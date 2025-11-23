@@ -31,8 +31,8 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { CostCenter } from "@/lib/types";
-import { costCenterService } from "@/lib/services/costCenterService";
 import { storageService } from "@/lib/services/storageService";
+import { useCompany } from "@/components/providers/CompanyProvider";
 
 interface TransactionFormProps {
     defaultValues?: Partial<TransactionFormData>;
@@ -43,6 +43,7 @@ interface TransactionFormProps {
 }
 
 export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, type }: TransactionFormProps) {
+    const { selectedCompany } = useCompany();
     const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
     const [isUploading, setIsUploading] = useState(false);
 
@@ -73,11 +74,13 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
 
     useEffect(() => {
         const loadCostCenters = async () => {
-            const data = await costCenterService.getAll();
-            setCostCenters(data);
+            if (selectedCompany) {
+                const data = await costCenterService.getAll(selectedCompany.id);
+                setCostCenters(data);
+            }
         };
         loadCostCenters();
-    }, []);
+    }, [selectedCompany]);
 
     // Update allocation amounts when total amount changes
     const totalAmount = form.watch("amount");

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 
 const menuItems = [
     {
@@ -48,10 +49,12 @@ export function Sidebar() {
 
     return (
         <div className="flex h-full w-64 flex-col border-r bg-card px-4 py-6">
-            <div className="mb-8 flex items-center gap-2 px-2">
+            <div className="mb-6 flex items-center gap-2 px-2">
                 <div className="h-8 w-8 rounded-lg bg-primary" />
                 <span className="text-xl font-bold">Fin Control</span>
             </div>
+
+            <CompanySwitcher />
 
             <nav className="flex-1 space-y-1">
                 {menuItems.map((item) => {

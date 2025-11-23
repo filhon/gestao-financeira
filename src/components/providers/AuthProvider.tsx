@@ -47,6 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     if (userDoc.exists()) {
                         const userData = userDoc.data() as UserProfile;
                         setUser(userData);
+                        // Role cookie might be ambiguous now, but we keep it for middleware (maybe use default/legacy role)
                         Cookies.set("user_role", userData.role, { expires: 1 / 24 });
                     } else {
                         // Create new user profile if it doesn't exist
@@ -55,7 +56,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                             email: firebaseUser.email!,
                             displayName: firebaseUser.displayName || "User",
                             photoURL: firebaseUser.photoURL || undefined,
-                            role: 'financial_manager', // Default role
+                            role: 'financial_manager', // Default legacy role
+                            companyRoles: {}, // Initialize empty
                             active: true,
                             createdAt: new Date(),
                             updatedAt: new Date(),

@@ -7,6 +7,7 @@ import {
     getDocs,
     query,
     orderBy,
+    where,
     serverTimestamp,
     Timestamp
 } from "firebase/firestore";
@@ -17,8 +18,13 @@ import { CostCenterFormData } from "@/lib/validations/costCenter";
 const COLLECTION_NAME = "cost_centers";
 
 export const costCenterService = {
-    getAll: async (): Promise<CostCenter[]> => {
-        const q = query(collection(db, COLLECTION_NAME), orderBy("name"));
+    getAll: async (companyId?: string): Promise<CostCenter[]> => {
+        let q = query(collection(db, COLLECTION_NAME), orderBy("name"));
+
+        if (companyId) {
+            q = query(q, where("companyId", "==", companyId));
+        }
+
         const snapshot = await getDocs(q);
         return snapshot.docs.map((doc) => {
             const data = doc.data();
@@ -31,9 +37,10 @@ export const costCenterService = {
         });
     },
 
-    create: async (data: CostCenterFormData) => {
+    create: async (data: CostCenterFormData, companyId: string) => {
         return addDoc(collection(db, COLLECTION_NAME), {
             ...data,
+            companyId,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });

@@ -14,8 +14,17 @@ export const userService = {
         } as UserProfile));
     },
 
-    updateRole: async (uid: string, role: UserRole) => {
+    updateRole: async (uid: string, role: UserRole, companyId?: string) => {
         const docRef = doc(db, COLLECTION_NAME, uid);
-        await updateDoc(docRef, { role });
+
+        if (companyId) {
+            // Update role for specific company
+            await updateDoc(docRef, {
+                [`companyRoles.${companyId}`]: role
+            });
+        } else {
+            // Legacy/Global fallback
+            await updateDoc(docRef, { role });
+        }
     }
 };

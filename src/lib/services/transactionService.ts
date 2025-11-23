@@ -34,9 +34,12 @@ const convertDates = (data: DocumentData): Transaction => {
 };
 
 export const transactionService = {
-    getAll: async (filter?: { type?: string; status?: string }): Promise<Transaction[]> => {
+    getAll: async (filter?: { type?: string; status?: string; companyId?: string }): Promise<Transaction[]> => {
         let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
+        if (filter?.companyId) {
+            q = query(q, where("companyId", "==", filter.companyId));
+        }
         if (filter?.type) {
             q = query(q, where("type", "==", filter.type));
         }
@@ -48,9 +51,10 @@ export const transactionService = {
         return snapshot.docs.map((doc) => convertDates({ id: doc.id, ...doc.data() }));
     },
 
-    create: async (data: TransactionFormData, userId: string) => {
+    create: async (data: TransactionFormData, userId: string, companyId: string) => {
         return addDoc(collection(db, COLLECTION_NAME), {
             ...data,
+            companyId,
             createdBy: userId,
             status: "draft", // Always start as draft or pending based on logic
             createdAt: serverTimestamp(),
@@ -78,10 +82,7 @@ export const transactionService = {
             updateData.releasedAt = serverTimestamp();
         } else if (status === 'pending_approval') {
             // Generate Magic Link Token
-            const { v4: uuidv4 } = require('uuid'); // Dynamic import or use global if available. 
-            // Better to use the one from package.json if imported at top.
-            // I will assume uuid is installed as per package.json
-            updateData.approvalToken = crypto.randomUUID(); // Native UUID is safer/easier if env supports it (Node 19+ or modern browsers). Next.js edge/node usually supports it.
+            updateData.approvalToken = crypto.randomUUID();
             // Set expiration for 7 days
             const expiresAt = new Date();
             expiresAt.setDate(expiresAt.getDate() + 7);
@@ -119,12 +120,7 @@ export const transactionService = {
         const docRef = doc(db, COLLECTION_NAME, transaction.id);
         await updateDoc(docRef, {
             status: 'approved',
-            approvedBy: userId, // 'magic-link-user' or actual user if we force login? 
-            // For magic link, we might not have a logged in user if it's purely email based.
-            // But the plan says "Public route (or protected via token)".
-            // Let's assume we capture the user if logged in, or use a placeholder if we allow anonymous approval (risky).
-            // Safest is to require login OR just trust the token. 
-            // If trusting token, approvedBy could be 'magic-link'.
+            approvedBy: userId,
             approvedAt: serverTimestamp(),
             approvalToken: null, // Consume token
             approvalTokenExpiresAt: null
@@ -133,8 +129,13 @@ export const transactionService = {
         return transaction;
     },
 
-    getDashboardStats: async () => {
-        const q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "asc"));
+    getDashboardStats: async (companyId?: string) => {
+        let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "asc"));
+
+        if (companyId) {
+            q = query(q, where("companyId", "==", companyId));
+        }
+
         const snapshot = await getDocs(q);
         const transactions = snapshot.docs.map((doc) => convertDates({ id: doc.id, ...doc.data() }));
 

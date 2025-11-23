@@ -10,12 +10,27 @@ export type AttachmentType = 'invoice' | 'demand_proof' | 'other';
 
 export type RequestOriginType = 'director' | 'department' | 'sector';
 
+export interface Company {
+    id: string;
+    name: string;
+    cnpj?: string;
+    logoUrl?: string;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 export interface UserProfile {
     uid: string;
     email: string;
     displayName: string;
     photoURL?: string;
+
+    // Legacy role (kept for backward compatibility or global admin)
     role: UserRole;
+
+    // Multi-Company Roles
+    companyRoles?: Record<string, UserRole>;
+
     department?: string;
     createdAt: Date;
     updatedAt: Date;
@@ -24,6 +39,7 @@ export interface UserProfile {
 
 export interface CostCenter {
     id: string;
+    companyId: string; // Tenant Isolation
     name: string;
     code: string;
     description?: string;
@@ -56,6 +72,7 @@ export interface TransactionRecurrence {
 
 export interface Transaction {
     id: string;
+    companyId: string; // Tenant Isolation
     type: TransactionType;
     description: string;
     amount: number;
