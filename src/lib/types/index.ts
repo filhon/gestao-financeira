@@ -40,6 +40,7 @@ export interface UserProfile {
 export interface CostCenter {
     id: string;
     companyId: string; // Tenant Isolation
+    parentId?: string; // Hierarchy
     name: string;
     code: string;
     description?: string;
@@ -48,13 +49,16 @@ export interface CostCenter {
     updatedAt: Date;
 }
 
-export interface TransactionAllocation {
+export interface CostCenterAllocation {
     costCenterId: string;
     percentage: number;
     amount: number;
 }
 
-export interface TransactionAttachment {
+// Alias for backward compatibility
+export type TransactionAllocation = CostCenterAllocation;
+
+export interface Attachment {
     id: string;
     url: string;
     name: string;
@@ -62,49 +66,83 @@ export interface TransactionAttachment {
     category: AttachmentType;
 }
 
+// Alias for backward compatibility
+export type TransactionAttachment = Attachment;
+
 export interface TransactionRecurrence {
     isRecurring: boolean;
-    frequency?: 'monthly' | 'weekly' | 'yearly';
-    currentInstallment: number;
-    totalInstallments?: number;
-    groupId?: string;
+    frequency?: "daily" | "weekly" | "monthly" | "yearly" | "custom";
+    interval?: number; // e.g., every 2 weeks
+    intervalUnit?: "days" | "weeks" | "months" | "years";
+    endDate?: Date;
+}
+
+export interface TransactionInstallments {
+    current: number;
+    total: number;
+    groupId: string; // ID linking all installments
+}
+
+export interface RequestOrigin {
+    type: RequestOriginType;
+    name: string;
+}
+
+export interface ApprovalStep {
+    approverId: string;
+    status: 'pending' | 'approved' | 'rejected';
+    approvedAt?: Date;
+    comment?: string;
 }
 
 export interface Transaction {
     id: string;
-    companyId: string; // Tenant Isolation
-    type: TransactionType;
+    type: "payable" | "receivable";
     description: string;
     amount: number;
+    date: Date; // Creation date
     dueDate: Date;
     paymentDate?: Date;
-    status: TransactionStatus;
+    status: "draft" | "pending_approval" | "approved" | "paid" | "rejected";
+    supplierOrClient: string; // Name of supplier or client
+    invoiceUrl?: string; // URL to uploaded invoice
+    category?: string; // Optional category
 
-    supplierOrClient: string;
-    createdBy: string;
-
-    approvedBy?: string;
-    approvedAt?: Date;
-    releasedBy?: string;
-    releasedAt?: Date;
-
-    requestOrigin: {
-        type: RequestOriginType;
-        name: string;
-    };
-
+    // New fields
+    requestOrigin?: RequestOrigin;
+    costCenterAllocation?: CostCenterAllocation[];
     recurrence?: TransactionRecurrence;
-
-    costCenterAllocation: TransactionAllocation[];
-
-    attachments: TransactionAttachment[];
-
-    paymentMethod?: PaymentMethod;
+    installments?: TransactionInstallments;
+    attachments?: Attachment[];
+    paymentMethod?: string;
     notes?: string;
 
-    // Magic Link
-    approvalToken?: string;
-    approvalTokenExpiresAt?: Date;
+    // Approval workflow
+    approvalChain?: ApprovalStep[];
+    currentApprovalStep?: number;
+    batchId?: string; // Linked Payment Batch
+
+    // Metadata
+    createdBy: string; // User UID
+    companyId: string; // Company ID
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export type PaymentBatchStatus = 'open' | 'pending_approval' | 'approved' | 'paid' | 'rejected';
+
+export interface PaymentBatch {
+    id: string;
+    companyId: string;
+    status: PaymentBatchStatus;
+    name: string; // e.g., "Pagamentos Semana 42"
+
+    transactionIds: string[];
+    totalAmount: number;
+
+    createdBy: string;
+    approvedBy?: string;
+    approvedAt?: Date;
 
     createdAt: Date;
     updatedAt: Date;

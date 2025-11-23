@@ -16,14 +16,25 @@ import {
 } from "@/components/ui/form";
 import { Loader2 } from "lucide-react";
 
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { CostCenter } from "@/lib/types";
+
 interface CostCenterFormProps {
     defaultValues?: CostCenterFormData;
     onSubmit: (data: CostCenterFormData) => Promise<void>;
     isLoading: boolean;
     onCancel: () => void;
+    availableCostCenters: CostCenter[];
+    editingId?: string | null;
 }
 
-export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel }: CostCenterFormProps) {
+export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, availableCostCenters, editingId }: CostCenterFormProps) {
     const form = useForm<CostCenterFormData>({
         resolver: zodResolver(costCenterSchema),
         defaultValues: defaultValues || {
@@ -31,12 +42,45 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel }:
             code: "",
             description: "",
             budget: 0,
+            parentId: "none", // Default to none
         },
     });
+
+    // Filter out self and potential children (simple circular check: just self for now)
+    const potentialParents = availableCostCenters.filter(cc => cc.id !== editingId);
 
     return (
         <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                    control={form.control}
+                    name="parentId"
+                    render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Centro de Custo Pai (Opcional)</FormLabel>
+                            <Select
+                                onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
+                                defaultValue={field.value || "none"}
+                            >
+                                <FormControl>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Selecione..." />
+                                    </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                    <SelectItem value="none">Nenhum (Raiz)</SelectItem>
+                                    {potentialParents.map((cc) => (
+                                        <SelectItem key={cc.id} value={cc.id}>
+                                            {cc.code} - {cc.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
+
                 <FormField
                     control={form.control}
                     name="name"

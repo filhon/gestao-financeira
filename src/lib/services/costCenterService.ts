@@ -59,3 +59,29 @@ export const costCenterService = {
         return deleteDoc(docRef);
     },
 };
+
+export const getHierarchicalCostCenters = (items: CostCenter[]) => {
+    const roots = items.filter(i => !i.parentId);
+    const childrenMap = new Map<string, CostCenter[]>();
+
+    items.forEach(item => {
+        if (item.parentId) {
+            const existing = childrenMap.get(item.parentId) || [];
+            existing.push(item);
+            childrenMap.set(item.parentId, existing);
+        }
+    });
+
+    const result: (CostCenter & { level: number })[] = [];
+
+    const traverse = (nodes: CostCenter[], level: number) => {
+        nodes.forEach(node => {
+            result.push({ ...node, level });
+            const children = childrenMap.get(node.id) || [];
+            traverse(children, level + 1);
+        });
+    };
+
+    traverse(roots, 0);
+    return result;
+};

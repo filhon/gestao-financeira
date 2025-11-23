@@ -26,7 +26,7 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import { CostCenter } from "@/lib/types";
-import { costCenterService } from "@/lib/services/costCenterService";
+import { costCenterService, getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 
@@ -95,6 +95,8 @@ export default function CostCentersPage() {
         setIsDialogOpen(true);
     };
 
+    const hierarchicalCostCenters = getHierarchicalCostCenters(costCenters);
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -116,6 +118,8 @@ export default function CostCentersPage() {
                             onSubmit={handleSubmit}
                             isLoading={isSubmitting}
                             onCancel={() => setIsDialogOpen(false)}
+                            availableCostCenters={costCenters}
+                            editingId={editingId}
                             defaultValues={
                                 editingId
                                     ? costCenters.find((c) => c.id === editingId)
@@ -149,17 +153,22 @@ export default function CostCentersPage() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {costCenters.length === 0 ? (
+                                {hierarchicalCostCenters.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={4} className="text-center text-muted-foreground">
                                             Nenhum centro de custo cadastrado.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    costCenters.map((cc) => (
+                                    hierarchicalCostCenters.map((cc) => (
                                         <TableRow key={cc.id}>
                                             <TableCell className="font-medium">{cc.code}</TableCell>
-                                            <TableCell>{cc.name}</TableCell>
+                                            <TableCell>
+                                                <div style={{ paddingLeft: `${cc.level * 20}px` }} className="flex items-center">
+                                                    {cc.level > 0 && <span className="mr-2 text-muted-foreground">↳</span>}
+                                                    {cc.name}
+                                                </div>
+                                            </TableCell>
                                             <TableCell>
                                                 {cc.budget
                                                     ? new Intl.NumberFormat("pt-BR", {

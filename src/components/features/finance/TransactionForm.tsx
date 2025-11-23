@@ -33,6 +33,7 @@ import { CalendarIcon, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { CostCenter } from "@/lib/types";
 import { storageService } from "@/lib/services/storageService";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { costCenterService, getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 
 interface TransactionFormProps {
     defaultValues?: Partial<TransactionFormData>;
@@ -48,14 +49,18 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
     const [isUploading, setIsUploading] = useState(false);
 
     const form = useForm<TransactionFormData>({
-        resolver: zodResolver(transactionSchema),
+        resolver: zodResolver(transactionSchema) as any,
         defaultValues: {
             type,
             status: "draft",
             recurrence: {
                 isRecurring: false,
-                currentInstallment: 1,
+                frequency: "monthly",
+                interval: 1,
+                intervalUnit: "months",
             },
+            installmentsCount: 2,
+            useInstallments: false,
             costCenterAllocation: [{ costCenterId: "", percentage: 100, amount: 0 }],
             attachments: [],
             ...defaultValues,
@@ -116,6 +121,8 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
             }
         }
     };
+
+    const hierarchicalCostCenters = getHierarchicalCostCenters(costCenters);
 
     return (
         <Form {...form}>
@@ -204,6 +211,143 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                     />
                 </div>
 
+                {/* Repetition / Installments */}
+                <div className="border rounded-lg p-4 space-y-4">
+                    <h3 className="font-medium">Repetição e Parcelamento</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormItem>
+                            <FormLabel>Tipo de Lançamento</FormLabel>
+                            <Select
+                                onValueChange={(value) => {
+                                    if (value === "single") {
+                                        form.setValue("recurrence.isRecurring", false);
+                                        form.setValue("useInstallments", false);
+                                    } else if (value === "recurring") {
+                                        form.setValue("recurrence.isRecurring", true);
+                                        form.setValue("useInstallments", false);
+                                    } else if (value === "installment") {
+                                        form.setValue("recurrence.isRecurring", false);
+                                        form.setValue("useInstallments", true);
+                                    }
+                                }}
+                                defaultValue={
+                                    form.getValues("useInstallments")
+                                        ? "installment"
+                                        : form.getValues("recurrence.isRecurring")
+                                            ? "recurring"
+                                            : "single"
+                                }
+                            >
+                                <FormControl>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Selecione..." />
+                                    </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                    <SelectItem value="single">Única</SelectItem>
+                                    <SelectItem value="recurring">Recorrente (Assinatura/Fixo)</SelectItem>
+                                    <SelectItem value="installment">Parcelada</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </FormItem>
+
+                        {form.watch("recurrence.isRecurring") && (
+                            <div className="space-y-4 border-l pl-4">
+                                <FormField
+                                    control={form.control}
+                                    name="recurrence.frequency"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Frequência</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value || "monthly"}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="weekly">Semanal</SelectItem>
+                                                    <SelectItem value="monthly">Mensal</SelectItem>
+                                                    <SelectItem value="yearly">Anual</SelectItem>
+                                                    <SelectItem value="custom">Personalizado</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                {form.watch("recurrence.frequency") === "custom" && (
+                                    <div className="flex gap-2">
+                                        <FormField
+                                            control={form.control}
+                                            name="recurrence.interval"
+                                            render={({ field }) => (
+                                                <FormItem className="flex-1">
+                                                    <FormLabel>A cada</FormLabel>
+                                                    <FormControl>
+                                                        <Input type="number" min="1" {...field} onChange={e => field.onChange(parseInt(e.target.value))} />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="recurrence.intervalUnit"
+                                            render={({ field }) => (
+                                                <FormItem className="flex-1">
+                                                    <FormLabel>Unidade</FormLabel>
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value || "months"}>
+                                                        <FormControl>
+                                                            <SelectTrigger>
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                        </FormControl>
+                                                        <SelectContent>
+                                                            <SelectItem value="days">Dias</SelectItem>
+                                                            <SelectItem value="weeks">Semanas</SelectItem>
+                                                            <SelectItem value="months">Meses</SelectItem>
+                                                            <SelectItem value="years">Anos</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {form.watch("useInstallments") && (
+                            <div className="space-y-4 border-l pl-4">
+                                <FormField
+                                    control={form.control}
+                                    name="installmentsCount"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Número de Parcelas</FormLabel>
+                                            <FormControl>
+                                                <Input
+                                                    type="number"
+                                                    min="2"
+                                                    max="120"
+                                                    {...field}
+                                                    onChange={e => field.onChange(parseInt(e.target.value))}
+                                                />
+                                            </FormControl>
+                                            <FormDescription>
+                                                Serão geradas {field.value || 0} transações.
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 {/* Request Origin */}
                 <div className="border rounded-lg p-4 space-y-4">
                     <h3 className="font-medium">Origem da Solicitação</h3>
@@ -270,8 +414,13 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
-                                                {costCenters.map((cc) => (
-                                                    <SelectItem key={cc.id} value={cc.id}>{cc.name}</SelectItem>
+                                                {hierarchicalCostCenters.map((cc) => (
+                                                    <SelectItem key={cc.id} value={cc.id}>
+                                                        <span style={{ paddingLeft: `${cc.level * 10}px` }}>
+                                                            {cc.level > 0 && "↳ "}
+                                                            {cc.name}
+                                                        </span>
+                                                    </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>

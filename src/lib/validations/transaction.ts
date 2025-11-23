@@ -17,10 +17,15 @@ export const transactionSchema = z.object({
 
     recurrence: z.object({
         isRecurring: z.boolean(),
-        frequency: z.enum(["monthly", "weekly", "yearly"]).optional(),
-        currentInstallment: z.number().min(1).default(1),
-        totalInstallments: z.number().optional(),
+        frequency: z.enum(["daily", "weekly", "monthly", "yearly", "custom"]).optional(),
+        interval: z.number().min(1).optional(),
+        intervalUnit: z.enum(["days", "weeks", "months", "years"]).optional(),
+        endDate: z.date().optional(),
     }).optional(),
+
+    // Form-only field to capture installment intent
+    installmentsCount: z.coerce.number().min(2).max(120).optional(),
+    useInstallments: z.boolean().optional(),
 
     costCenterAllocation: z.array(z.object({
         costCenterId: z.string().min(1, "Centro de custo é obrigatório"),

@@ -15,7 +15,7 @@ import {
 import { db } from "@/lib/firebase/client";
 import { Transaction, TransactionStatus } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
-import { format } from "date-fns";
+import { format, addMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const COLLECTION_NAME = "transactions";
@@ -34,7 +34,7 @@ const convertDates = (data: DocumentData): Transaction => {
 };
 
 export const transactionService = {
-    getAll: async (filter?: { type?: string; status?: string; companyId?: string }): Promise<Transaction[]> => {
+    getAll: async (filter?: { type?: string; status?: string; companyId?: string; batchId?: string }): Promise<Transaction[]> => {
         let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
         if (filter?.companyId) {
@@ -46,17 +46,59 @@ export const transactionService = {
         if (filter?.status) {
             q = query(q, where("status", "==", filter.status));
         }
+        if (filter?.batchId) {
+            q = query(q, where("batchId", "==", filter.batchId));
+        }
 
         const snapshot = await getDocs(q);
         return snapshot.docs.map((doc) => convertDates({ id: doc.id, ...doc.data() }));
     },
 
     create: async (data: TransactionFormData, userId: string, companyId: string) => {
+        const { useInstallments, installmentsCount, ...transactionData } = data;
+
+        if (useInstallments && installmentsCount && installmentsCount > 1) {
+            const groupId = crypto.randomUUID();
+            const totalAmount = transactionData.amount;
+            const baseAmount = Math.floor((totalAmount / installmentsCount) * 100) / 100;
+            const remainder = Math.round((totalAmount - (baseAmount * installmentsCount)) * 100) / 100;
+
+            const promises = [];
+            for (let i = 1; i <= installmentsCount; i++) {
+                const amount = i === installmentsCount ? baseAmount + remainder : baseAmount;
+                // First installment is on the selected due date, subsequent ones are monthly
+                const dueDate = i === 1 ? transactionData.dueDate : addMonths(transactionData.dueDate, i - 1);
+
+                // Description with installment info
+                const description = `${transactionData.description} (${i}/${installmentsCount})`;
+
+                promises.push(addDoc(collection(db, COLLECTION_NAME), {
+                    ...transactionData,
+                    description,
+                    amount,
+                    dueDate,
+                    installments: {
+                        current: i,
+                        total: installmentsCount,
+                        groupId
+                    },
+                    companyId,
+                    createdBy: userId,
+                    status: "draft",
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                }));
+            }
+
+            const refs = await Promise.all(promises);
+            return refs[0];
+        }
+
         return addDoc(collection(db, COLLECTION_NAME), {
-            ...data,
+            ...transactionData,
             companyId,
             createdBy: userId,
-            status: "draft", // Always start as draft or pending based on logic
+            status: "draft",
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
