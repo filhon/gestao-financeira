@@ -12,6 +12,7 @@ import {
     LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/components/providers/AuthProvider";
 
 const menuItems = [
     {
@@ -43,6 +44,7 @@ const menuItems = [
 
 export function Sidebar() {
     const pathname = usePathname();
+    const { logout } = useAuth();
 
     return (
         <div className="flex h-full w-64 flex-col border-r bg-card px-4 py-6">
@@ -73,7 +75,11 @@ export function Sidebar() {
             </nav>
 
             <div className="mt-auto border-t pt-4">
-                <Button variant="ghost" className="w-full justify-start gap-3 text-muted-foreground hover:text-foreground">
+                <Button
+                    variant="ghost"
+                    className="w-full justify-start gap-3 text-muted-foreground hover:text-foreground"
+                    onClick={logout}
+                >
                     <LogOut className="h-4 w-4" />
                     Sair
                 </Button>
