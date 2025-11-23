@@ -21,3 +21,69 @@ export interface UserProfile {
     updatedAt: Date;
     active: boolean;
 }
+
+export interface CostCenter {
+    id: string;
+    name: string;
+    code: string;
+    description?: string;
+    budget?: number;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface TransactionAllocation {
+    costCenterId: string;
+    percentage: number;
+    amount: number;
+}
+
+export interface TransactionAttachment {
+    id: string;
+    url: string;
+    name: string;
+    type: string;
+    category: AttachmentType;
+}
+
+export interface TransactionRecurrence {
+    isRecurring: boolean;
+    frequency?: 'monthly' | 'weekly' | 'yearly';
+    currentInstallment: number;
+    totalInstallments?: number;
+    groupId?: string;
+}
+
+export interface Transaction {
+    id: string;
+    type: TransactionType;
+    description: string;
+    amount: number;
+    dueDate: Date;
+    paymentDate?: Date;
+    status: TransactionStatus;
+
+    supplierOrClient: string;
+    createdBy: string;
+
+    approvedBy?: string;
+    approvedAt?: Date;
+    releasedBy?: string;
+    releasedAt?: Date;
+
+    requestOrigin: {
+        type: RequestOriginType;
+        name: string;
+    };
+
+    recurrence?: TransactionRecurrence;
+
+    costCenterAllocation: TransactionAllocation[];
+
+    attachments: TransactionAttachment[];
+
+    paymentMethod?: PaymentMethod;
+    notes?: string;
+    createdAt: Date;
+    updatedAt: Date;
+}

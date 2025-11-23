@@ -1,0 +1,165 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Plus, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table";
+import { Transaction } from "@/lib/types";
+import { transactionService } from "@/lib/services/transactionService";
+import { TransactionForm } from "@/components/features/finance/TransactionForm";
+import { TransactionFormData } from "@/lib/validations/transaction";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Badge } from "@/components/ui/badge";
+
+export default function AccountsReceivablePage() {
+    const { user } = useAuth();
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const fetchTransactions = async () => {
+        try {
+            const data = await transactionService.getAll({ type: "receivable" });
+            setTransactions(data);
+        } catch (error) {
+            console.error("Error fetching transactions:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchTransactions();
+    }, []);
+
+    const handleSubmit = async (data: TransactionFormData) => {
+        if (!user) return;
+        try {
+            setIsSubmitting(true);
+            await transactionService.create(data, user.uid);
+            await fetchTransactions();
+            setIsDialogOpen(false);
+        } catch (error) {
+            console.error("Error saving transaction:", error);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case "approved": return <Badge className="bg-emerald-500">Aprovado</Badge>;
+            case "pending_approval": return <Badge className="bg-amber-500">Pendente</Badge>;
+            case "paid": return <Badge className="bg-blue-500">Recebido</Badge>;
+            case "rejected": return <Badge className="bg-red-500">Rejeitado</Badge>;
+            default: return <Badge variant="secondary">Rascunho</Badge>;
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-bold tracking-tight">Contas a Receber</h1>
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                    <DialogTrigger asChild>
+                        <Button>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Nova Receita
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                            <DialogTitle>Nova Conta a Receber</DialogTitle>
+                        </DialogHeader>
+                        <TransactionForm
+                            type="receivable"
+                            onSubmit={handleSubmit}
+                            isLoading={isSubmitting}
+                            onCancel={() => setIsDialogOpen(false)}
+                        />
+                    </DialogContent>
+                </Dialog>
+            </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Transações</CardTitle>
+                    <CardDescription>
+                        Gerencie suas contas a receber.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {isLoading ? (
+                        <div className="flex justify-center py-8">
+                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        </div>
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Vencimento</TableHead>
+                                    <TableHead>Descrição</TableHead>
+                                    <TableHead>Cliente</TableHead>
+                                    <TableHead>Valor</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {transactions.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                                            Nenhuma conta a receber encontrada.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    transactions.map((t) => (
+                                        <TableRow key={t.id}>
+                                            <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
+                                            <TableCell>{t.description}</TableCell>
+                                            <TableCell>{t.supplierOrClient}</TableCell>
+                                            <TableCell>
+                                                {new Intl.NumberFormat("pt-BR", {
+                                                    style: "currency",
+                                                    currency: "BRL",
+                                                }).format(t.amount)}
+                                            </TableCell>
+                                            <TableCell>{getStatusBadge(t.status)}</TableCell>
+                                            <TableCell className="text-right">
+                                                <Button variant="ghost" size="sm">Detalhes</Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
