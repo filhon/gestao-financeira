@@ -84,6 +84,11 @@ export interface Transaction {
 
     paymentMethod?: PaymentMethod;
     notes?: string;
+
+    // Magic Link
+    approvalToken?: string;
+    approvalTokenExpiresAt?: Date;
+
     createdAt: Date;
     updatedAt: Date;
 }

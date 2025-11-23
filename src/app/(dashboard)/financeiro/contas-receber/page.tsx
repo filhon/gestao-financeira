@@ -35,6 +35,8 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 
+import { toast } from "sonner";
+
 export default function AccountsReceivablePage() {
     const { user } = useAuth();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -51,6 +53,7 @@ export default function AccountsReceivablePage() {
             setTransactions(data);
         } catch (error) {
             console.error("Error fetching transactions:", error);
+            toast.error("Erro ao carregar transações.");
         } finally {
             setIsLoading(false);
         }
@@ -67,8 +70,10 @@ export default function AccountsReceivablePage() {
             await transactionService.create(data, user.uid);
             await fetchTransactions();
             setIsDialogOpen(false);
+            toast.success("Conta a receber criada com sucesso!");
         } catch (error) {
             console.error("Error saving transaction:", error);
+            toast.error("Erro ao salvar conta a receber.");
         } finally {
             setIsSubmitting(false);
         }

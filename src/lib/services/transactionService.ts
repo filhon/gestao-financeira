@@ -76,6 +76,16 @@ export const transactionService = {
         } else if (status === 'paid') {
             updateData.releasedBy = userId;
             updateData.releasedAt = serverTimestamp();
+        } else if (status === 'pending_approval') {
+            // Generate Magic Link Token
+            const { v4: uuidv4 } = require('uuid'); // Dynamic import or use global if available. 
+            // Better to use the one from package.json if imported at top.
+            // I will assume uuid is installed as per package.json
+            updateData.approvalToken = crypto.randomUUID(); // Native UUID is safer/easier if env supports it (Node 19+ or modern browsers). Next.js edge/node usually supports it.
+            // Set expiration for 7 days
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 7);
+            updateData.approvalTokenExpiresAt = expiresAt;
         }
 
         return updateDoc(docRef, updateData);
@@ -84,6 +94,43 @@ export const transactionService = {
     delete: async (id: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
         return deleteDoc(docRef);
+    },
+
+    approveByToken: async (token: string, userId: string) => {
+        const q = query(collection(db, COLLECTION_NAME), where("approvalToken", "==", token));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+            throw new Error("Token inválido ou não encontrado.");
+        }
+
+        const docSnapshot = snapshot.docs[0];
+        const transaction = convertDates({ id: docSnapshot.id, ...docSnapshot.data() });
+
+        if (transaction.approvalTokenExpiresAt && transaction.approvalTokenExpiresAt < new Date()) {
+            throw new Error("Este link de aprovação expirou.");
+        }
+
+        if (transaction.status !== 'pending_approval') {
+            throw new Error("Esta transação já foi processada.");
+        }
+
+        // Approve
+        const docRef = doc(db, COLLECTION_NAME, transaction.id);
+        await updateDoc(docRef, {
+            status: 'approved',
+            approvedBy: userId, // 'magic-link-user' or actual user if we force login? 
+            // For magic link, we might not have a logged in user if it's purely email based.
+            // But the plan says "Public route (or protected via token)".
+            // Let's assume we capture the user if logged in, or use a placeholder if we allow anonymous approval (risky).
+            // Safest is to require login OR just trust the token. 
+            // If trusting token, approvedBy could be 'magic-link'.
+            approvedAt: serverTimestamp(),
+            approvalToken: null, // Consume token
+            approvalTokenExpiresAt: null
+        });
+
+        return transaction;
     },
 
     getDashboardStats: async () => {

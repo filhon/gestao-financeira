@@ -1,11 +1,31 @@
 "use client";
 
-import { Bell, Search } from "lucide-react";
+import { Bell, Search, LogOut, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/components/providers/AuthProvider";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function Header() {
+    const { user, logout } = useAuth();
+
+    const getInitials = (name: string) => {
+        return name
+            .split(" ")
+            .map((n) => n[0])
+            .join("")
+            .toUpperCase()
+            .substring(0, 2);
+    };
+
     return (
         <header className="flex h-16 items-center justify-between border-b bg-card px-6">
             <div className="flex w-96 items-center gap-2">
@@ -24,13 +44,35 @@ export function Header() {
 
                 <div className="flex items-center gap-3 border-l pl-4">
                     <div className="text-right hidden sm:block">
-                        <p className="text-sm font-medium">Filipe Honório</p>
-                        <p className="text-xs text-muted-foreground">Admin</p>
+                        <p className="text-sm font-medium">{user?.displayName || "Usuário"}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{user?.role?.replace('_', ' ') || "Visitante"}</p>
                     </div>
-                    <Avatar>
-                        <AvatarImage src="https://github.com/shadcn.png" />
-                        <AvatarFallback>FH</AvatarFallback>
-                    </Avatar>
+
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                                <Avatar>
+                                    <AvatarImage src={user?.photoURL || ""} />
+                                    <AvatarFallback>{user?.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
+                                </Avatar>
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-56" align="end" forceMount>
+                            <DropdownMenuLabel className="font-normal">
+                                <div className="flex flex-col space-y-1">
+                                    <p className="text-sm font-medium leading-none">{user?.displayName}</p>
+                                    <p className="text-xs leading-none text-muted-foreground">
+                                        {user?.email}
+                                    </p>
+                                </div>
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={logout} className="text-red-600 cursor-pointer">
+                                <LogOut className="mr-2 h-4 w-4" />
+                                <span>Sair</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
             </div>
         </header>

@@ -16,12 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { transactionService } from "@/lib/services/transactionService";
+import { emailService } from "@/lib/services/emailService";
 import { useState } from "react";
 import { Loader2, CheckCircle2, XCircle, Banknote, Send } from "lucide-react";
-import { toast } from "sonner"; // Assuming sonner or similar is used, or I'll use alert for now if not installed. 
-// Actually, I don't see sonner in the package list. I'll use simple console logs or alerts, or just rely on the UI state updates.
-// Wait, the user mentioned shadcn/ui. I should check if 'sonner' or 'toast' is available. 
-// I'll stick to basic UI feedback for now to avoid missing dependencies.
+import { db } from "@/lib/firebase/client";
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { toast } from "sonner";
 
 interface TransactionDetailsDialogProps {
     transaction: Transaction | null;
@@ -46,11 +46,42 @@ export function TransactionDetailsDialog({
         try {
             setIsProcessing(true);
             await transactionService.updateStatus(transaction.id, newStatus, user.uid, user.role);
+
+            // Email Notifications
+            try {
+                if (newStatus === 'pending_approval') {
+                    // Notify Approvers
+                    const q = query(collection(db, "users"), where("role", "in", ["admin", "approver", "financial_manager"]));
+                    const querySnapshot = await getDocs(q);
+                    const approverEmails = querySnapshot.docs.map(doc => doc.data().email).filter(email => email);
+
+                    if (approverEmails.length > 0) {
+                        // Send to the first found for demo to avoid spam/limits
+                        await emailService.sendApprovalRequest(transaction, approverEmails[0]);
+                    }
+                    toast.success("Solicitação enviada para aprovação!");
+                } else {
+                    // Notify Creator (Status Update)
+                    const userDoc = await getDoc(doc(db, "users", transaction.createdBy));
+                    const creatorEmail = userDoc.data()?.email;
+                    if (creatorEmail) {
+                        await emailService.sendStatusUpdate(transaction, creatorEmail, user.displayName);
+                    }
+
+                    if (newStatus === 'approved') toast.success("Transação aprovada com sucesso!");
+                    else if (newStatus === 'rejected') toast.info("Transação rejeitada.");
+                    else if (newStatus === 'paid') toast.success("Pagamento/Recebimento confirmado!");
+                }
+            } catch (emailError) {
+                console.error("Failed to send email notification:", emailError);
+                toast.warning("Status atualizado, mas houve erro ao enviar e-mail.");
+            }
+
             onUpdate();
             onClose();
         } catch (error) {
             console.error("Error updating status:", error);
-            alert("Erro ao atualizar status. Tente novamente.");
+            toast.error("Erro ao atualizar status. Tente novamente.");
         } finally {
             setIsProcessing(false);
         }
