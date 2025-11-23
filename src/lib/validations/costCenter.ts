@@ -6,6 +6,12 @@ export const costCenterSchema = z.object({
     parentId: z.string().optional(),
     description: z.string().optional(),
     budget: z.coerce.number().min(0, "Orçamento deve ser positivo").optional(),
+
+    // Permissions
+    allowedUserIds: z.array(z.string()).optional(),
+    approverId: z.string().optional(),
+    releaserId: z.string().optional(),
+    budgetLimit: z.coerce.number().min(0).optional(),
 });
 
 export type CostCenterFormData = z.infer<typeof costCenterSchema>;

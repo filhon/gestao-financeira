@@ -45,6 +45,13 @@ export interface CostCenter {
     code: string;
     description?: string;
     budget?: number;
+
+    // Permissions
+    allowedUserIds?: string[]; // Users allowed to create expenses
+    approverId?: string;       // User responsible for approval
+    releaserId?: string;       // User responsible for releasing payment
+    budgetLimit?: number;      // Monthly budget limit
+
     createdAt: Date;
     updatedAt: Date;
 }
