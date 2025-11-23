@@ -28,6 +28,7 @@ import {
 import { Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
+import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format } from "date-fns";
@@ -40,6 +41,9 @@ export default function AccountsReceivablePage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
     const fetchTransactions = async () => {
         try {
@@ -68,6 +72,11 @@ export default function AccountsReceivablePage() {
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const handleViewDetails = (transaction: Transaction) => {
+        setSelectedTransaction(transaction);
+        setIsDetailsOpen(true);
     };
 
     const getStatusBadge = (status: string) => {
@@ -150,7 +159,13 @@ export default function AccountsReceivablePage() {
                                             </TableCell>
                                             <TableCell>{getStatusBadge(t.status)}</TableCell>
                                             <TableCell className="text-right">
-                                                <Button variant="ghost" size="sm">Detalhes</Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleViewDetails(t)}
+                                                >
+                                                    Detalhes
+                                                </Button>
                                             </TableCell>
                                         </TableRow>
                                     ))
@@ -160,6 +175,13 @@ export default function AccountsReceivablePage() {
                     )}
                 </CardContent>
             </Card>
+
+            <TransactionDetailsDialog
+                transaction={selectedTransaction}
+                isOpen={isDetailsOpen}
+                onClose={() => setIsDetailsOpen(false)}
+                onUpdate={fetchTransactions}
+            />
         </div>
     );
 }
