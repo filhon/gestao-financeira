@@ -8,7 +8,10 @@ import { CashFlowChart } from "@/components/features/finance/CashFlowChart";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
+import { useCompany } from "@/components/providers/CompanyProvider";
+
 export default function DashboardPage() {
+    const { selectedCompany } = useCompany();
     const [stats, setStats] = useState<{
         totalBalance: number;
         monthlyIncome: number;
@@ -20,8 +23,9 @@ export default function DashboardPage() {
 
     useEffect(() => {
         const loadStats = async () => {
+            if (!selectedCompany) return;
             try {
-                const data = await transactionService.getDashboardStats();
+                const data = await transactionService.getDashboardStats(selectedCompany.id);
                 setStats(data);
             } catch (error) {
                 console.error("Error loading dashboard stats:", error);
@@ -30,7 +34,7 @@ export default function DashboardPage() {
             }
         };
         loadStats();
-    }, []);
+    }, [selectedCompany]);
 
     if (isLoading) {
         return (

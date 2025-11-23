@@ -30,7 +30,10 @@ import { costCenterService } from "@/lib/services/costCenterService";
 import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 
+import { useCompany } from "@/components/providers/CompanyProvider";
+
 export default function CostCentersPage() {
+    const { selectedCompany } = useCompany();
     const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -38,8 +41,9 @@ export default function CostCentersPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const fetchCostCenters = async () => {
+        if (!selectedCompany) return;
         try {
-            const data = await costCenterService.getAll();
+            const data = await costCenterService.getAll(selectedCompany.id);
             setCostCenters(data);
         } catch (error) {
             console.error("Error fetching cost centers:", error);
@@ -50,15 +54,16 @@ export default function CostCentersPage() {
 
     useEffect(() => {
         fetchCostCenters();
-    }, []);
+    }, [selectedCompany]);
 
     const handleSubmit = async (data: CostCenterFormData) => {
+        if (!selectedCompany) return;
         try {
             setIsSubmitting(true);
             if (editingId) {
                 await costCenterService.update(editingId, data);
             } else {
-                await costCenterService.create(data);
+                await costCenterService.create(data, selectedCompany.id);
             }
             await fetchCostCenters();
             setIsDialogOpen(false);

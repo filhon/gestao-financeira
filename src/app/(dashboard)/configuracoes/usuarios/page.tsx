@@ -23,10 +23,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/components/providers/AuthProvider";
+import { useCompany } from "@/components/providers/CompanyProvider";
 
 export default function UsersPage() {
     const { user: currentUser } = useAuth();
+    const { selectedCompany } = useCompany();
     const [users, setUsers] = useState<UserProfile[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -46,10 +47,30 @@ export default function UsersPage() {
         fetchUsers();
     }, []);
 
-    const handleRoleUpdate = async (uid: string, newRole: UserRole) => {
+    const handleRoleUpdate = async (uid: string, newRole: UserRole | "none") => {
+        if (!selectedCompany) return;
         try {
-            await userService.updateRole(uid, newRole);
-            setUsers(users.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+            // If "none", we might want to remove the role, but for now let's just assume valid roles.
+            // Or we can handle "none" by removing the key from the map (not implemented in service yet).
+            // Let's stick to valid roles for now.
+            if (newRole === "none") return; // TODO: Implement remove role
+
+            await userService.updateRole(uid, newRole as UserRole, selectedCompany.id);
+
+            // Update local state
+            setUsers(users.map(u => {
+                if (u.uid === uid) {
+                    return {
+                        ...u,
+                        companyRoles: {
+                            ...u.companyRoles,
+                            [selectedCompany.id]: newRole as UserRole
+                        }
+                    };
+                }
+                return u;
+            }));
+
             toast.success("Função do usuário atualizada!");
         } catch (error) {
             console.error("Error updating role:", error);
@@ -82,12 +103,17 @@ export default function UsersPage() {
         );
     }
 
+    const getRoleForCompany = (user: UserProfile) => {
+        if (!selectedCompany) return user.role; // Fallback to legacy
+        return user.companyRoles?.[selectedCompany.id] || "none";
+    };
+
     return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">Gerenciamento de Usuários</h1>
                 <p className="text-muted-foreground">
-                    Gerencie os acessos e funções dos usuários do sistema.
+                    Gerencie os acessos para a empresa: <span className="font-semibold text-foreground">{selectedCompany?.name}</span>
                 </p>
             </div>
 
@@ -104,46 +130,50 @@ export default function UsersPage() {
                             <TableRow>
                                 <TableHead>Usuário</TableHead>
                                 <TableHead>Email</TableHead>
-                                <TableHead>Função Atual</TableHead>
+                                <TableHead>Função na Empresa</TableHead>
                                 <TableHead className="text-right">Ações</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {users.map((user) => (
-                                <TableRow key={user.uid}>
-                                    <TableCell className="flex items-center gap-3">
-                                        <Avatar>
-                                            <AvatarImage src={user.photoURL || ""} />
-                                            <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
-                                        </Avatar>
-                                        <span className="font-medium">{user.displayName}</span>
-                                    </TableCell>
-                                    <TableCell>{user.email}</TableCell>
-                                    <TableCell>
-                                        <Badge variant="outline" className="capitalize">
-                                            {roleLabels[user.role] || user.role}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <Select
-                                            defaultValue={user.role}
-                                            onValueChange={(value) => handleRoleUpdate(user.uid, value as UserRole)}
-                                            disabled={currentUser?.uid === user.uid} // Prevent self-lockout
-                                        >
-                                            <SelectTrigger className="w-[180px] ml-auto">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="admin">Administrador</SelectItem>
-                                                <SelectItem value="financial_manager">Gerente Financeiro</SelectItem>
-                                                <SelectItem value="approver">Aprovador</SelectItem>
-                                                <SelectItem value="releaser">Pagador/Baixador</SelectItem>
-                                                <SelectItem value="auditor">Auditor</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
+                            {users.map((user) => {
+                                const currentRole = getRoleForCompany(user);
+                                return (
+                                    <TableRow key={user.uid}>
+                                        <TableCell className="flex items-center gap-3">
+                                            <Avatar>
+                                                <AvatarImage src={user.photoURL || ""} />
+                                                <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
+                                            </Avatar>
+                                            <span className="font-medium">{user.displayName}</span>
+                                        </TableCell>
+                                        <TableCell>{user.email}</TableCell>
+                                        <TableCell>
+                                            <Badge variant={currentRole === "none" ? "secondary" : "outline"} className="capitalize">
+                                                {currentRole === "none" ? "Sem Acesso" : (roleLabels[currentRole as UserRole] || currentRole)}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <Select
+                                                value={currentRole}
+                                                onValueChange={(value) => handleRoleUpdate(user.uid, value as UserRole)}
+                                                disabled={currentUser?.uid === user.uid} // Prevent self-lockout
+                                            >
+                                                <SelectTrigger className="w-[180px] ml-auto">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">Sem Acesso</SelectItem>
+                                                    <SelectItem value="admin">Administrador</SelectItem>
+                                                    <SelectItem value="financial_manager">Gerente Financeiro</SelectItem>
+                                                    <SelectItem value="approver">Aprovador</SelectItem>
+                                                    <SelectItem value="releaser">Pagador/Baixador</SelectItem>
+                                                    <SelectItem value="auditor">Auditor</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
                         </TableBody>
                     </Table>
                 </CardContent>

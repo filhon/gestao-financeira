@@ -34,11 +34,14 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
-
 import { toast } from "sonner";
+import { useCompany } from "@/components/providers/CompanyProvider";
+
+// ...
 
 export default function AccountsReceivablePage() {
     const { user } = useAuth();
+    const { selectedCompany } = useCompany();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -48,8 +51,9 @@ export default function AccountsReceivablePage() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
     const fetchTransactions = async () => {
+        if (!selectedCompany) return;
         try {
-            const data = await transactionService.getAll({ type: "receivable" });
+            const data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
             setTransactions(data);
         } catch (error) {
             console.error("Error fetching transactions:", error);
@@ -61,13 +65,13 @@ export default function AccountsReceivablePage() {
 
     useEffect(() => {
         fetchTransactions();
-    }, []);
+    }, [selectedCompany]);
 
     const handleSubmit = async (data: TransactionFormData) => {
-        if (!user) return;
+        if (!user || !selectedCompany) return;
         try {
             setIsSubmitting(true);
-            await transactionService.create(data, user.uid);
+            await transactionService.create(data, user.uid, selectedCompany.id);
             await fetchTransactions();
             setIsDialogOpen(false);
             toast.success("Conta a receber criada com sucesso!");
