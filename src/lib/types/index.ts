@@ -34,7 +34,8 @@ export interface UserProfile {
     department?: string;
     createdAt: Date;
     updatedAt: Date;
-    active: boolean;
+    active: boolean; // Deprecated in favor of status, but kept for sync
+    status: 'pending' | 'active' | 'rejected';
 }
 
 export interface CostCenter {

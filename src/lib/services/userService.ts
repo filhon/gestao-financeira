@@ -25,11 +25,21 @@ export const userService = {
         if (companyId) {
             // Update role for specific company
             await updateDoc(docRef, {
-                [`companyRoles.${companyId}`]: role
+                [`companyRoles.${companyId}`]: role,
+                updatedAt: serverTimestamp()
             });
         } else {
             // Legacy/Global fallback
-            await updateDoc(docRef, { role });
+            await updateDoc(docRef, { role, updatedAt: serverTimestamp() });
         }
+    },
+
+    updateStatus: async (uid: string, status: 'pending' | 'active' | 'rejected') => {
+        const docRef = doc(db, COLLECTION_NAME, uid);
+        await updateDoc(docRef, {
+            status,
+            active: status === 'active', // Sync legacy field
+            updatedAt: serverTimestamp()
+        });
     }
 };

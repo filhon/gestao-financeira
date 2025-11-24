@@ -47,8 +47,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     if (userDoc.exists()) {
                         const userData = userDoc.data() as UserProfile;
                         setUser(userData);
-                        // Role cookie might be ambiguous now, but we keep it for middleware (maybe use default/legacy role)
                         Cookies.set("user_role", userData.role, { expires: 1 / 24 });
+
+                        // Redirect if pending
+                        if (userData.status === 'pending' && window.location.pathname !== '/pending-approval') {
+                            router.push('/pending-approval');
+                        }
                     } else {
                         // Create new user profile if it doesn't exist
                         const newUser: UserProfile = {
@@ -56,9 +60,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                             email: firebaseUser.email!,
                             displayName: firebaseUser.displayName || "User",
                             photoURL: firebaseUser.photoURL || undefined,
-                            role: 'financial_manager', // Default legacy role
-                            companyRoles: {}, // Initialize empty
-                            active: true,
+                            role: 'auditor', // Safe default
+                            companyRoles: {},
+                            active: false, // Pending approval
+                            status: 'pending',
                             createdAt: new Date(),
                             updatedAt: new Date(),
                         };
@@ -71,6 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
                         setUser(newUser);
                         Cookies.set("user_role", newUser.role, { expires: 1 / 24 });
+                        router.push('/pending-approval');
                     }
                 } catch (error) {
                     console.error("Error fetching user profile:", error);

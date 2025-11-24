@@ -51,5 +51,26 @@ export const companyService = {
         });
 
         return company;
+    },
+
+    update: async (id: string, data: Partial<Omit<Company, "id" | "createdAt" | "updatedAt">>): Promise<void> => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        const now = new Date();
+
+        await setDoc(docRef, {
+            ...data,
+            updatedAt: Timestamp.fromDate(now),
+        }, { merge: true });
+    },
+
+    delete: async (id: string): Promise<void> => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        // Ideally we should check for related data (users, transactions) before deleting
+        // For now, we just delete the company document
+        await setDoc(docRef, { active: false }, { merge: true }); // Soft delete or actual delete? Plan said hard delete but soft is safer. 
+        // Let's do hard delete as per plan, but maybe soft is better? 
+        // The plan said "Hard delete for now". Okay.
+        const { deleteDoc } = await import("firebase/firestore");
+        await deleteDoc(docRef);
     }
 };

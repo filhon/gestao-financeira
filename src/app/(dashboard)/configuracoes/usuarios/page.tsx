@@ -21,15 +21,21 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
+import { Loader2, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 export default function UsersPage() {
     const { user: currentUser } = useAuth();
     const { selectedCompany } = useCompany();
     const [users, setUsers] = useState<UserProfile[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedUserToApprove, setSelectedUserToApprove] = useState<UserProfile | null>(null);
+    const [approvalRole, setApprovalRole] = useState<UserRole>("financial_manager");
 
     const fetchUsers = async () => {
         try {
@@ -50,14 +56,10 @@ export default function UsersPage() {
     const handleRoleUpdate = async (uid: string, newRole: UserRole | "none") => {
         if (!selectedCompany) return;
         try {
-            // If "none", we might want to remove the role, but for now let's just assume valid roles.
-            // Or we can handle "none" by removing the key from the map (not implemented in service yet).
-            // Let's stick to valid roles for now.
-            if (newRole === "none") return; // TODO: Implement remove role
+            if (newRole === "none") return;
 
             await userService.updateRole(uid, newRole as UserRole, selectedCompany.id);
 
-            // Update local state
             setUsers(users.map(u => {
                 if (u.uid === uid) {
                     return {
@@ -78,6 +80,36 @@ export default function UsersPage() {
         }
     };
 
+    const handleApproveUser = async () => {
+        if (!selectedUserToApprove || !selectedCompany) return;
+        try {
+            // 1. Update Status
+            await userService.updateStatus(selectedUserToApprove.uid, 'active');
+
+            // 2. Assign Role
+            await userService.updateRole(selectedUserToApprove.uid, approvalRole, selectedCompany.id);
+
+            toast.success(`Usuário ${selectedUserToApprove.displayName} aprovado com sucesso!`);
+            setSelectedUserToApprove(null);
+            fetchUsers();
+        } catch (error) {
+            console.error("Error approving user:", error);
+            toast.error("Erro ao aprovar usuário.");
+        }
+    };
+
+    const handleRejectUser = async (uid: string) => {
+        if (!confirm("Tem certeza que deseja rejeitar este usuário?")) return;
+        try {
+            await userService.updateStatus(uid, 'rejected');
+            toast.success("Usuário rejeitado.");
+            fetchUsers();
+        } catch (error) {
+            console.error("Error rejecting user:", error);
+            toast.error("Erro ao rejeitar usuário.");
+        }
+    };
+
     const getInitials = (name: string) => {
         return name
             .split(" ")
@@ -95,6 +127,14 @@ export default function UsersPage() {
         auditor: "Auditor"
     };
 
+    const getRoleForCompany = (user: UserProfile) => {
+        if (!selectedCompany) return user.role;
+        return user.companyRoles?.[selectedCompany.id] || "none";
+    };
+
+    const activeUsers = users.filter(u => u.status === 'active' || (!u.status && u.active)); // Backward compat
+    const pendingUsers = users.filter(u => u.status === 'pending');
+
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-96">
@@ -102,11 +142,6 @@ export default function UsersPage() {
             </div>
         );
     }
-
-    const getRoleForCompany = (user: UserProfile) => {
-        if (!selectedCompany) return user.role; // Fallback to legacy
-        return user.companyRoles?.[selectedCompany.id] || "none";
-    };
 
     return (
         <div className="space-y-6">
@@ -117,67 +152,162 @@ export default function UsersPage() {
                 </p>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Usuários Cadastrados</CardTitle>
-                    <CardDescription>
-                        Lista de todos os usuários com acesso ao sistema.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Usuário</TableHead>
-                                <TableHead>Email</TableHead>
-                                <TableHead>Função na Empresa</TableHead>
-                                <TableHead className="text-right">Ações</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {users.map((user) => {
-                                const currentRole = getRoleForCompany(user);
-                                return (
-                                    <TableRow key={user.uid}>
-                                        <TableCell className="flex items-center gap-3">
-                                            <Avatar>
-                                                <AvatarImage src={user.photoURL || ""} />
-                                                <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
-                                            </Avatar>
-                                            <span className="font-medium">{user.displayName}</span>
-                                        </TableCell>
-                                        <TableCell>{user.email}</TableCell>
-                                        <TableCell>
-                                            <Badge variant={currentRole === "none" ? "secondary" : "outline"} className="capitalize">
-                                                {currentRole === "none" ? "Sem Acesso" : (roleLabels[currentRole as UserRole] || currentRole)}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <Select
-                                                value={currentRole}
-                                                onValueChange={(value) => handleRoleUpdate(user.uid, value as UserRole)}
-                                                disabled={currentUser?.uid === user.uid} // Prevent self-lockout
-                                            >
-                                                <SelectTrigger className="w-[180px] ml-auto">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="none">Sem Acesso</SelectItem>
-                                                    <SelectItem value="admin">Administrador</SelectItem>
-                                                    <SelectItem value="financial_manager">Gerente Financeiro</SelectItem>
-                                                    <SelectItem value="approver">Aprovador</SelectItem>
-                                                    <SelectItem value="releaser">Pagador/Baixador</SelectItem>
-                                                    <SelectItem value="auditor">Auditor</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </TableCell>
+            <Tabs defaultValue="active" className="w-full">
+                <TabsList>
+                    <TabsTrigger value="active">Ativos ({activeUsers.length})</TabsTrigger>
+                    <TabsTrigger value="pending">Pendentes ({pendingUsers.length})</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="active">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Usuários Ativos</CardTitle>
+                            <CardDescription>
+                                Usuários com acesso ao sistema.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Usuário</TableHead>
+                                        <TableHead>Email</TableHead>
+                                        <TableHead>Função na Empresa</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
-                                );
-                            })}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
+                                </TableHeader>
+                                <TableBody>
+                                    {activeUsers.map((user) => {
+                                        const currentRole = getRoleForCompany(user);
+                                        return (
+                                            <TableRow key={user.uid}>
+                                                <TableCell className="flex items-center gap-3">
+                                                    <Avatar>
+                                                        <AvatarImage src={user.photoURL || ""} />
+                                                        <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
+                                                    </Avatar>
+                                                    <span className="font-medium">{user.displayName}</span>
+                                                </TableCell>
+                                                <TableCell>{user.email}</TableCell>
+                                                <TableCell>
+                                                    <Badge variant={currentRole === "none" ? "secondary" : "outline"} className="capitalize">
+                                                        {currentRole === "none" ? "Sem Acesso" : (roleLabels[currentRole as UserRole] || currentRole)}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Select
+                                                        value={currentRole}
+                                                        onValueChange={(value) => handleRoleUpdate(user.uid, value as UserRole)}
+                                                        disabled={currentUser?.uid === user.uid}
+                                                    >
+                                                        <SelectTrigger className="w-[180px] ml-auto">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="none">Sem Acesso</SelectItem>
+                                                            <SelectItem value="admin">Administrador</SelectItem>
+                                                            <SelectItem value="financial_manager">Gerente Financeiro</SelectItem>
+                                                            <SelectItem value="approver">Aprovador</SelectItem>
+                                                            <SelectItem value="releaser">Pagador/Baixador</SelectItem>
+                                                            <SelectItem value="auditor">Auditor</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="pending">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Solicitações Pendentes</CardTitle>
+                            <CardDescription>
+                                Usuários aguardando aprovação para acessar o sistema.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Usuário</TableHead>
+                                        <TableHead>Email</TableHead>
+                                        <TableHead>Data de Cadastro</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {pendingUsers.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                                                Nenhuma solicitação pendente.
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        pendingUsers.map((user) => (
+                                            <TableRow key={user.uid}>
+                                                <TableCell className="flex items-center gap-3">
+                                                    <Avatar>
+                                                        <AvatarImage src={user.photoURL || ""} />
+                                                        <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
+                                                    </Avatar>
+                                                    <span className="font-medium">{user.displayName}</span>
+                                                </TableCell>
+                                                <TableCell>{user.email}</TableCell>
+                                                <TableCell>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}</TableCell>
+                                                <TableCell className="text-right">
+                                                    <div className="flex justify-end gap-2">
+                                                        <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleRejectUser(user.uid)}>
+                                                            <XCircle className="h-4 w-4 mr-1" /> Rejeitar
+                                                        </Button>
+
+                                                        <Dialog>
+                                                            <DialogTrigger asChild>
+                                                                <Button size="sm" onClick={() => setSelectedUserToApprove(user)}>
+                                                                    <CheckCircle className="h-4 w-4 mr-1" /> Aprovar
+                                                                </Button>
+                                                            </DialogTrigger>
+                                                            <DialogContent>
+                                                                <DialogHeader>
+                                                                    <DialogTitle>Aprovar Usuário</DialogTitle>
+                                                                    <DialogDescription>
+                                                                        Defina a função inicial para <strong>{user.displayName}</strong> na empresa <strong>{selectedCompany?.name}</strong>.
+                                                                    </DialogDescription>
+                                                                </DialogHeader>
+                                                                <div className="py-4">
+                                                                    <Select value={approvalRole} onValueChange={(v) => setApprovalRole(v as UserRole)}>
+                                                                        <SelectTrigger>
+                                                                            <SelectValue placeholder="Selecione uma função" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="admin">Administrador</SelectItem>
+                                                                            <SelectItem value="financial_manager">Gerente Financeiro</SelectItem>
+                                                                            <SelectItem value="approver">Aprovador</SelectItem>
+                                                                            <SelectItem value="releaser">Pagador/Baixador</SelectItem>
+                                                                            <SelectItem value="auditor">Auditor</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </div>
+                                                                <DialogFooter>
+                                                                    <Button onClick={handleApproveUser}>Confirmar Aprovação</Button>
+                                                                </DialogFooter>
+                                                            </DialogContent>
+                                                        </Dialog>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }
