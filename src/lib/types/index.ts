@@ -103,38 +103,53 @@ export interface ApprovalStep {
     comment?: string;
 }
 
+export interface Entity {
+    id: string;
+    companyId: string;
+    name: string;
+    type: 'individual' | 'company';
+    document?: string; // CPF or CNPJ
+    email?: string;
+    phone?: string;
+    address?: string;
+    category: 'supplier' | 'client' | 'both';
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 export interface Transaction {
     id: string;
-    type: "payable" | "receivable";
+    companyId: string;
     description: string;
     amount: number;
-    date: Date; // Creation date
+    type: 'payable' | 'receivable';
+    status: TransactionStatus;
     dueDate: Date;
     paymentDate?: Date;
-    status: "draft" | "pending_approval" | "approved" | "paid" | "rejected";
-    supplierOrClient: string; // Name of supplier or client
-    invoiceUrl?: string; // URL to uploaded invoice
-    category?: string; // Optional category
-
-    // New fields
-    requestOrigin?: RequestOrigin;
+    supplierOrClient?: string; // Legacy or fallback name
+    entityId?: string; // Link to Entity
+    costCenterId?: string;
     costCenterAllocation?: CostCenterAllocation[];
     recurrence?: TransactionRecurrence;
     installments?: TransactionInstallments;
-    attachments?: Attachment[];
-    paymentMethod?: string;
-    notes?: string;
 
-    // Approval workflow
-    approvalChain?: ApprovalStep[];
-    currentApprovalStep?: number;
-    batchId?: string; // Linked Payment Batch
+    // Attachments
+    attachments?: string[]; // URLs
 
     // Metadata
-    createdBy: string; // User UID
-    companyId: string; // Company ID
+    createdBy: string;
+    approvedBy?: string;
+    approvedAt?: Date;
+    releasedBy?: string;
+    releasedAt?: Date;
+
+    // Approval Token for Magic Links
+    approvalToken?: string | null;
+    approvalTokenExpiresAt?: Date | null;
+
     createdAt: Date;
     updatedAt: Date;
+    batchId?: string;
 }
 
 export type PaymentBatchStatus = 'open' | 'pending_approval' | 'approved' | 'paid' | 'rejected';

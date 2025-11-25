@@ -35,6 +35,17 @@ import { storageService } from "@/lib/services/storageService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { costCenterService, getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { useAuth } from "@/components/providers/AuthProvider";
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { entityService } from "@/lib/services/entityService";
+import { Entity } from "@/lib/types";
 
 interface TransactionFormProps {
     defaultValues?: Partial<TransactionFormData>;
@@ -48,6 +59,20 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
     const { selectedCompany } = useCompany();
     const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
     const [isUploading, setIsUploading] = useState(false);
+    const [entities, setEntities] = useState<Entity[]>([]);
+    const [useEntity, setUseEntity] = useState(true);
+    const [openEntityCombobox, setOpenEntityCombobox] = useState(false);
+
+    useEffect(() => {
+        const loadEntities = async () => {
+            if (selectedCompany) {
+                const category = type === 'payable' ? 'supplier' : 'client';
+                const data = await entityService.getAll(selectedCompany.id, category);
+                setEntities(data);
+            }
+        };
+        loadEntities();
+    }, [selectedCompany, type]);
 
     const form = useForm<TransactionFormData>({
         resolver: zodResolver(transactionSchema) as any,
@@ -185,19 +210,101 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                         )}
                     />
 
-                    <FormField
-                        control={form.control}
-                        name="supplierOrClient"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>{type === 'payable' ? 'Fornecedor' : 'Cliente'}</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="Nome da empresa ou pessoa" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
+                    <div className="flex flex-col gap-2">
+                        <FormLabel>{type === 'payable' ? 'Fornecedor' : 'Cliente'}</FormLabel>
+                        <div className="flex items-center gap-2 mb-2">
+                            <Checkbox
+                                id="useEntity"
+                                checked={useEntity}
+                                onCheckedChange={(checked) => {
+                                    setUseEntity(!!checked);
+                                    if (checked) {
+                                        form.setValue("supplierOrClient", "");
+                                    } else {
+                                        form.setValue("entityId", undefined);
+                                    }
+                                }}
+                            />
+                            <label htmlFor="useEntity" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                                Selecionar de Cadastros
+                            </label>
+                        </div>
+
+                        {useEntity ? (
+                            <FormField
+                                control={form.control}
+                                name="entityId"
+                                render={({ field }) => (
+                                    <FormItem className="flex flex-col">
+                                        <Popover open={openEntityCombobox} onOpenChange={setOpenEntityCombobox}>
+                                            <PopoverTrigger asChild>
+                                                <FormControl>
+                                                    <Button
+                                                        variant="outline"
+                                                        role="combobox"
+                                                        className={cn(
+                                                            "w-full justify-between",
+                                                            !field.value && "text-muted-foreground"
+                                                        )}
+                                                    >
+                                                        {field.value
+                                                            ? entities.find((entity) => entity.id === field.value)?.name
+                                                            : "Selecione..."}
+                                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                    </Button>
+                                                </FormControl>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                                                <Command>
+                                                    <CommandInput placeholder="Buscar..." />
+                                                    <CommandList>
+                                                        <CommandEmpty>Nenhuma entidade encontrada.</CommandEmpty>
+                                                        <CommandGroup>
+                                                            {entities.map((entity) => (
+                                                                <CommandItem
+                                                                    value={entity.name}
+                                                                    key={entity.id}
+                                                                    onSelect={() => {
+                                                                        form.setValue("entityId", entity.id);
+                                                                        form.setValue("supplierOrClient", entity.name);
+                                                                        setOpenEntityCombobox(false);
+                                                                    }}
+                                                                >
+                                                                    <Check
+                                                                        className={cn(
+                                                                            "mr-2 h-4 w-4",
+                                                                            entity.id === field.value
+                                                                                ? "opacity-100"
+                                                                                : "opacity-0"
+                                                                        )}
+                                                                    />
+                                                                    {entity.name}
+                                                                </CommandItem>
+                                                            ))}
+                                                        </CommandGroup>
+                                                    </CommandList>
+                                                </Command>
+                                            </PopoverContent>
+                                        </Popover>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        ) : (
+                            <FormField
+                                control={form.control}
+                                name="supplierOrClient"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormControl>
+                                            <Input placeholder="Nome da empresa ou pessoa" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                         )}
-                    />
+                    </div>
 
                     <FormField
                         control={form.control}

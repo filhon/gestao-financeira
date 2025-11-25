@@ -4,11 +4,12 @@ export const transactionSchema = z.object({
     type: z.enum(["payable", "receivable"]),
     description: z.string().min(3, "Descrição deve ter pelo menos 3 caracteres"),
     amount: z.coerce.number().min(0.01, "Valor deve ser maior que zero"),
-    dueDate: z.date({ required_error: "Data de vencimento é obrigatória" }),
+    dueDate: z.date(),
     paymentDate: z.date().optional(),
     status: z.enum(["draft", "pending_approval", "approved", "paid", "rejected"]).default("draft"),
 
     supplierOrClient: z.string().min(2, "Fornecedor/Cliente é obrigatório"),
+    entityId: z.string().optional(),
 
     requestOrigin: z.object({
         type: z.enum(["director", "department", "sector"]),

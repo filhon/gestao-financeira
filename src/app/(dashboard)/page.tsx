@@ -1,39 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DollarSign, ArrowUpCircle, ArrowDownCircle, Loader2 } from "lucide-react";
-import { transactionService } from "@/lib/services/transactionService";
-import { CashFlowChart } from "@/components/features/finance/CashFlowChart";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-
+import { Loader2 } from "lucide-react";
+import { dashboardService, DashboardMetrics, CashFlowData, CostCenterData } from "@/lib/services/dashboardService";
+import { KPICards } from "@/components/features/dashboard/KPICards";
+import { CashFlowChart } from "@/components/features/dashboard/CashFlowChart";
+import { CostCenterChart } from "@/components/features/dashboard/CostCenterChart";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { transactionService } from "@/lib/services/transactionService";
+import { format } from "date-fns";
+import { Transaction } from "@/lib/types";
 
 export default function DashboardPage() {
     const { selectedCompany } = useCompany();
-    const [stats, setStats] = useState<{
-        totalBalance: number;
-        monthlyIncome: number;
-        monthlyExpense: number;
-        chartData: any[];
-        recentTransactions: any[];
-    } | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
+    const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+    const [cashFlow, setCashFlow] = useState<CashFlowData[]>([]);
+    const [costCenterData, setCostCenterData] = useState<CostCenterData[]>([]);
+    const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+
     useEffect(() => {
-        const loadStats = async () => {
+        const loadDashboard = async () => {
             if (!selectedCompany) return;
             try {
-                const data = await transactionService.getDashboardStats(selectedCompany.id);
-                setStats(data);
+                const [metricsData, cashFlowData, ccData, transactions] = await Promise.all([
+                    dashboardService.getFinancialMetrics(selectedCompany.id),
+                    dashboardService.getCashFlowData(selectedCompany.id),
+                    dashboardService.getExpensesByCostCenter(selectedCompany.id),
+                    transactionService.getAll({ companyId: selectedCompany.id }) // We might want to limit this query later
+                ]);
+
+                setMetrics(metricsData);
+                setCashFlow(cashFlowData);
+                setCostCenterData(ccData);
+                setRecentTransactions(transactions.slice(0, 5)); // Just take first 5 for now, assuming service returns sorted or we sort here
             } catch (error) {
-                console.error("Error loading dashboard stats:", error);
+                console.error("Error loading dashboard:", error);
             } finally {
                 setIsLoading(false);
             }
         };
-        loadStats();
+        loadDashboard();
     }, [selectedCompany]);
 
     if (isLoading) {
@@ -46,66 +55,26 @@ export default function DashboardPage() {
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Dashboard Financeiro</h1>
 
-            <div className="grid gap-4 md:grid-cols-3">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Saldo Total</CardTitle>
-                        <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">
-                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(stats?.totalBalance || 0)}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            Saldo acumulado atual
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Receitas (Mês)</CardTitle>
-                        <ArrowUpCircle className="h-4 w-4 text-emerald-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-emerald-600">
-                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(stats?.monthlyIncome || 0)}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            Entradas neste mês
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Despesas (Mês)</CardTitle>
-                        <ArrowDownCircle className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-red-600">
-                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(stats?.monthlyExpense || 0)}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            Saídas neste mês
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
+            {metrics && <KPICards metrics={metrics} />}
 
             <div className="grid gap-4 md:grid-cols-7">
-                <CashFlowChart data={stats?.chartData || []} />
+                <CashFlowChart data={cashFlow} />
+                <CostCenterChart data={costCenterData} />
+            </div>
 
-                <Card className="col-span-3">
+            <div className="grid gap-4 md:grid-cols-1">
+                <Card>
                     <CardHeader>
                         <CardTitle>Transações Recentes</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-8">
-                            {stats?.recentTransactions.length === 0 ? (
+                            {recentTransactions.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center">Nenhuma transação recente.</p>
                             ) : (
-                                stats?.recentTransactions.map((t) => (
+                                recentTransactions.map((t) => (
                                     <div key={t.id} className="flex items-center">
                                         <div className="ml-4 space-y-1">
                                             <p className="text-sm font-medium leading-none">{t.description}</p>
