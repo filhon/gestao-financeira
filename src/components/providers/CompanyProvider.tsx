@@ -87,6 +87,22 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    // Lazy Trigger for Recurring Transactions
+    useEffect(() => {
+        const checkRecurrences = async () => {
+            if (selectedCompany && user) {
+                try {
+                    // Dynamically import to avoid circular dependencies if any, though service layer should be fine
+                    const { recurrenceService } = await import("@/lib/services/recurrenceService");
+                    await recurrenceService.processDueTemplates(selectedCompany.id, { uid: user.uid, email: user.email });
+                } catch (error) {
+                    console.error("Failed to process recurrences:", error);
+                }
+            }
+        };
+        checkRecurrences();
+    }, [selectedCompany, user]);
+
     return (
         <CompanyContext.Provider value={{ companies, selectedCompany, isLoading, selectCompany }}>
             {children}

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
+import { recurrenceService } from "@/lib/services/recurrenceService";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
@@ -71,10 +72,39 @@ export default function AccountsReceivablePage() {
         if (!user || !selectedCompany) return;
         try {
             setIsSubmitting(true);
-            await transactionService.create(data, { uid: user.uid, email: user.email }, selectedCompany.id);
+
+            if (data.recurrence?.isRecurring) {
+                // Create Recurring Template
+                await recurrenceService.createTemplate({
+                    companyId: selectedCompany.id,
+                    description: data.description,
+                    amount: data.amount,
+                    type: 'receivable',
+                    frequency: data.recurrence.frequency as any,
+                    interval: data.recurrence.interval || 1,
+                    nextDueDate: data.dueDate,
+                    active: true,
+                    baseTransactionData: {
+                        costCenterAllocation: data.costCenterAllocation,
+                        supplierOrClient: data.supplierOrClient,
+                        entityId: data.entityId,
+                        paymentMethod: data.paymentMethod,
+                        requestOrigin: data.requestOrigin,
+                        notes: data.notes,
+                    }
+                });
+                toast.success("Recorrência criada com sucesso!");
+
+                // Trigger processing immediately
+                await recurrenceService.processDueTemplates(selectedCompany.id, { uid: user.uid, email: user.email });
+            } else {
+                // Normal Transaction
+                await transactionService.create(data, { uid: user.uid, email: user.email }, selectedCompany.id);
+                toast.success("Conta a receber criada com sucesso!");
+            }
+
             await fetchTransactions();
             setIsDialogOpen(false);
-            toast.success("Conta a receber criada com sucesso!");
         } catch (error) {
             console.error("Error saving transaction:", error);
             toast.error("Erro ao salvar conta a receber.");

@@ -11,6 +11,7 @@ import {
     Settings,
     LogOut,
     Users,
+    RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -31,6 +32,11 @@ const menuItems = [
         title: "Contas a Receber",
         href: "/financeiro/contas-receber",
         icon: Receipt,
+    },
+    {
+        title: "Recorrências",
+        href: "/financeiro/recorrencias",
+        icon: RefreshCw,
     },
     {
         title: "Centros de Custo",

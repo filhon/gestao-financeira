@@ -200,3 +200,20 @@ export interface AuditLog {
     userAgent?: string;
     createdAt: Date;
 }
+
+export interface RecurringTransactionTemplate {
+    id: string;
+    companyId: string;
+    description: string;
+    amount: number;
+    type: 'payable' | 'receivable';
+    frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+    interval: number; // e.g. 1 = every month, 2 = every 2 months
+    nextDueDate: Date;
+    endDate?: Date;
+    active: boolean;
+    lastGeneratedAt?: Date;
+    baseTransactionData: Partial<Transaction>; // Stores cost centers, category, etc.
+    createdAt: Date;
+    updatedAt: Date;
+}

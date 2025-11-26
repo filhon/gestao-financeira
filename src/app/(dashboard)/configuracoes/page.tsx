@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Users, Building2, ChevronRight } from "lucide-react";
+import { Users, Building2, ChevronRight, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function SettingsPage() {
@@ -17,6 +17,12 @@ export default function SettingsPage() {
             description: "Gerencie as empresas do grupo (Holding).",
             href: "/configuracoes/empresas",
             icon: Building2,
+        },
+        {
+            title: "Auditoria",
+            description: "Visualize logs de segurança e ações críticas.",
+            href: "/configuracoes/auditoria",
+            icon: ShieldCheck,
         },
     ];
 
