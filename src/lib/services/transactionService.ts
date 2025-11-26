@@ -17,6 +17,8 @@ import { Transaction, TransactionStatus } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { format, addMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { costCenterService } from "@/lib/services/costCenterService";
+import { notificationService } from "@/lib/services/notificationService";
 
 const COLLECTION_NAME = "transactions";
 
@@ -57,6 +59,8 @@ export const transactionService = {
     create: async (data: TransactionFormData, userId: string, companyId: string) => {
         const { useInstallments, installmentsCount, ...transactionData } = data;
 
+        const status = data.status || "draft";
+
         if (useInstallments && installmentsCount && installmentsCount > 1) {
             const groupId = crypto.randomUUID();
             const totalAmount = transactionData.amount;
@@ -66,10 +70,7 @@ export const transactionService = {
             const promises = [];
             for (let i = 1; i <= installmentsCount; i++) {
                 const amount = i === installmentsCount ? baseAmount + remainder : baseAmount;
-                // First installment is on the selected due date, subsequent ones are monthly
                 const dueDate = i === 1 ? transactionData.dueDate : addMonths(transactionData.dueDate, i - 1);
-
-                // Description with installment info
                 const description = `${transactionData.description} (${i}/${installmentsCount})`;
 
                 promises.push(addDoc(collection(db, COLLECTION_NAME), {
@@ -84,24 +85,61 @@ export const transactionService = {
                     },
                     companyId,
                     createdBy: userId,
-                    status: "draft",
+                    status: status,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                 }));
             }
 
             const refs = await Promise.all(promises);
+
+            // Trigger Notification if pending approval
+            if (status === 'pending_approval' && transactionData.costCenterAllocation) {
+                for (const allocation of transactionData.costCenterAllocation) {
+                    const costCenter = await costCenterService.getById(allocation.costCenterId);
+                    if (costCenter?.approverId) {
+                        await notificationService.create({
+                            userId: costCenter.approverId,
+                            companyId,
+                            title: "Nova Despesa para Aprovar",
+                            message: `Uma nova despesa de R$ ${totalAmount} requer sua aprovação.`,
+                            type: "info",
+                            link: "/financeiro/contas-pagar"
+                        });
+                    }
+                }
+            }
+
             return refs[0];
         }
 
-        return addDoc(collection(db, COLLECTION_NAME), {
+        const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             ...transactionData,
             companyId,
             createdBy: userId,
-            status: "draft",
+            status: status,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
+
+        // Trigger Notification if pending approval
+        if (status === 'pending_approval' && transactionData.costCenterAllocation) {
+            for (const allocation of transactionData.costCenterAllocation) {
+                const costCenter = await costCenterService.getById(allocation.costCenterId);
+                if (costCenter?.approverId) {
+                    await notificationService.create({
+                        userId: costCenter.approverId,
+                        companyId,
+                        title: "Nova Despesa para Aprovar",
+                        message: `Uma nova despesa de R$ ${transactionData.amount} requer sua aprovação.`,
+                        type: "info",
+                        link: "/financeiro/contas-pagar"
+                    });
+                }
+            }
+        }
+
+        return docRef;
     },
 
     update: async (id: string, data: Partial<TransactionFormData>) => {

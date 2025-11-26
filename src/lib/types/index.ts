@@ -170,3 +170,15 @@ export interface PaymentBatch {
     createdAt: Date;
     updatedAt: Date;
 }
+
+export interface Notification {
+    id: string;
+    userId: string;
+    companyId: string;
+    title: string;
+    message: string;
+    type: 'info' | 'warning' | 'success' | 'error';
+    link?: string;
+    read: boolean;
+    createdAt: Date;
+}

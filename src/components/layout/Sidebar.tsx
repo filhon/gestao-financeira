@@ -10,6 +10,7 @@ import {
     Building2,
     Settings,
     LogOut,
+    Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -35,6 +36,11 @@ const menuItems = [
         title: "Centros de Custo",
         href: "/centros-custo",
         icon: Building2,
+    },
+    {
+        title: "Cadastros",
+        href: "/cadastros",
+        icon: Users,
     },
     {
         title: "Configurações",

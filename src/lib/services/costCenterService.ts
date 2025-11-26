@@ -9,7 +9,8 @@ import {
     orderBy,
     where,
     serverTimestamp,
-    Timestamp
+    Timestamp,
+    getDoc
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { CostCenter } from "@/lib/types";
@@ -35,6 +36,22 @@ export const costCenterService = {
                 updatedAt: (data.updatedAt as Timestamp)?.toDate(),
             } as CostCenter;
         });
+    },
+
+    getById: async (id: string): Promise<CostCenter | null> => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            return {
+                id: docSnap.id,
+                ...data,
+                createdAt: (data.createdAt as Timestamp)?.toDate(),
+                updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+            } as CostCenter;
+        }
+        return null;
     },
 
     create: async (data: CostCenterFormData, companyId: string) => {
