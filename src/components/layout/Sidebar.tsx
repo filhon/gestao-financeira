@@ -12,6 +12,7 @@ import {
     LogOut,
     Users,
     RefreshCw,
+    FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -37,6 +38,11 @@ const menuItems = [
         title: "Recorrências",
         href: "/financeiro/recorrencias",
         icon: RefreshCw,
+    },
+    {
+        title: "Relatórios",
+        href: "/relatorios",
+        icon: FileText,
     },
     {
         title: "Centros de Custo",
