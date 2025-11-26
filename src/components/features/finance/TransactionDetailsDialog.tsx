@@ -15,6 +15,7 @@ import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { useCompany } from "@/components/providers/CompanyProvider";
 import { transactionService } from "@/lib/services/transactionService";
 import { emailService } from "@/lib/services/emailService";
 import { useState } from "react";
@@ -37,15 +38,16 @@ export function TransactionDetailsDialog({
     onUpdate,
 }: TransactionDetailsDialogProps) {
     const { user } = useAuth();
+    const { selectedCompany } = useCompany();
     const [isProcessing, setIsProcessing] = useState(false);
 
-    if (!transaction) return null;
+    if (!transaction || !selectedCompany) return null;
 
     const handleStatusUpdate = async (newStatus: TransactionStatus) => {
         if (!user) return;
         try {
             setIsProcessing(true);
-            await transactionService.updateStatus(transaction.id, newStatus, user.uid, user.role);
+            await transactionService.updateStatus(transaction.id, newStatus, { uid: user.uid, email: user.email }, selectedCompany.id);
 
             // Email Notifications
             try {
@@ -145,7 +147,7 @@ export function TransactionDetailsDialog({
                         <div>
                             <h4 className="text-sm font-medium text-muted-foreground">Solicitado por</h4>
                             <p className="text-sm">
-                                {transaction.requestOrigin.name} ({transaction.requestOrigin.type === 'director' ? 'Diretoria' : transaction.requestOrigin.type === 'department' ? 'Departamento' : 'Setor'})
+                                {transaction.requestOrigin?.name || '-'} ({transaction.requestOrigin?.type === 'director' ? 'Diretoria' : transaction.requestOrigin?.type === 'department' ? 'Departamento' : transaction.requestOrigin?.type === 'sector' ? 'Setor' : '-'})
                             </p>
                         </div>
                         <div>
@@ -156,7 +158,11 @@ export function TransactionDetailsDialog({
                             <div className="col-span-2">
                                 <h4 className="text-sm font-medium text-muted-foreground">Recorrência</h4>
                                 <p className="text-sm">
-                                    Parcela {transaction.recurrence.currentInstallment} de {transaction.recurrence.totalInstallments || '?'} ({transaction.recurrence.frequency === 'monthly' ? 'Mensal' : 'Outro'})
+                                    {transaction.installments ? (
+                                        `Parcela ${transaction.installments.current} de ${transaction.installments.total}`
+                                    ) : (
+                                        transaction.recurrence.frequency === 'monthly' ? 'Mensal' : 'Outro'
+                                    )}
                                 </p>
                             </div>
                         )}
@@ -168,7 +174,7 @@ export function TransactionDetailsDialog({
                     <div>
                         <h4 className="text-sm font-medium text-muted-foreground mb-2">Rateio por Centro de Custo</h4>
                         <div className="space-y-2">
-                            {transaction.costCenterAllocation.map((alloc, index) => (
+                            {transaction.costCenterAllocation?.map((alloc, index) => (
                                 <div key={index} className="flex justify-between text-sm border p-2 rounded">
                                     <span>Centro de Custo ID: {alloc.costCenterId}</span> {/* In a real app, we'd look up the name */}
                                     <div className="flex gap-4">
@@ -183,7 +189,7 @@ export function TransactionDetailsDialog({
                     </div>
 
                     {/* Attachments */}
-                    {transaction.attachments.length > 0 && (
+                    {transaction.attachments && transaction.attachments.length > 0 && (
                         <>
                             <Separator />
                             <div>

@@ -137,7 +137,7 @@ export default function AccountsPayablePage() {
         if (!user || !selectedCompany) return;
         try {
             setIsSubmitting(true);
-            await transactionService.create(data, user.uid, selectedCompany.id);
+            await transactionService.create(data, { uid: user.uid, email: user.email }, selectedCompany.id);
             await fetchTransactions();
             setIsDialogOpen(false);
             toast.success("Conta a pagar criada com sucesso!");

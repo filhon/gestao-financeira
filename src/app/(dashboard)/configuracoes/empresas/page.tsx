@@ -62,7 +62,8 @@ export default function CompaniesPage() {
 
     const handleCreate = async (data: any) => {
         try {
-            await companyService.create(data);
+            if (!user) return;
+            await companyService.create(data, { uid: user.uid, email: user.email });
             toast.success("Empresa criada com sucesso!");
             setIsDialogOpen(false);
             fetchCompanies();
@@ -75,7 +76,8 @@ export default function CompaniesPage() {
     const handleUpdate = async (data: any) => {
         if (!selectedCompany) return;
         try {
-            await companyService.update(selectedCompany.id, data);
+            if (!user) return;
+            await companyService.update(selectedCompany.id, data, { uid: user.uid, email: user.email });
             toast.success("Empresa atualizada com sucesso!");
             setIsDialogOpen(false);
             setSelectedCompany(null);
@@ -89,7 +91,8 @@ export default function CompaniesPage() {
     const handleDelete = async (id: string) => {
         if (!confirm("Tem certeza que deseja excluir esta empresa? Esta ação não pode ser desfeita.")) return;
         try {
-            await companyService.delete(id);
+            if (!user) return;
+            await companyService.delete(id, { uid: user.uid, email: user.email });
             toast.success("Empresa excluída com sucesso!");
             fetchCompanies();
         } catch (error) {

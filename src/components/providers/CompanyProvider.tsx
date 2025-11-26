@@ -49,7 +49,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
                     // Assign current user as admin of this new company
                     if (user) {
                         const { userService } = await import("@/lib/services/userService");
-                        await userService.updateRole(user.uid, 'admin', defaultCompany.id);
+                        await userService.updateRole(user.uid, 'admin', { uid: user.uid, email: user.email }, defaultCompany.id);
                     }
 
                     setCompanies([defaultCompany]);

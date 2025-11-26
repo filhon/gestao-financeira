@@ -19,6 +19,7 @@ import { format, addMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { notificationService } from "@/lib/services/notificationService";
+import { auditService } from "@/lib/services/auditService";
 
 const COLLECTION_NAME = "transactions";
 
@@ -56,8 +57,9 @@ export const transactionService = {
         return snapshot.docs.map((doc) => convertDates({ id: doc.id, ...doc.data() }));
     },
 
-    create: async (data: TransactionFormData, userId: string, companyId: string) => {
+    create: async (data: TransactionFormData, user: { uid: string; email: string }, companyId: string) => {
         const { useInstallments, installmentsCount, ...transactionData } = data;
+        const userId = user.uid;
 
         const status = data.status || "draft";
 
@@ -139,20 +141,42 @@ export const transactionService = {
             }
         }
 
+        // Log Audit
+        await auditService.log({
+            companyId,
+            userId: user.uid,
+            userEmail: user.email,
+            action: 'create',
+            entity: 'transaction',
+            entityId: docRef.id,
+            details: { amount: transactionData.amount, description: transactionData.description }
+        });
+
         return docRef;
     },
 
-    update: async (id: string, data: Partial<TransactionFormData>) => {
+    update: async (id: string, data: Partial<TransactionFormData>, user: { uid: string; email: string }, companyId: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
-        return updateDoc(docRef, {
+        await updateDoc(docRef, {
             ...data,
             updatedAt: serverTimestamp(),
         });
+
+        await auditService.log({
+            companyId,
+            userId: user.uid,
+            userEmail: user.email,
+            action: 'update',
+            entity: 'transaction',
+            entityId: id,
+            details: data
+        });
     },
 
-    updateStatus: async (id: string, status: TransactionStatus, userId: string, role: string) => {
+    updateStatus: async (id: string, status: TransactionStatus, user: { uid: string; email: string }, companyId: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
         const updateData: any = { status, updatedAt: serverTimestamp() };
+        const userId = user.uid;
 
         if (status === 'approved') {
             updateData.approvedBy = userId;
@@ -169,12 +193,32 @@ export const transactionService = {
             updateData.approvalTokenExpiresAt = expiresAt;
         }
 
-        return updateDoc(docRef, updateData);
+        await updateDoc(docRef, updateData);
+
+        await auditService.log({
+            companyId,
+            userId: user.uid,
+            userEmail: user.email,
+            action: status === 'approved' ? 'approve' : status === 'rejected' ? 'reject' : 'update',
+            entity: 'transaction',
+            entityId: id,
+            details: { status }
+        });
     },
 
-    delete: async (id: string) => {
+    delete: async (id: string, user: { uid: string; email: string }, companyId: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
-        return deleteDoc(docRef);
+        await deleteDoc(docRef);
+
+        await auditService.log({
+            companyId,
+            userId: user.uid,
+            userEmail: user.email,
+            action: 'delete',
+            entity: 'transaction',
+            entityId: id,
+            details: {}
+        });
     },
 
     approveByToken: async (token: string, userId: string) => {

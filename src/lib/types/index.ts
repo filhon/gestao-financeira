@@ -132,9 +132,13 @@ export interface Transaction {
     costCenterAllocation?: CostCenterAllocation[];
     recurrence?: TransactionRecurrence;
     installments?: TransactionInstallments;
+    requestOrigin?: RequestOrigin;
+    paymentMethod?: PaymentMethod;
+    notes?: string;
 
     // Attachments
-    attachments?: string[]; // URLs
+    // Attachments
+    attachments?: Attachment[];
 
     // Metadata
     createdBy: string;
@@ -180,5 +184,19 @@ export interface Notification {
     type: 'info' | 'warning' | 'success' | 'error';
     link?: string;
     read: boolean;
+    createdAt: Date;
+}
+
+export interface AuditLog {
+    id: string;
+    companyId: string;
+    userId: string;
+    userEmail: string;
+    action: 'create' | 'update' | 'delete' | 'login' | 'approve' | 'reject';
+    entity: 'transaction' | 'company' | 'user' | 'cost_center' | 'entity';
+    entityId: string;
+    details: Record<string, any>;
+    ipAddress?: string;
+    userAgent?: string;
     createdAt: Date;
 }

@@ -57,8 +57,9 @@ export default function UsersPage() {
         if (!selectedCompany) return;
         try {
             if (newRole === "none") return;
+            if (!currentUser) return;
 
-            await userService.updateRole(uid, newRole as UserRole, selectedCompany.id);
+            await userService.updateRole(uid, newRole as UserRole, { uid: currentUser.uid, email: currentUser.email }, selectedCompany.id);
 
             setUsers(users.map(u => {
                 if (u.uid === uid) {
@@ -83,11 +84,13 @@ export default function UsersPage() {
     const handleApproveUser = async () => {
         if (!selectedUserToApprove || !selectedCompany) return;
         try {
+            if (!currentUser) return;
+
             // 1. Update Status
-            await userService.updateStatus(selectedUserToApprove.uid, 'active');
+            await userService.updateStatus(selectedUserToApprove.uid, 'active', { uid: currentUser.uid, email: currentUser.email });
 
             // 2. Assign Role
-            await userService.updateRole(selectedUserToApprove.uid, approvalRole, selectedCompany.id);
+            await userService.updateRole(selectedUserToApprove.uid, approvalRole, { uid: currentUser.uid, email: currentUser.email }, selectedCompany.id);
 
             toast.success(`Usuário ${selectedUserToApprove.displayName} aprovado com sucesso!`);
             setSelectedUserToApprove(null);
@@ -100,8 +103,9 @@ export default function UsersPage() {
 
     const handleRejectUser = async (uid: string) => {
         if (!confirm("Tem certeza que deseja rejeitar este usuário?")) return;
+        if (!currentUser) return;
         try {
-            await userService.updateStatus(uid, 'rejected');
+            await userService.updateStatus(uid, 'rejected', { uid: currentUser.uid, email: currentUser.email });
             toast.success("Usuário rejeitado.");
             fetchUsers();
         } catch (error) {

@@ -1,6 +1,7 @@
 import { db } from "@/lib/firebase/client";
 import { collection, doc, getDocs, getDoc, setDoc, query, orderBy, Timestamp } from "firebase/firestore";
 import { Company } from "@/lib/types";
+import { auditService } from "@/lib/services/auditService";
 
 const COLLECTION_NAME = "companies";
 
@@ -33,7 +34,7 @@ export const companyService = {
         } as Company;
     },
 
-    create: async (data: Omit<Company, "id" | "createdAt" | "updatedAt">): Promise<Company> => {
+    create: async (data: Omit<Company, "id" | "createdAt" | "updatedAt">, adminUser: { uid: string; email: string }): Promise<Company> => {
         const docRef = doc(collection(db, COLLECTION_NAME));
         const now = new Date();
 
@@ -50,10 +51,20 @@ export const companyService = {
             updatedAt: Timestamp.fromDate(now),
         });
 
+        await auditService.log({
+            companyId: docRef.id,
+            userId: adminUser.uid,
+            userEmail: adminUser.email,
+            action: 'create',
+            entity: 'company',
+            entityId: docRef.id,
+            details: data
+        });
+
         return company;
     },
 
-    update: async (id: string, data: Partial<Omit<Company, "id" | "createdAt" | "updatedAt">>): Promise<void> => {
+    update: async (id: string, data: Partial<Omit<Company, "id" | "createdAt" | "updatedAt">>, adminUser: { uid: string; email: string }): Promise<void> => {
         const docRef = doc(db, COLLECTION_NAME, id);
         const now = new Date();
 
@@ -61,16 +72,33 @@ export const companyService = {
             ...data,
             updatedAt: Timestamp.fromDate(now),
         }, { merge: true });
+
+        await auditService.log({
+            companyId: id,
+            userId: adminUser.uid,
+            userEmail: adminUser.email,
+            action: 'update',
+            entity: 'company',
+            entityId: id,
+            details: data
+        });
     },
 
-    delete: async (id: string): Promise<void> => {
+    delete: async (id: string, adminUser: { uid: string; email: string }): Promise<void> => {
         const docRef = doc(db, COLLECTION_NAME, id);
         // Ideally we should check for related data (users, transactions) before deleting
         // For now, we just delete the company document
-        await setDoc(docRef, { active: false }, { merge: true }); // Soft delete or actual delete? Plan said hard delete but soft is safer. 
-        // Let's do hard delete as per plan, but maybe soft is better? 
-        // The plan said "Hard delete for now". Okay.
         const { deleteDoc } = await import("firebase/firestore");
         await deleteDoc(docRef);
+
+        await auditService.log({
+            companyId: id,
+            userId: adminUser.uid,
+            userEmail: adminUser.email,
+            action: 'delete',
+            entity: 'company',
+            entityId: id,
+            details: {}
+        });
     }
 };
