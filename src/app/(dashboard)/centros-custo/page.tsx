@@ -122,7 +122,15 @@ export default function CostCentersPage() {
                             editingId={editingId}
                             defaultValues={
                                 editingId
-                                    ? costCenters.find((c) => c.id === editingId)
+                                    ? (() => {
+                                        const cc = costCenters.find((c) => c.id === editingId);
+                                        if (!cc) return undefined;
+                                        return {
+                                            ...cc,
+                                            budget: cc.budget || 0,
+                                            budgetLimit: cc.budgetLimit || 0,
+                                        };
+                                    })()
                                     : undefined
                             }
                         />

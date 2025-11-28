@@ -14,6 +14,8 @@ export interface Company {
     id: string;
     name: string;
     cnpj?: string;
+    phone?: string;
+    address?: string;
     logoUrl?: string;
     createdAt: Date;
     updatedAt: Date;

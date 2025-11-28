@@ -24,9 +24,11 @@ import { Plus, Pencil, Trash2, Users, Building2, User, Loader2 } from "lucide-re
 import { toast } from "sonner";
 import { EntityForm } from "@/components/features/entities/EntityForm";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function EntitiesPage() {
+    const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const [entities, setEntities] = useState<Entity[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -54,9 +56,9 @@ export default function EntitiesPage() {
     }, [selectedCompany, activeTab]);
 
     const handleCreate = async (data: any) => {
-        if (!selectedCompany) return;
+        if (!selectedCompany || !user) return;
         try {
-            await entityService.create({ ...data, companyId: selectedCompany.id });
+            await entityService.create({ ...data, companyId: selectedCompany.id }, { uid: user.uid, email: user.email });
             toast.success("Entidade criada com sucesso!");
             setIsDialogOpen(false);
             fetchEntities();
@@ -67,9 +69,9 @@ export default function EntitiesPage() {
     };
 
     const handleUpdate = async (data: any) => {
-        if (!selectedEntity) return;
+        if (!selectedEntity || !user || !selectedCompany) return;
         try {
-            await entityService.update(selectedEntity.id, data);
+            await entityService.update(selectedEntity.id, data, { uid: user.uid, email: user.email }, selectedCompany.id);
             toast.success("Entidade atualizada com sucesso!");
             setIsDialogOpen(false);
             setSelectedEntity(null);
@@ -82,8 +84,9 @@ export default function EntitiesPage() {
 
     const handleDelete = async (id: string) => {
         if (!confirm("Tem certeza que deseja excluir esta entidade?")) return;
+        if (!user || !selectedCompany) return;
         try {
-            await entityService.delete(id);
+            await entityService.delete(id, { uid: user.uid, email: user.email }, selectedCompany.id);
             toast.success("Entidade excluída com sucesso!");
             fetchEntities();
         } catch (error) {
