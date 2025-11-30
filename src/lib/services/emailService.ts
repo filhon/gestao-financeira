@@ -21,7 +21,7 @@ export const emailService = {
                         transactionId: transaction.id,
                         description: transaction.description,
                         amount: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(transaction.amount),
-                        requesterName: transaction.requestOrigin.name,
+                        requesterName: transaction.requestOrigin?.name || "Solicitante",
                         link: `${window.location.origin}/approve/${transaction.approvalToken}`,
                     },
                 }),

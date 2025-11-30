@@ -32,12 +32,12 @@ export const dashboardService = {
         // For accurate totals, we need everything.
         // Optimization: Create aggregation counters in Firestore or use a cloud function.
         // For MVP: Client-side aggregation.
-        
+
         const q = query(
-            collection(db, TRANSACTIONS_COLLECTION), 
+            collection(db, TRANSACTIONS_COLLECTION),
             where("companyId", "==", companyId)
         );
-        
+
         const snapshot = await getDocs(q);
         const transactions = snapshot.docs.map(doc => doc.data() as Transaction);
 
@@ -48,14 +48,14 @@ export const dashboardService = {
 
         transactions.forEach(t => {
             const amount = Number(t.amount) || 0;
-            
+
             if (t.status === 'paid') {
                 if (t.type === 'receivable') {
                     totalRevenue += amount;
                 } else {
                     totalExpenses += amount;
                 }
-            } else if (t.status !== 'cancelled') {
+            } else if (t.status !== 'rejected') {
                 // Pending (draft, pending_approval, approved)
                 if (t.type === 'receivable') {
                     pendingReceivables += amount;
@@ -76,7 +76,7 @@ export const dashboardService = {
 
     getCashFlowData: async (companyId: string, months: number = 6): Promise<CashFlowData[]> => {
         const startDate = startOfMonth(subMonths(new Date(), months - 1));
-        
+
         const q = query(
             collection(db, TRANSACTIONS_COLLECTION),
             where("companyId", "==", companyId),
@@ -106,11 +106,11 @@ export const dashboardService = {
         }
 
         transactions.forEach(t => {
-            if (t.status === 'cancelled') return;
-            
+            if (t.status === 'rejected') return;
+
             const key = format(t.dueDate, 'yyyy-MM');
             const entry = monthlyData.get(key);
-            
+
             if (entry) {
                 if (t.type === 'receivable') {
                     entry.income += Number(t.amount);
@@ -150,7 +150,7 @@ export const dashboardService = {
         const expensesByCC = new Map<string, number>();
 
         transactions.forEach(t => {
-            if (t.status === 'cancelled') return;
+            if (t.status === 'rejected') return;
 
             // Allocation logic
             if (t.costCenterAllocation && t.costCenterAllocation.length > 0) {

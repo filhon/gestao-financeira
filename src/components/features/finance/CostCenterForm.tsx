@@ -147,7 +147,12 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                                 <FormItem>
                                     <FormLabel>Orçamento Inicial (Opcional)</FormLabel>
                                     <FormControl>
-                                        <Input type="number" placeholder="0.00" {...field} />
+                                        <Input
+                                            type="number"
+                                            placeholder="0.00"
+                                            {...field}
+                                            onChange={e => field.onChange(e.target.value === "" ? undefined : parseFloat(e.target.value))}
+                                        />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
@@ -233,7 +238,12 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                                 <FormItem>
                                     <FormLabel>Limite de Orçamento Mensal</FormLabel>
                                     <FormControl>
-                                        <Input type="number" placeholder="0.00" {...field} />
+                                        <Input
+                                            type="number"
+                                            placeholder="0.00"
+                                            {...field}
+                                            onChange={e => field.onChange(e.target.value === "" ? undefined : parseFloat(e.target.value))}
+                                        />
                                     </FormControl>
                                     <FormDescription>Valor máximo para alertas de gastos.</FormDescription>
                                     <FormMessage />

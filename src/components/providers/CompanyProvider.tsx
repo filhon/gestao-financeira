@@ -44,7 +44,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
                 if (allCompanies.length === 0) {
                     const defaultCompany = await companyService.create({
                         name: "Minha Empresa",
-                    });
+                    }, { uid: user.uid, email: user.email });
 
                     // Assign current user as admin of this new company
                     if (user) {
