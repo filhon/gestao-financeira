@@ -20,6 +20,7 @@ import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { notificationService } from "@/lib/services/notificationService";
 import { auditService } from "@/lib/services/auditService";
+import { emailService } from "@/lib/services/emailService";
 
 const COLLECTION_NAME = "transactions";
 
@@ -99,15 +100,27 @@ export const transactionService = {
             if (status === 'pending_approval' && transactionData.costCenterAllocation) {
                 for (const allocation of transactionData.costCenterAllocation) {
                     const costCenter = await costCenterService.getById(allocation.costCenterId);
-                    if (costCenter?.approverId) {
-                        await notificationService.create({
-                            userId: costCenter.approverId,
-                            companyId,
-                            title: "Nova Despesa para Aprovar",
-                            message: `Uma nova despesa de R$ ${totalAmount} requer sua aprovação.`,
-                            type: "info",
-                            link: "/financeiro/contas-pagar"
+                    if (costCenter?.approverEmail) {
+                        // Generate token for the first installment to allow approval start
+                        // Ideally we would have a "Group Approval" but for now let's link the first one.
+                        const token = crypto.randomUUID();
+                        const expiresAt = new Date();
+                        expiresAt.setDate(expiresAt.getDate() + 7);
+
+                        // Update the first installment with the token
+                        await updateDoc(refs[0], {
+                            approvalToken: token,
+                            approvalTokenExpiresAt: expiresAt
                         });
+
+                        // Send Email
+                        await emailService.sendApprovalRequest({
+                            id: refs[0].id,
+                            ...transactionData,
+                            amount: totalAmount, // Show total amount in email
+                            approvalToken: token,
+                            requestOrigin: transactionData.requestOrigin
+                        } as any, costCenter.approverEmail);
                     }
                 }
             }
@@ -128,15 +141,33 @@ export const transactionService = {
         if (status === 'pending_approval' && transactionData.costCenterAllocation) {
             for (const allocation of transactionData.costCenterAllocation) {
                 const costCenter = await costCenterService.getById(allocation.costCenterId);
-                if (costCenter?.approverId) {
-                    await notificationService.create({
-                        userId: costCenter.approverId,
-                        companyId,
-                        title: "Nova Despesa para Aprovar",
-                        message: `Uma nova despesa de R$ ${transactionData.amount} requer sua aprovação.`,
-                        type: "info",
-                        link: "/financeiro/contas-pagar"
+                if (costCenter?.approverEmail) {
+                    // We need to ensure the transaction has a token if we want magic links.
+                    // But `addDoc` above didn't add a token.
+                    // We should probably update the doc with a token OR generate it before adding.
+                    // Let's generate it before adding.
+                    // But I can't change the `addDoc` call easily without a huge replace.
+                    // For now, let's just send the email. If the token is missing, the email service might fail or send a broken link?
+                    // `emailService` uses `transaction.approvalToken`.
+                    // So we MUST generate a token.
+
+                    // Strategy: Update the transaction with a token immediately.
+                    const token = crypto.randomUUID();
+                    const expiresAt = new Date();
+                    expiresAt.setDate(expiresAt.getDate() + 7);
+
+                    await updateDoc(docRef, {
+                        approvalToken: token,
+                        approvalTokenExpiresAt: expiresAt
                     });
+
+                    await emailService.sendApprovalRequest({
+                        id: docRef.id,
+                        ...transactionData,
+                        amount: transactionData.amount,
+                        approvalToken: token,
+                        requestOrigin: transactionData.requestOrigin // Ensure this is passed
+                    } as any, costCenter.approverEmail);
                 }
             }
         }

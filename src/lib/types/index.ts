@@ -51,8 +51,8 @@ export interface CostCenter {
 
     // Permissions
     allowedUserIds?: string[]; // Users allowed to create expenses
-    approverId?: string;       // User responsible for approval
-    releaserId?: string;       // User responsible for releasing payment
+    approverEmail?: string;    // Email of the person responsible for approval
+    releaserEmail?: string;    // Email of the person responsible for releasing payment
     budgetLimit?: number;      // Monthly budget limit
 
     createdAt: Date;

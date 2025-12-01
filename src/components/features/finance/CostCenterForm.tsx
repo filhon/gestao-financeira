@@ -53,8 +53,8 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
             budget: 0,
             parentId: "none",
             allowedUserIds: [],
-            approverId: "",
-            releaserId: "",
+            approverEmail: "",
+            releaserEmail: "",
             budgetLimit: 0,
         },
     });
@@ -181,24 +181,13 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <FormField
                             control={form.control}
-                            name="approverId"
+                            name="approverEmail"
                             render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Aprovador (Gerente)</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione um aprovador" />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            {users.map((user) => (
-                                                <SelectItem key={user.uid} value={user.uid}>
-                                                    {user.displayName}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <FormLabel>E-mail do Aprovador (Diretor)</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="diretor@empresa.com" {...field} />
+                                    </FormControl>
                                     <FormDescription>Responsável por aprovar despesas deste centro.</FormDescription>
                                     <FormMessage />
                                 </FormItem>
@@ -207,24 +196,13 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
 
                         <FormField
                             control={form.control}
-                            name="releaserId"
+                            name="releaserEmail"
                             render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Liberador (Financeiro)</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione um liberador" />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            {users.map((user) => (
-                                                <SelectItem key={user.uid} value={user.uid}>
-                                                    {user.displayName}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <FormLabel>E-mail do Liberador (Financeiro)</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="financeiro@empresa.com" {...field} />
+                                    </FormControl>
                                     <FormDescription>Responsável por efetuar o pagamento.</FormDescription>
                                     <FormMessage />
                                 </FormItem>

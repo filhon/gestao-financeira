@@ -9,8 +9,8 @@ export const costCenterSchema = z.object({
 
     // Permissions
     allowedUserIds: z.array(z.string()).optional(),
-    approverId: z.string().optional(),
-    releaserId: z.string().optional(),
+    approverEmail: z.string().email("Email inválido").optional().or(z.literal("")),
+    releaserEmail: z.string().email("Email inválido").optional().or(z.literal("")),
     budgetLimit: z.number().min(0).optional(),
 });
 

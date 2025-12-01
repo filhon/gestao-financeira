@@ -157,13 +157,15 @@ export default function CostCentersPage() {
                                     <TableHead>Código</TableHead>
                                     <TableHead>Nome</TableHead>
                                     <TableHead>Orçamento</TableHead>
+                                    <TableHead>Aprovador</TableHead>
+                                    <TableHead>Liberador</TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {hierarchicalCostCenters.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                        <TableCell colSpan={6} className="text-center text-muted-foreground">
                                             Nenhum centro de custo cadastrado.
                                         </TableCell>
                                     </TableRow>
@@ -184,6 +186,12 @@ export default function CostCentersPage() {
                                                         currency: "BRL",
                                                     }).format(cc.budget)
                                                     : "-"}
+                                            </TableCell>
+                                            <TableCell className="text-sm text-muted-foreground">
+                                                {cc.approverEmail || "-"}
+                                            </TableCell>
+                                            <TableCell className="text-sm text-muted-foreground">
+                                                {cc.releaserEmail || "-"}
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <Button
