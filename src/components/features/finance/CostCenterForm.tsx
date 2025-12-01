@@ -26,6 +26,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { CostCenter, UserProfile } from "@/lib/types";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { userService } from "@/lib/services/userService";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -147,11 +148,10 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                                 <FormItem>
                                     <FormLabel>Orçamento Inicial (Opcional)</FormLabel>
                                     <FormControl>
-                                        <Input
-                                            type="number"
-                                            placeholder="0.00"
-                                            {...field}
-                                            onChange={e => field.onChange(e.target.value === "" ? undefined : parseFloat(e.target.value))}
+                                        <CurrencyInput
+                                            value={field.value}
+                                            onChange={field.onChange}
+                                            placeholder="0,00"
                                         />
                                     </FormControl>
                                     <FormMessage />
@@ -216,11 +216,10 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                                 <FormItem>
                                     <FormLabel>Limite de Orçamento Mensal</FormLabel>
                                     <FormControl>
-                                        <Input
-                                            type="number"
-                                            placeholder="0.00"
-                                            {...field}
-                                            onChange={e => field.onChange(e.target.value === "" ? undefined : parseFloat(e.target.value))}
+                                        <CurrencyInput
+                                            value={field.value}
+                                            onChange={field.onChange}
+                                            placeholder="0,00"
                                         />
                                     </FormControl>
                                     <FormDescription>Valor máximo para alertas de gastos.</FormDescription>

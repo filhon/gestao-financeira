@@ -78,7 +78,7 @@ export const costCenterService = {
 };
 
 export const getHierarchicalCostCenters = (items: CostCenter[]) => {
-    const roots = items.filter(i => !i.parentId);
+    const roots = items.filter(i => !i.parentId || i.parentId === "none");
     const childrenMap = new Map<string, CostCenter[]>();
 
     items.forEach(item => {
