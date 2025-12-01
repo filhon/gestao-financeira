@@ -29,6 +29,7 @@ import { CostCenter, UserProfile } from "@/lib/types";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { userService } from "@/lib/services/userService";
+import { budgetService } from "@/lib/services/budgetService";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -52,6 +53,7 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
             code: "",
             description: "",
             budget: 0,
+            budgetYear: new Date().getFullYear(),
             parentId: "none",
             allowedUserIds: [],
             approverEmail: "",
@@ -73,6 +75,40 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
         };
         loadUsers();
     }, [selectedCompany]);
+
+    const watchedYear = form.watch("budgetYear");
+
+    useEffect(() => {
+        const loadBudget = async () => {
+            if (editingId && watchedYear) {
+                try {
+                    const budget = await budgetService.getByCostCenterAndYear(editingId, watchedYear);
+                    if (budget) {
+                        form.setValue("budget", budget.amount);
+                    } else {
+                        // If no budget entry exists for this year
+                        // If it's the current year, we might rely on the passed default value (legacy), 
+                        // but only if we haven't touched the field yet? 
+                        // Actually, simpler: if no budget entity, and year is NOT current year, 0.
+                        // If year IS current year, we keep what was passed in defaultValues (which comes from cc.budget)
+                        // UNLESS we want to force 0 for new years.
+
+                        // Let's assume if we change year, we want to see that year's budget.
+                        // If we are on the initial load (current year), defaultValues are used.
+                        // If we change the year, we fetch.
+                        if (watchedYear !== new Date().getFullYear()) {
+                            form.setValue("budget", 0);
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error loading budget:", error);
+                }
+            }
+        };
+        // Debounce or check if year actually changed? 
+        // For now, simple effect.
+        loadBudget();
+    }, [editingId, watchedYear, form]);
 
     // Filter out self and potential children (simple circular check: just self for now)
     const potentialParents = availableCostCenters.filter(cc => cc.id !== editingId);
@@ -147,13 +183,33 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                             />
                         </div>
 
-                        <div className="col-span-12 md:col-span-6">
+                        <div className="col-span-12 md:col-span-2">
+                            <FormField
+                                control={form.control}
+                                name="budgetYear"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Ano</FormLabel>
+                                        <FormControl>
+                                            <Input
+                                                type="number"
+                                                {...field}
+                                                onChange={e => field.onChange(parseInt(e.target.value))}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        <div className="col-span-12 md:col-span-4">
                             <FormField
                                 control={form.control}
                                 name="budget"
                                 render={({ field }) => (
                                     <FormItem>
-                                        <FormLabel>Orçamento Inicial (Opcional)</FormLabel>
+                                        <FormLabel>Orçamento</FormLabel>
                                         <FormControl>
                                             <CurrencyInput
                                                 value={field.value}

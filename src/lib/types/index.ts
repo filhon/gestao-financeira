@@ -59,6 +59,15 @@ export interface CostCenter {
     updatedAt: Date;
 }
 
+export interface Budget {
+    id: string;
+    costCenterId: string;
+    year: number;
+    amount: number;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 export interface CostCenterAllocation {
     costCenterId: string;
     percentage: number;

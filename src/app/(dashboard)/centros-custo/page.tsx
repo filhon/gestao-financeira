@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { CostCenter } from "@/lib/types";
 import { costCenterService, getHierarchicalCostCenters } from "@/lib/services/costCenterService";
+import { budgetService } from "@/lib/services/budgetService";
 import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 
@@ -61,11 +62,20 @@ export default function CostCentersPage() {
         if (!selectedCompany) return;
         try {
             setIsSubmitting(true);
+            let ccId = editingId;
+
             if (editingId) {
                 await costCenterService.update(editingId, data);
             } else {
-                await costCenterService.create(data, selectedCompany.id);
+                const ref = await costCenterService.create(data, selectedCompany.id);
+                ccId = ref.id;
             }
+
+            // Save Annual Budget
+            if (ccId && data.budget !== undefined && data.budgetYear) {
+                await budgetService.setBudget(ccId, data.budgetYear, data.budget);
+            }
+
             await fetchCostCenters();
             setIsDialogOpen(false);
             setEditingId(null);
@@ -109,29 +119,6 @@ export default function CostCentersPage() {
                             Novo Centro de Custo
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-                        <DialogHeader>
-                            <DialogTitle>
-                                {editingId ? "Editar Centro de Custo" : "Novo Centro de Custo"}
-                            </DialogTitle>
-                        </DialogHeader>
-                        <CostCenterForm
-                            onSubmit={handleSubmit}
-                            isLoading={isSubmitting}
-                            onCancel={() => setIsDialogOpen(false)}
-                            availableCostCenters={costCenters}
-                            editingId={editingId}
-                            defaultValues={
-                                editingId
-                                    ? (() => {
-                                        const cc = costCenters.find((c) => c.id === editingId);
-                                        if (!cc) return undefined;
-                                        return {
-                                            ...cc,
-                                            budget: cc.budget || 0,
-                                            budgetLimit: cc.budgetLimit || 0,
-                                        };
-                                    })()
                                     : undefined
                             }
                         />
@@ -223,6 +210,6 @@ export default function CostCentersPage() {
                     )}
                 </CardContent>
             </Card>
-        </div>
+        </div >
     );
 }

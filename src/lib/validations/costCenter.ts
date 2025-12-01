@@ -6,6 +6,7 @@ export const costCenterSchema = z.object({
     parentId: z.string().optional(),
     description: z.string().optional(),
     budget: z.number().min(0, "Orçamento deve ser positivo").optional(),
+    budgetYear: z.number().min(2000).default(new Date().getFullYear()),
 
     // Permissions
     allowedUserIds: z.array(z.string()).optional(),
