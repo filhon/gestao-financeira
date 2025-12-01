@@ -22,6 +22,30 @@ import {
 } from "@/components/ui/select";
 import { Entity } from "@/lib/types";
 import { useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const BRAZILIAN_BANKS = [
+    { code: "001", name: "Banco do Brasil" },
+    { code: "033", name: "Santander" },
+    { code: "104", name: "Caixa Econômica Federal" },
+    { code: "237", name: "Bradesco" },
+    { code: "341", name: "Itaú" },
+    { code: "077", name: "Inter" },
+    { code: "260", name: "Nubank" },
+    { code: "336", name: "C6 Bank" },
+    { code: "290", name: "PagBank" },
+    { code: "380", name: "PicPay" },
+    { code: "655", name: "Votorantim" },
+    { code: "422", name: "Safra" },
+    { code: "748", name: "Sicredi" },
+    { code: "756", name: "Sicoob" },
+    { code: "212", name: "Original" },
+    { code: "637", name: "Sofisa" },
+    { code: "070", name: "BRB" },
+    { code: "218", name: "Bonsucesso" },
+    { code: "654", name: "Digimais" },
+    { code: "208", name: "BTG Pactual" },
+].sort((a, b) => a.name.localeCompare(b.name));
 
 const entitySchema = z.object({
     name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
@@ -31,6 +55,14 @@ const entitySchema = z.object({
     phone: z.string().optional(),
     address: z.string().optional(),
     category: z.enum(["supplier", "client", "both"]),
+
+    // Bank Details
+    bankName: z.string().optional(),
+    agency: z.string().optional(),
+    account: z.string().optional(),
+    accountType: z.enum(["checking", "savings"]).optional(),
+    pixKeyType: z.enum(["cpf", "cnpj", "email", "phone", "random"]).optional(),
+    pixKey: z.string().optional(),
 });
 
 type EntityFormData = z.infer<typeof entitySchema>;
@@ -52,6 +84,12 @@ export function EntityForm({ defaultValues, onSubmit, isLoading }: EntityFormPro
             phone: "",
             address: "",
             category: "supplier",
+            bankName: "",
+            agency: "",
+            account: "",
+            accountType: undefined,
+            pixKeyType: undefined,
+            pixKey: "",
             ...defaultValues,
         },
     });
@@ -66,6 +104,12 @@ export function EntityForm({ defaultValues, onSubmit, isLoading }: EntityFormPro
                 phone: defaultValues.phone || "",
                 address: defaultValues.address || "",
                 category: defaultValues.category || "supplier",
+                bankName: defaultValues.bankName || "",
+                agency: defaultValues.agency || "",
+                account: defaultValues.account || "",
+                accountType: defaultValues.accountType,
+                pixKeyType: defaultValues.pixKeyType,
+                pixKey: defaultValues.pixKey || "",
             });
         }
     }, [defaultValues, form]);
@@ -203,6 +247,141 @@ export function EntityForm({ defaultValues, onSubmit, isLoading }: EntityFormPro
                         />
                     </div>
                 </div>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="text-base">Dados Bancários (Opcional)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid grid-cols-12 gap-4">
+                            <div className="col-span-12 md:col-span-6">
+                                <FormField
+                                    control={form.control}
+                                    name="bankName"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Banco</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecione o banco" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    {BRAZILIAN_BANKS.map((bank) => (
+                                                        <SelectItem key={bank.code} value={`${bank.code} - ${bank.name}`}>
+                                                            {bank.code} - {bank.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+
+                            <div className="col-span-6 md:col-span-3">
+                                <FormField
+                                    control={form.control}
+                                    name="agency"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Agência</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="0000" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+
+                            <div className="col-span-6 md:col-span-3">
+                                <FormField
+                                    control={form.control}
+                                    name="account"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Conta</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="00000-0" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+
+                            <div className="col-span-12 md:col-span-4">
+                                <FormField
+                                    control={form.control}
+                                    name="accountType"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Tipo de Conta</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecione..." />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="checking">Corrente</SelectItem>
+                                                    <SelectItem value="savings">Poupança</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+
+                            <div className="col-span-12 md:col-span-4">
+                                <FormField
+                                    control={form.control}
+                                    name="pixKeyType"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Tipo de Chave PIX</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecione..." />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="cpf">CPF</SelectItem>
+                                                    <SelectItem value="cnpj">CNPJ</SelectItem>
+                                                    <SelectItem value="email">E-mail</SelectItem>
+                                                    <SelectItem value="phone">Telefone</SelectItem>
+                                                    <SelectItem value="random">Chave Aleatória</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+
+                            <div className="col-span-12 md:col-span-4">
+                                <FormField
+                                    control={form.control}
+                                    name="pixKey"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Chave PIX</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="Chave PIX" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
 
                 <div className="flex justify-end pt-4">
                     <Button type="submit" disabled={isLoading}>

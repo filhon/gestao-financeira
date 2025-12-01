@@ -206,6 +206,33 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                             />
                         </div>
 
+                        <div className="col-span-12 md:col-span-4">
+                            <FormField
+                                control={form.control}
+                                name="paymentMethod"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Forma de Pagamento</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Selecione..." />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="pix">PIX</SelectItem>
+                                                <SelectItem value="boleto">Boleto</SelectItem>
+                                                <SelectItem value="transfer">Transferência</SelectItem>
+                                                <SelectItem value="credit_card">Cartão de Crédito</SelectItem>
+                                                <SelectItem value="cash">Dinheiro</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
                         <div className="col-span-12 md:col-span-6">
                             <div className="flex flex-col gap-2">
                                 <div className="flex items-center justify-between">

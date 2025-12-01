@@ -115,6 +115,15 @@ export interface Entity {
     phone?: string;
     address?: string;
     category: 'supplier' | 'client' | 'both';
+
+    // Bank Details
+    bankName?: string;
+    agency?: string;
+    account?: string;
+    accountType?: 'checking' | 'savings';
+    pixKeyType?: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random';
+    pixKey?: string;
+
     createdAt: Date;
     updatedAt: Date;
 }
