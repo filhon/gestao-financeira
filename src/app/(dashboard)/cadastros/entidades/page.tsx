@@ -197,7 +197,7 @@ export default function EntitiesPage() {
             </Tabs>
 
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent>
+                <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>{selectedEntity ? "Editar Entidade" : "Nova Entidade"}</DialogTitle>
                         <DialogDescription>

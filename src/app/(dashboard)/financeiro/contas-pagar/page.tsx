@@ -257,7 +257,7 @@ export default function AccountsPayablePage() {
                                 Nova Conta
                             </Button>
                         </DialogTrigger>
-                        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Nova Conta a Pagar</DialogTitle>
                             </DialogHeader>

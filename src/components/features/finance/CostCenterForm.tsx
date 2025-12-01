@@ -83,150 +83,166 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
 
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium">Informações Básicas</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="parentId"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Centro de Custo Pai (Opcional)</FormLabel>
-                                    <Select
-                                        onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
-                                        defaultValue={field.value || "none"}
-                                    >
+                    <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-12 md:col-span-6">
+                            <FormField
+                                control={form.control}
+                                name="parentId"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Centro de Custo Pai (Opcional)</FormLabel>
+                                        <Select
+                                            onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
+                                            defaultValue={field.value || "none"}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Selecione..." />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="none">Nenhum (Raiz)</SelectItem>
+                                                {potentialParents.map((cc) => (
+                                                    <SelectItem key={cc.id} value={cc.id}>
+                                                        {cc.code} - {cc.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        <div className="col-span-12 md:col-span-3">
+                            <FormField
+                                control={form.control}
+                                name="code"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Código</FormLabel>
                                         <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione..." />
-                                            </SelectTrigger>
+                                            <Input placeholder="Ex: CC-001" {...field} />
                                         </FormControl>
-                                        <SelectContent>
-                                            <SelectItem value="none">Nenhum (Raiz)</SelectItem>
-                                            {potentialParents.map((cc) => (
-                                                <SelectItem key={cc.id} value={cc.id}>
-                                                    {cc.code} - {cc.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
-                        <FormField
-                            control={form.control}
-                            name="code"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Código</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Ex: CC-001" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                        <div className="col-span-12 md:col-span-3">
+                            <FormField
+                                control={form.control}
+                                name="name"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Nome</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="Ex: Marketing" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
-                        <FormField
-                            control={form.control}
-                            name="name"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Nome</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Ex: Marketing" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                        <div className="col-span-12 md:col-span-6">
+                            <FormField
+                                control={form.control}
+                                name="budget"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Orçamento Inicial (Opcional)</FormLabel>
+                                        <FormControl>
+                                            <CurrencyInput
+                                                value={field.value}
+                                                onChange={field.onChange}
+                                                placeholder="0,00"
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
-                        <FormField
-                            control={form.control}
-                            name="budget"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Orçamento Inicial (Opcional)</FormLabel>
-                                    <FormControl>
-                                        <CurrencyInput
-                                            value={field.value}
-                                            onChange={field.onChange}
-                                            placeholder="0,00"
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                        <div className="col-span-12">
+                            <FormField
+                                control={form.control}
+                                name="description"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Descrição</FormLabel>
+                                        <FormControl>
+                                            <Textarea placeholder="Descrição do centro de custo..." {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
                     </div>
-
-                    <FormField
-                        control={form.control}
-                        name="description"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Descrição</FormLabel>
-                                <FormControl>
-                                    <Textarea placeholder="Descrição do centro de custo..." {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
                 </div>
 
                 <div className="space-y-4 border-t pt-4">
                     <h3 className="text-lg font-medium">Permissões e Controle</h3>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="approverEmail"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>E-mail do Aprovador (Diretor)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="diretor@empresa.com" {...field} />
-                                    </FormControl>
-                                    <FormDescription>Responsável por aprovar despesas deste centro.</FormDescription>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                    <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-12 md:col-span-6">
+                            <FormField
+                                control={form.control}
+                                name="approverEmail"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>E-mail do Aprovador (Diretor)</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="diretor@empresa.com" {...field} />
+                                        </FormControl>
+                                        <FormDescription>Responsável por aprovar despesas deste centro.</FormDescription>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
-                        <FormField
-                            control={form.control}
-                            name="releaserEmail"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>E-mail do Liberador (Financeiro)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="financeiro@empresa.com" {...field} />
-                                    </FormControl>
-                                    <FormDescription>Responsável por efetuar o pagamento.</FormDescription>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                        <div className="col-span-12 md:col-span-6">
+                            <FormField
+                                control={form.control}
+                                name="releaserEmail"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>E-mail do Liberador (Financeiro)</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="financeiro@empresa.com" {...field} />
+                                        </FormControl>
+                                        <FormDescription>Responsável por efetuar o pagamento.</FormDescription>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
-                        <FormField
-                            control={form.control}
-                            name="budgetLimit"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Limite de Orçamento Mensal</FormLabel>
-                                    <FormControl>
-                                        <CurrencyInput
-                                            value={field.value}
-                                            onChange={field.onChange}
-                                            placeholder="0,00"
-                                        />
-                                    </FormControl>
-                                    <FormDescription>Valor máximo para alertas de gastos.</FormDescription>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                        <div className="col-span-12 md:col-span-6">
+                            <FormField
+                                control={form.control}
+                                name="budgetLimit"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Limite de Orçamento Mensal</FormLabel>
+                                        <FormControl>
+                                            <CurrencyInput
+                                                value={field.value}
+                                                onChange={field.onChange}
+                                                placeholder="0,00"
+                                            />
+                                        </FormControl>
+                                        <FormDescription>Valor máximo para alertas de gastos.</FormDescription>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
                     </div>
 
                     <FormField

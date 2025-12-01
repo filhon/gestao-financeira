@@ -108,7 +108,7 @@ export default function CostCentersPage() {
                             Novo Centro de Custo
                         </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>
                                 {editingId ? "Editar Centro de Custo" : "Novo Centro de Custo"}
