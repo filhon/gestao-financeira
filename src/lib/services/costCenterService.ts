@@ -75,6 +75,20 @@ export const costCenterService = {
         const docRef = doc(db, COLLECTION_NAME, id);
         return deleteDoc(docRef);
     },
+
+    getChildren: async (parentId: string): Promise<CostCenter[]> => {
+        const q = query(collection(db, COLLECTION_NAME), where("parentId", "==", parentId));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                createdAt: (data.createdAt as Timestamp)?.toDate(),
+                updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+            } as CostCenter;
+        });
+    },
 };
 
 export const getHierarchicalCostCenters = (items: CostCenter[]) => {

@@ -58,6 +58,14 @@ export const transactionService = {
         return snapshot.docs.map((doc) => convertDates({ id: doc.id, ...doc.data() }));
     },
 
+    getByCostCenter: async (costCenterId: string, companyId: string): Promise<Transaction[]> => {
+        // Since we can't easily query array of objects in Firestore without a specific index structure,
+        // we'll fetch company transactions and filter. 
+        // Optimization: In a real app, we should maintain a 'relatedCostCenterIds' array field on the transaction.
+        const all = await transactionService.getAll({ companyId });
+        return all.filter(t => t.costCenterAllocation?.some(a => a.costCenterId === costCenterId));
+    },
+
     create: async (data: TransactionFormData, user: { uid: string; email: string }, companyId: string) => {
         const { useInstallments, installmentsCount, ...transactionData } = data;
         const userId = user.uid;

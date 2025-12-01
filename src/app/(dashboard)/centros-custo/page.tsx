@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
     Card,
@@ -172,7 +173,11 @@ export default function CostCentersPage() {
                                 ) : (
                                     hierarchicalCostCenters.map((cc) => (
                                         <TableRow key={cc.id}>
-                                            <TableCell className="font-medium">{cc.code}</TableCell>
+                                            <TableCell className="font-medium">
+                                                <Link href={`/centros-custo/${cc.id}`} className="hover:underline text-primary">
+                                                    {cc.code}
+                                                </Link>
+                                            </TableCell>
                                             <TableCell>
                                                 <div style={{ paddingLeft: `${cc.level * 20}px` }} className="flex items-center">
                                                     {cc.level > 0 && <span className="mr-2 text-muted-foreground">↳</span>}
