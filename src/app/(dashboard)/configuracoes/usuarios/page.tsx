@@ -28,6 +28,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useSortableData } from "@/hooks/useSortableData";
 
 export default function UsersPage() {
     const { user: currentUser } = useAuth();
@@ -139,6 +140,8 @@ export default function UsersPage() {
     const activeUsers = users.filter(u => u.status === 'active' || (!u.status && u.active)); // Backward compat
     const pendingUsers = users.filter(u => u.status === 'pending');
 
+    const { items: sortedActiveUsers, requestSort, sortConfig } = useSortableData(activeUsers);
+
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-96">
@@ -174,14 +177,24 @@ export default function UsersPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Usuário</TableHead>
-                                        <TableHead>Email</TableHead>
+                                        <TableHead
+                                            className="cursor-pointer hover:text-primary"
+                                            onClick={() => requestSort('displayName')}
+                                        >
+                                            Usuário {sortConfig?.key === 'displayName' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead
+                                            className="cursor-pointer hover:text-primary"
+                                            onClick={() => requestSort('email')}
+                                        >
+                                            Email {sortConfig?.key === 'email' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
                                         <TableHead>Função na Empresa</TableHead>
                                         <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {activeUsers.map((user) => {
+                                    {sortedActiveUsers.map((user) => {
                                         const currentRole = getRoleForCompany(user);
                                         return (
                                             <TableRow key={user.uid}>

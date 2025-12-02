@@ -33,6 +33,7 @@ import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useSortableData } from "@/hooks/useSortableData";
 
 export default function CostCentersPage() {
     const { selectedCompany } = useCompany();
@@ -106,7 +107,9 @@ export default function CostCentersPage() {
         setIsDialogOpen(true);
     };
 
-    const hierarchicalCostCenters = getHierarchicalCostCenters(costCenters);
+    const { items: sortedCostCenters, requestSort, sortConfig } = useSortableData(costCenters);
+
+    const hierarchicalCostCenters = getHierarchicalCostCenters(sortedCostCenters);
 
     return (
         <div className="space-y-6">
@@ -172,11 +175,36 @@ export default function CostCentersPage() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Código</TableHead>
-                                    <TableHead>Nome</TableHead>
-                                    <TableHead>Orçamento</TableHead>
-                                    <TableHead>Aprovador</TableHead>
-                                    <TableHead>Liberador</TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('code')}
+                                    >
+                                        Código {sortConfig?.key === 'code' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('name')}
+                                    >
+                                        Nome {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('budget')}
+                                    >
+                                        Orçamento {sortConfig?.key === 'budget' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('approverEmail')}
+                                    >
+                                        Aprovador {sortConfig?.key === 'approverEmail' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('releaserEmail')}
+                                    >
+                                        Liberador {sortConfig?.key === 'releaserEmail' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>

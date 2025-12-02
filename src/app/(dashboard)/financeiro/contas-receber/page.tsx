@@ -37,6 +37,7 @@ import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useSortableData } from "@/hooks/useSortableData";
 
 // ...
 
@@ -44,6 +45,7 @@ export default function AccountsReceivablePage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const { items: sortedTransactions, requestSort, sortConfig } = useSortableData(transactions);
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -169,23 +171,48 @@ export default function AccountsReceivablePage() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Vencimento</TableHead>
-                                    <TableHead>Descrição</TableHead>
-                                    <TableHead>Cliente</TableHead>
-                                    <TableHead>Valor</TableHead>
-                                    <TableHead>Status</TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('dueDate')}
+                                    >
+                                        Vencimento {sortConfig?.key === 'dueDate' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('description')}
+                                    >
+                                        Descrição {sortConfig?.key === 'description' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('supplierOrClient')}
+                                    >
+                                        Cliente {sortConfig?.key === 'supplierOrClient' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('amount')}
+                                    >
+                                        Valor {sortConfig?.key === 'amount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead
+                                        className="cursor-pointer hover:text-primary"
+                                        onClick={() => requestSort('status')}
+                                    >
+                                        Status {sortConfig?.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {transactions.length === 0 ? (
+                                {sortedTransactions.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={6} className="text-center text-muted-foreground">
                                             Nenhuma conta a receber encontrada.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    transactions.map((t) => (
+                                    sortedTransactions.map((t) => (
                                         <TableRow key={t.id}>
                                             <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
                                             <TableCell>{t.description}</TableCell>

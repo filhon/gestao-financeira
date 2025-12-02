@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
 import { Bell, Search, LogOut, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,6 +21,14 @@ import { ModeToggle } from "@/components/mode-toggle";
 
 export function Header() {
     const { user, logout } = useAuth();
+    const router = useRouter();
+    const [searchQuery, setSearchQuery] = useState("");
+
+    const handleSearch = () => {
+        if (searchQuery.trim()) {
+            router.push(`/busca?q=${encodeURIComponent(searchQuery)}`);
+        }
+    };
 
     const getInitials = (name: string) => {
         return name
@@ -35,6 +46,13 @@ export function Header() {
                 <Input
                     placeholder="Buscar transações..."
                     className="bg-transparent border-none shadow-none focus-visible:ring-0"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                            handleSearch();
+                        }
+                    }}
                 />
             </div>
 

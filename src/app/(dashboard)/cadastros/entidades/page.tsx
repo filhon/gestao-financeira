@@ -26,11 +26,13 @@ import { EntityForm } from "@/components/features/entities/EntityForm";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSortableData } from "@/hooks/useSortableData";
 
 export default function EntitiesPage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const [entities, setEntities] = useState<Entity[]>([]);
+    const { items: sortedEntities, requestSort, sortConfig } = useSortableData(entities);
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
@@ -142,22 +144,42 @@ export default function EntitiesPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Nome</TableHead>
-                                        <TableHead>Tipo</TableHead>
-                                        <TableHead>Categoria</TableHead>
-                                        <TableHead>Documento</TableHead>
+                                        <TableHead
+                                            className="cursor-pointer hover:text-primary"
+                                            onClick={() => requestSort('name')}
+                                        >
+                                            Nome {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead
+                                            className="cursor-pointer hover:text-primary"
+                                            onClick={() => requestSort('type')}
+                                        >
+                                            Tipo {sortConfig?.key === 'type' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead
+                                            className="cursor-pointer hover:text-primary"
+                                            onClick={() => requestSort('category')}
+                                        >
+                                            Categoria {sortConfig?.key === 'category' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead
+                                            className="cursor-pointer hover:text-primary"
+                                            onClick={() => requestSort('document')}
+                                        >
+                                            Documento {sortConfig?.key === 'document' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
                                         <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {entities.length === 0 ? (
+                                    {sortedEntities.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={5} className="text-center text-muted-foreground">
                                                 Nenhuma entidade encontrada.
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        entities.map((entity) => (
+                                        sortedEntities.map((entity) => (
                                             <TableRow key={entity.id}>
                                                 <TableCell className="font-medium flex items-center gap-2">
                                                     {entity.type === 'company' ? (
