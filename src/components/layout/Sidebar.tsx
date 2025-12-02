@@ -9,14 +9,21 @@ import {
     Receipt,
     Building2,
     Settings,
-    LogOut,
     Users,
     RefreshCw,
     FileText,
+    ChevronRight,
+    DollarSign,
+    Database,
+    Layers,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useAuth } from "@/components/providers/AuthProvider";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { useState, useEffect } from "react";
 
 const menuItems = [
     {
@@ -25,34 +32,51 @@ const menuItems = [
         icon: LayoutDashboard,
     },
     {
-        title: "Contas a Pagar",
-        href: "/financeiro/contas-pagar",
-        icon: Wallet,
+        title: "Financeiro",
+        icon: DollarSign,
+        items: [
+            {
+                title: "Contas a Pagar",
+                href: "/financeiro/contas-pagar",
+                icon: Wallet,
+            },
+            {
+                title: "Contas a Receber",
+                href: "/financeiro/contas-receber",
+                icon: Receipt,
+            },
+            {
+                title: "Recorrências",
+                href: "/financeiro/recorrencias",
+                icon: RefreshCw,
+            },
+            {
+                title: "Lotes de Pagamento",
+                href: "/financeiro/lotes",
+                icon: Layers,
+            },
+        ],
     },
     {
-        title: "Contas a Receber",
-        href: "/financeiro/contas-receber",
-        icon: Receipt,
-    },
-    {
-        title: "Recorrências",
-        href: "/financeiro/recorrencias",
-        icon: RefreshCw,
+        title: "Cadastros",
+        icon: Database,
+        items: [
+            {
+                title: "Centros de Custo",
+                href: "/centros-custo",
+                icon: Building2,
+            },
+            {
+                title: "Outros Cadastros",
+                href: "/cadastros",
+                icon: Users,
+            },
+        ],
     },
     {
         title: "Relatórios",
         href: "/relatorios",
         icon: FileText,
-    },
-    {
-        title: "Centros de Custo",
-        href: "/centros-custo",
-        icon: Building2,
-    },
-    {
-        title: "Cadastros",
-        href: "/cadastros",
-        icon: Users,
     },
     {
         title: "Configurações",
@@ -63,7 +87,25 @@ const menuItems = [
 
 export function Sidebar() {
     const pathname = usePathname();
-    const { logout } = useAuth();
+    const [openGroups, setOpenGroups] = useState<string[]>([]);
+
+    // Automatically open groups if a child is active
+    useEffect(() => {
+        const activeGroup = menuItems.find(item =>
+            item.items?.some(subItem => subItem.href === pathname)
+        );
+        if (activeGroup && !openGroups.includes(activeGroup.title)) {
+            setOpenGroups(prev => [...prev, activeGroup.title]);
+        }
+    }, [pathname]);
+
+    const toggleGroup = (title: string) => {
+        setOpenGroups(prev =>
+            prev.includes(title)
+                ? prev.filter(t => t !== title)
+                : [...prev, title]
+        );
+    };
 
     return (
         <div className="flex h-full w-64 flex-col border-r bg-card px-4 py-6">
@@ -74,13 +116,67 @@ export function Sidebar() {
 
             <CompanySwitcher />
 
-            <nav className="flex-1 space-y-1">
+            <nav className="flex-1 space-y-1 mt-4">
                 {menuItems.map((item) => {
+                    if (item.items) {
+                        const isOpen = openGroups.includes(item.title);
+                        const isActiveGroup = item.items.some(subItem => subItem.href === pathname);
+
+                        return (
+                            <Collapsible
+                                key={item.title}
+                                open={isOpen}
+                                onOpenChange={() => toggleGroup(item.title)}
+                                className="w-full"
+                            >
+                                <CollapsibleTrigger asChild>
+                                    <button
+                                        className={cn(
+                                            "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground",
+                                            isActiveGroup ? "text-primary" : "text-muted-foreground"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <item.icon className="h-4 w-4" />
+                                            {item.title}
+                                        </div>
+                                        <ChevronRight
+                                            className={cn(
+                                                "h-4 w-4 transition-transform duration-200",
+                                                isOpen && "rotate-90"
+                                            )}
+                                        />
+                                    </button>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent className="space-y-1 pt-1">
+                                    {item.items.map((subItem) => {
+                                        const isActive = pathname === subItem.href;
+                                        return (
+                                            <Link
+                                                key={subItem.href}
+                                                href={subItem.href}
+                                                className={cn(
+                                                    "flex items-center gap-3 rounded-lg pl-9 pr-3 py-2 text-sm font-medium transition-colors",
+                                                    isActive
+                                                        ? "bg-primary/10 text-primary"
+                                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                )}
+                                            >
+                                                <subItem.icon className="h-4 w-4" />
+                                                {subItem.title}
+                                            </Link>
+                                        );
+                                    })}
+                                </CollapsibleContent>
+                            </Collapsible>
+                        );
+                    }
+
                     const isActive = pathname === item.href;
                     return (
                         <Link
-                            key={item.href}
-                            href={item.href}
+                            key={item.href!}
+                            href={item.href!}
                             className={cn(
                                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                                 isActive
@@ -94,17 +190,6 @@ export function Sidebar() {
                     );
                 })}
             </nav>
-
-            <div className="mt-auto border-t pt-4">
-                <Button
-                    variant="ghost"
-                    className="w-full justify-start gap-3 text-muted-foreground hover:text-foreground"
-                    onClick={logout}
-                >
-                    <LogOut className="h-4 w-4" />
-                    Sair
-                </Button>
-            </div>
         </div>
     );
 }

@@ -119,6 +119,36 @@ export default function CostCentersPage() {
                             Novo Centro de Custo
                         </Button>
                     </DialogTrigger>
+                    <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                            <DialogTitle>
+                                {editingId ? "Editar Centro de Custo" : "Novo Centro de Custo"}
+                            </DialogTitle>
+                        </DialogHeader>
+                        <CostCenterForm
+                            onSubmit={handleSubmit}
+                            isLoading={isSubmitting}
+                            onCancel={() => setIsDialogOpen(false)}
+                            availableCostCenters={costCenters}
+                            editingId={editingId}
+                            defaultValues={
+                                editingId
+                                    ? (() => {
+                                        const cc = costCenters.find((c) => c.id === editingId);
+                                        if (!cc) return undefined;
+                                        return {
+                                            name: cc.name,
+                                            code: cc.code,
+                                            description: cc.description,
+                                            parentId: cc.parentId,
+                                            budget: cc.budget,
+                                            budgetYear: new Date().getFullYear(),
+                                            allowedUserIds: cc.allowedUserIds,
+                                            approverEmail: cc.approverEmail,
+                                            releaserEmail: cc.releaserEmail,
+                                            budgetLimit: cc.budgetLimit,
+                                        };
+                                    })()
                                     : undefined
                             }
                         />

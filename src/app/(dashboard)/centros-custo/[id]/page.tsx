@@ -32,6 +32,14 @@ import {
     YAxis,
     CartesianGrid
 } from "recharts";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { budgetService } from "@/lib/services/budgetService";
 
 export default function CostCenterDashboard() {
     const params = useParams();
@@ -41,6 +49,8 @@ export default function CostCenterDashboard() {
     const [children, setChildren] = useState<CostCenter[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+    const [budgetAmount, setBudgetAmount] = useState(0);
 
     const id = params.id as string;
 
@@ -49,15 +59,17 @@ export default function CostCenterDashboard() {
             if (selectedCompany && id) {
                 setIsLoading(true);
                 try {
-                    const [cc, kids, txs] = await Promise.all([
+                    const [cc, kids, txs, budget] = await Promise.all([
                         costCenterService.getById(id),
                         costCenterService.getChildren(id),
-                        transactionService.getByCostCenter(id, selectedCompany.id)
+                        transactionService.getByCostCenter(id, selectedCompany.id),
+                        budgetService.getByCostCenterAndYear(id, selectedYear)
                     ]);
 
                     setCostCenter(cc);
                     setChildren(kids);
                     setTransactions(txs);
+                    setBudgetAmount(budget?.amount || 0);
                 } catch (error) {
                     console.error("Error loading dashboard data:", error);
                 } finally {
@@ -66,7 +78,7 @@ export default function CostCenterDashboard() {
             }
         };
         loadData();
-    }, [selectedCompany, id]);
+    }, [selectedCompany, id, selectedYear]);
 
     if (isLoading) {
         return <div className="flex items-center justify-center h-screen">Carregando...</div>;
@@ -76,12 +88,17 @@ export default function CostCenterDashboard() {
         return <div className="flex items-center justify-center h-screen">Centro de Custo não encontrado.</div>;
     }
 
+    // Filter transactions for the selected year
+    const yearTransactions = transactions.filter(t => t.dueDate.getFullYear() === selectedYear);
+
     // Calculations
-    const totalBudget = costCenter.budget || 0;
+    const totalBudget = budgetAmount;
+    // Note: Children allocation is still using the legacy budget field. 
+    // Ideally we should fetch children's budgets for the selected year.
     const allocatedToChildren = children.reduce((acc, child) => acc + (child.budget || 0), 0);
 
     // Calculate direct expenses (sum of transaction amounts allocated to this CC)
-    const directExpenses = transactions
+    const directExpenses = yearTransactions
         .filter(t => t.type === 'payable' && t.status !== 'rejected')
         .reduce((acc, t) => {
             const allocation = t.costCenterAllocation?.find(a => a.costCenterId === id);
@@ -91,8 +108,9 @@ export default function CostCenterDashboard() {
     const remainingBalance = totalBudget - allocatedToChildren - directExpenses;
 
     const now = new Date();
-    const monthsRemaining = 12 - now.getMonth(); // Including current month? Or remaining? Let's say remaining including current.
-    // If it's December (month 11), 12 - 11 = 1 month remaining. Correct.
+    const isCurrentYear = selectedYear === now.getFullYear();
+    const monthsRemaining = isCurrentYear ? (12 - now.getMonth()) : (selectedYear > now.getFullYear() ? 12 : 0);
+
     const suggestedMonthlySpend = monthsRemaining > 0 ? remainingBalance / monthsRemaining : 0;
 
     // Charts Data
@@ -102,43 +120,65 @@ export default function CostCenterDashboard() {
         { name: "Disponível", value: Math.max(0, remainingBalance), color: "#22c55e" }, // green-500
     ].filter(d => d.value > 0);
 
-    // Monthly Spending Trend (Last 6 months)
-    const monthlyTrendData = transactions
+    // Monthly Spending Trend (Last 6 months or all months of selected year?)
+    // Let's show all months of selected year
+    const monthlyTrendData = yearTransactions
         .filter(t => t.type === 'payable' && t.status !== 'rejected')
         .reduce((acc, t) => {
             const date = t.dueDate;
-            const key = format(date, "MMM/yy", { locale: ptBR });
+            const key = format(date, "MMM", { locale: ptBR });
+            const monthIndex = date.getMonth();
             const allocation = t.costCenterAllocation?.find(a => a.costCenterId === id);
             const amount = allocation ? allocation.amount : 0;
 
-            const existing = acc.find(d => d.name === key);
+            const existing = acc.find(d => d.monthIndex === monthIndex);
             if (existing) {
                 existing.amount += amount;
             } else {
-                acc.push({ name: key, amount, date: date.getTime() }); // store timestamp for sorting
+                acc.push({ name: key, amount, monthIndex });
             }
             return acc;
-        }, [] as { name: string; amount: number; date: number }[])
-        .sort((a, b) => a.date - b.date)
-        .slice(-6);
+        }, [] as { name: string; amount: number; monthIndex: number }[])
+        .sort((a, b) => a.monthIndex - b.monthIndex);
 
 
-    const upcomingExpenses = transactions
+    const upcomingExpenses = yearTransactions
         .filter(t => t.type === 'payable' && t.status !== 'paid' && t.status !== 'rejected' && t.dueDate >= new Date())
         .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
         .slice(0, 5);
 
+    const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i); // Current year - 2 to + 2
+
     return (
         <div className="space-y-6 p-8 pt-6">
-            <div className="flex items-center gap-4">
-                <Button variant="outline" size="icon" onClick={() => router.back()}>
-                    <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div>
-                    <h2 className="text-3xl font-bold tracking-tight">{costCenter.name}</h2>
-                    <p className="text-muted-foreground">
-                        Código: {costCenter.code} | Responsável: {costCenter.approverEmail || "N/A"}
-                    </p>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <Button variant="outline" size="icon" onClick={() => router.back()}>
+                        <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <div>
+                        <h2 className="text-3xl font-bold tracking-tight">{costCenter.name}</h2>
+                        <p className="text-muted-foreground">
+                            Código: {costCenter.code} | Responsável: {costCenter.approverEmail || "N/A"}
+                        </p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Select
+                        value={selectedYear.toString()}
+                        onValueChange={(value) => setSelectedYear(parseInt(value))}
+                    >
+                        <SelectTrigger className="w-[120px]">
+                            <SelectValue placeholder="Ano" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {years.map((year) => (
+                                <SelectItem key={year} value={year.toString()}>
+                                    {year}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             </div>
 
@@ -146,7 +186,7 @@ export default function CostCenterDashboard() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Orçamento Total</CardTitle>
+                        <CardTitle className="text-sm font-medium">Orçamento {selectedYear}</CardTitle>
                         <Wallet className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
@@ -166,7 +206,7 @@ export default function CostCenterDashboard() {
                             {formatCurrency(remainingBalance)}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                            {((remainingBalance / totalBudget) * 100).toFixed(1)}% do total
+                            {totalBudget > 0 ? ((remainingBalance / totalBudget) * 100).toFixed(1) : 0}% do total
                         </p>
                     </CardContent>
                 </Card>
@@ -190,7 +230,7 @@ export default function CostCenterDashboard() {
                     <CardContent>
                         <div className="text-2xl font-bold">{formatCurrency(directExpenses)}</div>
                         <p className="text-xs text-muted-foreground">
-                            Total gasto diretamente
+                            Total gasto em {selectedYear}
                         </p>
                     </CardContent>
                 </Card>
@@ -200,7 +240,7 @@ export default function CostCenterDashboard() {
                 {/* Charts */}
                 <Card className="col-span-4">
                     <CardHeader>
-                        <CardTitle>Tendência de Gastos</CardTitle>
+                        <CardTitle>Tendência de Gastos ({selectedYear})</CardTitle>
                     </CardHeader>
                     <CardContent className="pl-2">
                         <div className="h-[300px]">

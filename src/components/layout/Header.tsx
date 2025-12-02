@@ -14,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { ModeToggle } from "@/components/mode-toggle";
 
 export function Header() {
     const { user, logout } = useAuth();
@@ -38,6 +39,7 @@ export function Header() {
             </div>
 
             <div className="flex items-center gap-4">
+                <ModeToggle />
                 <NotificationBell />
 
                 <div className="flex items-center gap-3 border-l pl-4">
