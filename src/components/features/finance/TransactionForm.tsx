@@ -206,7 +206,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                             />
                         </div>
 
-                        <div className="col-span-12 md:col-span-4">
+                        <div className="col-span-12 md:col-span-6">
                             <FormField
                                 control={form.control}
                                 name="paymentMethod"
@@ -333,7 +333,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                             </div>
                         </div>
 
-                        <div className="col-span-12 md:col-span-6 grid grid-cols-2 gap-4">
+                        <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6">
                             <FormField
                                 control={form.control}
                                 name="dueDate"
@@ -373,43 +373,41 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                 )}
                             />
 
-                            <div className="flex gap-2">
-                                <FormField
-                                    control={form.control}
-                                    name="requestOrigin.type"
-                                    render={({ field }) => (
-                                        <FormItem className="w-[140px]">
-                                            <FormLabel>Tipo Origem</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl>
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Tipo" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    <SelectItem value="department">Depto.</SelectItem>
-                                                    <SelectItem value="sector">Setor</SelectItem>
-                                                    <SelectItem value="director">Diretoria</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                                <FormField
-                                    control={form.control}
-                                    name="requestOrigin.name"
-                                    render={({ field }) => (
-                                        <FormItem className="flex-1">
-                                            <FormLabel>Nome Origem</FormLabel>
+                            <FormField
+                                control={form.control}
+                                name="requestOrigin.type"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Tipo Origem</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
                                             <FormControl>
-                                                <Input placeholder="Ex: Marketing" {...field} />
+                                                <SelectTrigger className="w-full">
+                                                    <SelectValue placeholder="Tipo" />
+                                                </SelectTrigger>
                                             </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                            </div>
+                                            <SelectContent>
+                                                <SelectItem value="department">Depto.</SelectItem>
+                                                <SelectItem value="sector">Setor</SelectItem>
+                                                <SelectItem value="director">Diretoria</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="requestOrigin.name"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Nome Origem</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="Ex: Marketing" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                         </div>
                     </CardContent>
                 </Card>
@@ -445,7 +443,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                     }
                                 >
                                     <FormControl>
-                                        <SelectTrigger>
+                                        <SelectTrigger className="w-full">
                                             <SelectValue placeholder="Selecione..." />
                                         </SelectTrigger>
                                     </FormControl>
@@ -467,7 +465,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                                 <FormLabel>Frequência</FormLabel>
                                                 <Select onValueChange={field.onChange} defaultValue={field.value || "monthly"}>
                                                     <FormControl>
-                                                        <SelectTrigger>
+                                                        <SelectTrigger className="w-full">
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                     </FormControl>
@@ -564,16 +562,16 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                     <CardContent>
                         <div className="space-y-4">
                             {fields.map((field, index) => (
-                                <div key={field.id} className="flex gap-4 items-end">
+                                <div key={field.id} className="grid grid-cols-[1fr_1fr_auto] gap-4 items-end">
                                     <FormField
                                         control={form.control}
                                         name={`costCenterAllocation.${index}.costCenterId`}
                                         render={({ field }) => (
-                                            <FormItem className="flex-1">
+                                            <FormItem>
                                                 <FormLabel className={index !== 0 ? "sr-only" : ""}>Centro de Custo</FormLabel>
                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                                                     <FormControl>
-                                                        <SelectTrigger>
+                                                        <SelectTrigger className="w-full">
                                                             <SelectValue placeholder="Selecione..." />
                                                         </SelectTrigger>
                                                     </FormControl>
@@ -595,7 +593,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                         control={form.control}
                                         name={`costCenterAllocation.${index}.percentage`}
                                         render={({ field }) => (
-                                            <FormItem className="w-24">
+                                            <FormItem>
                                                 <FormLabel className={index !== 0 ? "sr-only" : ""}>%</FormLabel>
                                                 <FormControl>
                                                     <Input
