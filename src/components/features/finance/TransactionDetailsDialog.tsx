@@ -18,8 +18,11 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { transactionService } from "@/lib/services/transactionService";
 import { emailService } from "@/lib/services/emailService";
-import { useState } from "react";
-import { Loader2, CheckCircle2, XCircle, Banknote, Send } from "lucide-react";
+import { costCenterService } from "@/lib/services/costCenterService";
+import { useState, useEffect } from "react";
+import { Loader2, CheckCircle2, XCircle, Banknote, Send, CalendarIcon } from "lucide-react";
+import { PaymentDialog } from "./PaymentDialog";
+import { formatCurrency } from "@/lib/utils";
 import { db } from "@/lib/firebase/client";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { toast } from "sonner";
@@ -40,6 +43,55 @@ export function TransactionDetailsDialog({
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const [isProcessing, setIsProcessing] = useState(false);
+
+    const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+    const [costCenterNames, setCostCenterNames] = useState<Record<string, string>>({});
+    const [userNames, setUserNames] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        const fetchNames = async () => {
+            if (!transaction || !selectedCompany) return;
+
+            const newCostCenterNames: Record<string, string> = {};
+            const newUserNames: Record<string, string> = {};
+
+            // Fetch Cost Center Names
+            if (transaction.costCenterAllocation) {
+                for (const alloc of transaction.costCenterAllocation) {
+                    if (!costCenterNames[alloc.costCenterId]) {
+                        try {
+                            const cc = await costCenterService.getById(alloc.costCenterId);
+                            if (cc) newCostCenterNames[alloc.costCenterId] = cc.name;
+                        } catch (e) {
+                            console.error(`Failed to fetch cost center ${alloc.costCenterId}`, e);
+                        }
+                    }
+                }
+            }
+
+            // Fetch User Names
+            const userIdsToFetch = [transaction.approvedBy, transaction.releasedBy].filter(Boolean) as string[];
+            for (const uid of userIdsToFetch) {
+                if (!userNames[uid]) {
+                    try {
+                        const userDoc = await getDoc(doc(db, "users", uid));
+                        if (userDoc.exists()) {
+                            newUserNames[uid] = userDoc.data().displayName || userDoc.data().email || uid;
+                        }
+                    } catch (e) {
+                        console.error(`Failed to fetch user ${uid}`, e);
+                    }
+                }
+            }
+
+            setCostCenterNames(prev => ({ ...prev, ...newCostCenterNames }));
+            setUserNames(prev => ({ ...prev, ...newUserNames }));
+        };
+
+        if (isOpen) {
+            fetchNames();
+        }
+    }, [transaction, isOpen, selectedCompany]);
 
     if (!transaction || !selectedCompany) return null;
 
@@ -102,190 +154,242 @@ export function TransactionDetailsDialog({
     const canApprove = user?.role === 'admin' || user?.role === 'approver' || user?.role === 'financial_manager';
     const canPay = user?.role === 'admin' || user?.role === 'releaser' || user?.role === 'financial_manager';
 
+
+
+
+
+    const handlePaymentConfirm = async (data: { paymentDate: Date; finalAmount: number; discount: number; interest: number }) => {
+        if (!user || !selectedCompany) return;
+        try {
+            setIsProcessing(true);
+            await transactionService.settle(transaction.id, data, { uid: user.uid, email: user.email }, selectedCompany.id);
+            toast.success("Pagamento/Recebimento registrado com sucesso!");
+            onUpdate();
+            onClose();
+        } catch (error) {
+            console.error("Error settling transaction:", error);
+            toast.error("Erro ao registrar pagamento.");
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <div className="flex items-center justify-between pr-8">
-                        <DialogTitle>Detalhes da Transação</DialogTitle>
-                        {getStatusBadge(transaction.status)}
-                    </div>
-                    <DialogDescription>
-                        ID: {transaction.id}
-                    </DialogDescription>
-                </DialogHeader>
+        <>
+            <Dialog open={isOpen} onOpenChange={onClose}>
+                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <div className="flex items-center justify-between pr-8">
+                            <DialogTitle>Detalhes da Transação</DialogTitle>
+                            {getStatusBadge(transaction.status)}
+                        </div>
+                        <DialogDescription>
+                            ID: {transaction.id}
+                        </DialogDescription>
+                    </DialogHeader>
 
-                <div className="grid gap-6 py-4">
-                    {/* Header Info */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <h4 className="text-sm font-medium text-muted-foreground">Descrição</h4>
-                            <p className="text-lg font-semibold">{transaction.description}</p>
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-medium text-muted-foreground">Valor</h4>
-                            <p className="text-lg font-semibold text-emerald-600">
-                                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(transaction.amount)}
-                            </p>
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-medium text-muted-foreground">
-                                {transaction.type === 'payable' ? 'Fornecedor' : 'Cliente'}
-                            </h4>
-                            <p className="text-base">{transaction.supplierOrClient}</p>
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-medium text-muted-foreground">Vencimento</h4>
-                            <p className="text-base">{format(transaction.dueDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
-                        </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Details */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <h4 className="text-sm font-medium text-muted-foreground">Solicitado por</h4>
-                            <p className="text-sm">
-                                {transaction.requestOrigin?.name || '-'} ({transaction.requestOrigin?.type === 'director' ? 'Diretoria' : transaction.requestOrigin?.type === 'department' ? 'Departamento' : transaction.requestOrigin?.type === 'sector' ? 'Setor' : '-'})
-                            </p>
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-medium text-muted-foreground">Método de Pagamento</h4>
-                            <p className="text-sm capitalize">{transaction.paymentMethod || '-'}</p>
-                        </div>
-                        {transaction.recurrence?.isRecurring && (
-                            <div className="col-span-2">
-                                <h4 className="text-sm font-medium text-muted-foreground">Recorrência</h4>
-                                <p className="text-sm">
-                                    {transaction.installments ? (
-                                        `Parcela ${transaction.installments.current} de ${transaction.installments.total}`
-                                    ) : (
-                                        transaction.recurrence.frequency === 'monthly' ? 'Mensal' : 'Outro'
-                                    )}
+                    <div className="grid gap-6 py-4">
+                        {/* Header Info */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <h4 className="text-sm font-medium text-muted-foreground">Descrição</h4>
+                                <p className="text-lg font-semibold">{transaction.description}</p>
+                            </div>
+                            <div className="text-right">
+                                <h4 className="text-sm font-medium text-muted-foreground">Valor</h4>
+                                <p className={`text-lg font-semibold ${transaction.type === 'payable' ? 'text-red-600' : 'text-green-600'}`}>
+                                    {transaction.type === 'payable' ? '-' : '+'}
+                                    {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(transaction.amount)}
                                 </p>
                             </div>
-                        )}
-                    </div>
+                            <div>
+                                <h4 className="text-sm font-medium text-muted-foreground">
+                                    {transaction.type === 'payable' ? 'Fornecedor' : 'Cliente'}
+                                </h4>
+                                <p className="text-base">{transaction.supplierOrClient}</p>
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-medium text-muted-foreground">Vencimento</h4>
+                                <p className="text-base flex items-center gap-2 justify-end">
+                                    <CalendarIcon className="h-4 w-4" />
+                                    {format(transaction.dueDate, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                                </p>
+                            </div>
+                        </div>
 
-                    <Separator />
+                        <Separator />
 
-                    {/* Cost Centers */}
-                    <div>
-                        <h4 className="text-sm font-medium text-muted-foreground mb-2">Rateio por Centro de Custo</h4>
-                        <div className="space-y-2">
-                            {transaction.costCenterAllocation?.map((alloc, index) => (
-                                <div key={index} className="flex justify-between text-sm border p-2 rounded">
-                                    <span>Centro de Custo ID: {alloc.costCenterId}</span> {/* In a real app, we'd look up the name */}
-                                    <div className="flex gap-4">
-                                        <span>{alloc.percentage}%</span>
-                                        <span className="font-medium">
-                                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(alloc.amount)}
-                                        </span>
+                        {/* Details */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <h4 className="text-sm font-medium text-muted-foreground">Solicitado por</h4>
+                                <p className="text-sm">
+                                    {transaction.requestOrigin?.name || '-'} ({transaction.requestOrigin?.type === 'director' ? 'Diretoria' : transaction.requestOrigin?.type === 'department' ? 'Departamento' : transaction.requestOrigin?.type === 'sector' ? 'Setor' : '-'})
+                                </p>
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-medium text-muted-foreground">Método de Pagamento</h4>
+                                <p className="text-sm capitalize">{transaction.paymentMethod || '-'}</p>
+                            </div>
+
+                            {transaction.paymentDate && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-muted-foreground">Data de Pagamento</h4>
+                                    <p className="text-sm flex items-center gap-2 text-blue-600 font-medium">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                        {format(transaction.paymentDate, "dd/MM/yyyy", { locale: ptBR })}
+                                    </p>
+                                </div>
+                            )}
+
+                            {transaction.finalAmount !== undefined && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-muted-foreground">Valor Final</h4>
+                                    <p className="text-sm font-medium">{formatCurrency(transaction.finalAmount)}</p>
+                                </div>
+                            )}
+
+                            {transaction.recurrence?.isRecurring && (
+                                <div className="col-span-2">
+                                    <h4 className="text-sm font-medium text-muted-foreground">Recorrência</h4>
+                                    <p className="text-sm">
+                                        {transaction.installments ? (
+                                            `Parcela ${transaction.installments.current} de ${transaction.installments.total}`
+                                        ) : (
+                                            transaction.recurrence.frequency === 'monthly' ? 'Mensal' : 'Outro'
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        <Separator />
+
+                        {/* Cost Centers */}
+                        <div>
+                            <h4 className="text-sm font-medium text-muted-foreground mb-2">Rateio por Centro de Custo</h4>
+                            <div className="space-y-2">
+                                {transaction.costCenterAllocation?.map((alloc, index) => (
+                                    <div key={index} className="flex justify-between text-sm border p-2 rounded">
+                                        <span>{costCenterNames[alloc.costCenterId] || alloc.costCenterId}</span>
+                                        <div className="flex gap-4">
+                                            <span>{alloc.percentage}%</span>
+                                            <span className="font-medium">
+                                                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(alloc.amount)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Attachments */}
+                        {transaction.attachments && transaction.attachments.length > 0 && (
+                            <>
+                                <Separator />
+                                <div>
+                                    <h4 className="text-sm font-medium text-muted-foreground mb-2">Anexos</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {transaction.attachments.map((att) => (
+                                            <a
+                                                key={att.id}
+                                                href={att.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-sm text-blue-600 hover:underline bg-blue-50 px-2 py-1 rounded"
+                                            >
+                                                {att.name}
+                                            </a>
+                                        ))}
                                     </div>
                                 </div>
-                            ))}
-                        </div>
+                            </>
+                        )}
+
+                        {/* Notes */}
+                        {transaction.notes && (
+                            <>
+                                <Separator />
+                                <div>
+                                    <h4 className="text-sm font-medium text-muted-foreground">Observações</h4>
+                                    <p className="text-sm whitespace-pre-wrap">{transaction.notes}</p>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Approval Info */}
+                        {(transaction.approvedBy || transaction.releasedBy) && (
+                            <>
+                                <Separator />
+                                <div className="text-xs text-muted-foreground space-y-1">
+                                    {transaction.approvedBy && <p>Aprovado por: {userNames[transaction.approvedBy] || transaction.approvedBy} em {transaction.approvedAt ? format(transaction.approvedAt, "dd/MM/yyyy HH:mm") : '-'}</p>}
+                                    {transaction.releasedBy && <p>Pago/Liberado por: {userNames[transaction.releasedBy] || transaction.releasedBy} em {transaction.releasedAt ? format(transaction.releasedAt, "dd/MM/yyyy HH:mm") : '-'}</p>}
+                                </div>
+                            </>
+                        )}
+
                     </div>
 
-                    {/* Attachments */}
-                    {transaction.attachments && transaction.attachments.length > 0 && (
-                        <>
-                            <Separator />
-                            <div>
-                                <h4 className="text-sm font-medium text-muted-foreground mb-2">Anexos</h4>
-                                <div className="flex flex-wrap gap-2">
-                                    {transaction.attachments.map((att) => (
-                                        <a
-                                            key={att.id}
-                                            href={att.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-sm text-blue-600 hover:underline bg-blue-50 px-2 py-1 rounded"
-                                        >
-                                            {att.name}
-                                        </a>
-                                    ))}
-                                </div>
-                            </div>
-                        </>
-                    )}
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        {/* Actions based on status */}
 
-                    {/* Notes */}
-                    {transaction.notes && (
-                        <>
-                            <Separator />
-                            <div>
-                                <h4 className="text-sm font-medium text-muted-foreground">Observações</h4>
-                                <p className="text-sm whitespace-pre-wrap">{transaction.notes}</p>
-                            </div>
-                        </>
-                    )}
-
-                    {/* Approval Info */}
-                    {(transaction.approvedBy || transaction.releasedBy) && (
-                        <>
-                            <Separator />
-                            <div className="text-xs text-muted-foreground space-y-1">
-                                {transaction.approvedBy && <p>Aprovado por: {transaction.approvedBy} em {transaction.approvedAt ? format(transaction.approvedAt, "dd/MM/yyyy HH:mm") : '-'}</p>}
-                                {transaction.releasedBy && <p>Pago/Liberado por: {transaction.releasedBy} em {transaction.releasedAt ? format(transaction.releasedAt, "dd/MM/yyyy HH:mm") : '-'}</p>}
-                            </div>
-                        </>
-                    )}
-
-                </div>
-
-                <DialogFooter className="gap-2 sm:gap-0">
-                    {/* Actions based on status */}
-
-                    {transaction.status === 'draft' && (
-                        <Button
-                            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
-                            onClick={() => handleStatusUpdate('pending_approval')}
-                            disabled={isProcessing}
-                        >
-                            {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                            Enviar para Aprovação
-                        </Button>
-                    )}
-
-                    {transaction.status === 'pending_approval' && canApprove && (
-                        <div className="flex gap-2 w-full sm:w-auto">
+                        {transaction.status === 'draft' && (
                             <Button
-                                variant="destructive"
-                                onClick={() => handleStatusUpdate('rejected')}
+                                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
+                                onClick={() => handleStatusUpdate('pending_approval')}
                                 disabled={isProcessing}
                             >
-                                {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
-                                Rejeitar
+                                {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                Enviar para Aprovação
                             </Button>
+                        )}
+
+                        {transaction.status === 'pending_approval' && canApprove && (
+                            <div className="flex gap-2 w-full sm:w-auto">
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => handleStatusUpdate('rejected')}
+                                    disabled={isProcessing}
+                                >
+                                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
+                                    Rejeitar
+                                </Button>
+                                <Button
+                                    className="bg-emerald-600 hover:bg-emerald-700"
+                                    onClick={() => handleStatusUpdate('approved')}
+                                    disabled={isProcessing}
+                                >
+                                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                                    Aprovar
+                                </Button>
+                            </div>
+                        )}
+
+                        {transaction.status === 'approved' && canPay && (
                             <Button
-                                className="bg-emerald-600 hover:bg-emerald-700"
-                                onClick={() => handleStatusUpdate('approved')}
+                                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
+                                onClick={() => setIsPaymentDialogOpen(true)}
                                 disabled={isProcessing}
                             >
-                                {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                                Aprovar
+                                {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Banknote className="mr-2 h-4 w-4" />}
+                                {transaction.type === 'payable' ? 'Confirmar Pagamento' : 'Confirmar Recebimento'}
                             </Button>
-                        </div>
-                    )}
+                        )}
 
-                    {transaction.status === 'approved' && canPay && (
-                        <Button
-                            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
-                            onClick={() => handleStatusUpdate('paid')}
-                            disabled={isProcessing}
-                        >
-                            {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Banknote className="mr-2 h-4 w-4" />}
-                            {transaction.type === 'payable' ? 'Confirmar Pagamento' : 'Confirmar Recebimento'}
+                        <Button variant="outline" onClick={onClose} disabled={isProcessing}>
+                            Fechar
                         </Button>
-                    )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
-                    <Button variant="outline" onClick={onClose} disabled={isProcessing}>
-                        Fechar
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+            <PaymentDialog
+                isOpen={isPaymentDialogOpen}
+                onClose={() => setIsPaymentDialogOpen(false)}
+                onConfirm={handlePaymentConfirm}
+                transaction={transaction}
+                type={transaction.type === 'payable' ? 'pay' : 'receive'}
+            />
+        </>
     );
 }

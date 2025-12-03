@@ -146,6 +146,9 @@ export interface Transaction {
     status: TransactionStatus;
     dueDate: Date;
     paymentDate?: Date;
+    finalAmount?: number;
+    discount?: number;
+    interest?: number;
     supplierOrClient?: string; // Legacy or fallback name
     entityId?: string; // Link to Entity
     costCenterId?: string;

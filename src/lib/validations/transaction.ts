@@ -14,7 +14,7 @@ export const transactionSchema = z.object({
     requestOrigin: z.object({
         type: z.enum(["director", "department", "sector"]),
         name: z.string().min(2, "Nome da origem é obrigatório"),
-    }),
+    }).optional(),
 
     recurrence: z.object({
         isRecurring: z.boolean(),

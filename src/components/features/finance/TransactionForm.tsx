@@ -163,7 +163,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
 
     return (
         <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit, (errors) => console.error("Validation Errors:", errors))} className="space-y-6">
 
                 {/* Main Info Card */}
                 <Card>
@@ -373,19 +373,43 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                 )}
                             />
 
-                            <FormField
-                                control={form.control}
-                                name="requestOrigin.name"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Origem (Opcional)</FormLabel>
-                                        <FormControl>
-                                            <Input placeholder="Ex: Marketing" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                            <div className="flex gap-2">
+                                <FormField
+                                    control={form.control}
+                                    name="requestOrigin.type"
+                                    render={({ field }) => (
+                                        <FormItem className="w-[140px]">
+                                            <FormLabel>Tipo Origem</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Tipo" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="department">Depto.</SelectItem>
+                                                    <SelectItem value="sector">Setor</SelectItem>
+                                                    <SelectItem value="director">Diretoria</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="requestOrigin.name"
+                                    render={({ field }) => (
+                                        <FormItem className="flex-1">
+                                            <FormLabel>Nome Origem</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="Ex: Marketing" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

@@ -212,6 +212,32 @@ export const transactionService = {
         });
     },
 
+    settle: async (id: string, data: { paymentDate: Date; finalAmount: number; discount: number; interest: number }, user: { uid: string, email: string }, companyId: string) => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+
+        // Audit Log
+        await auditService.log({
+            companyId,
+            userId: user.uid,
+            userEmail: user.email,
+            action: 'update',
+            entity: 'transaction',
+            entityId: id,
+            details: { status: 'paid', ...data }
+        });
+
+        return updateDoc(docRef, {
+            status: 'paid',
+            paymentDate: Timestamp.fromDate(data.paymentDate),
+            finalAmount: data.finalAmount,
+            discount: data.discount,
+            interest: data.interest,
+            releasedBy: user.uid,
+            releasedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        });
+    },
+
     updateStatus: async (id: string, status: TransactionStatus, user: { uid: string; email: string }, companyId: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
         const updateData: any = { status, updatedAt: serverTimestamp() };
@@ -314,18 +340,31 @@ export const transactionService = {
         const monthlyData = new Map<string, { name: string; income: number; expense: number }>();
 
         transactions.forEach(t => {
+            // Determine date and amount to use
+            let dateToUse = t.dueDate;
+            let amountToUse = t.amount;
+
+            if (t.status === 'paid') {
+                if (t.paymentDate) {
+                    dateToUse = t.paymentDate;
+                }
+                if (t.finalAmount !== undefined) {
+                    amountToUse = t.finalAmount;
+                }
+            }
+
             // Calculate totals based on status 'paid'/'received' (mapped to 'paid' in types)
             // For balance, we consider paid transactions
             if (t.status === 'paid') {
                 if (t.type === 'receivable') {
-                    totalBalance += t.amount;
+                    totalBalance += amountToUse;
                 } else {
-                    totalBalance -= t.amount;
+                    totalBalance -= amountToUse;
                 }
             }
 
-            // Monthly stats (based on Due Date for projection or Payment Date for realized? Let's use Due Date for Cash Flow View)
-            const tDate = t.dueDate;
+            // Monthly stats
+            const tDate = dateToUse;
             const tMonth = tDate.getMonth();
             const tYear = tDate.getFullYear();
             const monthKey = `${tYear}-${tMonth}`;
@@ -342,17 +381,22 @@ export const transactionService = {
             const monthStats = monthlyData.get(monthKey)!;
 
             if (t.type === 'receivable') {
-                monthStats.income += t.amount;
-                if (tMonth === currentMonth && tYear === currentYear) {
-                    monthlyIncome += t.amount;
-                }
+                monthStats.income += amountToUse;
             } else {
-                monthStats.expense += t.amount;
-                if (tMonth === currentMonth && tYear === currentYear) {
-                    monthlyExpense += t.amount;
+                monthStats.expense += amountToUse;
+            }
+
+            // Current Month Stats (for cards)
+            if (tMonth === currentMonth && tYear === currentYear) {
+                if (t.type === 'receivable') {
+                    monthlyIncome += amountToUse;
+                } else {
+                    monthlyExpense += amountToUse;
                 }
             }
         });
+
+
 
         // Convert map to array and take last 6 months
         const chartData = Array.from(monthlyData.values()).slice(-6);
