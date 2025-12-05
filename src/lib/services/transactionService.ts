@@ -485,5 +485,61 @@ export const transactionService = {
             chartData,
             recentTransactions: transactions.reverse().slice(0, 5)
         };
+    },
+
+    getUpcomingByUser: async (userId: string, companyId: string, days: number = 7): Promise<Transaction[]> => {
+        // Calculate date range
+        const startDate = new Date();
+        startDate.setHours(0, 0, 0, 0);
+
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + days);
+        endDate.setHours(23, 59, 59, 999);
+
+        // Query: status != 'paid' (we want open bills), type == 'payable', companyId == companyId
+        // We can't easily filter by date AND multiple fields without composite indexes in Firestore sometimes.
+        // Let's query by company and filter in memory since dataset per company isn't huge yet for MVP, 
+        // OR better: query by status and type, then filter by date.
+
+        const q = query(
+            collection(db, COLLECTION_NAME),
+            where("companyId", "==", companyId),
+            where("type", "==", "payable"),
+            where("status", "in", ["draft", "pending_approval", "approved"]) // Open statuses
+        );
+
+        const snapshot = await getDocs(q);
+        const transactions = snapshot.docs
+            .map((doc) => convertDates({ id: doc.id, ...doc.data() }))
+            .filter(t => {
+                // Filter by Date
+                if (!t.dueDate) return false;
+                return t.dueDate >= startDate && t.dueDate <= endDate;
+            })
+            .filter(t => {
+                // Filter by User relevance: createdBy or (if generic visibility needed, maybe skip this?)
+                // The requirement says "próximas contas a serem pagas ... podendo ver detalhes".
+                // Usually "my dashboard" implies things I need to act on or I created.
+                // Admin sees all. User sees createdBy? 
+                // Plan said: "created by or relevant to the user".
+                // For simplicity/MVP: show ALL upcoming payables if Admin/Manager, or createdBy if User?
+                // Actually, the request said "Should be accessible ... for any user".
+                // If I click my profile, I expect to see actions *I* need to take or *my* requests.
+                // Let's prioritize: Transactions I created.
+                return t.createdBy === userId;
+            });
+
+        // Sort: Payment Date (closest first) -> Amount (highest first)
+        transactions.sort((a, b) => {
+            const dateA = a.paymentDate || a.dueDate;
+            const dateB = b.paymentDate || b.dueDate;
+
+            const diffTime = dateA.getTime() - dateB.getTime();
+            if (diffTime !== 0) return diffTime;
+
+            return b.amount - a.amount; // Descending amount
+        });
+
+        return transactions;
     }
 };

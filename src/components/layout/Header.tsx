@@ -85,6 +85,11 @@ export function Header() {
                                 </div>
                             </DropdownMenuLabel>
                             <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => router.push(`/perfil/${user?.uid}`)} className="cursor-pointer">
+                                <User className="mr-2 h-4 w-4" />
+                                <span>Meu Perfil</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={logout} className="text-red-600 cursor-pointer">
                                 <LogOut className="mr-2 h-4 w-4" />
                                 <span>Sair</span>

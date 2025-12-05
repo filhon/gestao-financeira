@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase/client";
-import { collection, doc, getDocs, updateDoc, query, orderBy, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, updateDoc, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { UserRole, UserProfile } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
 
@@ -18,6 +18,19 @@ export const userService = {
             return users.filter(u => u.companyRoles && u.companyRoles[companyId]);
         }
         return users;
+    },
+
+    getById: async (uid: string): Promise<UserProfile | null> => {
+        const docRef = doc(db, COLLECTION_NAME, uid);
+        const docSnap = await getDoc(docRef); // Requires getDoc import
+
+        if (docSnap.exists()) {
+            return {
+                uid: docSnap.id,
+                ...docSnap.data()
+            } as UserProfile;
+        }
+        return null;
     },
 
     updateRole: async (uid: string, role: UserRole, adminUser: { uid: string; email: string }, companyId?: string) => {

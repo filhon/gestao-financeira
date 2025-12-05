@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { userService } from "@/lib/services/userService";
 import { UserProfile, UserRole } from "@/lib/types";
 import {
@@ -198,12 +199,14 @@ export default function UsersPage() {
                                         const currentRole = getRoleForCompany(user);
                                         return (
                                             <TableRow key={user.uid}>
-                                                <TableCell className="flex items-center gap-3">
-                                                    <Avatar>
-                                                        <AvatarImage src={user.photoURL || ""} />
-                                                        <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
-                                                    </Avatar>
-                                                    <span className="font-medium">{user.displayName}</span>
+                                                <TableCell>
+                                                    <Link href={`/perfil/${user.uid}`} className="flex items-center gap-3 hover:underline">
+                                                        <Avatar>
+                                                            <AvatarImage src={user.photoURL || ""} />
+                                                            <AvatarFallback>{user.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
+                                                        </Avatar>
+                                                        <span className="font-medium">{user.displayName}</span>
+                                                    </Link>
                                                 </TableCell>
                                                 <TableCell>{user.email}</TableCell>
                                                 <TableCell>
