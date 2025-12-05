@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { transactionService } from "@/lib/services/transactionService";
@@ -27,7 +27,7 @@ import { ptBR } from "date-fns/locale";
 import { Loader2 } from "lucide-react";
 import { useSortableData } from "@/hooks/useSortableData";
 
-export default function SearchPage() {
+function SearchContent() {
     const searchParams = useSearchParams();
     const query = searchParams.get("q") || "";
     const { selectedCompany } = useCompany();
@@ -52,13 +52,15 @@ export default function SearchPage() {
                 const lowerQuery = query.toLowerCase();
                 const filtered = allTransactions.filter((t) =>
                     t.description.toLowerCase().includes(lowerQuery) ||
-                    t.category?.toLowerCase().includes(lowerQuery) ||
+                    t.supplierOrClient?.toLowerCase()?.includes(lowerQuery) ||
+                    t.requestOrigin?.name?.toLowerCase()?.includes(lowerQuery) ||
                     t.amount.toString().includes(query)
                 );
 
                 setTransactions(filtered);
             } catch (error) {
                 console.error("Error searching transactions:", error);
+                setTransactions([]);
             } finally {
                 setIsLoading(false);
             }
@@ -82,24 +84,24 @@ export default function SearchPage() {
     };
 
     return (
-        <div className="space-y-6">
-            <h1 className="text-3xl font-bold tracking-tight">Resultados da Busca</h1>
+        <div className="container mx-auto py-8">
+            <h1 className="text-3xl font-bold tracking-tight mb-8">Resultados da Busca</h1>
 
             <Card>
                 <CardHeader>
                     <CardTitle>Transações encontradas</CardTitle>
                     <CardDescription>
-                        Resultados para: <span className="font-medium">"{query}"</span>
+                        Resultados para: "{query}"
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     {isLoading ? (
-                        <div className="flex justify-center py-8">
-                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin" />
                         </div>
                     ) : transactions.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground">
-                            Nenhuma transação encontrada.
+                            Nenhuma transação encontrada com este termo.
                         </div>
                     ) : (
                         <Table>
@@ -113,9 +115,9 @@ export default function SearchPage() {
                                     </TableHead>
                                     <TableHead
                                         className="cursor-pointer hover:text-primary"
-                                        onClick={() => requestSort('category')}
+                                        onClick={() => requestSort('supplierOrClient')}
                                     >
-                                        Categoria {sortConfig?.key === 'category' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        Origem/Fornecedor {sortConfig?.key === 'supplierOrClient' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                                     </TableHead>
                                     <TableHead
                                         className="cursor-pointer hover:text-primary"
@@ -141,13 +143,12 @@ export default function SearchPage() {
                                 {sortedTransactions.map((transaction) => (
                                     <TableRow key={transaction.id}>
                                         <TableCell className="font-medium">{transaction.description}</TableCell>
-                                        <TableCell>{transaction.category}</TableCell>
+                                        <TableCell>{transaction.supplierOrClient || transaction.requestOrigin?.name || "-"}</TableCell>
                                         <TableCell>
                                             {format(transaction.dueDate, "dd/MM/yyyy", { locale: ptBR })}
                                         </TableCell>
                                         <TableCell>{getStatusBadge(transaction.status)}</TableCell>
-                                        <TableCell className={`text-right font-medium ${transaction.type === "payable" ? "text-red-600" : "text-green-600"
-                                            }`}>
+                                        <TableCell className={`text-right font-medium ${transaction.type === "payable" ? "text-red-600" : "text-green-600"}`}>
                                             {transaction.type === "payable" ? "-" : "+"}
                                             {formatCurrency(transaction.amount)}
                                         </TableCell>
@@ -159,5 +160,13 @@ export default function SearchPage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+export default function SearchPage() {
+    return (
+        <Suspense fallback={<div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+            <SearchContent />
+        </Suspense>
     );
 }
