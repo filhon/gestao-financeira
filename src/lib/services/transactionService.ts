@@ -487,7 +487,7 @@ export const transactionService = {
         };
     },
 
-    getUpcomingByUser: async (userId: string, companyId: string, days: number = 7): Promise<Transaction[]> => {
+    getUpcomingByUser: async (userId: string, userEmail: string | null | undefined, companyId: string, days: number = 7): Promise<Transaction[]> => {
         // Calculate date range
         const startDate = new Date();
         startDate.setHours(0, 0, 0, 0);
@@ -496,16 +496,25 @@ export const transactionService = {
         endDate.setDate(endDate.getDate() + days);
         endDate.setHours(23, 59, 59, 999);
 
-        // Query: status != 'paid' (we want open bills), type == 'payable', companyId == companyId
-        // We can't easily filter by date AND multiple fields without composite indexes in Firestore sometimes.
-        // Let's query by company and filter in memory since dataset per company isn't huge yet for MVP, 
-        // OR better: query by status and type, then filter by date.
+        // Fetch Cost Centers to know responsibilities
+        const costCenters = await costCenterService.getAll(companyId);
+
+        // Map Cost Center IDs to responsibilities
+        const approverCcIds = new Set<string>();
+        const releaserCcIds = new Set<string>();
+
+        if (userEmail) {
+            costCenters.forEach(cc => {
+                if (cc.approverEmail === userEmail) approverCcIds.add(cc.id);
+                if (cc.releaserEmail === userEmail) releaserCcIds.add(cc.id);
+            });
+        }
 
         const q = query(
             collection(db, COLLECTION_NAME),
             where("companyId", "==", companyId),
             where("type", "==", "payable"),
-            where("status", "in", ["draft", "pending_approval", "approved"]) // Open statuses
+            where("status", "in", ["draft", "pending_approval", "approved"])
         );
 
         const snapshot = await getDocs(q);
@@ -514,19 +523,28 @@ export const transactionService = {
             .filter(t => {
                 // Filter by Date
                 if (!t.dueDate) return false;
-                return t.dueDate >= startDate && t.dueDate <= endDate;
-            })
-            .filter(t => {
-                // Filter by User relevance: createdBy or (if generic visibility needed, maybe skip this?)
-                // The requirement says "próximas contas a serem pagas ... podendo ver detalhes".
-                // Usually "my dashboard" implies things I need to act on or I created.
-                // Admin sees all. User sees createdBy? 
-                // Plan said: "created by or relevant to the user".
-                // For simplicity/MVP: show ALL upcoming payables if Admin/Manager, or createdBy if User?
-                // Actually, the request said "Should be accessible ... for any user".
-                // If I click my profile, I expect to see actions *I* need to take or *my* requests.
-                // Let's prioritize: Transactions I created.
-                return t.createdBy === userId;
+                if (t.dueDate < startDate || t.dueDate > endDate) return false;
+
+                // 1. I created it
+                if (t.createdBy === userId) return true;
+
+                // 2. I need to approve it
+                if (t.status === 'pending_approval' && t.costCenterAllocation) {
+                    const needsMyApproval = t.costCenterAllocation.some(alloc =>
+                        approverCcIds.has(alloc.costCenterId)
+                    );
+                    if (needsMyApproval) return true;
+                }
+
+                // 3. I need to release (pay) it
+                if (t.status === 'approved' && t.costCenterAllocation) {
+                    const needsMyRelease = t.costCenterAllocation.some(alloc =>
+                        releaserCcIds.has(alloc.costCenterId)
+                    );
+                    if (needsMyRelease) return true;
+                }
+
+                return false;
             });
 
         // Sort: Payment Date (closest first) -> Amount (highest first)

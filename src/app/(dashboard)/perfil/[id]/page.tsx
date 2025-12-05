@@ -84,7 +84,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
 
 
                 // 3. Fetch Upcoming Transactions
-                const upcoming = await transactionService.getUpcomingByUser(userId, selectedCompany.id);
+                const upcoming = await transactionService.getUpcomingByUser(userId, user?.email, selectedCompany.id);
                 setUpcomingTransactions(upcoming);
 
             } catch (error) {
@@ -305,7 +305,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
                 onUpdate={() => {
                     // Refresh upcoming
                     if (userId && selectedCompany) {
-                        transactionService.getUpcomingByUser(userId, selectedCompany.id).then(setUpcomingTransactions);
+                        transactionService.getUpcomingByUser(userId, userProfile?.email, selectedCompany.id).then(setUpcomingTransactions);
                     }
                 }}
             />
