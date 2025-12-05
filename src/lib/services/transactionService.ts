@@ -37,6 +37,24 @@ const convertDates = (data: DocumentData): Transaction => {
     } as Transaction;
 };
 
+// Helper to remove undefined values for Firestore
+const stripUndefined = (obj: any): any => {
+    if (Array.isArray(obj)) {
+        return obj.map(v => stripUndefined(v));
+    } else if (obj !== null && typeof obj === 'object') {
+        // Handle Date objects correctly - return as is
+        if (obj instanceof Date || obj instanceof Timestamp) return obj;
+
+        return Object.entries(obj).reduce((acc, [key, value]) => {
+            if (value !== undefined) {
+                acc[key] = stripUndefined(value);
+            }
+            return acc;
+        }, {} as any);
+    }
+    return obj;
+};
+
 export const transactionService = {
     getAll: async (filter?: { type?: string; status?: string; companyId?: string; batchId?: string }): Promise<Transaction[]> => {
         let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
@@ -67,10 +85,11 @@ export const transactionService = {
     },
 
     create: async (data: TransactionFormData, user: { uid: string; email: string }, companyId: string) => {
-        const { useInstallments, installmentsCount, ...transactionData } = data;
+        const cleanData = stripUndefined(data); // Clean data on create too
+        const { useInstallments, installmentsCount, ...transactionData } = cleanData;
         const userId = user.uid;
 
-        const status = data.status || "draft";
+        const status = cleanData.status || "draft";
 
         if (useInstallments && installmentsCount && installmentsCount > 1) {
             const groupId = crypto.randomUUID();
@@ -136,6 +155,7 @@ export const transactionService = {
             return refs[0];
         }
 
+        // Single Create
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             ...transactionData,
             companyId,
@@ -196,8 +216,10 @@ export const transactionService = {
 
     update: async (id: string, data: Partial<TransactionFormData>, user: { uid: string; email: string }, companyId: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
+        const cleanData = stripUndefined(data); // Sanitize data
+
         await updateDoc(docRef, {
-            ...data,
+            ...cleanData,
             updatedAt: serverTimestamp(),
         });
 
@@ -208,8 +230,63 @@ export const transactionService = {
             action: 'update',
             entity: 'transaction',
             entityId: id,
-            details: data
+            details: cleanData
         });
+    },
+
+    updateRecurrence: async (
+        originalTransaction: Transaction,
+        data: Partial<TransactionFormData>,
+        scope: "single" | "series",
+        user: { uid: string; email: string },
+        companyId: string
+    ) => {
+        if (scope === "single" || !originalTransaction.installments?.groupId) {
+            await transactionService.update(originalTransaction.id, data, user, companyId);
+            return;
+        }
+
+        // Scope: Series (This and Future)
+        if (scope === "series") {
+            const q = query(
+                collection(db, COLLECTION_NAME),
+                where("installments.groupId", "==", originalTransaction.installments.groupId),
+                where("dueDate", ">=", originalTransaction.dueDate) // Filter for this and future
+            );
+
+            const snapshot = await getDocs(q);
+            const promises = snapshot.docs.map(async (docSnapshot) => {
+                const t = docSnapshot.data();
+                // Avoid updating 'dueDate' relative to each other if it's not a generic update
+                // For simplified 'Edit', we might replace description, amount, category, etc.
+                // We typically DO NOT update 'dueDate' in batch because each installment has its own month.
+                // If user changed Date in Form, it's ambiguous if they mean "Shift all by X days" or "Set all to Date Y".
+                // For MVP, let's exclude 'dueDate' from batch updates or handle explicitly.
+                // Let's exclude 'dueDate' and 'installments' data from batch to be safe, unless needed.
+
+                const { dueDate, installments, ...safeData } = data as any;
+                const cleanData = stripUndefined(safeData); // Sanitize data
+
+                const updateData = {
+                    ...cleanData,
+                    updatedAt: serverTimestamp()
+                };
+
+                return updateDoc(docSnapshot.ref, updateData);
+            });
+
+            await Promise.all(promises);
+
+            await auditService.log({
+                companyId,
+                userId: user.uid,
+                userEmail: user.email,
+                action: 'update',
+                entity: 'transaction',
+                entityId: originalTransaction.installments.groupId,
+                details: { ...data, scope, count: snapshot.size, isRecurrenceUpdate: true }
+            });
+        }
     },
 
     settle: async (id: string, data: { paymentDate: Date; finalAmount: number; discount: number; interest: number }, user: { uid: string, email: string }, companyId: string) => {
