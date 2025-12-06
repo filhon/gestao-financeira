@@ -1,5 +1,8 @@
+"use client";
+
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { GlobalSearch } from "@/components/layout/GlobalSearch";
 
 export default function DashboardLayout({
     children,
@@ -15,6 +18,7 @@ export default function DashboardLayout({
                     {children}
                 </main>
             </div>
+            <GlobalSearch />
         </div>
     );
 }
