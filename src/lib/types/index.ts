@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'financial_manager' | 'approver' | 'releaser' | 'auditor';
+export type UserRole = 'admin' | 'financial_manager' | 'approver' | 'releaser' | 'auditor' | 'user';
 
 export type TransactionType = 'payable' | 'receivable';
 

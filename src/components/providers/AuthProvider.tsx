@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                             email: firebaseUser.email!,
                             displayName: firebaseUser.displayName || "User",
                             photoURL: firebaseUser.photoURL || undefined,
-                            role: 'auditor', // Safe default
+                            role: 'user', // Default role for new users
                             companyRoles: {},
                             active: false, // Pending approval
                             status: 'pending',
@@ -134,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 email: firebaseUser.email!,
                 displayName: name, // Use provided name
                 photoURL: firebaseUser.photoURL || undefined,
-                role: 'auditor', // Safe default
+                role: 'user', // Default role for new users
                 companyRoles: {},
                 active: false, // Pending approval
                 status: 'pending',

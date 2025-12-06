@@ -25,6 +25,7 @@ const ROLE_DESCRIPTIONS: Record<UserRole | "none", string> = {
     approver: "Responsável por aprovar solicitações e despesas dentro do seu limite e centros de custo atribuídos.",
     releaser: "Responsável por realizar pagamentos (baixas) de transações já aprovadas.",
     auditor: "Acesso apenas para visualização de dados, relatórios e auditoria. Não pode realizar alterações.",
+    user: "Pode criar transações nos centros de custo autorizados e visualizar apenas suas próprias transações.",
     none: "Sem acesso a esta empresa."
 };
 
@@ -33,7 +34,8 @@ const ROLE_LABELS: Record<UserRole, string> = {
     financial_manager: "Gerente Financeiro",
     approver: "Aprovador",
     releaser: "Pagador/Baixador",
-    auditor: "Auditor"
+    auditor: "Auditor",
+    user: "Usuário"
 };
 
 export default function UserProfilePage({ params }: { params: Promise<{ id: string }> }) {

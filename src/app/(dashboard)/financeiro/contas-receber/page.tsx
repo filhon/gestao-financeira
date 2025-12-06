@@ -69,9 +69,16 @@ export default function AccountsReceivablePage() {
     };
 
     const fetchTransactions = async () => {
-        if (!selectedCompany) return;
+        if (!selectedCompany || !user) return;
         try {
-            const data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
+            let data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
+
+            // Filter transactions for 'user' role - they can only see their own transactions
+            const userRole = user.companyRoles?.[selectedCompany.id] || user.role;
+            if (userRole === 'user') {
+                data = data.filter(t => t.createdBy === user.uid);
+            }
+
             setTransactions(data);
         } catch (error) {
             console.error("Error fetching transactions:", error);

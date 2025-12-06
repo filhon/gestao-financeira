@@ -134,7 +134,8 @@ export default function UsersPage() {
         financial_manager: "Gerente Financeiro",
         approver: "Aprovador",
         releaser: "Pagador/Baixador",
-        auditor: "Auditor"
+        auditor: "Auditor",
+        user: "Usuário"
     };
 
     const getRoleForCompany = (user: UserProfile) => {
@@ -234,6 +235,7 @@ export default function UsersPage() {
                                                             <SelectItem value="approver">Aprovador</SelectItem>
                                                             <SelectItem value="releaser">Pagador/Baixador</SelectItem>
                                                             <SelectItem value="auditor">Auditor</SelectItem>
+                                                            <SelectItem value="user">Usuário</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 </TableCell>
@@ -313,6 +315,7 @@ export default function UsersPage() {
                                                                             <SelectItem value="approver">Aprovador</SelectItem>
                                                                             <SelectItem value="releaser">Pagador/Baixador</SelectItem>
                                                                             <SelectItem value="auditor">Auditor</SelectItem>
+                                                                            <SelectItem value="user">Usuário</SelectItem>
                                                                         </SelectContent>
                                                                     </Select>
                                                                 </div>
