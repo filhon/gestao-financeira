@@ -21,12 +21,14 @@ import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function RecorrenciasPage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const [templates, setTemplates] = useState<RecurringTransactionTemplate[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [deleteId, setDeleteId] = useState<string | null>(null);
 
     const fetchTemplates = async () => {
         if (!selectedCompany) return;
@@ -56,14 +58,16 @@ export default function RecorrenciasPage() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Tem certeza que deseja excluir esta recorrência?")) return;
+    const handleDelete = async () => {
+        if (!deleteId) return;
         try {
-            await recurrenceService.deleteTemplate(id);
+            await recurrenceService.deleteTemplate(deleteId);
             toast.success("Recorrência excluída com sucesso!");
             fetchTemplates();
         } catch (error) {
             toast.error("Erro ao excluir recorrência.");
+        } finally {
+            setDeleteId(null);
         }
     };
 
@@ -175,7 +179,7 @@ export default function RecorrenciasPage() {
                                                     variant="ghost"
                                                     size="icon"
                                                     className="text-red-500 hover:text-red-700"
-                                                    onClick={() => handleDelete(t.id)}
+                                                    onClick={() => setDeleteId(t.id)}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -188,6 +192,16 @@ export default function RecorrenciasPage() {
                     </Table>
                 </CardContent>
             </Card>
+
+            <ConfirmDialog
+                open={!!deleteId}
+                onOpenChange={(open) => !open && setDeleteId(null)}
+                title="Excluir Recorrência"
+                description="Tem certeza que deseja excluir esta recorrência? Esta ação não pode ser desfeita."
+                confirmText="Excluir"
+                variant="destructive"
+                onConfirm={handleDelete}
+            />
         </div>
     );
 }

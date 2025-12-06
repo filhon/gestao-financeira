@@ -3,6 +3,8 @@
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
+import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
 
 export default function DashboardLayout({
     children,
@@ -15,10 +17,14 @@ export default function DashboardLayout({
             <div className="flex flex-1 flex-col overflow-hidden">
                 <Header />
                 <main className="flex-1 overflow-y-auto bg-muted/10 p-6">
-                    {children}
+                    <Breadcrumbs />
+                    <ErrorBoundary>
+                        {children}
+                    </ErrorBoundary>
                 </main>
             </div>
             <GlobalSearch />
         </div>
     );
 }
+

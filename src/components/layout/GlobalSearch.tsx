@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import {
+    Search,
+    Receipt,
+    Users,
+    Building2,
+    Settings,
+    FileText,
+    Bell,
+    Wallet,
+    FolderTree,
+    RotateCcw
+} from "lucide-react";
 import {
     CommandDialog,
     CommandInput,
@@ -10,7 +21,23 @@ import {
     CommandEmpty,
     CommandGroup,
     CommandItem,
+    CommandSeparator,
 } from "@/components/ui/command";
+
+// Quick navigation pages
+const navigationPages = [
+    { name: "Contas a Pagar", href: "/financeiro/contas-pagar", icon: Receipt, keywords: ["pagar", "despesas", "saidas"] },
+    { name: "Contas a Receber", href: "/financeiro/contas-receber", icon: Wallet, keywords: ["receber", "receitas", "entradas"] },
+    { name: "Lotes de Pagamento", href: "/financeiro/lotes", icon: FileText, keywords: ["lotes", "batch"] },
+    { name: "Recorrências", href: "/financeiro/recorrencias", icon: RotateCcw, keywords: ["recorrencia", "automatico"] },
+    { name: "Centros de Custo", href: "/centros-custo", icon: FolderTree, keywords: ["centro", "custo", "departamento"] },
+    { name: "Entidades", href: "/cadastros/entidades", icon: Users, keywords: ["fornecedor", "cliente", "entidade"] },
+    { name: "Empresas", href: "/configuracoes/empresas", icon: Building2, keywords: ["empresa", "company"] },
+    { name: "Usuários", href: "/configuracoes/usuarios", icon: Users, keywords: ["usuario", "user"] },
+    { name: "Configurações", href: "/configuracoes", icon: Settings, keywords: ["config", "settings"] },
+    { name: "Relatórios", href: "/relatorios", icon: FileText, keywords: ["relatorio", "report"] },
+    { name: "Notificações", href: "/notificacoes", icon: Bell, keywords: ["notificacao", "alerta"] },
+];
 
 export function GlobalSearch() {
     const [open, setOpen] = useState(false);
@@ -30,6 +57,17 @@ export function GlobalSearch() {
         return () => document.removeEventListener("keydown", handleKeyDown);
     }, []);
 
+    // Filter navigation pages based on query
+    const filteredPages = useMemo(() => {
+        if (!searchQuery.trim()) return navigationPages;
+
+        const query = searchQuery.toLowerCase().replace(/^\//, "");
+        return navigationPages.filter(page =>
+            page.name.toLowerCase().includes(query) ||
+            page.keywords.some(kw => kw.includes(query))
+        );
+    }, [searchQuery]);
+
     const handleSearch = useCallback(() => {
         if (searchQuery.trim()) {
             router.push(`/busca?q=${encodeURIComponent(searchQuery.trim())}`);
@@ -38,8 +76,14 @@ export function GlobalSearch() {
         }
     }, [searchQuery, router]);
 
+    const handleNavigate = useCallback((href: string) => {
+        router.push(href);
+        setOpen(false);
+        setSearchQuery("");
+    }, [router]);
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !searchQuery.startsWith("/")) {
             e.preventDefault();
             handleSearch();
         }
@@ -50,40 +94,48 @@ export function GlobalSearch() {
             open={open}
             onOpenChange={setOpen}
             title="Busca Global"
-            description="Buscar transações em todo o sistema"
+            description="Buscar transações ou navegar rapidamente"
         >
             <CommandInput
-                placeholder="Buscar transações..."
+                placeholder="Buscar ou digite / para navegar..."
                 value={searchQuery}
                 onValueChange={setSearchQuery}
                 onKeyDown={handleKeyDown}
             />
             <CommandList>
                 <CommandEmpty>
-                    {searchQuery.trim() ? (
-                        <div className="py-6 text-center">
-                            <p className="text-sm text-muted-foreground mb-2">
-                                Pressione <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">Enter</kbd> para buscar
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                                &quot;{searchQuery}&quot;
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="py-6 text-center text-sm text-muted-foreground">
-                            Digite para buscar transações...
-                        </div>
-                    )}
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                        Nenhum resultado encontrado.
+                    </div>
                 </CommandEmpty>
-                {searchQuery.trim() && (
-                    <CommandGroup heading="Ações">
-                        <CommandItem onSelect={handleSearch}>
-                            <Search className="mr-2 h-4 w-4" />
-                            <span>Buscar por &quot;{searchQuery}&quot;</span>
+
+                {/* Quick Navigation */}
+                <CommandGroup heading="Navegação Rápida">
+                    {filteredPages.slice(0, 6).map((page) => (
+                        <CommandItem
+                            key={page.href}
+                            onSelect={() => handleNavigate(page.href)}
+                        >
+                            <page.icon className="mr-2 h-4 w-4" />
+                            <span>{page.name}</span>
                         </CommandItem>
-                    </CommandGroup>
+                    ))}
+                </CommandGroup>
+
+                {/* Search action */}
+                {searchQuery.trim() && !searchQuery.startsWith("/") && (
+                    <>
+                        <CommandSeparator />
+                        <CommandGroup heading="Buscar">
+                            <CommandItem onSelect={handleSearch}>
+                                <Search className="mr-2 h-4 w-4" />
+                                <span>Buscar por &quot;{searchQuery}&quot;</span>
+                            </CommandItem>
+                        </CommandGroup>
+                    </>
                 )}
             </CommandList>
         </CommandDialog>
     );
 }
+

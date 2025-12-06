@@ -27,6 +27,7 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSortableData } from "@/hooks/useSortableData";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function EntitiesPage() {
     const { user } = useAuth();
@@ -37,6 +38,7 @@ export default function EntitiesPage() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
     const [activeTab, setActiveTab] = useState<string>("all");
+    const [deleteId, setDeleteId] = useState<string | null>(null);
 
     const fetchEntities = async () => {
         if (!selectedCompany) return;
@@ -86,16 +88,18 @@ export default function EntitiesPage() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Tem certeza que deseja excluir esta entidade?")) return;
+    const handleDelete = async () => {
+        if (!deleteId) return;
         if (!user || !selectedCompany) return;
         try {
-            await entityService.delete(id, { uid: user.uid, email: user.email }, selectedCompany.id);
+            await entityService.delete(deleteId, { uid: user.uid, email: user.email }, selectedCompany.id);
             toast.success("Entidade excluída com sucesso!");
             fetchEntities();
         } catch (error) {
             console.error("Error deleting entity:", error);
             toast.error("Erro ao excluir entidade.");
+        } finally {
+            setDeleteId(null);
         }
     };
 
@@ -205,7 +209,7 @@ export default function EntitiesPage() {
                                                         <Button variant="ghost" size="icon" onClick={() => openEditDialog(entity)}>
                                                             <Pencil className="h-4 w-4" />
                                                         </Button>
-                                                        <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(entity.id)}>
+                                                        <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => setDeleteId(entity.id)}>
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>
                                                     </div>
@@ -234,6 +238,16 @@ export default function EntitiesPage() {
                     />
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={!!deleteId}
+                onOpenChange={(open) => !open && setDeleteId(null)}
+                title="Excluir Entidade"
+                description="Tem certeza que deseja excluir esta entidade?"
+                confirmText="Excluir"
+                variant="destructive"
+                onConfirm={handleDelete}
+            />
         </div>
     );
 }

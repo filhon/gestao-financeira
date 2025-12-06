@@ -30,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useSortableData } from "@/hooks/useSortableData";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function UsersPage() {
     const { user: currentUser } = useAuth();
@@ -38,6 +39,7 @@ export default function UsersPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [selectedUserToApprove, setSelectedUserToApprove] = useState<UserProfile | null>(null);
     const [approvalRole, setApprovalRole] = useState<UserRole>("financial_manager");
+    const [rejectUserId, setRejectUserId] = useState<string | null>(null);
 
     const fetchUsers = async () => {
         try {
@@ -103,16 +105,18 @@ export default function UsersPage() {
         }
     };
 
-    const handleRejectUser = async (uid: string) => {
-        if (!confirm("Tem certeza que deseja rejeitar este usuário?")) return;
+    const handleRejectUser = async () => {
+        if (!rejectUserId) return;
         if (!currentUser) return;
         try {
-            await userService.updateStatus(uid, 'rejected', { uid: currentUser.uid, email: currentUser.email });
+            await userService.updateStatus(rejectUserId, 'rejected', { uid: currentUser.uid, email: currentUser.email });
             toast.success("Usuário rejeitado.");
             fetchUsers();
         } catch (error) {
             console.error("Error rejecting user:", error);
             toast.error("Erro ao rejeitar usuário.");
+        } finally {
+            setRejectUserId(null);
         }
     };
 
@@ -281,7 +285,7 @@ export default function UsersPage() {
                                                 <TableCell>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}</TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-2">
-                                                        <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleRejectUser(user.uid)}>
+                                                        <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => setRejectUserId(user.uid)}>
                                                             <XCircle className="h-4 w-4 mr-1" /> Rejeitar
                                                         </Button>
 
@@ -328,6 +332,16 @@ export default function UsersPage() {
                     </Card>
                 </TabsContent>
             </Tabs>
+
+            <ConfirmDialog
+                open={!!rejectUserId}
+                onOpenChange={(open) => !open && setRejectUserId(null)}
+                title="Rejeitar Usuário"
+                description="Tem certeza que deseja rejeitar este usuário? Ele não terá acesso ao sistema."
+                confirmText="Rejeitar"
+                variant="destructive"
+                onConfirm={handleRejectUser}
+            />
         </div>
     );
 }

@@ -34,6 +34,7 @@ import { CostCenterFormData } from "@/lib/validations/costCenter";
 
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useSortableData } from "@/hooks/useSortableData";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function CostCentersPage() {
     const { selectedCompany } = useCompany();
@@ -42,6 +43,7 @@ export default function CostCentersPage() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [deleteId, setDeleteId] = useState<string | null>(null);
 
     const fetchCostCenters = async () => {
         if (!selectedCompany) return;
@@ -87,13 +89,15 @@ export default function CostCentersPage() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Tem certeza que deseja excluir este centro de custo?")) return;
+    const handleDelete = async () => {
+        if (!deleteId) return;
         try {
-            await costCenterService.delete(id);
+            await costCenterService.delete(deleteId);
             await fetchCostCenters();
         } catch (error) {
             console.error("Error deleting cost center:", error);
+        } finally {
+            setDeleteId(null);
         }
     };
 
@@ -255,7 +259,7 @@ export default function CostCentersPage() {
                                                     variant="ghost"
                                                     size="icon"
                                                     className="text-red-500 hover:text-red-600"
-                                                    onClick={() => handleDelete(cc.id)}
+                                                    onClick={() => setDeleteId(cc.id)}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -268,6 +272,16 @@ export default function CostCentersPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <ConfirmDialog
+                open={!!deleteId}
+                onOpenChange={(open) => !open && setDeleteId(null)}
+                title="Excluir Centro de Custo"
+                description="Tem certeza que deseja excluir este centro de custo? Esta ação não pode ser desfeita."
+                confirmText="Excluir"
+                variant="destructive"
+                onConfirm={handleDelete}
+            />
         </div >
     );
 }

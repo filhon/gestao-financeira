@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { CompanyForm } from "@/components/features/companies/CompanyForm";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function CompaniesPage() {
     const { user } = useAuth();
@@ -34,6 +35,7 @@ export default function CompaniesPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+    const [deleteId, setDeleteId] = useState<string | null>(null);
 
     // Redirect if not admin
     useEffect(() => {
@@ -90,16 +92,18 @@ export default function CompaniesPage() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Tem certeza que deseja excluir esta empresa? Esta ação não pode ser desfeita.")) return;
+    const handleDelete = async () => {
+        if (!deleteId) return;
         try {
             if (!user) return;
-            await companyService.delete(id, { uid: user.uid, email: user.email });
+            await companyService.delete(deleteId, { uid: user.uid, email: user.email });
             toast.success("Empresa excluída com sucesso!");
             fetchCompanies();
         } catch (error) {
             console.error("Error deleting company:", error);
             toast.error("Erro ao excluir empresa.");
+        } finally {
+            setDeleteId(null);
         }
     };
 
@@ -166,7 +170,7 @@ export default function CompaniesPage() {
                                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(company)}>
                                                 <Pencil className="h-4 w-4" />
                                             </Button>
-                                            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(company.id)}>
+                                            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => setDeleteId(company.id)}>
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </div>
@@ -192,6 +196,16 @@ export default function CompaniesPage() {
                     />
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={!!deleteId}
+                onOpenChange={(open) => !open && setDeleteId(null)}
+                title="Excluir Empresa"
+                description="Tem certeza que deseja excluir esta empresa? Esta ação não pode ser desfeita."
+                confirmText="Excluir"
+                variant="destructive"
+                onConfirm={handleDelete}
+            />
         </div>
     );
 }
