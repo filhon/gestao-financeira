@@ -1,22 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
 
+// Use useSyncExternalStore to detect client-side hydration
+// This avoids the "setState in useEffect" warning
+const emptySubscribe = () => () => { };
+const getSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => {
-        setMounted(true);
-    }, []);
+    const mounted = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
 
     // Avoid hydration mismatch with Radix UI components that generate dynamic IDs
     if (!mounted) {
