@@ -22,6 +22,7 @@ interface AuthContextType {
     loading: boolean;
     loginWithGoogle: () => Promise<void>;
     loginWithEmail: (email: string, password: string) => Promise<void>;
+    registerWithEmail: (email: string, password: string, name: string) => Promise<void>;
     logout: () => Promise<void>;
 }
 
@@ -54,7 +55,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                             router.push('/pending-approval');
                         }
                     } else {
-                        // Create new user profile if it doesn't exist
+                        // Create new user profile if it doesn't exist (First Login with Google usually)
+                        // Note: Registration flow handles this manually, but this is a fallback for Google Sign In
                         const newUser: UserProfile = {
                             uid: firebaseUser.uid,
                             email: firebaseUser.email!,
@@ -116,6 +118,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    const registerWithEmail = async (email: string, password: string, name: string) => {
+        try {
+            // 1. Create Auth User
+            const userCredential = await import("firebase/auth").then(m => m.createUserWithEmailAndPassword(auth, email, password));
+            const firebaseUser = userCredential.user;
+
+            // 2. Update Profile Name
+            await import("firebase/auth").then(m => m.updateProfile(firebaseUser, { displayName: name }));
+
+            // 3. Create Firestore Profile (explicitly here to ensure setting name correctly)
+            const userDocRef = doc(db, "users", firebaseUser.uid);
+            const newUser: UserProfile = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email!,
+                displayName: name, // Use provided name
+                photoURL: firebaseUser.photoURL || undefined,
+                role: 'auditor', // Safe default
+                companyRoles: {},
+                active: false, // Pending approval
+                status: 'pending',
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            };
+
+            await setDoc(userDocRef, {
+                ...newUser,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+
+            // State update will happen via onAuthStateChanged, but we can push navigation if needed.
+            // onAuthStateChanged will pick it up and redirect to /pending-approval anyway.
+        } catch (error) {
+            console.error("Error registering:", error);
+            throw error;
+        }
+    };
+
     const logout = async () => {
         try {
             await signOut(auth);
@@ -128,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, loading, loginWithGoogle, loginWithEmail, logout }}>
+        <AuthContext.Provider value={{ user, loading, loginWithGoogle, loginWithEmail, registerWithEmail, logout }}>
             {children}
         </AuthContext.Provider>
     );
