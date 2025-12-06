@@ -1,11 +1,14 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { Loader2 } from "lucide-react";
 
 // Use useSyncExternalStore to detect client-side hydration
 // This avoids the "setState in useEffect" warning
@@ -19,6 +22,20 @@ export default function DashboardLayout({
     children: React.ReactNode;
 }) {
     const mounted = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
+    const { user, loading } = useAuth();
+    const router = useRouter();
+
+    // Security: Block pending/rejected users from accessing dashboard
+    // Backward compatibility: if status is missing but active is true, treat as 'active'
+    const effectiveStatus = user?.status || (user?.active ? 'active' : 'pending');
+    if (!loading && user && effectiveStatus !== 'active') {
+        router.push('/pending-approval');
+        return (
+            <div className="flex h-screen items-center justify-center bg-background">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
 
     // Avoid hydration mismatch with Radix UI components that generate dynamic IDs
     if (!mounted) {

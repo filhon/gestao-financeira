@@ -50,8 +50,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         setUser(userData);
                         Cookies.set("user_role", userData.role, { expires: 1 / 24 });
 
+                        // Backward compatibility: if status is missing but active is true, treat as 'active'
+                        const effectiveStatus = userData.status || (userData.active ? 'active' : 'pending');
+                        Cookies.set("user_status", effectiveStatus, { expires: 1 / 24 });
+
                         // Redirect if pending
-                        if (userData.status === 'pending' && window.location.pathname !== '/pending-approval') {
+                        if (effectiveStatus === 'pending' && window.location.pathname !== '/pending-approval') {
                             router.push('/pending-approval');
                         }
                     } else {
@@ -78,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
                         setUser(newUser);
                         Cookies.set("user_role", newUser.role, { expires: 1 / 24 });
+                        Cookies.set("user_status", 'pending', { expires: 1 / 24 });
                         router.push('/pending-approval');
                     }
                 } catch (error) {
@@ -85,11 +90,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     setUser(null);
                     Cookies.remove("auth_token");
                     Cookies.remove("user_role");
+                    Cookies.remove("user_status");
                 }
             } else {
                 setUser(null);
                 Cookies.remove("auth_token");
                 Cookies.remove("user_role");
+                Cookies.remove("user_status");
             }
             setLoading(false);
         });
@@ -161,6 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await signOut(auth);
             Cookies.remove("auth_token");
             Cookies.remove("user_role");
+            Cookies.remove("user_status");
             router.push("/login");
         } catch (error) {
             console.error("Error logging out:", error);

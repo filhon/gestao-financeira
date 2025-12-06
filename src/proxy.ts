@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const publicRoutes = ["/login"];
+const publicRoutes = ["/login", "/pending-approval"];
 
 export function proxy(request: NextRequest) {
     const token = request.cookies.get("auth_token")?.value;
-    const role = request.cookies.get("user_role")?.value;
+    const status = request.cookies.get("user_status")?.value;
     const { pathname } = request.nextUrl;
 
     // Check if route is public
-    if (publicRoutes.includes(pathname)) {
-        // If user is logged in and tries to access login, redirect to dashboard
-        if (token) {
+    if (publicRoutes.some(route => pathname === route || pathname.startsWith(route + "/"))) {
+        // If user is logged in and active, redirect login to dashboard
+        if (token && status === 'active' && pathname === '/login') {
             return NextResponse.redirect(new URL("/", request.url));
         }
         return NextResponse.next();
@@ -22,10 +22,10 @@ export function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    // RBAC Logic (Example)
-    // if (pathname.startsWith("/configuracoes") && role !== "admin") {
-    //   return NextResponse.redirect(new URL("/", request.url));
-    // }
+    // SECURITY: Block pending/rejected users from accessing protected routes
+    if (status !== 'active') {
+        return NextResponse.redirect(new URL("/pending-approval", request.url));
+    }
 
     return NextResponse.next();
 }

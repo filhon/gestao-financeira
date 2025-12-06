@@ -1,0 +1,125 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get current user's data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if user is active (approved)
+    // Backward compatibility: check both 'status' and legacy 'active' field
+    function isActiveUser() {
+      let userData = getUserData();
+      return isAuthenticated() && (userData.status == 'active' || userData.active == true);
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isActiveUser() && getUserData().role == 'admin';
+    }
+    
+    // Helper function to check company role
+    function hasCompanyRole(companyId, roles) {
+      let userData = getUserData();
+      return userData.role in roles || 
+             (userData.companyRoles != null && 
+              companyId in userData.companyRoles && 
+              userData.companyRoles[companyId] in roles);
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Admins can read all users
+      allow read: if isAdmin();
+      
+      // Users can create their own profile on first login
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Only admins can update user status and role
+      allow update: if isAdmin() || 
+                       (request.auth.uid == userId && 
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'companyRoles']));
+    }
+    
+    // Companies collection
+    match /companies/{companyId} {
+      // Only active users can read companies
+      allow read: if isActiveUser();
+      
+      // Only admins can write companies
+      allow write: if isAdmin();
+    }
+    
+    // Transactions collection
+    match /transactions/{transactionId} {
+      // Only active users can read transactions from their company
+      allow read: if isActiveUser() && 
+                     resource.data.companyId in getUserData().companyRoles.keys();
+      
+      // Active users can create transactions
+      allow create: if isActiveUser();
+      
+      // Updates depend on role
+      allow update: if isActiveUser() && 
+                       hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager', 'approver', 'releaser']);
+      
+      // Only admin and financial_manager can delete
+      allow delete: if isActiveUser() && 
+                       hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager']);
+    }
+    
+    // Cost Centers collection
+    match /costCenters/{costCenterId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser() && 
+                      hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager']);
+    }
+    
+    // Entities (suppliers/clients) collection
+    match /entities/{entityId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser() && 
+                      hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager']);
+    }
+    
+    // Audit Logs - read only for admins and auditors
+    match /auditLogs/{logId} {
+      allow read: if isActiveUser() && 
+                     hasCompanyRole(resource.data.companyId, ['admin', 'auditor']);
+      allow create: if isActiveUser();
+      allow update, delete: if false; // Audit logs are immutable
+    }
+    
+    // Payment Batches
+    match /paymentBatches/{batchId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser() && 
+                      hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager', 'releaser']);
+    }
+    
+    // Recurring Templates
+    match /recurringTemplates/{templateId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser() && 
+                      hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager']);
+    }
+    
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isActiveUser();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
