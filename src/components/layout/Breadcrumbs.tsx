@@ -3,7 +3,11 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight, Home } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { userService } from "@/lib/services/userService";
+import { costCenterService } from "@/lib/services/costCenterService";
+import { useCompany } from "@/components/providers/CompanyProvider";
 
 // Map of paths to display names
 const pathNames: Record<string, string> = {
@@ -27,21 +31,84 @@ const pathNames: Record<string, string> = {
 
 export function Breadcrumbs() {
     const pathname = usePathname();
+    const { user } = useAuth();
+    const { selectedCompany } = useCompany();
+    const [dynamicLabels, setDynamicLabels] = useState<Record<string, string>>({});
 
-    // Don't show breadcrumbs on root
+    const segments = pathname.split("/").filter(Boolean);
+
+    // Fetch dynamic labels for IDs - hooks must be called before any early returns
+    useEffect(() => {
+        // Don't fetch for root pages
+        if (pathname === "/" || pathname === "/login") return;
+
+        const fetchDynamicLabels = async () => {
+            const labels: Record<string, string> = {};
+
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                const prevSegment = segments[i - 1];
+
+                // Check if it's a dynamic ID (UUID-like or Firebase ID)
+                if (segment.match(/^[a-zA-Z0-9]{20,}$/i)) {
+                    // Profile page
+                    if (prevSegment === "perfil") {
+                        if (user && segment === user.uid) {
+                            labels[segment] = "Meu Perfil";
+                        } else {
+                            // Admin viewing another user's profile
+                            try {
+                                const profileUser = await userService.getById(segment);
+                                labels[segment] = profileUser?.displayName || "Perfil";
+                            } catch {
+                                labels[segment] = "Perfil";
+                            }
+                        }
+                    }
+                    // Cost center page
+                    else if (prevSegment === "centros-custo") {
+                        if (selectedCompany) {
+                            try {
+                                const costCenters = await costCenterService.getAll(selectedCompany.id);
+                                const cc = costCenters.find(c => c.id === segment);
+                                labels[segment] = cc?.name || "Detalhes";
+                            } catch {
+                                labels[segment] = "Detalhes";
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (Object.keys(labels).length > 0) {
+                setDynamicLabels(labels);
+            }
+        };
+
+        fetchDynamicLabels();
+    }, [pathname, user, selectedCompany, segments]);
+
+    // Don't show breadcrumbs on root - this return is now AFTER all hooks
     if (pathname === "/" || pathname === "/login") {
         return null;
     }
-
-    const segments = pathname.split("/").filter(Boolean);
 
     // Build breadcrumb items
     const breadcrumbs = segments.map((segment, index) => {
         const href = "/" + segments.slice(0, index + 1).join("/");
         const isLast = index === segments.length - 1;
 
-        // Skip dynamic segments like [id] - show them as the previous segment's detail
-        if (segment.match(/^[a-f0-9-]{20,}$/i)) {
+        // Check if we have a dynamic label for this segment
+        if (dynamicLabels[segment]) {
+            return {
+                href,
+                label: dynamicLabels[segment],
+                isLast,
+            };
+        }
+
+        // Skip dynamic segments if no label found yet
+        if (segment.match(/^[a-zA-Z0-9]{20,}$/i)) {
             return null;
         }
 
@@ -94,3 +161,4 @@ export function Breadcrumbs() {
         </nav>
     );
 }
+

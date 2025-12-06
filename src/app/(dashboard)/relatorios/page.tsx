@@ -7,12 +7,15 @@ import { transactionService } from "@/lib/services/transactionService";
 import { reportService } from "@/lib/services/reportService";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, FileText, Download } from "lucide-react";
+import { Loader2, FileText, Download, CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
 import { startOfMonth, endOfMonth, format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 export default function ReportsPage() {
     const { user } = useAuth();
@@ -20,8 +23,8 @@ export default function ReportsPage() {
     const [isLoading, setIsLoading] = useState(false);
 
     // Default to current month
-    const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), "yyyy-MM-dd"));
-    const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), "yyyy-MM-dd"));
+    const [startDate, setStartDate] = useState<Date>(startOfMonth(new Date()));
+    const [endDate, setEndDate] = useState<Date>(endOfMonth(new Date()));
     const [reportType, setReportType] = useState("cash_flow");
 
     const handleGenerate = async (formatType: 'pdf' | 'csv') => {
@@ -29,13 +32,6 @@ export default function ReportsPage() {
 
         try {
             setIsLoading(true);
-
-            // 1. Fetch Data
-            // We need a method to fetch by date range. 
-            // transactionService.getAll currently takes filters but maybe not range?
-            // Let's check transactionService.getAll implementation.
-            // Assuming we might need to fetch all and filter client side if service doesn't support range yet,
-            // or update service. For now, let's fetch all and filter client side to be safe.
 
             const allTransactions = await transactionService.getAll({ companyId: selectedCompany.id });
 
@@ -45,8 +41,7 @@ export default function ReportsPage() {
             end.setHours(23, 59, 59, 999);
 
             const filtered = allTransactions.filter(t => {
-                const date = t.dueDate; // Report based on due date or payment date? Usually Due Date for projection, Payment for realized.
-                // Let's use Due Date for now as it covers both paid and unpaid.
+                const date = t.dueDate;
                 return date >= start && date <= end;
             });
 
@@ -96,19 +91,63 @@ export default function ReportsPage() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-2">
                             <Label>Data Inicial</Label>
-                            <Input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                            />
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className={cn(
+                                            "w-full pl-3 text-left font-normal",
+                                            !startDate && "text-muted-foreground"
+                                        )}
+                                    >
+                                        {startDate ? (
+                                            format(startDate, "PPP", { locale: ptBR })
+                                        ) : (
+                                            <span>Selecione</span>
+                                        )}
+                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={startDate}
+                                        onSelect={(date) => date && setStartDate(date)}
+                                        initialFocus
+                                        locale={ptBR}
+                                    />
+                                </PopoverContent>
+                            </Popover>
                         </div>
                         <div className="space-y-2">
                             <Label>Data Final</Label>
-                            <Input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                            />
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className={cn(
+                                            "w-full pl-3 text-left font-normal",
+                                            !endDate && "text-muted-foreground"
+                                        )}
+                                    >
+                                        {endDate ? (
+                                            format(endDate, "PPP", { locale: ptBR })
+                                        ) : (
+                                            <span>Selecione</span>
+                                        )}
+                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={endDate}
+                                        onSelect={(date) => date && setEndDate(date)}
+                                        initialFocus
+                                        locale={ptBR}
+                                    />
+                                </PopoverContent>
+                            </Popover>
                         </div>
                         <div className="space-y-2">
                             <Label>Tipo de Relatório</Label>
@@ -148,3 +187,4 @@ export default function ReportsPage() {
         </div>
     );
 }
+

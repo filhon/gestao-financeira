@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     Card,
@@ -44,6 +44,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useSortableData } from "@/hooks/useSortableData";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // ...
 
@@ -64,6 +65,20 @@ export default function AccountsPayablePage() {
     const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
     const [openBatches, setOpenBatches] = useState<PaymentBatch[]>([]);
     const [newBatchName, setNewBatchName] = useState("");
+    const [deleteId, setDeleteId] = useState<string | null>(null);
+
+    // Check if user can delete transactions
+    // Admin: can delete any transaction in any company
+    // Financial Manager: can delete transactions in their company
+    // Normal users: cannot delete
+    const canDelete = () => {
+        if (!user || !selectedCompany) return false;
+        // Admin can always delete (check legacy role or companyRole)
+        if (user.role === 'admin') return true;
+        // Check company-specific role
+        const companyRole = user.companyRoles?.[selectedCompany.id];
+        return companyRole === 'admin' || companyRole === 'financial_manager';
+    };
 
     const fetchTransactions = async () => {
         if (!selectedCompany) return;
@@ -185,6 +200,20 @@ export default function AccountsPayablePage() {
     const handleViewDetails = (transaction: Transaction) => {
         setSelectedTransaction(transaction);
         setIsDetailsOpen(true);
+    };
+
+    const handleDelete = async () => {
+        if (!deleteId || !user || !selectedCompany) return;
+        try {
+            await transactionService.delete(deleteId, { uid: user.uid, email: user.email }, selectedCompany.id);
+            toast.success("Transação excluída com sucesso!");
+            fetchTransactions();
+        } catch (error) {
+            console.error("Error deleting transaction:", error);
+            toast.error("Erro ao excluir transação.");
+        } finally {
+            setDeleteId(null);
+        }
     };
 
     const getStatusBadge = (status: string) => {
@@ -366,13 +395,25 @@ export default function AccountsPayablePage() {
                                             </TableCell>
                                             <TableCell>{getStatusBadge(t.status)}</TableCell>
                                             <TableCell className="text-right">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => handleViewDetails(t)}
-                                                >
-                                                    Detalhes
-                                                </Button>
+                                                <div className="flex justify-end gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => handleViewDetails(t)}
+                                                    >
+                                                        Detalhes
+                                                    </Button>
+                                                    {canDelete() && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="text-red-500 hover:text-red-700"
+                                                            onClick={() => setDeleteId(t.id)}
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     ))
@@ -388,6 +429,16 @@ export default function AccountsPayablePage() {
                 isOpen={isDetailsOpen}
                 onClose={() => setIsDetailsOpen(false)}
                 onUpdate={fetchTransactions}
+            />
+
+            <ConfirmDialog
+                open={!!deleteId}
+                onOpenChange={(open) => !open && setDeleteId(null)}
+                title="Excluir Transação"
+                description="Tem certeza que deseja excluir esta transação? Esta ação não pode ser desfeita."
+                confirmText="Excluir"
+                variant="destructive"
+                onConfirm={handleDelete}
             />
         </div>
     );
