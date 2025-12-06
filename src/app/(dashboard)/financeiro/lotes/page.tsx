@@ -76,6 +76,7 @@ export default function PaymentBatchesPage() {
         }
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdateStatus = async (batchId: string, status: any) => {
         if (!user) return;
         try {

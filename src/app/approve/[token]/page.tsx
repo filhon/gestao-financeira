@@ -24,6 +24,7 @@ export default function ApprovalPage() {
             const approverId = user?.uid || 'magic-link';
             await transactionService.approveByToken(token, approverId);
             setStatus('success');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (error: any) {
             console.error("Approval error:", error);
             setStatus('error');

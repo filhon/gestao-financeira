@@ -218,6 +218,7 @@ export interface AuditLog {
     action: 'create' | 'update' | 'delete' | 'login' | 'approve' | 'reject';
     entity: 'transaction' | 'company' | 'user' | 'cost_center' | 'entity';
     entityId: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     details: Record<string, any>;
     ipAddress?: string;
     userAgent?: string;

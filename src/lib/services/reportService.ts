@@ -36,6 +36,7 @@ export const reportService = {
         const totalOut = transactions.filter(t => t.type === 'payable').reduce((acc, t) => acc + t.amount, 0);
         const balance = totalIn - totalOut;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const finalY = (doc as any).lastAutoTable.finalY + 10;
         doc.text(`Total Receitas: ${formatCurrency(totalIn)}`, 14, finalY);
         doc.text(`Total Despesas: ${formatCurrency(totalOut)}`, 14, finalY + 6);

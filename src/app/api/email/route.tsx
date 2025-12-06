@@ -3,9 +3,22 @@ import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
 export async function POST(request: Request) {
-    try {
-        const { type, to, data } = await request.json();
+    const { type, to, data } = await request.json();
 
+    let emailComponent;
+    let subject = "";
+
+    if (type === 'approval_request') {
+        emailComponent = <ApprovalRequestEmail {...data} />;
+        subject = `Aprovação Necessária: ${data.description}`;
+    } else if (type === 'status_update') {
+        emailComponent = <StatusUpdateEmail {...data} />;
+        subject = `Atualização de Status: ${data.description}`;
+    } else {
+        return NextResponse.json({ error: "Invalid email type" }, { status: 400 });
+    }
+
+    try {
         if (!process.env.RESEND_API_KEY) {
             console.warn("RESEND_API_KEY is missing. Email simulation:");
             console.log("To:", to);
@@ -16,18 +29,7 @@ export async function POST(request: Request) {
 
         const resend = new Resend(process.env.RESEND_API_KEY);
 
-        let emailComponent;
-        let subject = "";
 
-        if (type === 'approval_request') {
-            emailComponent = <ApprovalRequestEmail {...data} />;
-            subject = `Aprovação Necessária: ${data.description}`;
-        } else if (type === 'status_update') {
-            emailComponent = <StatusUpdateEmail {...data} />;
-            subject = `Atualização de Status: ${data.description}`;
-        } else {
-            return NextResponse.json({ error: "Invalid email type" }, { status: 400 });
-        }
 
         // Resend Free Tier Restriction: Can only send to verified email.
         // We redirect to the developer's email in dev mode.
@@ -52,6 +54,7 @@ export async function POST(request: Request) {
         }
 
         return NextResponse.json(result);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
         console.error("Email API Internal Error:", error);
         return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });

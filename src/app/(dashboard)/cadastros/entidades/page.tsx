@@ -57,6 +57,7 @@ export default function EntitiesPage() {
         fetchEntities();
     }, [selectedCompany, activeTab]);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleCreate = async (data: any) => {
         if (!selectedCompany || !user) return;
         try {
@@ -70,6 +71,7 @@ export default function EntitiesPage() {
         }
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdate = async (data: any) => {
         if (!selectedEntity || !user || !selectedCompany) return;
         try {

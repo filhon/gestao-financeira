@@ -18,6 +18,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
                     currency: "BRL",
                     minimumFractionDigits: 2,
                 }).format(value);
+                // eslint-disable-next-line
                 setDisplayValue(formatted);
             } else {
                 setDisplayValue("");
@@ -25,7 +26,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
         }, [value]);
 
         const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-            let inputValue = e.target.value;
+            const inputValue = e.target.value;
 
             // Remove non-numeric characters
             const numericValue = inputValue.replace(/\D/g, "");

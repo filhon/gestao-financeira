@@ -38,6 +38,7 @@ const convertDates = (data: DocumentData): Transaction => {
 };
 
 // Helper to remove undefined values for Firestore
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stripUndefined = (obj: any): any => {
     if (Array.isArray(obj)) {
         return obj.map(v => stripUndefined(v));
@@ -50,6 +51,7 @@ const stripUndefined = (obj: any): any => {
                 acc[key] = stripUndefined(value);
             }
             return acc;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         }, {} as any);
     }
     return obj;
@@ -147,6 +149,7 @@ export const transactionService = {
                             amount: totalAmount, // Show total amount in email
                             approvalToken: token,
                             requestOrigin: transactionData.requestOrigin
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         } as any, costCenter.approverEmail);
                     }
                 }
@@ -195,6 +198,7 @@ export const transactionService = {
                         amount: transactionData.amount,
                         approvalToken: token,
                         requestOrigin: transactionData.requestOrigin // Ensure this is passed
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     } as any, costCenter.approverEmail);
                 }
             }
@@ -264,6 +268,7 @@ export const transactionService = {
                 // For MVP, let's exclude 'dueDate' from batch updates or handle explicitly.
                 // Let's exclude 'dueDate' and 'installments' data from batch to be safe, unless needed.
 
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const { dueDate, installments, ...safeData } = data as any;
                 const cleanData = stripUndefined(safeData); // Sanitize data
 
@@ -317,6 +322,7 @@ export const transactionService = {
 
     updateStatus: async (id: string, status: TransactionStatus, user: { uid: string; email: string }, companyId: string) => {
         const docRef = doc(db, COLLECTION_NAME, id);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updateData: any = { status, updatedAt: serverTimestamp() };
         const userId = user.uid;
 

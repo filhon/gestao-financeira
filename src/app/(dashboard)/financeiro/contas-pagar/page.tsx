@@ -148,6 +148,7 @@ export default function AccountsPayablePage() {
                     description: data.description,
                     amount: data.amount,
                     type: 'payable',
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     frequency: data.recurrence.frequency as any,
                     interval: data.recurrence.interval || 1,
                     nextDueDate: data.dueDate,

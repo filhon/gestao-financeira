@@ -76,6 +76,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
     }, [selectedCompany, type]);
 
     const form = useForm<TransactionFormData>({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(transactionSchema) as any,
         defaultValues: {
             type,

@@ -2,6 +2,7 @@ import { Transaction } from "@/lib/types";
 
 interface EmailResponse {
     success?: boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     error?: any;
     id?: string;
 }

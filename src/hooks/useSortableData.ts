@@ -9,12 +9,13 @@ export const useSortableData = <T>(items: T[], config: SortConfig<T> = null) => 
     const [sortConfig, setSortConfig] = useState<SortConfig<T>>(config);
 
     const sortedItems = useMemo(() => {
-        let sortableItems = [...items];
+        const sortableItems = [...items];
         if (sortConfig !== null) {
             sortableItems.sort((a, b) => {
                 // Handle nested properties if key is a string with dots (e.g. "category.name")
                 const getValue = (item: T, path: string | keyof T) => {
                     if (typeof path === 'string' && path.includes('.')) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         return path.split('.').reduce((obj: any, key) => obj?.[key], item);
                     }
                     return item[path as keyof T];

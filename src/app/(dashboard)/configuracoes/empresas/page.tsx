@@ -60,6 +60,7 @@ export default function CompaniesPage() {
         fetchCompanies();
     }, []);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleCreate = async (data: any) => {
         try {
             if (!user) return;
@@ -73,6 +74,7 @@ export default function CompaniesPage() {
         }
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdate = async (data: any) => {
         if (!selectedCompany) return;
         try {

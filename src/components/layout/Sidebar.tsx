@@ -95,6 +95,7 @@ export function Sidebar() {
             item.items?.some(subItem => subItem.href === pathname)
         );
         if (activeGroup && !openGroups.includes(activeGroup.title)) {
+            // eslint-disable-next-line
             setOpenGroups(prev => [...prev, activeGroup.title]);
         }
     }, [pathname]);

@@ -28,6 +28,7 @@ export default function NotificationsPage() {
     };
 
     useEffect(() => {
+        // eslint-disable-next-line
         loadNotifications();
     }, [user]);
 

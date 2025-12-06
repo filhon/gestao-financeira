@@ -91,7 +91,7 @@ function SearchContent() {
                 <CardHeader>
                     <CardTitle>Transações encontradas</CardTitle>
                     <CardDescription>
-                        Resultados para: "{query}"
+                        Resultados para: &quot;{query}&quot;
                     </CardDescription>
                 </CardHeader>
                 <CardContent>

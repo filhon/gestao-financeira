@@ -76,6 +76,7 @@ export const recurrenceService = {
                 }
 
                 // Generate Transaction
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const newTransactionData: any = {
                     ...template.baseTransactionData,
                     description: `${template.description} (Recorrência)`,

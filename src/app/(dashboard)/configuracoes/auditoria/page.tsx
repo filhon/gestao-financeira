@@ -51,6 +51,7 @@ export default function AuditLogsPage() {
         if (!selectedCompany) return;
         try {
             setIsLoading(true);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const filter: any = {};
             if (filters.action !== "all") filter.action = filters.action;
             if (filters.entity !== "all") filter.entity = filters.entity;

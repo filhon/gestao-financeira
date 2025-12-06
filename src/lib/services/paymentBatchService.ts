@@ -121,6 +121,7 @@ export const paymentBatchService = {
         if (!batchSnap.exists()) throw new Error("Batch not found");
         const batchData = batchSnap.data() as PaymentBatch;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updateData: any = { status, updatedAt: serverTimestamp() };
         if (status === 'approved') {
             updateData.approvedBy = userId;
@@ -140,6 +141,7 @@ export const paymentBatchService = {
         if (transactionStatus) {
             batchData.transactionIds.forEach(tId => {
                 const tRef = doc(db, TRANSACTIONS_COLLECTION, tId);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const tUpdate: any = { status: transactionStatus };
                 if (status === 'approved') {
                     tUpdate.approvedBy = userId;
