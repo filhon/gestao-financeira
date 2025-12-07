@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useSortableData } from "@/hooks/useSortableData";
+import { usePermissions } from "@/hooks/usePermissions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // ...
@@ -55,27 +56,16 @@ export default function AccountsReceivablePage() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
-    // Check if user can delete transactions
-    // Admin: can delete any transaction in any company
-    // Financial Manager: can delete transactions in their company
-    // Normal users: cannot delete
-    const canDelete = () => {
-        if (!user || !selectedCompany) return false;
-        // Admin can always delete (check legacy role or companyRole)
-        if (user.role === 'admin') return true;
-        // Check company-specific role
-        const companyRole = user.companyRoles?.[selectedCompany.id];
-        return companyRole === 'admin' || companyRole === 'financial_manager';
-    };
+    // Use centralized permissions
+    const { canDeleteTransactions, canCreateTransactions, canViewAllTransactions } = usePermissions();
 
     const fetchTransactions = async () => {
         if (!selectedCompany || !user) return;
         try {
             let data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
 
-            // Filter transactions for 'user' role - they can only see their own transactions
-            const userRole = user.companyRoles?.[selectedCompany.id] || user.role;
-            if (userRole === 'user') {
+            // Filter transactions for users who can't view all - they can only see their own
+            if (!canViewAllTransactions) {
                 data = data.filter(t => t.createdBy === user.uid);
             }
 
@@ -171,25 +161,27 @@ export default function AccountsReceivablePage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">Contas a Receber</h1>
-                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Nova Receita
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-                        <DialogHeader>
-                            <DialogTitle>Nova Conta a Receber</DialogTitle>
-                        </DialogHeader>
-                        <TransactionForm
-                            type="receivable"
-                            onSubmit={handleSubmit}
-                            isLoading={isSubmitting}
-                            onCancel={() => setIsDialogOpen(false)}
-                        />
-                    </DialogContent>
-                </Dialog>
+                {canCreateTransactions && (
+                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button>
+                                <Plus className="mr-2 h-4 w-4" />
+                                Nova Receita
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Nova Conta a Receber</DialogTitle>
+                            </DialogHeader>
+                            <TransactionForm
+                                type="receivable"
+                                onSubmit={handleSubmit}
+                                isLoading={isSubmitting}
+                                onCancel={() => setIsDialogOpen(false)}
+                            />
+                        </DialogContent>
+                    </Dialog>
+                )}
             </div>
 
             <Card>
@@ -270,7 +262,7 @@ export default function AccountsReceivablePage() {
                                                     >
                                                         Detalhes
                                                     </Button>
-                                                    {canDelete() && (
+                                                    {canDeleteTransactions && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"

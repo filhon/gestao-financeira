@@ -44,6 +44,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useSortableData } from "@/hooks/useSortableData";
+import { usePermissions } from "@/hooks/usePermissions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // ...
@@ -67,27 +68,16 @@ export default function AccountsPayablePage() {
     const [newBatchName, setNewBatchName] = useState("");
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
-    // Check if user can delete transactions
-    // Admin: can delete any transaction in any company
-    // Financial Manager: can delete transactions in their company
-    // Normal users: cannot delete
-    const canDelete = () => {
-        if (!user || !selectedCompany) return false;
-        // Admin can always delete (check legacy role or companyRole)
-        if (user.role === 'admin') return true;
-        // Check company-specific role
-        const companyRole = user.companyRoles?.[selectedCompany.id];
-        return companyRole === 'admin' || companyRole === 'financial_manager';
-    };
+    // Use centralized permissions
+    const { canDeleteTransactions, canCreateTransactions, canViewAllTransactions } = usePermissions();
 
     const fetchTransactions = async () => {
         if (!selectedCompany || !user) return;
         try {
             let data = await transactionService.getAll({ type: "payable", companyId: selectedCompany.id });
 
-            // Filter transactions for 'user' role - they can only see their own transactions
-            const userRole = user.companyRoles?.[selectedCompany.id] || user.role;
-            if (userRole === 'user') {
+            // Filter transactions for users who can't view all - they can only see their own
+            if (!canViewAllTransactions) {
                 data = data.filter(t => t.createdBy === user.uid);
             }
 
@@ -289,25 +279,27 @@ export default function AccountsPayablePage() {
                             </DialogContent>
                         </Dialog>
                     )}
-                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                        <DialogTrigger asChild>
-                            <Button>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Nova Conta
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-                            <DialogHeader>
-                                <DialogTitle>Nova Conta a Pagar</DialogTitle>
-                            </DialogHeader>
-                            <TransactionForm
-                                type="payable"
-                                onSubmit={handleSubmit}
-                                isLoading={isSubmitting}
-                                onCancel={() => setIsDialogOpen(false)}
-                            />
-                        </DialogContent>
-                    </Dialog>
+                    {canCreateTransactions && (
+                        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Nova Conta
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+                                <DialogHeader>
+                                    <DialogTitle>Nova Conta a Pagar</DialogTitle>
+                                </DialogHeader>
+                                <TransactionForm
+                                    type="payable"
+                                    onSubmit={handleSubmit}
+                                    isLoading={isSubmitting}
+                                    onCancel={() => setIsDialogOpen(false)}
+                                />
+                            </DialogContent>
+                        </Dialog>
+                    )}
                 </div>
             </div>
 
@@ -410,7 +402,7 @@ export default function AccountsPayablePage() {
                                                     >
                                                         Detalhes
                                                     </Button>
-                                                    {canDelete() && (
+                                                    {canDeleteTransactions && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"

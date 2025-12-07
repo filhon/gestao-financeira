@@ -16,6 +16,7 @@ import {
     DollarSign,
     Database,
     Layers,
+    LucideIcon,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -23,9 +24,19 @@ import {
     CollapsibleContent,
     CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { usePermissions } from "@/hooks/usePermissions";
 
-const menuItems = [
+interface MenuItem {
+    title: string;
+    href?: string;
+    icon: LucideIcon;
+    items?: MenuItem[];
+    // Permission key - if specified, item is only shown if permission is true
+    permission?: keyof ReturnType<typeof usePermissions>;
+}
+
+const allMenuItems: MenuItem[] = [
     {
         title: "Dashboard",
         href: "/",
@@ -49,17 +60,20 @@ const menuItems = [
                 title: "Recorrências",
                 href: "/financeiro/recorrencias",
                 icon: RefreshCw,
+                permission: "canAccessSettings", // Only managers can see recurrences management
             },
             {
                 title: "Lotes de Pagamento",
                 href: "/financeiro/lotes",
                 icon: Layers,
+                permission: "canPayTransactions", // Only those who can pay
             },
         ],
     },
     {
         title: "Cadastros",
         icon: Database,
+        permission: "canManageCostCenters", // Only managers can see this section
         items: [
             {
                 title: "Centros de Custo",
@@ -77,17 +91,46 @@ const menuItems = [
         title: "Relatórios",
         href: "/relatorios",
         icon: FileText,
+        permission: "canViewAllTransactions", // Only those who can view all transactions
     },
     {
         title: "Configurações",
         href: "/configuracoes",
         icon: Settings,
+        permission: "canAccessSettings", // Only managers and admins
     },
 ];
 
 export function Sidebar() {
     const pathname = usePathname();
     const [openGroups, setOpenGroups] = useState<string[]>([]);
+    const permissions = usePermissions();
+
+    // Filter menu items based on permissions
+    const menuItems = useMemo(() => {
+        const filterItems = (items: MenuItem[]): MenuItem[] => {
+            return items
+                .filter(item => {
+                    // If no permission required, show the item
+                    if (!item.permission) return true;
+                    // Check if user has the required permission
+                    return permissions[item.permission] === true;
+                })
+                .map(item => {
+                    // If item has sub-items, filter them too
+                    if (item.items) {
+                        const filteredSubItems = filterItems(item.items);
+                        // Only include the group if it has visible sub-items
+                        if (filteredSubItems.length === 0) return null;
+                        return { ...item, items: filteredSubItems };
+                    }
+                    return item;
+                })
+                .filter((item): item is MenuItem => item !== null);
+        };
+
+        return filterItems(allMenuItems);
+    }, [permissions]);
 
     // Automatically open groups if a child is active
     useEffect(() => {
@@ -95,10 +138,9 @@ export function Sidebar() {
             item.items?.some(subItem => subItem.href === pathname)
         );
         if (activeGroup && !openGroups.includes(activeGroup.title)) {
-            // eslint-disable-next-line
             setOpenGroups(prev => [...prev, activeGroup.title]);
         }
-    }, [pathname]);
+    }, [pathname, menuItems]);
 
     const toggleGroup = (title: string) => {
         setOpenGroups(prev =>
@@ -155,7 +197,7 @@ export function Sidebar() {
                                         return (
                                             <Link
                                                 key={subItem.href}
-                                                href={subItem.href}
+                                                href={subItem.href!}
                                                 className={cn(
                                                     "flex items-center gap-3 rounded-lg pl-9 pr-3 py-2 text-sm font-medium transition-colors",
                                                     isActive
