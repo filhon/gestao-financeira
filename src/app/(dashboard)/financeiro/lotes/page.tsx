@@ -33,9 +33,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { BatchDetailsDialog } from "@/components/features/finance/BatchDetailsDialog";
 
+import { usePermissions } from "@/hooks/usePermissions";
+
 export default function PaymentBatchesPage() {
     const { selectedCompany } = useCompany();
     const { user } = useAuth();
+    const {
+        canManageBatches,
+        canApproveBatches,
+        canPayBatches
+    } = usePermissions();
+
     const [batches, setBatches] = useState<PaymentBatch[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -109,33 +117,35 @@ export default function PaymentBatchesPage() {
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <h1 className="text-3xl font-bold tracking-tight">Lotes de Pagamento</h1>
-                <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-                    <DialogTrigger asChild>
-                        <Button>
-                            <Plus className="mr-2 h-4 w-4" /> Novo Lote
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Criar Novo Lote</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-4 py-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="name">Nome do Lote</Label>
-                                <Input
-                                    id="name"
-                                    placeholder="Ex: Pagamentos Semana 42"
-                                    value={newBatchName}
-                                    onChange={(e) => setNewBatchName(e.target.value)}
-                                />
+                {canManageBatches && (
+                    <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                        <DialogTrigger asChild>
+                            <Button>
+                                <Plus className="mr-2 h-4 w-4" /> Novo Lote
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Criar Novo Lote</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-4 py-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="name">Nome do Lote</Label>
+                                    <Input
+                                        id="name"
+                                        placeholder="Ex: Pagamentos Semana 42"
+                                        value={newBatchName}
+                                        onChange={(e) => setNewBatchName(e.target.value)}
+                                    />
+                                </div>
                             </div>
-                        </div>
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancelar</Button>
-                            <Button onClick={handleCreateBatch}>Criar</Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancelar</Button>
+                                <Button onClick={handleCreateBatch}>Criar</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                )}
             </div>
 
             <div className="border rounded-lg">
@@ -179,17 +189,17 @@ export default function PaymentBatchesPage() {
                                                     Ver Detalhes
                                                 </DropdownMenuItem>
                                                 <DropdownMenuSeparator />
-                                                {batch.status === 'open' && (
+                                                {batch.status === 'open' && canManageBatches && (
                                                     <DropdownMenuItem onClick={() => handleUpdateStatus(batch.id, 'pending_approval')}>
                                                         Enviar para Aprovação
                                                     </DropdownMenuItem>
                                                 )}
-                                                {batch.status === 'pending_approval' && (
+                                                {batch.status === 'pending_approval' && canApproveBatches && (
                                                     <DropdownMenuItem onClick={() => handleUpdateStatus(batch.id, 'approved')}>
                                                         Aprovar Lote
                                                     </DropdownMenuItem>
                                                 )}
-                                                {batch.status === 'approved' && (
+                                                {batch.status === 'approved' && canPayBatches && (
                                                     <DropdownMenuItem onClick={() => handleUpdateStatus(batch.id, 'paid')}>
                                                         Marcar como Pago
                                                     </DropdownMenuItem>

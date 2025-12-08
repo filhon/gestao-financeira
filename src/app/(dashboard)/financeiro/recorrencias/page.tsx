@@ -23,9 +23,12 @@ import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+import { usePermissions } from "@/hooks/usePermissions";
+
 export default function RecorrenciasPage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
+    const { canManageRecurrences } = usePermissions();
     const [templates, setTemplates] = useState<RecurringTransactionTemplate[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -115,10 +118,12 @@ export default function RecorrenciasPage() {
                         Gerencie suas assinaturas e transações recorrentes.
                     </p>
                 </div>
-                <Button onClick={handleProcessNow} variant="outline">
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Verificar Pendências
-                </Button>
+                {canManageRecurrences && (
+                    <Button onClick={handleProcessNow} variant="outline">
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Verificar Pendências
+                    </Button>
+                )}
             </div>
 
             <Card>
@@ -166,24 +171,26 @@ export default function RecorrenciasPage() {
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <div className="flex justify-end gap-2">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => handleToggleActive(t)}
-                                                    title={t.active ? "Pausar" : "Ativar"}
-                                                >
-                                                    {t.active ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="text-red-500 hover:text-red-700"
-                                                    onClick={() => setDeleteId(t.id)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
+                                            {canManageRecurrences && (
+                                                <div className="flex justify-end gap-2">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => handleToggleActive(t)}
+                                                        title={t.active ? "Pausar" : "Ativar"}
+                                                    >
+                                                        {t.active ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-red-500 hover:text-red-700"
+                                                        onClick={() => setDeleteId(t.id)}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </TableCell>
                                     </TableRow>
                                 ))

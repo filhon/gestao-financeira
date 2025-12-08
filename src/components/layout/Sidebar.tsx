@@ -41,6 +41,7 @@ const allMenuItems: MenuItem[] = [
         title: "Dashboard",
         href: "/",
         icon: LayoutDashboard,
+        permission: "canViewDashboard", // Restricted to Admin/Manager/Approver/Releaser
     },
     {
         title: "Financeiro",
@@ -50,40 +51,43 @@ const allMenuItems: MenuItem[] = [
                 title: "Contas a Pagar",
                 href: "/financeiro/contas-pagar",
                 icon: Wallet,
+                permission: "canViewPayables",
             },
             {
                 title: "Contas a Receber",
                 href: "/financeiro/contas-receber",
                 icon: Receipt,
+                permission: "canViewReceivables",
             },
             {
                 title: "Recorrências",
                 href: "/financeiro/recorrencias",
                 icon: RefreshCw,
-                permission: "canAccessSettings", // Only managers can see recurrences management
+                permission: "canViewRecurrences",
             },
             {
                 title: "Lotes de Pagamento",
                 href: "/financeiro/lotes",
                 icon: Layers,
-                permission: "canPayTransactions", // Only those who can pay
+                permission: "canViewBatches",
             },
         ],
     },
     {
         title: "Cadastros",
         icon: Database,
-        permission: "canManageCostCenters", // Only managers can see this section
         items: [
             {
                 title: "Centros de Custo",
                 href: "/centros-custo",
                 icon: Building2,
+                permission: "canViewCostCenters",
             },
             {
-                title: "Outros Cadastros",
+                title: "Outros Cadastros", // Entities, etc.
                 href: "/cadastros",
                 icon: Users,
+                permission: "canViewEntities",
             },
         ],
     },
@@ -91,7 +95,7 @@ const allMenuItems: MenuItem[] = [
         title: "Relatórios",
         href: "/relatorios",
         icon: FileText,
-        permission: "canViewAllTransactions", // Only those who can view all transactions
+        permission: "canViewReports",
     },
     {
         title: "Configurações",

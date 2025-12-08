@@ -4,27 +4,52 @@ import Link from "next/link";
 import { Users, Building2, ChevronRight, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+import { useRouter } from "next/navigation";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useEffect } from "react";
+
 export default function SettingsPage() {
-    const settingsItems = [
+    const router = useRouter();
+    const {
+        canAccessSettings,
+        canManageUsers,
+        canManageCompanies,
+        canViewAuditLogs
+    } = usePermissions();
+
+    useEffect(() => {
+        if (!canAccessSettings) {
+            router.push("/");
+        }
+    }, [canAccessSettings, router]);
+
+    if (!canAccessSettings) return null;
+
+    const allItems = [
         {
             title: "Usuários",
             description: "Gerencie os usuários, funções e permissões de acesso.",
             href: "/configuracoes/usuarios",
             icon: Users,
+            show: canManageUsers,
         },
         {
             title: "Empresas",
             description: "Gerencie as empresas do grupo (Holding).",
             href: "/configuracoes/empresas",
             icon: Building2,
+            show: canManageCompanies,
         },
         {
             title: "Auditoria",
             description: "Visualize logs de segurança e ações críticas.",
             href: "/configuracoes/auditoria",
             icon: ShieldCheck,
+            show: canViewAuditLogs,
         },
     ];
+
+    const settingsItems = allItems.filter(item => item.show);
 
     return (
         <div className="space-y-6">

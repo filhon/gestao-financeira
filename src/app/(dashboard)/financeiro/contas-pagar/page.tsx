@@ -69,7 +69,11 @@ export default function AccountsPayablePage() {
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
     // Use centralized permissions
-    const { canDeleteTransactions, canCreateTransactions, canViewAllTransactions } = usePermissions();
+    const {
+        canDeletePayables,
+        canCreatePayables,
+        onlyOwnPayables
+    } = usePermissions();
 
     const fetchTransactions = async () => {
         if (!selectedCompany || !user) return;
@@ -77,7 +81,7 @@ export default function AccountsPayablePage() {
             let data = await transactionService.getAll({ type: "payable", companyId: selectedCompany.id });
 
             // Filter transactions for users who can't view all - they can only see their own
-            if (!canViewAllTransactions) {
+            if (onlyOwnPayables) {
                 data = data.filter(t => t.createdBy === user.uid);
             }
 
@@ -279,7 +283,7 @@ export default function AccountsPayablePage() {
                             </DialogContent>
                         </Dialog>
                     )}
-                    {canCreateTransactions && (
+                    {canCreatePayables && (
                         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                             <DialogTrigger asChild>
                                 <Button>
@@ -402,7 +406,7 @@ export default function AccountsPayablePage() {
                                                     >
                                                         Detalhes
                                                     </Button>
-                                                    {canDeleteTransactions && (
+                                                    {canDeletePayables && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"

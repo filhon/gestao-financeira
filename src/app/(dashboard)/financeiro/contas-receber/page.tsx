@@ -57,18 +57,15 @@ export default function AccountsReceivablePage() {
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
     // Use centralized permissions
-    const { canDeleteTransactions, canCreateTransactions, canViewAllTransactions } = usePermissions();
+    const {
+        canDeleteReceivables,
+        canCreateReceivables
+    } = usePermissions();
 
     const fetchTransactions = async () => {
         if (!selectedCompany || !user) return;
         try {
             let data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
-
-            // Filter transactions for users who can't view all - they can only see their own
-            if (!canViewAllTransactions) {
-                data = data.filter(t => t.createdBy === user.uid);
-            }
-
             setTransactions(data);
         } catch (error) {
             console.error("Error fetching transactions:", error);
@@ -161,7 +158,7 @@ export default function AccountsReceivablePage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">Contas a Receber</h1>
-                {canCreateTransactions && (
+                {canCreateReceivables && (
                     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                         <DialogTrigger asChild>
                             <Button>
@@ -262,7 +259,7 @@ export default function AccountsReceivablePage() {
                                                     >
                                                         Detalhes
                                                     </Button>
-                                                    {canDeleteTransactions && (
+                                                    {canDeleteReceivables && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"

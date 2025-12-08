@@ -29,9 +29,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+import { usePermissions } from "@/hooks/usePermissions";
+import { useRouter } from "next/navigation";
+
 export default function EntitiesPage() {
     const { user } = useAuth();
+    const router = useRouter();
     const { selectedCompany } = useCompany();
+    const { canManageEntities, canViewEntities } = usePermissions();
     const [entities, setEntities] = useState<Entity[]>([]);
     const { items: sortedEntities, requestSort, sortConfig } = useSortableData(entities);
     const [isLoading, setIsLoading] = useState(true);
@@ -39,6 +44,14 @@ export default function EntitiesPage() {
     const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
     const [activeTab, setActiveTab] = useState<string>("all");
     const [deleteId, setDeleteId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!canViewEntities) {
+            router.push("/");
+        }
+    }, [canViewEntities, router]);
+
+    if (!canViewEntities) return null;
 
     const fetchEntities = async () => {
         if (!selectedCompany) return;
@@ -122,9 +135,11 @@ export default function EntitiesPage() {
                         Gerencie fornecedores e clientes.
                     </p>
                 </div>
-                <Button onClick={openCreateDialog}>
-                    <Plus className="mr-2 h-4 w-4" /> Nova Entidade
-                </Button>
+                {canManageEntities && (
+                    <Button onClick={openCreateDialog}>
+                        <Plus className="mr-2 h-4 w-4" /> Nova Entidade
+                    </Button>
+                )}
             </div>
 
             <Tabs defaultValue="all" onValueChange={setActiveTab} className="space-y-4">
@@ -205,14 +220,16 @@ export default function EntitiesPage() {
                                                 </TableCell>
                                                 <TableCell>{entity.document || "-"}</TableCell>
                                                 <TableCell className="text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(entity)}>
-                                                            <Pencil className="h-4 w-4" />
-                                                        </Button>
-                                                        <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => setDeleteId(entity.id)}>
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </div>
+                                                    {canManageEntities && (
+                                                        <div className="flex justify-end gap-2">
+                                                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(entity)}>
+                                                                <Pencil className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => setDeleteId(entity.id)}>
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    )}
                                                 </TableCell>
                                             </TableRow>
                                         ))

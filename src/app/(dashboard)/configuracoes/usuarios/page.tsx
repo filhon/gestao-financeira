@@ -32,14 +32,27 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+import { usePermissions } from "@/hooks/usePermissions";
+import { useRouter } from "next/navigation";
+
 export default function UsersPage() {
     const { user: currentUser } = useAuth();
     const { selectedCompany } = useCompany();
+    const router = useRouter();
+    const { canManageUsers } = usePermissions();
     const [users, setUsers] = useState<UserProfile[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedUserToApprove, setSelectedUserToApprove] = useState<UserProfile | null>(null);
     const [approvalRole, setApprovalRole] = useState<UserRole>("financial_manager");
     const [rejectUserId, setRejectUserId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!canManageUsers) {
+            router.push("/");
+        }
+    }, [canManageUsers, router]);
+
+    if (!canManageUsers) return null;
 
     const fetchUsers = async () => {
         try {

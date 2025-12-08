@@ -33,11 +33,13 @@ import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function CostCentersPage() {
     const { selectedCompany } = useCompany();
+    const { canManageCostCenters } = usePermissions();
     const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -119,48 +121,50 @@ export default function CostCentersPage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">Centros de Custo</h1>
-                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button onClick={handleAddNew}>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Novo Centro de Custo
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-                        <DialogHeader>
-                            <DialogTitle>
-                                {editingId ? "Editar Centro de Custo" : "Novo Centro de Custo"}
-                            </DialogTitle>
-                        </DialogHeader>
-                        <CostCenterForm
-                            onSubmit={handleSubmit}
-                            isLoading={isSubmitting}
-                            onCancel={() => setIsDialogOpen(false)}
-                            availableCostCenters={costCenters}
-                            editingId={editingId}
-                            defaultValues={
-                                editingId
-                                    ? (() => {
-                                        const cc = costCenters.find((c) => c.id === editingId);
-                                        if (!cc) return undefined;
-                                        return {
-                                            name: cc.name,
-                                            code: cc.code,
-                                            description: cc.description,
-                                            parentId: cc.parentId,
-                                            budget: cc.budget,
-                                            budgetYear: new Date().getFullYear(),
-                                            allowedUserIds: cc.allowedUserIds,
-                                            approverEmail: cc.approverEmail,
-                                            releaserEmail: cc.releaserEmail,
-                                            budgetLimit: cc.budgetLimit,
-                                        };
-                                    })()
-                                    : undefined
-                            }
-                        />
-                    </DialogContent>
-                </Dialog>
+                {canManageCostCenters && (
+                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button onClick={handleAddNew}>
+                                <Plus className="mr-2 h-4 w-4" />
+                                Novo Centro de Custo
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>
+                                    {editingId ? "Editar Centro de Custo" : "Novo Centro de Custo"}
+                                </DialogTitle>
+                            </DialogHeader>
+                            <CostCenterForm
+                                onSubmit={handleSubmit}
+                                isLoading={isSubmitting}
+                                onCancel={() => setIsDialogOpen(false)}
+                                availableCostCenters={costCenters}
+                                editingId={editingId}
+                                defaultValues={
+                                    editingId
+                                        ? (() => {
+                                            const cc = costCenters.find((c) => c.id === editingId);
+                                            if (!cc) return undefined;
+                                            return {
+                                                name: cc.name,
+                                                code: cc.code,
+                                                description: cc.description,
+                                                parentId: cc.parentId,
+                                                budget: cc.budget,
+                                                budgetYear: new Date().getFullYear(),
+                                                allowedUserIds: cc.allowedUserIds,
+                                                approverEmail: cc.approverEmail,
+                                                releaserEmail: cc.releaserEmail,
+                                                budgetLimit: cc.budgetLimit,
+                                            };
+                                        })()
+                                        : undefined
+                                }
+                            />
+                        </DialogContent>
+                    </Dialog>
+                )}
             </div>
 
             <Card>
@@ -248,21 +252,25 @@ export default function CostCentersPage() {
                                                 {cc.releaserEmail || "-"}
                                             </TableCell>
                                             <TableCell className="text-right">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => handleEdit(cc)}
-                                                >
-                                                    <Pencil className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="text-red-500 hover:text-red-600"
-                                                    onClick={() => setDeleteId(cc.id)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+                                                {canManageCostCenters && (
+                                                    <>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => handleEdit(cc)}
+                                                        >
+                                                            <Pencil className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="text-red-500 hover:text-red-600"
+                                                            onClick={() => setDeleteId(cc.id)}
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </>
+                                                )}
                                             </TableCell>
                                         </TableRow>
                                     ))

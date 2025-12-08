@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { TransactionForm } from "./TransactionForm"; // Import Form
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface TransactionDetailsDialogProps {
     transaction: Transaction | null;
@@ -45,6 +46,13 @@ export function TransactionDetailsDialog({
 }: TransactionDetailsDialogProps) {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
+    const {
+        canEditPayables,
+        canApprovePayables,
+        canPayPayables,
+        canEditReceivables
+    } = usePermissions();
+
     const [isProcessing, setIsProcessing] = useState(false);
     const [isEditing, setIsEditing] = useState(false); // Edit Mode State
 
@@ -111,14 +119,12 @@ export function TransactionDetailsDialog({
 
     if (!transaction || !selectedCompany) return null;
 
-    // Permissions
-    const isAdmin = user?.role === 'admin';
-    const isFinancialManager = user?.role === 'financial_manager';
-    const isCreator = user?.uid === transaction.createdBy;
+    const isPayable = transaction.type === 'payable';
 
-    const canEdit = isAdmin || (isFinancialManager) || (isCreator); // Manager restricted to company by context usually
-    const canApprove = isAdmin || user?.role === 'approver' || isFinancialManager;
-    const canPay = isAdmin || user?.role === 'releaser' || isFinancialManager;
+    // Approval/Payment logic
+    const canEdit = isPayable ? canEditPayables : canEditReceivables;
+    const canApprove = isPayable ? canApprovePayables : canEditReceivables;
+    const canPay = isPayable ? canPayPayables : canEditReceivables;
 
     const handleStatusUpdate = async (newStatus: TransactionStatus) => {
         if (!user) return;

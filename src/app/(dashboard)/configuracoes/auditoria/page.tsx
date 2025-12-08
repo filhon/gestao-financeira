@@ -29,10 +29,13 @@ import {
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
+import { usePermissions } from "@/hooks/usePermissions";
+
 export default function AuditLogsPage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const router = useRouter();
+    const { canViewAuditLogs } = usePermissions();
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [filters, setFilters] = useState({
@@ -41,11 +44,11 @@ export default function AuditLogsPage() {
     });
 
     useEffect(() => {
-        if (user && user.role !== 'admin' && user.role !== 'auditor') {
-            toast.error("Acesso negado. Apenas administradores e auditores podem ver logs.");
+        if (!canViewAuditLogs) {
+            toast.error("Acesso negado.");
             router.push("/");
         }
-    }, [user, router]);
+    }, [canViewAuditLogs, router]);
 
     const fetchLogs = async () => {
         if (!selectedCompany) return;

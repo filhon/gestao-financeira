@@ -5,79 +5,164 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { UserRole } from "@/lib/types";
 
 export interface Permissions {
-    // User management
-    canManageUsers: boolean;
-    canApproveUsers: boolean;
+    // Dashboard
+    canViewDashboard: boolean;
 
-    // Settings
-    canAccessSettings: boolean;
+    // Transactions - Payables
+    canViewPayables: boolean;
+    canCreatePayables: boolean;
+    canEditPayables: boolean; // Full edit (description, amount, etc.) + Delete
+    canDeletePayables: boolean; // Explicit delete permission
+    canApprovePayables: boolean; // Change status to approved
+    canPayPayables: boolean; // Change status to paid
+    onlyOwnPayables: boolean; // Restriction: can only see/edit own transactions
+
+    // Transactions - Receivables
+    canViewReceivables: boolean;
+    canCreateReceivables: boolean;
+    canEditReceivables: boolean;
+    canDeleteReceivables: boolean;
+
+    // Modules
+    canViewRecurrences: boolean;
+    canManageRecurrences: boolean; // Create/Edit/Delete
+
+    canViewBatches: boolean;
+    canManageBatches: boolean; // Create/Edit/Delete
+    canApproveBatches: boolean;
+    canPayBatches: boolean;
+
+    canViewCostCenters: boolean;
+    canManageCostCenters: boolean; // Create/Edit/Delete
+
+    canViewEntities: boolean; // Suppliers/Clients
+    canManageEntities: boolean; // Create/Edit/Delete
+
+    canViewReports: boolean;
+
+    // Admin & Settings
+    canManageUsers: boolean;
     canManageCompanies: boolean;
     canViewAuditLogs: boolean;
+    canAccessSettings: boolean; // General settings access
 
-    // Transactions
-    canCreateTransactions: boolean;
-    canViewAllTransactions: boolean;
-    canApproveTransactions: boolean;
-    canPayTransactions: boolean;
-    canDeleteTransactions: boolean;
-
-    // Cost Centers
-    canManageCostCenters: boolean;
-
-    // Entities (suppliers/clients)
-    canManageEntities: boolean;
-
-    // Current role info
+    // Role Info
     currentRole: UserRole | null;
     isAdmin: boolean;
+    isFinancialManager: boolean;
 }
-
-const ADMIN_ROLES: UserRole[] = ['admin'];
-const MANAGER_ROLES: UserRole[] = ['admin', 'financial_manager'];
-const APPROVER_ROLES: UserRole[] = ['admin', 'financial_manager', 'approver'];
-const PAYER_ROLES: UserRole[] = ['admin', 'financial_manager', 'releaser'];
-const CREATOR_ROLES: UserRole[] = ['admin', 'financial_manager', 'approver', 'releaser', 'user'];
-const VIEWER_ROLES: UserRole[] = ['admin', 'financial_manager', 'approver', 'releaser', 'auditor'];
 
 export function usePermissions(): Permissions {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
 
     // Get effective role for current company
-    const currentRole: UserRole | null = user
-        ? (selectedCompany?.id && user.companyRoles?.[selectedCompany.id]) || user.role
-        : null;
+    // If global admin, role is 'admin'.
+    // If not global admin, check companyRoles[companyId].
+    const globalRole = user?.role;
+    const companyRole = (user && selectedCompany?.id && user.companyRoles?.[selectedCompany.id]) as UserRole | undefined;
 
-    const hasRole = (allowedRoles: UserRole[]): boolean => {
-        if (!currentRole) return false;
-        return allowedRoles.includes(currentRole);
-    };
+    const isGlobalAdmin = globalRole === 'admin';
+    const effectiveRole: UserRole | null = isGlobalAdmin ? 'admin' : (companyRole || null);
+
+    // Helpers
+    const isRole = (role: UserRole) => effectiveRole === role;
+    const isOneOf = (roles: UserRole[]) => effectiveRole ? roles.includes(effectiveRole) : false;
+
+    // Role definitions
+    const isAdmin = isGlobalAdmin;
+    const isManager = isRole('financial_manager');
+    const isApprover = isRole('approver');
+    const isReleaser = isRole('releaser');
+    const isAuditor = isRole('auditor');
+    const isUser = isRole('user');
+
+    // Combined Helpers
+    const isAdminOrManager = isAdmin || isManager;
 
     return {
-        // User management
-        canManageUsers: hasRole(ADMIN_ROLES),
-        canApproveUsers: hasRole(ADMIN_ROLES),
+        // Dashboard
+        // Admin, Manager, Approver, Releaser can view.
+        // Auditor, User cannot (Spec: "Não poderá visualizar o dashboard")
+        canViewDashboard: isOneOf(['admin', 'financial_manager', 'approver', 'releaser']),
 
-        // Settings
-        canAccessSettings: hasRole(MANAGER_ROLES),
-        canManageCompanies: hasRole(ADMIN_ROLES),
-        canViewAuditLogs: hasRole(['admin', 'auditor']),
+        // Payables
+        // View: Everyone except maybe User who has specific restriction? 
+        // Spec User: "Pode visualizar somente as contas a pagar incluídas por ele". So canView is true, but requires filter.
+        canViewPayables: true,
+        canCreatePayables: isOneOf(['admin', 'financial_manager', 'user']),
+        canEditPayables: isOneOf(['admin', 'financial_manager', 'user']), // User can edit own
+        canDeletePayables: isOneOf(['admin', 'financial_manager', 'user']), // User can delete own
+        canApprovePayables: isOneOf(['admin', 'financial_manager', 'approver']),
+        canPayPayables: isOneOf(['admin', 'financial_manager', 'releaser']),
+        onlyOwnPayables: isUser,
 
-        // Transactions
-        canCreateTransactions: hasRole(CREATOR_ROLES),
-        canViewAllTransactions: hasRole(VIEWER_ROLES),
-        canApproveTransactions: hasRole(APPROVER_ROLES),
-        canPayTransactions: hasRole(PAYER_ROLES),
-        canDeleteTransactions: hasRole(MANAGER_ROLES),
+        // Receivables
+        // User cannot view.
+        // Approver/Releaser/Auditor: View only.
+        // Admin/Manager: Full.
+        canViewReceivables: isOneOf(['admin', 'financial_manager', 'approver', 'releaser', 'auditor']),
+        canCreateReceivables: isAdminOrManager,
+        canEditReceivables: isAdminOrManager,
+        canDeleteReceivables: isAdminOrManager,
+
+        // Recurrences
+        // User/Auditor cannot view (Spec Auditor: "Não poderá visualizar recorrências"? 
+        // Wait, Spec Auditor item 5: "Não poderá visualizar recorrências...". Correct).
+        // Approver/Releaser: View only.
+        // Admin/Manager: Full.
+        canViewRecurrences: isOneOf(['admin', 'financial_manager', 'approver', 'releaser']),
+        canManageRecurrences: isAdminOrManager,
+
+        // Batches
+        // User/Auditor cannot view.
+        // Approver: View + Approve.
+        // Releaser: View + Pay.
+        // Admin/Manager: Full.
+        canViewBatches: isOneOf(['admin', 'financial_manager', 'approver', 'releaser']),
+        canManageBatches: isAdminOrManager,
+        canApproveBatches: isOneOf(['admin', 'financial_manager', 'approver']),
+        canPayBatches: isOneOf(['admin', 'financial_manager', 'releaser']),
 
         // Cost Centers
-        canManageCostCenters: hasRole(MANAGER_ROLES),
+        // User: View assigned (canView = true).
+        // Auditor: View.
+        // Allocators (everyone who creates tx needs to view).
+        // Spec: Approver/Releaser/Auditor/User can view details.
+        // Admin/Manager: Full.
+        canViewCostCenters: true, // Everyone active can view (restricted logic might apply for 'user' to only see allowed, but page access is allowed)
+        canManageCostCenters: isAdminOrManager,
 
         // Entities
-        canManageEntities: hasRole(MANAGER_ROLES),
+        // Spec:
+        // Approver: Hide.
+        // Auditor: Hide.
+        // User: Hide.
+        // Releaser: Same as Approver (Hide).
+        // Admin/Manager: Full.
+        canViewEntities: isAdminOrManager,
+        canManageEntities: isAdminOrManager,
 
-        // Role info
-        currentRole,
-        isAdmin: hasRole(ADMIN_ROLES),
+        // Reports
+        // User: No.
+        // Others: Yes.
+        canViewReports: isOneOf(['admin', 'financial_manager', 'approver', 'releaser', 'auditor']),
+
+        // Admin & Settings
+        canManageUsers: isAdminOrManager, // Manager manages company users
+        canManageCompanies: isAdmin, // Only global admin
+        canViewAuditLogs: isOneOf(['admin', 'auditor', 'approver', 'releaser']), // Spec: Admin, Approver(11), Auditor(7). Releaser (same as approver?). Releaser spec didn't explicitly say yes/no on logs but said "same as approver", so I assume Yes? 
+        // Re-reading Spec: "Usuários releaser... Terá o mesmo acesso do approver...".
+        // Approver item 11: "Poderá visualizar os logs de auditoria".
+        // Manager item 12: "Não poderá visualizar os logs de auditoria". STRANGE but spec says so.
+        // Admin: Yes.
+        // User: No.
+
+        canAccessSettings: isAdminOrManager, // General 'Settings' menu access
+
+        // Role Info
+        currentRole: effectiveRole,
+        isAdmin,
+        isFinancialManager: isManager,
     };
 }
