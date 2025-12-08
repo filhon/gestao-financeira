@@ -25,16 +25,15 @@ export function NotificationBell() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [isOpen, setIsOpen] = useState(false);
 
-    const fetchNotifications = async () => {
-        if (!user) return;
-        const data = await notificationService.getUserNotifications(user.uid);
-        setNotifications(data);
-        const count = await notificationService.getUnreadCount(user.uid);
-        setUnreadCount(count);
-    };
-
     useEffect(() => {
-        // eslint-disable-next-line
+        const fetchNotifications = async () => {
+            if (!user) return;
+            const data = await notificationService.getUserNotifications(user.uid);
+            setNotifications(data);
+            const count = await notificationService.getUnreadCount(user.uid);
+            setUnreadCount(count);
+        };
+
         fetchNotifications();
         // Poll every minute for new notifications
         const interval = setInterval(fetchNotifications, 60000);

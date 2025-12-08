@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,7 @@ import { TransactionDetailsDialog } from "@/components/features/finance/Transact
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+// ptBR removed
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -62,10 +62,10 @@ export default function AccountsReceivablePage() {
         canCreateReceivables
     } = usePermissions();
 
-    const fetchTransactions = async () => {
+    const fetchTransactions = useCallback(async () => {
         if (!selectedCompany || !user) return;
         try {
-            let data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
+            const data = await transactionService.getAll({ type: "receivable", companyId: selectedCompany.id });
             setTransactions(data);
         } catch (error) {
             console.error("Error fetching transactions:", error);
@@ -73,11 +73,11 @@ export default function AccountsReceivablePage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [selectedCompany, user]);
 
     useEffect(() => {
         fetchTransactions();
-    }, [selectedCompany]);
+    }, [fetchTransactions, selectedCompany]);
 
     const handleSubmit = async (data: TransactionFormData) => {
         if (!user || !selectedCompany) return;

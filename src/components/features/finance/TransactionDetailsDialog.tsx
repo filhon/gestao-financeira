@@ -115,7 +115,7 @@ export function TransactionDetailsDialog({
         if (isOpen) {
             fetchNames();
         }
-    }, [transaction, isOpen, selectedCompany]);
+    }, [transaction, isOpen, selectedCompany, costCenterNames, userNames]);
 
     if (!transaction || !selectedCompany) return null;
 

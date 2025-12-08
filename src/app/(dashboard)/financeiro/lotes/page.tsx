@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { PaymentBatch } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { Plus, Eye, MoreHorizontal } from "lucide-react";
+import { Plus, MoreHorizontal } from "lucide-react";
 import {
     Table,
     TableBody,
@@ -52,7 +52,7 @@ export default function PaymentBatchesPage() {
     const [selectedBatch, setSelectedBatch] = useState<PaymentBatch | null>(null);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
-    const fetchBatches = async () => {
+    const fetchBatches = useCallback(async () => {
         if (!selectedCompany) return;
         try {
             setIsLoading(true);
@@ -64,11 +64,11 @@ export default function PaymentBatchesPage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [selectedCompany]);
 
     useEffect(() => {
         fetchBatches();
-    }, [selectedCompany]);
+    }, [fetchBatches]);
 
     const handleCreateBatch = async () => {
         if (!selectedCompany || !user || !newBatchName.trim()) return;

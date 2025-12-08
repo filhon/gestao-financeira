@@ -52,7 +52,7 @@ export default function UsersPage() {
         }
     }, [canManageUsers, router]);
 
-    if (!canManageUsers) return null;
+    // Validating permissions...
 
     const fetchUsers = async () => {
         try {
@@ -168,6 +168,8 @@ export default function UsersPage() {
             </div>
         );
     }
+
+    if (!canManageUsers) return null;
 
     return (
         <div className="space-y-6">

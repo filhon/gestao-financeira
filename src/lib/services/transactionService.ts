@@ -18,7 +18,6 @@ import { TransactionFormData } from "@/lib/validations/transaction";
 import { format, addMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
-import { notificationService } from "@/lib/services/notificationService";
 import { auditService } from "@/lib/services/auditService";
 import { emailService } from "@/lib/services/emailService";
 
@@ -269,7 +268,9 @@ export const transactionService = {
                 // Let's exclude 'dueDate' and 'installments' data from batch to be safe, unless needed.
 
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const { dueDate, installments, ...safeData } = data as any;
+                const payload = data as any;
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { dueDate, installments: _installments, ...safeData } = payload;
                 const cleanData = stripUndefined(safeData); // Sanitize data
 
                 const updateData = {

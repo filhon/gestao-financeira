@@ -51,7 +51,9 @@ export default function EntitiesPage() {
         }
     }, [canViewEntities, router]);
 
-    if (!canViewEntities) return null;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const unused = null; // Placeholder to maintain structure or just empty
+
 
     const fetchEntities = async () => {
         if (!selectedCompany) return;
@@ -121,10 +123,13 @@ export default function EntitiesPage() {
         setIsDialogOpen(true);
     };
 
+
     const openCreateDialog = () => {
         setSelectedEntity(null);
         setIsDialogOpen(true);
     };
+
+    if (!canViewEntities) return null;
 
     return (
         <div className="space-y-6">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,7 +75,7 @@ export default function AccountsPayablePage() {
         onlyOwnPayables
     } = usePermissions();
 
-    const fetchTransactions = async () => {
+    const fetchTransactions = useCallback(async () => {
         if (!selectedCompany || !user) return;
         try {
             let data = await transactionService.getAll({ type: "payable", companyId: selectedCompany.id });
@@ -92,12 +92,12 @@ export default function AccountsPayablePage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [selectedCompany, user, onlyOwnPayables]);
 
     useEffect(() => {
         fetchTransactions();
         setSelectedIds(new Set()); // Clear selection on company change
-    }, [selectedCompany]);
+    }, [fetchTransactions, selectedCompany]);
 
     const toggleSelectAll = (checked: boolean) => {
         if (checked) {

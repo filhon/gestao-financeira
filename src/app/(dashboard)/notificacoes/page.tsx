@@ -18,17 +18,16 @@ export default function NotificationsPage() {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(true);
 
-    const loadNotifications = async () => {
-        if (user) {
-            setLoading(true);
-            const data = await notificationService.getUserNotifications(user.uid, 50);
-            setNotifications(data);
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
-        // eslint-disable-next-line
+        const loadNotifications = async () => {
+            if (user) {
+                setLoading(true);
+                const data = await notificationService.getUserNotifications(user.uid, 50);
+                setNotifications(data);
+                setLoading(false);
+            }
+        };
+
         loadNotifications();
     }, [user]);
 

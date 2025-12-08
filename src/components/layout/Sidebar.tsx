@@ -141,8 +141,8 @@ export function Sidebar() {
         const activeGroup = menuItems.find(item =>
             item.items?.some(subItem => subItem.href === pathname)
         );
-        if (activeGroup && !openGroups.includes(activeGroup.title)) {
-            setOpenGroups(prev => [...prev, activeGroup.title]);
+        if (activeGroup) {
+            setOpenGroups(prev => prev.includes(activeGroup.title) ? prev : [...prev, activeGroup.title]);
         }
     }, [pathname, menuItems]);
 

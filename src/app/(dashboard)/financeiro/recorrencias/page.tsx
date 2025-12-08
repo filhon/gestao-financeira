@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
@@ -17,7 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Trash2, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+// ptBR removed
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
@@ -33,7 +33,7 @@ export default function RecorrenciasPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
-    const fetchTemplates = async () => {
+    const fetchTemplates = useCallback(async () => {
         if (!selectedCompany) return;
         try {
             setIsLoading(true);
@@ -45,18 +45,18 @@ export default function RecorrenciasPage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [selectedCompany]);
 
     useEffect(() => {
         fetchTemplates();
-    }, [selectedCompany]);
+    }, [fetchTemplates, selectedCompany]);
 
     const handleToggleActive = async (template: RecurringTransactionTemplate) => {
         try {
             await recurrenceService.updateTemplate(template.id, { active: !template.active });
             toast.success(`Recorrência ${template.active ? 'pausada' : 'ativada'} com sucesso!`);
             fetchTemplates();
-        } catch (error) {
+        } catch {
             toast.error("Erro ao atualizar recorrência.");
         }
     };
@@ -67,7 +67,7 @@ export default function RecorrenciasPage() {
             await recurrenceService.deleteTemplate(deleteId);
             toast.success("Recorrência excluída com sucesso!");
             fetchTemplates();
-        } catch (error) {
+        } catch {
             toast.error("Erro ao excluir recorrência.");
         } finally {
             setDeleteId(null);

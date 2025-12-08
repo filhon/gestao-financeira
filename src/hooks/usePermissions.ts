@@ -72,9 +72,6 @@ export function usePermissions(): Permissions {
     // Role definitions
     const isAdmin = isGlobalAdmin;
     const isManager = isRole('financial_manager');
-    const isApprover = isRole('approver');
-    const isReleaser = isRole('releaser');
-    const isAuditor = isRole('auditor');
     const isUser = isRole('user');
 
     // Combined Helpers

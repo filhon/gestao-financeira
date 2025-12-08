@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { auditService } from "@/lib/services/auditService";
@@ -15,10 +15,9 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Search } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Input } from "@/components/ui/input";
 import {
     Select,
     SelectContent,
@@ -32,7 +31,6 @@ import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 
 export default function AuditLogsPage() {
-    const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const router = useRouter();
     const { canViewAuditLogs } = usePermissions();
@@ -50,7 +48,7 @@ export default function AuditLogsPage() {
         }
     }, [canViewAuditLogs, router]);
 
-    const fetchLogs = async () => {
+    const fetchLogs = useCallback(async () => {
         if (!selectedCompany) return;
         try {
             setIsLoading(true);
@@ -67,11 +65,11 @@ export default function AuditLogsPage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [selectedCompany, filters]);
 
     useEffect(() => {
         fetchLogs();
-    }, [selectedCompany, filters]);
+    }, [fetchLogs]);
 
     const getActionBadge = (action: string) => {
         switch (action) {
