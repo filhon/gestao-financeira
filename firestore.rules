@@ -22,13 +22,16 @@ service cloud.firestore {
     }
     
     function getUserData() {
-      return getUserDoc().data;
+      let userDoc = getUserDoc();
+      return userDoc != null ? userDoc.data : null;
     }
 
     // -> Role Checks
     function isGlobalAdmin() {
       // Check if user has 'admin' in the top-level 'role' field
-      return isAuthenticated() && getUserData().role == 'admin';
+      let userData = getUserData();
+      // Safe check: userData might be null if new user
+      return isAuthenticated() && userData != null && userData.role == 'admin';
     }
 
     function isActiveUser() {
@@ -65,7 +68,22 @@ service cloud.firestore {
     function isApprover(companyId) {
       return hasCompanyRole(companyId, 'approver');
     }
-// ...
+    function isReleaser(companyId) {
+      return hasCompanyRole(companyId, 'releaser');
+    }
+
+    function isAuditor(companyId) {
+      return hasCompanyRole(companyId, 'auditor');
+    }
+
+    function isSimpleUser(companyId) {
+      return hasCompanyRole(companyId, 'user');
+    }
+
+    // Group Checks
+    function isManagerOrAdmin(companyId) {
+       return isGlobalAdmin() || isFinancialManager(companyId);
+    }
     // ----------------------------------------------------------------------------------
     // Cost Centers
     // ----------------------------------------------------------------------------------
