@@ -7,6 +7,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { userService } from "@/lib/services/userService";
 import { costCenterService } from "@/lib/services/costCenterService";
+import { entityService } from "@/lib/services/entityService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 
 // Map of paths to display names
@@ -72,6 +73,18 @@ export function Breadcrumbs() {
                                 const costCenters = await costCenterService.getAll(selectedCompany.id);
                                 const cc = costCenters.find(c => c.id === segment);
                                 labels[segment] = cc?.name || "Detalhes";
+                            } catch {
+                                labels[segment] = "Detalhes";
+                            }
+                        }
+                    }
+                    // Entity page
+                    else if (prevSegment === "entidades") {
+                        if (selectedCompany) {
+                            try {
+                                const entities = await entityService.getAll(selectedCompany.id);
+                                const entity = entities.find(e => e.id === segment);
+                                labels[segment] = entity?.name || "Detalhes";
                             } catch {
                                 labels[segment] = "Detalhes";
                             }

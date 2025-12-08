@@ -47,8 +47,14 @@ export const entityService = {
 
     create: async (data: Omit<Entity, "id" | "createdAt" | "updatedAt">, user: { uid: string; email: string }): Promise<Entity> => {
         const now = new Date();
+
+        // Remove undefined values (Firestore doesn't accept them)
+        const cleanData = Object.fromEntries(
+            Object.entries(data).filter(([_, value]) => value !== undefined)
+        );
+
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-            ...data,
+            ...cleanData,
             createdAt: Timestamp.fromDate(now),
             updatedAt: Timestamp.fromDate(now),
         });
@@ -75,8 +81,13 @@ export const entityService = {
         const docRef = doc(db, COLLECTION_NAME, id);
         const now = new Date();
 
+        // Remove undefined values (Firestore doesn't accept them)
+        const cleanData = Object.fromEntries(
+            Object.entries(data).filter(([_, value]) => value !== undefined)
+        );
+
         await updateDoc(docRef, {
-            ...data,
+            ...cleanData,
             updatedAt: Timestamp.fromDate(now),
         });
 

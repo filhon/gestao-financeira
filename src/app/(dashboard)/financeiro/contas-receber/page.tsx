@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Loader2, Trash2 } from "lucide-react";
+import { Plus, Loader2, Trash2, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     Card,
@@ -254,10 +254,11 @@ export default function AccountsReceivablePage() {
                                                 <div className="flex justify-end gap-1">
                                                     <Button
                                                         variant="ghost"
-                                                        size="sm"
+                                                        size="icon"
                                                         onClick={() => handleViewDetails(t)}
+                                                        title="Ver detalhes"
                                                     >
-                                                        Detalhes
+                                                        <Eye className="h-4 w-4" />
                                                     </Button>
                                                     {canDeleteReceivables && (
                                                         <Button

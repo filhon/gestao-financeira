@@ -133,13 +133,9 @@ export function usePermissions(): Permissions {
         canManageCostCenters: isAdminOrManager,
 
         // Entities
-        // Spec:
-        // Approver: Hide.
-        // Auditor: Hide.
-        // User: Hide.
-        // Releaser: Same as Approver (Hide).
-        // Admin/Manager: Full.
-        canViewEntities: isAdminOrManager,
+        // Updated: Admin, Manager, Approver, Releaser can VIEW entities dashboard
+        // Only Admin/Manager can manage (create/edit/delete)
+        canViewEntities: isOneOf(['admin', 'financial_manager', 'approver', 'releaser']),
         canManageEntities: isAdminOrManager,
 
         // Reports

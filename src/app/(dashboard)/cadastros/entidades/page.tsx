@@ -20,7 +20,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, Users, Building2, User, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, Building2, User, Loader2, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { EntityForm } from "@/components/features/entities/EntityForm";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -206,14 +206,17 @@ export default function EntitiesPage() {
                                         </TableRow>
                                     ) : (
                                         sortedEntities.map((entity) => (
-                                            <TableRow key={entity.id}>
-                                                <TableCell className="font-medium flex items-center gap-2">
+                                            <TableRow key={entity.id} className="cursor-pointer hover:bg-muted/50">
+                                                <TableCell
+                                                    className="font-medium flex items-center gap-2"
+                                                    onClick={() => router.push(`/cadastros/entidades/${entity.id}`)}
+                                                >
                                                     {entity.type === 'company' ? (
                                                         <Building2 className="h-4 w-4 text-muted-foreground" />
                                                     ) : (
                                                         <User className="h-4 w-4 text-muted-foreground" />
                                                     )}
-                                                    {entity.name}
+                                                    <span className="hover:underline">{entity.name}</span>
                                                 </TableCell>
                                                 <TableCell>
                                                     {entity.type === 'company' ? 'Pessoa Jurídica' : 'Pessoa Física'}
@@ -225,16 +228,44 @@ export default function EntitiesPage() {
                                                 </TableCell>
                                                 <TableCell>{entity.document || "-"}</TableCell>
                                                 <TableCell className="text-right">
-                                                    {canManageEntities && (
-                                                        <div className="flex justify-end gap-2">
-                                                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(entity)}>
-                                                                <Pencil className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" onClick={() => setDeleteId(entity.id)}>
-                                                                <Trash2 className="h-4 w-4" />
-                                                            </Button>
-                                                        </div>
-                                                    )}
+                                                    <div className="flex justify-end gap-2">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                router.push(`/cadastros/entidades/${entity.id}`);
+                                                            }}
+                                                            title="Ver detalhes"
+                                                        >
+                                                            <Eye className="h-4 w-4" />
+                                                        </Button>
+                                                        {canManageEntities && (
+                                                            <>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        openEditDialog(entity);
+                                                                    }}
+                                                                >
+                                                                    <Pencil className="h-4 w-4" />
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="text-red-500 hover:text-red-700"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setDeleteId(entity.id);
+                                                                    }}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </TableCell>
                                             </TableRow>
                                         ))
