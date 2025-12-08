@@ -38,7 +38,16 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
             }
 
             try {
-                const allCompanies = await companyService.getAll();
+                let allCompanies: Company[] = [];
+
+                if (user.role === 'admin') {
+                    allCompanies = await companyService.getAll();
+                } else if (user.companyRoles && Object.keys(user.companyRoles).length > 0) {
+                    const allowedIds = Object.keys(user.companyRoles);
+                    allCompanies = await companyService.getByIds(allowedIds);
+                } else {
+                    allCompanies = [];
+                }
 
                 // If no companies exist, create a default one (Migration Logic)
                 if (allCompanies.length === 0) {

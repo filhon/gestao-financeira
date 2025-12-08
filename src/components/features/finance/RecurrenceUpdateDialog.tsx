@@ -1,6 +1,5 @@
 import {
     AlertDialog,
-    AlertDialogAction,
     AlertDialogCancel,
     AlertDialogContent,
     AlertDialogDescription,
@@ -14,29 +13,46 @@ interface RecurrenceUpdateDialogProps {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: (scope: "single" | "series") => void;
+    installmentInfo?: {
+        current: number;
+        total: number;
+    };
 }
 
 export function RecurrenceUpdateDialog({
     isOpen,
     onClose,
     onConfirm,
+    installmentInfo,
 }: RecurrenceUpdateDialogProps) {
+    const isInstallment = installmentInfo && installmentInfo.total > 1;
+    const remainingCount = isInstallment ? installmentInfo.total - installmentInfo.current + 1 : 0;
+
     return (
         <AlertDialog open={isOpen} onOpenChange={onClose}>
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>Editar Transação Recorrente</AlertDialogTitle>
+                    <AlertDialogTitle>
+                        {isInstallment ? "Editar Transação Parcelada" : "Editar Transação Recorrente"}
+                    </AlertDialogTitle>
                     <AlertDialogDescription>
-                        Esta transação faz parte de uma recorrência. Como você deseja aplicar as alterações?
+                        {isInstallment ? (
+                            <>
+                                Esta transação é a <strong>parcela {installmentInfo.current} de {installmentInfo.total}</strong>.
+                                Como você deseja aplicar as alterações?
+                            </>
+                        ) : (
+                            "Esta transação faz parte de uma recorrência. Como você deseja aplicar as alterações?"
+                        )}
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter className="flex-col sm:flex-row gap-2">
                     <AlertDialogCancel onClick={onClose}>Cancelar</AlertDialogCancel>
                     <Button variant="secondary" onClick={() => onConfirm("single")}>
-                        Apenas esta transação
+                        Apenas esta parcela
                     </Button>
                     <Button onClick={() => onConfirm("series")}>
-                        Esta e as próximas
+                        Esta e as próximas {isInstallment && remainingCount > 1 ? `(${remainingCount})` : ""}
                     </Button>
                 </AlertDialogFooter>
             </AlertDialogContent>

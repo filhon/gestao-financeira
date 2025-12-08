@@ -26,11 +26,12 @@ import {
     Cell,
     ResponsiveContainer,
     Tooltip,
-    BarChart,
-    Bar,
+    AreaChart,
+    Area,
     XAxis,
     YAxis,
-    CartesianGrid
+    CartesianGrid,
+    Legend
 } from "recharts";
 import {
     Select,
@@ -245,8 +246,14 @@ export default function CostCenterDashboard() {
                     <CardContent className="pl-2">
                         <div className="h-[300px]">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={monthlyTrendData}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <AreaChart data={monthlyTrendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="spendingGradient" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
+                                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                                     <XAxis
                                         dataKey="name"
                                         stroke="#888888"
@@ -259,14 +266,38 @@ export default function CostCenterDashboard() {
                                         fontSize={12}
                                         tickLine={false}
                                         axisLine={false}
-                                        tickFormatter={(value) => `R$${value}`}
+                                        tickFormatter={(value) => {
+                                            if (Math.abs(value) >= 1000) {
+                                                return `R$${(value / 1000).toFixed(0)}k`;
+                                            }
+                                            return `R$${value}`;
+                                        }}
                                     />
                                     <Tooltip
-                                        formatter={(value: number) => formatCurrency(value)}
-                                        cursor={{ fill: 'transparent' }}
+                                        content={({ active, payload, label }) => {
+                                            if (active && payload && payload.length) {
+                                                return (
+                                                    <div className="rounded-lg border bg-popover p-3 shadow-md">
+                                                        <p className="text-sm font-medium text-popover-foreground">{label}</p>
+                                                        <p className="text-sm text-red-600 font-medium">
+                                                            {formatCurrency(payload[0].value as number)}
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+                                            return null;
+                                        }}
                                     />
-                                    <Bar dataKey="amount" fill="#adfa1d" radius={[4, 4, 0, 0]} />
-                                </BarChart>
+                                    <Area
+                                        type="monotone"
+                                        dataKey="amount"
+                                        stroke="#ef4444"
+                                        strokeWidth={2.5}
+                                        fill="url(#spendingGradient)"
+                                        dot={false}
+                                        activeDot={{ r: 6, fill: '#ef4444', stroke: '#fff', strokeWidth: 2 }}
+                                    />
+                                </AreaChart>
                             </ResponsiveContainer>
                         </div>
                     </CardContent>
@@ -277,30 +308,39 @@ export default function CostCenterDashboard() {
                         <CardTitle>Distribuição do Orçamento</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="h-[300px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={budgetDistributionData}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={60}
-                                        outerRadius={80}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {budgetDistributionData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                            <div className="flex justify-center gap-4 mt-4">
+                        <div className="flex flex-col h-[300px]">
+                            <div className="flex-1 min-h-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={budgetDistributionData}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={50}
+                                            outerRadius={70}
+                                            paddingAngle={5}
+                                            dataKey="value"
+                                        >
+                                            {budgetDistributionData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={entry.color} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            formatter={(value: number) => formatCurrency(value)}
+                                            contentStyle={{
+                                                borderRadius: '8px',
+                                                border: '1px solid #e5e7eb',
+                                                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                                            }}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
                                 {budgetDistributionData.map((entry, index) => (
                                     <div key={index} className="flex items-center gap-2">
-                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
-                                        <span className="text-sm text-muted-foreground">{entry.name}</span>
+                                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                                        <span className="text-xs text-muted-foreground">{entry.name}</span>
                                     </div>
                                 ))}
                             </div>

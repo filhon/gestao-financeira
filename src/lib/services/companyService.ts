@@ -20,6 +20,26 @@ export const companyService = {
         });
     },
 
+    getByIds: async (ids: string[]): Promise<Company[]> => {
+        if (ids.length === 0) return [];
+
+        // Firestore 'in' query limits to 30 items. If we ever exceed this, we need to batch.
+        // For now, simple implementation.
+        const { documentId, where } = await import("firebase/firestore");
+        const q = query(collection(db, COLLECTION_NAME), where(documentId(), 'in', ids));
+        const snapshot = await getDocs(q);
+
+        return snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                createdAt: data.createdAt?.toDate(),
+                updatedAt: data.updatedAt?.toDate(),
+            } as Company;
+        });
+    },
+
     getById: async (id: string): Promise<Company | null> => {
         const docRef = doc(db, COLLECTION_NAME, id);
         const snapshot = await getDoc(docRef);

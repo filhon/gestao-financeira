@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Search, LogOut, User } from "lucide-react";
@@ -20,6 +21,12 @@ import { ModeToggle } from "@/components/mode-toggle";
 export function Header() {
     const { user, logout } = useAuth();
     const router = useRouter();
+    const [isMac, setIsMac] = useState(false);
+
+    useEffect(() => {
+        // Detect if user is on Mac
+        setIsMac(navigator.platform.toUpperCase().indexOf('MAC') >= 0);
+    }, []);
 
     const getInitials = (name: string) => {
         return name
@@ -46,8 +53,8 @@ export function Header() {
             >
                 <Search className="h-4 w-4 text-muted-foreground" />
                 <span className="flex-1 text-sm text-muted-foreground">Buscar transações...</span>
-                <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-background px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:flex">
-                    <span className="text-xs">⌘</span>K
+                <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:flex">
+                    {isMac ? "⌘" : "Ctrl"} + K
                 </kbd>
             </div>
 

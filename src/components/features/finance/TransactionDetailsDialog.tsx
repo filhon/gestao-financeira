@@ -78,17 +78,19 @@ export function TransactionDetailsDialog({
 
             const newCostCenterNames: Record<string, string> = {};
             const newUserNames: Record<string, string> = {};
+            let hasNewData = false;
 
             // Fetch Cost Center Names
             if (transaction.costCenterAllocation) {
                 for (const alloc of transaction.costCenterAllocation) {
-                    if (!costCenterNames[alloc.costCenterId]) {
-                        try {
-                            const cc = await costCenterService.getById(alloc.costCenterId);
-                            if (cc) newCostCenterNames[alloc.costCenterId] = cc.name;
-                        } catch (e) {
-                            console.error(`Failed to fetch cost center ${alloc.costCenterId}`, e);
+                    try {
+                        const cc = await costCenterService.getById(alloc.costCenterId);
+                        if (cc) {
+                            newCostCenterNames[alloc.costCenterId] = cc.name;
+                            hasNewData = true;
                         }
+                    } catch (e) {
+                        console.error(`Failed to fetch cost center ${alloc.costCenterId}`, e);
                     }
                 }
             }
@@ -96,26 +98,27 @@ export function TransactionDetailsDialog({
             // Fetch User Names
             const userIdsToFetch = [transaction.approvedBy, transaction.releasedBy].filter(Boolean) as string[];
             for (const uid of userIdsToFetch) {
-                if (!userNames[uid]) {
-                    try {
-                        const userDoc = await getDoc(doc(db, "users", uid));
-                        if (userDoc.exists()) {
-                            newUserNames[uid] = userDoc.data().displayName || userDoc.data().email || uid;
-                        }
-                    } catch (e) {
-                        console.error(`Failed to fetch user ${uid}`, e);
+                try {
+                    const userDoc = await getDoc(doc(db, "users", uid));
+                    if (userDoc.exists()) {
+                        newUserNames[uid] = userDoc.data().displayName || userDoc.data().email || uid;
+                        hasNewData = true;
                     }
+                } catch (e) {
+                    console.error(`Failed to fetch user ${uid}`, e);
                 }
             }
 
-            setCostCenterNames(prev => ({ ...prev, ...newCostCenterNames }));
-            setUserNames(prev => ({ ...prev, ...newUserNames }));
+            if (hasNewData) {
+                setCostCenterNames(newCostCenterNames);
+                setUserNames(newUserNames);
+            }
         };
 
-        if (isOpen) {
+        if (isOpen && transaction) {
             fetchNames();
         }
-    }, [transaction, isOpen, selectedCompany, costCenterNames, userNames]);
+    }, [transaction?.id, isOpen, selectedCompany]);
 
     if (!transaction || !selectedCompany) return null;
 
@@ -175,8 +178,8 @@ export function TransactionDetailsDialog({
     const handleEditSubmit = async (data: TransactionFormData) => {
         if (!user) return;
 
-        // Check if recurring
-        if (transaction.recurrence?.isRecurring && transaction.installments?.groupId) {
+        // Check if part of a group (installments/parcelas)
+        if (transaction.installments?.groupId) {
             setPendingUpdateData(data);
             setIsRecurrenceUpdateDialogOpen(true);
             return;
@@ -497,6 +500,10 @@ export function TransactionDetailsDialog({
                 isOpen={isRecurrenceUpdateDialogOpen}
                 onClose={() => setIsRecurrenceUpdateDialogOpen(false)}
                 onConfirm={handleRecurrenceConfirm}
+                installmentInfo={transaction.installments ? {
+                    current: transaction.installments.current,
+                    total: transaction.installments.total
+                } : undefined}
             />
         </>
     );

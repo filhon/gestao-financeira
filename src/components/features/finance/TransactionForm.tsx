@@ -371,6 +371,7 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                                     mode="single"
                                                     selected={field.value}
                                                     onSelect={field.onChange}
+                                                    defaultMonth={field.value}
                                                     initialFocus
                                                 />
                                             </PopoverContent>

@@ -82,10 +82,21 @@ export function GlobalSearch() {
         setSearchQuery("");
     }, [router]);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && !searchQuery.startsWith("/")) {
-            e.preventDefault();
-            handleSearch();
+    // Only trigger search if Enter is pressed with text and no navigation item is selected
+    // The cmdk library handles Enter for selected items via onSelect
+    const handleInputKeyDown = (e: React.KeyboardEvent) => {
+        // If pressing Enter with search text, check if user explicitly wants to search
+        // This happens when there's text but the user hasn't selected a navigation item
+        if (e.key === "Enter" && searchQuery.trim() && !searchQuery.startsWith("/")) {
+            // Get the currently selected item from cmdk
+            const selectedItem = document.querySelector('[cmdk-item][data-selected="true"]');
+
+            // Only perform search if no item is selected OR the search item is selected
+            if (!selectedItem || selectedItem.textContent?.includes(`Buscar por`)) {
+                e.preventDefault();
+                handleSearch();
+            }
+            // Otherwise, let cmdk handle the navigation to the selected item
         }
     };
 
@@ -100,7 +111,7 @@ export function GlobalSearch() {
                 placeholder="Buscar ou digite / para navegar..."
                 value={searchQuery}
                 onValueChange={setSearchQuery}
-                onKeyDown={handleKeyDown}
+                onKeyDown={handleInputKeyDown}
             />
             <CommandList>
                 <CommandEmpty>

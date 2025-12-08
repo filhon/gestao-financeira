@@ -53,7 +53,7 @@ export default function AccountsPayablePage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
-    const { items: sortedTransactions, requestSort, sortConfig } = useSortableData(transactions);
+    const { items: sortedTransactions, requestSort, sortConfig } = useSortableData(transactions, { key: 'dueDate', direction: 'asc' });
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
