@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { UserRole } from "@/lib/types";
@@ -71,13 +72,14 @@ export function usePermissions(): Permissions {
 
     // Role definitions
     const isAdmin = isGlobalAdmin;
-    const isManager = isRole('financial_manager');
+    const isManager = isRole('financial_manager') || isRole('admin');
     const isUser = isRole('user');
 
     // Combined Helpers
     const isAdminOrManager = isAdmin || isManager;
 
-    return {
+    // Memoize the return object to prevent unnecessary re-renders in consumers
+    return useMemo(() => ({
         // Dashboard
         // Admin, Manager, Approver, Releaser can view.
         // Auditor, User cannot (Spec: "Não poderá visualizar o dashboard")
@@ -161,5 +163,5 @@ export function usePermissions(): Permissions {
         currentRole: effectiveRole,
         isAdmin,
         isFinancialManager: isManager,
-    };
+    }), [effectiveRole, isAdmin, isManager, isUser, isAdminOrManager]);
 }

@@ -142,6 +142,7 @@ export function Sidebar() {
             item.items?.some(subItem => subItem.href === pathname)
         );
         if (activeGroup) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setOpenGroups(prev => prev.includes(activeGroup.title) ? prev : [...prev, activeGroup.title]);
         }
     }, [pathname, menuItems]);

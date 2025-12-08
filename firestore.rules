@@ -59,153 +59,13 @@ service cloud.firestore {
     
     // Specific Role Check Shortcuts
     function isFinancialManager(companyId) {
-      return hasCompanyRole(companyId, 'financial_manager');
+      return hasCompanyRole(companyId, 'financial_manager') || hasCompanyRole(companyId, 'admin');
     }
     
     function isApprover(companyId) {
       return hasCompanyRole(companyId, 'approver');
     }
-
-    function isReleaser(companyId) {
-      return hasCompanyRole(companyId, 'releaser');
-    }
-
-    function isAuditor(companyId) {
-      return hasCompanyRole(companyId, 'auditor');
-    }
-
-    function isSimpleUser(companyId) {
-      return hasCompanyRole(companyId, 'user');
-    }
-
-    // Group Checks
-    function isManagerOrAdmin(companyId) {
-       return isGlobalAdmin() || isFinancialManager(companyId);
-    }
-
-    // ==================================================================================
-    // 2. COLLECTION RULES
-    // ==================================================================================
-
-    // ----------------------------------------------------------------------------------
-    // Users Collection
-    // ----------------------------------------------------------------------------------
-    match /users/{userId} {
-      // Admins and Managers have some rights, but let's stick to the spec:
-      // Global Admin: Can manage all users.
-      // Financial Manager: Can manage users OF THEIR COMPANY (this is hard to enforce strictly at /users/{userId} 
-      // level without complex queries or duplicating user data, so we rely on trusted admin logic or Cloud Functions usually.
-      // But here we can allow updates if the manager is assigning roles for their own company. 
-      // For simplicity and security, we'll keep strict user management to Admins and self-updates for now, 
-      // as managers usually invite users via a separate flow or we'd need to check shared company access).
-      
-      // READ: 
-      // - Admin: All
-      // - User: Own profile
-      // - Manager/Approver/etc: Need to read profiles? Not strictly for the list, usually.
-      // Let's stick to: Admin reads all, Users read themselves.
-      // NOTE: If managers need to list users to assign roles, they need read access.
-      allow read: if isGlobalAdmin() || (isAuthenticated() && request.auth.uid == userId);
-      
-      // UPDATE:
-      // - Admin: All
-      // - User: Own profile (limited fields)
-      allow update: if isGlobalAdmin();
-      allow update: if request.auth.uid == userId && 
-                       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'companyRoles']);
-
-      // CREATE:
-      // - Users can create their own profile on signup
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-    }
-
-    // ----------------------------------------------------------------------------------
-    // Companies Collection
-    // ----------------------------------------------------------------------------------
-    match /companies/{companyId} {
-      // Global Admin: Full Access
-      allow read, write: if isGlobalAdmin();
-
-      // Financial Manager: Read Only (Spec says "Cannot manage companies", but implicitly needs to read own company to load dashboard)
-      // Actually, spec says: "Cannot visualize or take action on company management", but to show the dashboard 
-      // we need to fetch the company document (name, settings). So we allow READ if assigned to company.
-      allow read: if isActiveUser() && 
-                  (getUserData().companyRoles[companyId] != null);
-    }
-
-    // ----------------------------------------------------------------------------------
-    // Transactions (Payables/Receivables)
-    // ----------------------------------------------------------------------------------
-    match /transactions/{transactionId} {
-      // Data validation helper
-      function isValidTransaction() {
-        return request.resource.data.companyId != null;
-      }
-      
-      // READ
-      // Admin: All
-      // Manager/Approver/Releaser/Auditor: All in their Company
-      // User: Only OWN transactions in their Company (Spec: "Pode visualizar somente as contas a pagar incluídas por ele")
-      allow read: if isGlobalAdmin();
-      allow read: if isActiveUser() && 
-                     resource.data.companyId != null &&
-                     (
-                       isManagerOrAdmin(resource.data.companyId) || 
-                       isApprover(resource.data.companyId) || 
-                       isReleaser(resource.data.companyId) || 
-                       isAuditor(resource.data.companyId) || 
-                       (isSimpleUser(resource.data.companyId) && resource.data.createdBy == request.auth.uid)
-                     );
-
-      // CREATE
-      // Admin: All
-      // Manager: Yes
-      // User: Yes (Payables only? The rule doesn't distinguish type here, logic handles 'type' field validation ideally, 
-      // but we'll allow create for company members who are authorized).
-      // Approver/Releaser/Auditor: NO
-      allow create: if isGlobalAdmin();
-      allow create: if isActiveUser() && 
-                       request.resource.data.companyId != null && 
-                       (
-                         isFinancialManager(request.resource.data.companyId) || 
-                         isSimpleUser(request.resource.data.companyId)
-                       );
-
-      // UPDATE
-      // Admin: All
-      // Manager: All
-      // User: Only own transactions (Edit/Delete).
-      // Approver: Only status (approve).
-      // Releaser: Only status (pay).
-      
-      allow update: if isGlobalAdmin();
-      
-      // Manager: Full update in their company
-      allow update: if isFinancialManager(resource.data.companyId);
-      
-      // User: Cannot Update (Spec: "Não pode alterar")
-      // allow update: if isSimpleUser(resource.data.companyId) && resource.data.createdBy == request.auth.uid;
-
-      // Approver: Can update if changing status to 'approved' (and maybe 'rejected'?)
-      // Simplification: Allow write if role is approver, frontend limits fields. 
-      // Secure way: Limit affectedKeys or check transition.
-      allow update: if isApprover(resource.data.companyId) && 
-                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'approvedBy', 'approvedAt', 'updatedAt']);
-
-      // Releaser: Can update if changing status to 'paid'
-      allow update: if isReleaser(resource.data.companyId) && 
-                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'paymentDate', 'releasedBy', 'releasedAt', 'updatedAt']);
-
-      // DELETE
-      // Admin: Yes
-      // Manager: Yes
-      // User: Yes (Own only)
-      allow delete: if isGlobalAdmin();
-      allow delete: if isFinancialManager(resource.data.companyId);
-      // User: Cannot Delete (Spec: "Não pode excluir")
-      // allow delete: if isSimpleUser(resource.data.companyId) && resource.data.createdBy == request.auth.uid;
-    }
-    
+// ...
     // ----------------------------------------------------------------------------------
     // Cost Centers
     // ----------------------------------------------------------------------------------
@@ -218,12 +78,12 @@ service cloud.firestore {
                      resource.data.companyId != null && 
                      (getUserData().companyRoles[resource.data.companyId] != null);
 
-      // Create/Update/Delete: Manager Only
-      allow write: if isActiveUser() && 
+      // Create/Update: Manager Only
+      allow create, update: if isActiveUser() && 
                       request.resource.data.companyId != null && 
                       isFinancialManager(request.resource.data.companyId);
                       
-      // Handle delete (resource available)
+      // Delete: Manager Only
       allow delete: if isActiveUser() && 
                        resource.data.companyId != null && 
                        isFinancialManager(resource.data.companyId);
