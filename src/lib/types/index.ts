@@ -37,7 +37,15 @@ export interface UserProfile {
     createdAt: Date;
     updatedAt: Date;
     active: boolean; // Deprecated in favor of status, but kept for sync
-    status: 'pending' | 'active' | 'rejected';
+    status: 'pending_company_setup' | 'pending_approval' | 'active' | 'rejected';
+
+    // Pending access request (before admin approval)
+    pendingCompanyId?: string;
+    pendingRole?: UserRole;
+
+    // Future: Subscription support
+    subscriptionStatus?: 'none' | 'trial' | 'active' | 'expired';
+    subscriptionValidUntil?: Date;
 }
 
 export interface CostCenter {

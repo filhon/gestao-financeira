@@ -24,17 +24,26 @@ import { formatCurrency } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 import { usePermissions } from "@/hooks/usePermissions";
+import { useRouter } from "next/navigation";
 
 export default function RecorrenciasPage() {
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
-    const { canManageRecurrences } = usePermissions();
+    const router = useRouter();
+    const { canViewRecurrences, canManageRecurrences } = usePermissions();
     const [templates, setTemplates] = useState<RecurringTransactionTemplate[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [deleteId, setDeleteId] = useState<string | null>(null);
 
+    // Guard: redirect if no permission
+    useEffect(() => {
+        if (!canViewRecurrences) {
+            router.push("/");
+        }
+    }, [canViewRecurrences, router]);
+
     const fetchTemplates = useCallback(async () => {
-        if (!selectedCompany) return;
+        if (!selectedCompany || !canViewRecurrences) return;
         try {
             setIsLoading(true);
             const data = await recurrenceService.getTemplates(selectedCompany.id);
@@ -45,11 +54,13 @@ export default function RecorrenciasPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedCompany]);
+    }, [selectedCompany, canViewRecurrences]);
 
     useEffect(() => {
         fetchTemplates();
     }, [fetchTemplates, selectedCompany]);
+
+    if (!canViewRecurrences) return null;
 
     const handleToggleActive = async (template: RecurringTransactionTemplate) => {
         try {

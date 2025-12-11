@@ -1,11 +1,78 @@
 import { db } from "@/lib/firebase/client";
-import { collection, doc, getDocs, getDoc, setDoc, query, orderBy, Timestamp } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, setDoc, query, orderBy, where, limit, Timestamp } from "firebase/firestore";
 import { Company } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
 
 const COLLECTION_NAME = "companies";
 
+// Normalize company name: lowercase, remove accents, trim
+const normalizeName = (name: string): string => {
+    return name
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .trim();
+};
+
+// Normalize CNPJ: remove all non-digits
+const normalizeCnpj = (cnpj: string): string => {
+    return cnpj.replace(/\D/g, "");
+};
+
 export const companyService = {
+    /**
+     * Find company by CNPJ (primary) or normalized name (fallback)
+     * Optimized for minimal reads
+     */
+    findByIdentifier: async (cnpj: string, name: string): Promise<Company | null> => {
+        const normalizedCnpj = normalizeCnpj(cnpj);
+        const normalizedNameValue = normalizeName(name);
+
+        // First try: exact CNPJ match (most specific, indexed)
+        if (normalizedCnpj) {
+            const cnpjQuery = query(
+                collection(db, COLLECTION_NAME),
+                where("normalizedCnpj", "==", normalizedCnpj),
+                limit(1)
+            );
+            const cnpjSnapshot = await getDocs(cnpjQuery);
+            
+            if (!cnpjSnapshot.empty) {
+                const docData = cnpjSnapshot.docs[0];
+                const data = docData.data();
+                return {
+                    id: docData.id,
+                    ...data,
+                    createdAt: data.createdAt?.toDate(),
+                    updatedAt: data.updatedAt?.toDate(),
+                } as Company;
+            }
+        }
+
+        // Second try: normalized name match (fallback)
+        if (normalizedNameValue) {
+            const nameQuery = query(
+                collection(db, COLLECTION_NAME),
+                where("normalizedName", "==", normalizedNameValue),
+                limit(1)
+            );
+            const nameSnapshot = await getDocs(nameQuery);
+            
+            if (!nameSnapshot.empty) {
+                const docData = nameSnapshot.docs[0];
+                const data = docData.data();
+                return {
+                    id: docData.id,
+                    ...data,
+                    createdAt: data.createdAt?.toDate(),
+                    updatedAt: data.updatedAt?.toDate(),
+                } as Company;
+            }
+        }
+
+        return null;
+    },
+
     getAll: async (): Promise<Company[]> => {
         const q = query(collection(db, COLLECTION_NAME), orderBy("name", "asc"));
         const snapshot = await getDocs(q);
@@ -25,8 +92,8 @@ export const companyService = {
 
         // Firestore 'in' query limits to 30 items. If we ever exceed this, we need to batch.
         // For now, simple implementation.
-        const { documentId, where } = await import("firebase/firestore");
-        const q = query(collection(db, COLLECTION_NAME), where(documentId(), 'in', ids));
+        const { documentId, where: whereClause } = await import("firebase/firestore");
+        const q = query(collection(db, COLLECTION_NAME), whereClause(documentId(), 'in', ids));
         const snapshot = await getDocs(q);
 
         return snapshot.docs.map(doc => {
@@ -58,6 +125,10 @@ export const companyService = {
         const docRef = doc(collection(db, COLLECTION_NAME));
         const now = new Date();
 
+        // Create normalized fields for efficient querying
+        const normalizedName = normalizeName(data.name);
+        const normalizedCnpj = data.cnpj ? normalizeCnpj(data.cnpj) : null;
+
         const company: Company = {
             id: docRef.id,
             ...data,
@@ -67,6 +138,8 @@ export const companyService = {
 
         await setDoc(docRef, {
             ...data,
+            normalizedName,
+            ...(normalizedCnpj && { normalizedCnpj }),
             createdAt: Timestamp.fromDate(now),
             updatedAt: Timestamp.fromDate(now),
         });

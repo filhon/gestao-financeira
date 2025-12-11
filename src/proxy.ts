@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const publicRoutes = ["/login", "/pending-approval"];
+const publicRoutes = ["/login", "/pending-approval", "/company-setup"];
 
 export function proxy(request: NextRequest) {
     const token = request.cookies.get("auth_token")?.value;
@@ -14,6 +14,14 @@ export function proxy(request: NextRequest) {
         if (token && status === 'active' && pathname === '/login') {
             return NextResponse.redirect(new URL("/", request.url));
         }
+        // If user needs company setup but is on pending-approval, redirect to company-setup
+        if (token && status === 'pending_company_setup' && pathname === '/pending-approval') {
+            return NextResponse.redirect(new URL("/company-setup", request.url));
+        }
+        // If user is pending approval but is on company-setup, redirect to pending-approval
+        if (token && status === 'pending_approval' && pathname === '/company-setup') {
+            return NextResponse.redirect(new URL("/pending-approval", request.url));
+        }
         return NextResponse.next();
     }
 
@@ -22,9 +30,17 @@ export function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    // SECURITY: Block pending/rejected users from accessing protected routes
-    if (status !== 'active') {
+    // SECURITY: Block pending users from accessing protected routes
+    if (status === 'pending_company_setup') {
+        return NextResponse.redirect(new URL("/company-setup", request.url));
+    }
+    
+    if (status === 'pending_approval' || status === 'pending') {
         return NextResponse.redirect(new URL("/pending-approval", request.url));
+    }
+    
+    if (status === 'rejected') {
+        return NextResponse.redirect(new URL("/login", request.url));
     }
 
     return NextResponse.next();

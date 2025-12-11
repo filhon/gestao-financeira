@@ -78,13 +78,18 @@ export default function AccountsPayablePage() {
     const fetchTransactions = useCallback(async () => {
         if (!selectedCompany || !user) return;
         try {
-            let data = await transactionService.getAll({ type: "payable", companyId: selectedCompany.id });
-
-            // Filter transactions for users who can't view all - they can only see their own
+            // For 'user' role, pass createdBy filter directly to Firestore query
+            // This matches the Firestore rules and prevents permission errors
+            const filter: { type: string; companyId: string; createdBy?: string } = {
+                type: "payable",
+                companyId: selectedCompany.id
+            };
+            
             if (onlyOwnPayables) {
-                data = data.filter(t => t.createdBy === user.uid);
+                filter.createdBy = user.uid;
             }
-
+            
+            const data = await transactionService.getAll(filter);
             setTransactions(data);
         } catch (error) {
             console.error("Error fetching transactions:", error);

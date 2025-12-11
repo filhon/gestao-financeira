@@ -49,7 +49,7 @@ export default function AuditLogsPage() {
     }, [canViewAuditLogs, router]);
 
     const fetchLogs = useCallback(async () => {
-        if (!selectedCompany) return;
+        if (!selectedCompany || !canViewAuditLogs) return;
         try {
             setIsLoading(true);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,11 +65,13 @@ export default function AuditLogsPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedCompany, filters]);
+    }, [selectedCompany, filters, canViewAuditLogs]);
 
     useEffect(() => {
         fetchLogs();
     }, [fetchLogs]);
+
+    if (!canViewAuditLogs) return null;
 
     const getActionBadge = (action: string) => {
         switch (action) {

@@ -33,13 +33,15 @@ import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function CostCentersPage() {
     const { selectedCompany } = useCompany();
-    const { canManageCostCenters } = usePermissions();
+    const { user } = useAuth();
+    const { canManageCostCenters, onlyOwnPayables } = usePermissions();
     const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -50,7 +52,9 @@ export default function CostCentersPage() {
     const fetchCostCenters = async () => {
         if (!selectedCompany) return;
         try {
-            const data = await costCenterService.getAll(selectedCompany.id);
+            // For 'user' role, pass forUserId to filter only their allowed cost centers
+            const forUserId = onlyOwnPayables ? user?.uid : undefined;
+            const data = await costCenterService.getAll(selectedCompany.id, forUserId);
             setCostCenters(data);
         } catch (error) {
             console.error("Error fetching cost centers:", error);
@@ -61,7 +65,7 @@ export default function CostCentersPage() {
 
     useEffect(() => {
         fetchCostCenters();
-    }, [selectedCompany]);
+    }, [selectedCompany, onlyOwnPayables, user]);
 
     const handleSubmit = async (data: CostCenterFormData) => {
         if (!selectedCompany) return;

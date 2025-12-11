@@ -46,6 +46,13 @@ export default function UsersPage() {
     const [approvalRole, setApprovalRole] = useState<UserRole>("financial_manager");
     const [rejectUserId, setRejectUserId] = useState<string | null>(null);
 
+    // Pre-select the user's requested role when opening approval dialog
+    useEffect(() => {
+        if (selectedUserToApprove?.pendingRole) {
+            setApprovalRole(selectedUserToApprove.pendingRole);
+        }
+    }, [selectedUserToApprove]);
+
     useEffect(() => {
         if (!canManageUsers) {
             router.push("/");
@@ -106,8 +113,12 @@ export default function UsersPage() {
             // 1. Update Status
             await userService.updateStatus(selectedUserToApprove.uid, 'active', { uid: currentUser.uid, email: currentUser.email });
 
-            // 2. Assign Role
-            await userService.updateRole(selectedUserToApprove.uid, approvalRole, { uid: currentUser.uid, email: currentUser.email }, selectedCompany.id);
+            // 2. Assign Role - use the company that the user requested if it matches, otherwise current selected company
+            const targetCompanyId = selectedUserToApprove.pendingCompanyId || selectedCompany.id;
+            await userService.updateRole(selectedUserToApprove.uid, approvalRole, { uid: currentUser.uid, email: currentUser.email }, targetCompanyId);
+
+            // 3. Clear pending access fields
+            await userService.clearPendingAccess(selectedUserToApprove.uid);
 
             toast.success(`Usuário ${selectedUserToApprove.displayName} aprovado com sucesso!`);
             setSelectedUserToApprove(null);
@@ -157,7 +168,24 @@ export default function UsersPage() {
     };
 
     const activeUsers = users.filter(u => u.status === 'active' || (!u.status && u.active)); // Backward compat
-    const pendingUsers = users.filter(u => u.status === 'pending');
+    // Filter pending users: those who requested access to the current company OR old 'pending' status users
+    const pendingUsers = users.filter(u => {
+        const isPendingApproval = u.status === 'pending_approval';
+        const isOldPendingStatus = (u.status as string) === 'pending';
+        const isPendingCompanySetup = u.status === 'pending_company_setup';
+        
+        // Include if pending_approval and matches current company (or has no pending company)
+        if (isPendingApproval) {
+            return !u.pendingCompanyId || u.pendingCompanyId === selectedCompany?.id;
+        }
+        
+        // Include old pending status users for backward compatibility
+        if (isOldPendingStatus || isPendingCompanySetup) {
+            return true;
+        }
+        
+        return false;
+    });
 
     const { items: sortedActiveUsers, requestSort, sortConfig } = useSortableData(activeUsers);
 
@@ -277,6 +305,7 @@ export default function UsersPage() {
                                     <TableRow>
                                         <TableHead>Usuário</TableHead>
                                         <TableHead>Email</TableHead>
+                                        <TableHead>Função Solicitada</TableHead>
                                         <TableHead>Data de Cadastro</TableHead>
                                         <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
@@ -284,7 +313,7 @@ export default function UsersPage() {
                                 <TableBody>
                                     {pendingUsers.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                                            <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                                                 Nenhuma solicitação pendente.
                                             </TableCell>
                                         </TableRow>
@@ -299,6 +328,13 @@ export default function UsersPage() {
                                                     <span className="font-medium">{user.displayName}</span>
                                                 </TableCell>
                                                 <TableCell>{user.email}</TableCell>
+                                                <TableCell>
+                                                    {user.pendingRole ? (
+                                                        <Badge variant="outline">{roleLabels[user.pendingRole] || user.pendingRole}</Badge>
+                                                    ) : (
+                                                        <span className="text-muted-foreground">-</span>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}</TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-2">

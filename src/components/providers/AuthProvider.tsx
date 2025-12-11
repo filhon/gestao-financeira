@@ -51,11 +51,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         Cookies.set("user_role", userData.role, { expires: 1 / 24 });
 
                         // Backward compatibility: if status is missing but active is true, treat as 'active'
-                        const effectiveStatus = userData.status || (userData.active ? 'active' : 'pending');
+                        // Old 'pending' status maps to 'pending_company_setup'
+                        let effectiveStatus = userData.status || (userData.active ? 'active' : 'pending_company_setup');
+                        if ((effectiveStatus as string) === 'pending') {
+                            effectiveStatus = 'pending_company_setup';
+                        }
                         Cookies.set("user_status", effectiveStatus, { expires: 1 / 24 });
 
-                        // Redirect if pending
-                        if (effectiveStatus === 'pending' && window.location.pathname !== '/pending-approval') {
+                        // Redirect based on status
+                        if (effectiveStatus === 'pending_company_setup' && window.location.pathname !== '/company-setup') {
+                            router.push('/company-setup');
+                        } else if (effectiveStatus === 'pending_approval' && window.location.pathname !== '/pending-approval') {
                             router.push('/pending-approval');
                         }
                     } else {
@@ -65,11 +71,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                             uid: firebaseUser.uid,
                             email: firebaseUser.email!,
                             displayName: firebaseUser.displayName || "User",
-                            photoURL: firebaseUser.photoURL || undefined,
+                            ...(firebaseUser.photoURL && { photoURL: firebaseUser.photoURL }),
                             role: 'user', // Default role for new users
                             companyRoles: {},
-                            active: false, // Pending approval
-                            status: 'pending',
+                            active: false, // Pending company setup
+                            status: 'pending_company_setup',
                             createdAt: new Date(),
                             updatedAt: new Date(),
                         };
@@ -82,8 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
                         setUser(newUser);
                         Cookies.set("user_role", newUser.role, { expires: 1 / 24 });
-                        Cookies.set("user_status", 'pending', { expires: 1 / 24 });
-                        router.push('/pending-approval');
+                        Cookies.set("user_status", 'pending_company_setup', { expires: 1 / 24 });
+                        router.push('/company-setup');
                     }
                 } catch (error) {
                     console.error("Error fetching user profile:", error);
@@ -140,11 +146,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email!,
                 displayName: name, // Use provided name
-                photoURL: firebaseUser.photoURL || undefined,
+                ...(firebaseUser.photoURL && { photoURL: firebaseUser.photoURL }),
                 role: 'user', // Default role for new users
                 companyRoles: {},
-                active: false, // Pending approval
-                status: 'pending',
+                active: false, // Pending company setup
+                status: 'pending_company_setup',
                 createdAt: new Date(),
                 updatedAt: new Date(),
             };

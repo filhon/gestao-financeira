@@ -37,6 +37,14 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
                 return;
             }
 
+            // Skip loading for users who haven't been approved yet
+            if (user.status === 'pending_company_setup' || user.status === 'pending_approval' || (user.status as string) === 'pending') {
+                setCompanies([]);
+                setSelectedCompany(null);
+                setIsLoading(false);
+                return;
+            }
+
             try {
                 let allCompanies: Company[] = [];
 

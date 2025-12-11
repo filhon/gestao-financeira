@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight, Home } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { userService } from "@/lib/services/userService";
 import { costCenterService } from "@/lib/services/costCenterService";
@@ -36,7 +36,8 @@ export function Breadcrumbs() {
     const { selectedCompany } = useCompany();
     const [dynamicLabels, setDynamicLabels] = useState<Record<string, string>>({});
 
-    const segments = pathname.split("/").filter(Boolean);
+    // Memoize segments to prevent infinite loop - segments was being recreated on every render
+    const segments = useMemo(() => pathname.split("/").filter(Boolean), [pathname]);
 
     // Fetch dynamic labels for IDs - hooks must be called before any early returns
     useEffect(() => {

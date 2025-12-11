@@ -58,7 +58,7 @@ export const userService = {
         });
     },
 
-    updateStatus: async (uid: string, status: 'pending' | 'active' | 'rejected', adminUser: { uid: string; email: string }) => {
+    updateStatus: async (uid: string, status: 'pending_company_setup' | 'pending_approval' | 'active' | 'rejected', adminUser: { uid: string; email: string }) => {
         const docRef = doc(db, COLLECTION_NAME, uid);
         await updateDoc(docRef, {
             status,
@@ -74,6 +74,26 @@ export const userService = {
             entity: 'user',
             entityId: uid,
             details: { status }
+        });
+    },
+
+    setPendingCompanyAccess: async (uid: string, companyId: string, role: UserRole) => {
+        const docRef = doc(db, COLLECTION_NAME, uid);
+        await updateDoc(docRef, {
+            pendingCompanyId: companyId,
+            pendingRole: role,
+            status: 'pending_approval',
+            updatedAt: serverTimestamp()
+        });
+    },
+
+    clearPendingAccess: async (uid: string) => {
+        const docRef = doc(db, COLLECTION_NAME, uid);
+        const { deleteField } = await import("firebase/firestore");
+        await updateDoc(docRef, {
+            pendingCompanyId: deleteField(),
+            pendingRole: deleteField(),
+            updatedAt: serverTimestamp()
         });
     }
 };

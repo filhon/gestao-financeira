@@ -34,11 +34,14 @@ import {
 import { BatchDetailsDialog } from "@/components/features/finance/BatchDetailsDialog";
 
 import { usePermissions } from "@/hooks/usePermissions";
+import { useRouter } from "next/navigation";
 
 export default function PaymentBatchesPage() {
     const { selectedCompany } = useCompany();
     const { user } = useAuth();
+    const router = useRouter();
     const {
+        canViewBatches,
         canManageBatches,
         canApproveBatches,
         canPayBatches
@@ -52,8 +55,15 @@ export default function PaymentBatchesPage() {
     const [selectedBatch, setSelectedBatch] = useState<PaymentBatch | null>(null);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
+    // Guard: redirect if no permission
+    useEffect(() => {
+        if (!canViewBatches) {
+            router.push("/");
+        }
+    }, [canViewBatches, router]);
+
     const fetchBatches = useCallback(async () => {
-        if (!selectedCompany) return;
+        if (!selectedCompany || !canViewBatches) return;
         try {
             setIsLoading(true);
             const data = await paymentBatchService.getAll(selectedCompany.id);
@@ -64,11 +74,13 @@ export default function PaymentBatchesPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedCompany]);
+    }, [selectedCompany, canViewBatches]);
 
     useEffect(() => {
         fetchBatches();
     }, [fetchBatches]);
+
+    if (!canViewBatches) return null;
 
     const handleCreateBatch = async () => {
         if (!selectedCompany || !user || !newBatchName.trim()) return;

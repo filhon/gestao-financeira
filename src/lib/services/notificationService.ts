@@ -78,5 +78,40 @@ export const notificationService = {
         });
 
         await batch.commit();
+    },
+
+    notifyAdminsOfNewUser: async (
+        companyId: string,
+        companyName: string,
+        userName: string,
+        requestedRole: string
+    ): Promise<void> => {
+        // Find global admins (users with role === 'admin')
+        const usersRef = collection(db, "users");
+        const adminQuery = query(usersRef, where("role", "==", "admin"));
+        const adminSnapshot = await getDocs(adminQuery);
+
+        console.log(`[notifyAdminsOfNewUser] Found ${adminSnapshot.docs.length} global admins`);
+
+        // Note: We cannot query for company admins using dynamic field names in Firestore
+        // (e.g., `companyRoles.${companyId}` as a field path doesn't work for queries)
+        // In the future, this should be handled by a Cloud Function with admin SDK
+
+        const adminIds = new Set<string>();
+        adminSnapshot.docs.forEach(doc => {
+            adminIds.add(doc.id);
+        });
+
+        // Send notification to each admin
+        for (const adminId of adminIds) {
+            await notificationService.create({
+                userId: adminId,
+                companyId: companyId,
+                title: "Novo usuário pendente",
+                message: `${userName} solicitou acesso como ${requestedRole} na empresa ${companyName}.`,
+                type: 'info',
+                link: '/configuracoes/usuarios'
+            });
+        }
     }
 };

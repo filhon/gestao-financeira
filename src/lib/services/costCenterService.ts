@@ -19,11 +19,17 @@ import { CostCenterFormData } from "@/lib/validations/costCenter";
 const COLLECTION_NAME = "cost_centers";
 
 export const costCenterService = {
-    getAll: async (companyId?: string): Promise<CostCenter[]> => {
+    getAll: async (companyId?: string, forUserId?: string): Promise<CostCenter[]> => {
         let q = query(collection(db, COLLECTION_NAME), orderBy("name"));
 
         if (companyId) {
             q = query(q, where("companyId", "==", companyId));
+        }
+        
+        // For 'user' role, filter to only cost centers where they are in allowedUserIds
+        // This matches the Firestore rules and prevents permission errors
+        if (forUserId) {
+            q = query(q, where("allowedUserIds", "array-contains", forUserId));
         }
 
         const snapshot = await getDocs(q);

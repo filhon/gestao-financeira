@@ -1,4 +1,4 @@
-import {
+    import {
     collection,
     addDoc,
     updateDoc,
@@ -57,7 +57,7 @@ const stripUndefined = (obj: any): any => {
 };
 
 export const transactionService = {
-    getAll: async (filter?: { type?: string; status?: string; companyId?: string; batchId?: string }): Promise<Transaction[]> => {
+    getAll: async (filter?: { type?: string; status?: string; companyId?: string; batchId?: string; createdBy?: string }): Promise<Transaction[]> => {
         let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
         if (filter?.companyId) {
@@ -71,6 +71,10 @@ export const transactionService = {
         }
         if (filter?.batchId) {
             q = query(q, where("batchId", "==", filter.batchId));
+        }
+        // Filter by createdBy - essential for 'user' role to match Firestore rules
+        if (filter?.createdBy) {
+            q = query(q, where("createdBy", "==", filter.createdBy));
         }
 
         const snapshot = await getDocs(q);

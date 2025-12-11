@@ -35,6 +35,7 @@ import { storageService } from "@/lib/services/storageService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { costCenterService, getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
     Command,
     CommandEmpty,
@@ -112,24 +113,20 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
     });
 
     const { user } = useAuth();
+    const { onlyOwnPayables } = usePermissions();
 
     useEffect(() => {
         const loadCostCenters = async () => {
             if (selectedCompany && user) {
-                const data = await costCenterService.getAll(selectedCompany.id);
-
-                const filtered = data.filter(cc => {
-                    if (cc.allowedUserIds && cc.allowedUserIds.length > 0) {
-                        return cc.allowedUserIds.includes(user.uid);
-                    }
-                    return true;
-                });
-
-                setCostCenters(filtered);
+                // For 'user' role, pass forUserId to filter in Firestore query
+                // This matches Firestore rules and prevents permission errors
+                const forUserId = onlyOwnPayables ? user.uid : undefined;
+                const data = await costCenterService.getAll(selectedCompany.id, forUserId);
+                setCostCenters(data);
             }
         };
         loadCostCenters();
-    }, [selectedCompany, user]);
+    }, [selectedCompany, user, onlyOwnPayables]);
 
     // Update allocation amounts when total amount changes
     const totalAmount = form.watch("amount");

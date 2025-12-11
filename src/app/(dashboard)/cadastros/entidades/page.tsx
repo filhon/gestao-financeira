@@ -56,7 +56,7 @@ export default function EntitiesPage() {
 
 
     const fetchEntities = async () => {
-        if (!selectedCompany) return;
+        if (!selectedCompany || !canViewEntities) return;
         setIsLoading(true);
         try {
             const category = activeTab === 'all' ? undefined : activeTab as 'supplier' | 'client';
@@ -72,7 +72,7 @@ export default function EntitiesPage() {
 
     useEffect(() => {
         fetchEntities();
-    }, [selectedCompany, activeTab]);
+    }, [selectedCompany, activeTab, canViewEntities]);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleCreate = async (data: any) => {
