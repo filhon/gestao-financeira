@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { auditService } from "@/lib/services/auditService";
 import { AuditLog } from "@/lib/types";
@@ -15,7 +14,13 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Loader2, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, RefreshCw, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -27,8 +32,103 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+    formatAuditDetails,
+    getActionSummary,
+    formatRelativeTime,
+    getChangeIcon,
+    getEntityLink,
+    ENTITY_LABELS,
+    AuditDetails,
+    FieldChange,
+} from "@/lib/auditFormatter";
+
+// Component to render a single change item
+function ChangeItem({ change }: { change: FieldChange }) {
+    const icon = getChangeIcon(change.field, change.oldValue, change.newValue);
+
+    return (
+        <div className="flex items-start gap-2 py-1">
+            {icon === 'increase' && (
+                <ArrowUpRight className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+            )}
+            {icon === 'decrease' && (
+                <ArrowDownRight className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+            )}
+            {icon === 'change' && (
+                <RefreshCw className="h-3 w-3 text-blue-600 mt-1 flex-shrink-0" />
+            )}
+            {!icon && <span className="w-4" />}
+            <span
+                className="text-sm"
+                dangerouslySetInnerHTML={{
+                    __html: formatAuditDetails('update', '', { changes: [change] })[0]
+                        ?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || ''
+                }}
+            />
+        </div>
+    );
+}
+
+// Component to render audit details
+function AuditDetailsDisplay({ log }: { log: AuditLog }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const details = log.details as AuditDetails;
+    const hasChanges = details.changes && Array.isArray(details.changes) && details.changes.length > 0;
+
+    // Get the summary text
+    const summary = getActionSummary(log.action, log.entity, details);
+
+    // Format legacy details
+    const formattedDetails = formatAuditDetails(log.action, log.entity, details);
+
+    if (!hasChanges && formattedDetails.length === 0) {
+        return (
+            <div className="text-sm text-muted-foreground">
+                {summary}
+            </div>
+        );
+    }
+
+    return (
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+            <div className="flex items-center gap-2">
+                <span className="text-sm">{summary}</span>
+                <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                        {isOpen ? (
+                            <ChevronUp className="h-4 w-4" />
+                        ) : (
+                            <ChevronDown className="h-4 w-4" />
+                        )}
+                    </Button>
+                </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent>
+                <div className="mt-2 pl-2 border-l-2 border-muted space-y-1">
+                    {hasChanges ? (
+                        (details.changes as FieldChange[]).map((change, index) => (
+                            <ChangeItem key={index} change={change} />
+                        ))
+                    ) : (
+                        formattedDetails.map((detail, index) => (
+                            <div
+                                key={index}
+                                className="text-sm py-1"
+                                dangerouslySetInnerHTML={{
+                                    __html: detail.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                }}
+                            />
+                        ))
+                    )}
+                </div>
+            </CollapsibleContent>
+        </Collapsible>
+    );
+}
 
 export default function AuditLogsPage() {
     const { selectedCompany } = useCompany();
@@ -76,7 +176,7 @@ export default function AuditLogsPage() {
     const getActionBadge = (action: string) => {
         switch (action) {
             case "create": return <Badge variant="default" className="bg-emerald-600">Criação</Badge>;
-            case "update": return <Badge variant="secondary" className="bg-blue-100 text-blue-800">Edição</Badge>;
+            case "update": return <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Edição</Badge>;
             case "delete": return <Badge variant="destructive">Exclusão</Badge>;
             case "approve": return <Badge className="bg-green-600">Aprovação</Badge>;
             case "reject": return <Badge className="bg-red-600">Rejeição</Badge>;
@@ -86,13 +186,7 @@ export default function AuditLogsPage() {
     };
 
     const getEntityLabel = (entity: string) => {
-        switch (entity) {
-            case "transaction": return "Transação";
-            case "user": return "Usuário";
-            case "company": return "Empresa";
-            case "cost_center": return "Centro de Custo";
-            default: return entity;
-        }
+        return ENTITY_LABELS[entity] || entity;
     };
 
     if (isLoading && logs.length === 0) {
@@ -149,6 +243,8 @@ export default function AuditLogsPage() {
                                 <SelectItem value="transaction">Transação</SelectItem>
                                 <SelectItem value="user">Usuário</SelectItem>
                                 <SelectItem value="company">Empresa</SelectItem>
+                                <SelectItem value="entity">Entidade</SelectItem>
+                                <SelectItem value="cost_center">Centro de Custo</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -156,16 +252,16 @@ export default function AuditLogsPage() {
             </Card>
 
             <Card>
-                <CardContent className="p-0">
-                    <Table>
+                <CardContent className="p-0 overflow-x-auto">
+                    <Table className="table-fixed w-full">
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Data/Hora</TableHead>
-                                <TableHead>Usuário</TableHead>
-                                <TableHead>Ação</TableHead>
-                                <TableHead>Entidade</TableHead>
-                                <TableHead>ID da Entidade</TableHead>
-                                <TableHead>Detalhes</TableHead>
+                                <TableHead className="w-[15%] pl-6">Data/Hora</TableHead>
+                                <TableHead className="w-[18%]">Usuário</TableHead>
+                                <TableHead className="w-[10%]">Ação</TableHead>
+                                <TableHead className="w-[12%]">Entidade</TableHead>
+                                <TableHead className="w-[40%]">Detalhes</TableHead>
+                                <TableHead className="w-[5%]"></TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -176,29 +272,47 @@ export default function AuditLogsPage() {
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                logs.map((log) => (
-                                    <TableRow key={log.id}>
-                                        <TableCell className="whitespace-nowrap">
-                                            {format(log.createdAt, "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="flex flex-col">
-                                                <span className="font-medium text-xs">{log.userEmail}</span>
-                                                <span className="text-[10px] text-muted-foreground">{log.userId}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>{getActionBadge(log.action)}</TableCell>
-                                        <TableCell>{getEntityLabel(log.entity)}</TableCell>
-                                        <TableCell className="font-mono text-xs text-muted-foreground">
-                                            {log.entityId}
-                                        </TableCell>
-                                        <TableCell className="max-w-[300px]">
-                                            <pre className="text-[10px] bg-muted p-1 rounded overflow-x-auto">
-                                                {JSON.stringify(log.details, null, 2)}
-                                            </pre>
-                                        </TableCell>
-                                    </TableRow>
-                                ))
+                                logs.map((log) => {
+                                    const entityLink = getEntityLink(log.entity, log.entityId);
+
+                                    return (
+                                        <TableRow key={log.id}>
+                                            <TableCell className="pl-6">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium">
+                                                        {formatRelativeTime(log.createdAt)}
+                                                    </span>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {format(log.createdAt, "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                                                    </span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium text-sm truncate max-w-[180px]">
+                                                        {log.userEmail}
+                                                    </span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>{getActionBadge(log.action)}</TableCell>
+                                            <TableCell>
+                                                <span className="text-sm">{getEntityLabel(log.entity)}</span>
+                                            </TableCell>
+                                            <TableCell>
+                                                <AuditDetailsDisplay log={log} />
+                                            </TableCell>
+                                            <TableCell>
+                                                {entityLink && (
+                                                    <Link href={entityLink}>
+                                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                                            <ExternalLink className="h-4 w-4" />
+                                                        </Button>
+                                                    </Link>
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })
                             )}
                         </TableBody>
                     </Table>

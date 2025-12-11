@@ -2,6 +2,7 @@ import { db } from "@/lib/firebase/client";
 import { collection, doc, getDocs, getDoc, updateDoc, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { UserRole, UserProfile } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
+import { generateChanges } from "@/lib/auditFormatter";
 
 const COLLECTION_NAME = "users";
 
@@ -36,6 +37,13 @@ export const userService = {
     updateRole: async (uid: string, role: UserRole, adminUser: { uid: string; email: string }, companyId?: string) => {
         const docRef = doc(db, COLLECTION_NAME, uid);
 
+        // Fetch current document to get old role
+        const currentDoc = await getDoc(docRef);
+        const currentData = currentDoc.exists() ? currentDoc.data() : {};
+        const oldRole = companyId 
+            ? currentData?.companyRoles?.[companyId] 
+            : currentData?.role;
+
         if (companyId) {
             // Update role for specific company
             await updateDoc(docRef, {
@@ -54,12 +62,21 @@ export const userService = {
             action: 'update',
             entity: 'user',
             entityId: uid,
-            details: { role, companyId }
+            details: { 
+                changes: [{ field: 'role', oldValue: oldRole, newValue: role }],
+                companyId 
+            }
         });
     },
 
     updateStatus: async (uid: string, status: 'pending_company_setup' | 'pending_approval' | 'active' | 'rejected', adminUser: { uid: string; email: string }) => {
         const docRef = doc(db, COLLECTION_NAME, uid);
+
+        // Fetch current document to get old status
+        const currentDoc = await getDoc(docRef);
+        const currentData = currentDoc.exists() ? currentDoc.data() : {};
+        const oldStatus = currentData?.status;
+
         await updateDoc(docRef, {
             status,
             active: status === 'active', // Sync legacy field
@@ -73,7 +90,9 @@ export const userService = {
             action: status === 'active' ? 'approve' : status === 'rejected' ? 'reject' : 'update',
             entity: 'user',
             entityId: uid,
-            details: { status }
+            details: { 
+                changes: [{ field: 'status', oldValue: oldStatus, newValue: status }]
+            }
         });
     },
 

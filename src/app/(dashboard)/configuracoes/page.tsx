@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Users, Building2, ChevronRight, ShieldCheck } from "lucide-react";
+import { Users, Building2, ChevronRight, ShieldCheck, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { useRouter } from "next/navigation";
@@ -14,7 +14,8 @@ export default function SettingsPage() {
         canAccessSettings,
         canManageUsers,
         canManageCompanies,
-        canViewAuditLogs
+        canViewAuditLogs,
+        canManageFeedback
     } = usePermissions();
 
     useEffect(() => {
@@ -46,6 +47,13 @@ export default function SettingsPage() {
             href: "/configuracoes/auditoria",
             icon: ShieldCheck,
             show: canViewAuditLogs,
+        },
+        {
+            title: "Feedbacks",
+            description: "Visualize e responda aos feedbacks dos usuários.",
+            href: "/configuracoes/feedbacks",
+            icon: MessageSquare,
+            show: canManageFeedback,
         },
     ];
 

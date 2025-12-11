@@ -2,6 +2,7 @@ import { db } from "@/lib/firebase/client";
 import { collection, doc, getDocs, getDoc, setDoc, query, orderBy, where, limit, Timestamp } from "firebase/firestore";
 import { Company } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
+import { generateChanges } from "@/lib/auditFormatter";
 
 const COLLECTION_NAME = "companies";
 
@@ -161,10 +162,17 @@ export const companyService = {
         const docRef = doc(db, COLLECTION_NAME, id);
         const now = new Date();
 
+        // Fetch current document to generate diff
+        const currentDoc = await getDoc(docRef);
+        const currentData = currentDoc.exists() ? currentDoc.data() : {};
+
         await setDoc(docRef, {
             ...data,
             updatedAt: Timestamp.fromDate(now),
         }, { merge: true });
+
+        // Generate changes for audit log
+        const changes = generateChanges(currentData as Record<string, unknown>, data as Record<string, unknown>);
 
         await auditService.log({
             companyId: id,
@@ -173,7 +181,7 @@ export const companyService = {
             action: 'update',
             entity: 'company',
             entityId: id,
-            details: data
+            details: { changes }
         });
     },
 

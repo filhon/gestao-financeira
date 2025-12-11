@@ -46,6 +46,7 @@ export interface Permissions {
     canManageCompanies: boolean;
     canViewAuditLogs: boolean;
     canAccessSettings: boolean; // General settings access
+    canManageFeedback: boolean; // View/respond to all feedbacks - admin only
 
     // Role Info
     currentRole: UserRole | null;
@@ -154,6 +155,7 @@ export function usePermissions(): Permissions {
         // User: No.
 
         canAccessSettings: isAdminOrManager, // General 'Settings' menu access
+        canManageFeedback: isAdmin, // Only global admin can manage feedbacks
 
         // Role Info
         currentRole: effectiveRole,

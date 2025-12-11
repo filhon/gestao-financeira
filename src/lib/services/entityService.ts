@@ -4,6 +4,7 @@ import {
     updateDoc,
     deleteDoc,
     doc,
+    getDoc,
     getDocs,
     query,
     where,
@@ -14,6 +15,7 @@ import {
 import { db } from "@/lib/firebase/client";
 import { Entity } from "@/lib/types";
 import { auditService } from "./auditService";
+import { generateChanges } from "@/lib/auditFormatter";
 
 const COLLECTION_NAME = "entities";
 
@@ -81,6 +83,10 @@ export const entityService = {
         const docRef = doc(db, COLLECTION_NAME, id);
         const now = new Date();
 
+        // Fetch current document to generate diff
+        const currentDoc = await getDoc(docRef);
+        const currentData = currentDoc.exists() ? currentDoc.data() : {};
+
         // Remove undefined values (Firestore doesn't accept them)
         const cleanData = Object.fromEntries(
             Object.entries(data).filter(([_, value]) => value !== undefined)
@@ -91,6 +97,9 @@ export const entityService = {
             updatedAt: Timestamp.fromDate(now),
         });
 
+        // Generate changes for audit log
+        const changes = generateChanges(currentData as Record<string, unknown>, cleanData as Record<string, unknown>);
+
         await auditService.log({
             companyId: companyId,
             userId: user.uid,
@@ -98,7 +107,7 @@ export const entityService = {
             action: 'update',
             entity: 'entity',
             entityId: id,
-            details: data
+            details: { changes }
         });
     },
 

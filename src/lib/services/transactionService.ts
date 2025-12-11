@@ -4,6 +4,7 @@
     updateDoc,
     deleteDoc,
     doc,
+    getDoc,
     getDocs,
     query,
     orderBy,
@@ -20,6 +21,7 @@ import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { auditService } from "@/lib/services/auditService";
 import { emailService } from "@/lib/services/emailService";
+import { generateChanges } from "@/lib/auditFormatter";
 
 const COLLECTION_NAME = "transactions";
 
@@ -225,10 +227,17 @@ export const transactionService = {
         const docRef = doc(db, COLLECTION_NAME, id);
         const cleanData = stripUndefined(data); // Sanitize data
 
+        // Fetch current document to generate diff
+        const currentDoc = await getDoc(docRef);
+        const currentData = currentDoc.exists() ? currentDoc.data() : {};
+
         await updateDoc(docRef, {
             ...cleanData,
             updatedAt: serverTimestamp(),
         });
+
+        // Generate changes for audit log
+        const changes = generateChanges(currentData as Record<string, unknown>, cleanData as Record<string, unknown>);
 
         await auditService.log({
             companyId,
@@ -237,7 +246,7 @@ export const transactionService = {
             action: 'update',
             entity: 'transaction',
             entityId: id,
-            details: cleanData
+            details: { changes }
         });
     },
 

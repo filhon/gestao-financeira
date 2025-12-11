@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Component, ErrorInfo, ReactNode } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -57,7 +57,7 @@ export class ErrorBoundary extends Component<Props, State> {
                                     {this.state.error.message}
                                 </pre>
                             )}
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2 justify-center">
                                 <Button onClick={this.handleRetry} variant="outline">
                                     <RefreshCw className="mr-2 h-4 w-4" />
                                     Tentar Novamente
@@ -66,6 +66,19 @@ export class ErrorBoundary extends Component<Props, State> {
                                     Ir para Início
                                 </Button>
                             </div>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-muted-foreground"
+                                onClick={() => {
+                                    const errorMessage = encodeURIComponent(this.state.error?.message || "Erro desconhecido");
+                                    const errorUrl = encodeURIComponent(window.location.href);
+                                    window.location.href = `/feedback?error=${errorMessage}&url=${errorUrl}`;
+                                }}
+                            >
+                                <MessageSquare className="mr-2 h-4 w-4" />
+                                Reportar Problema
+                            </Button>
                         </CardContent>
                     </Card>
                 </div>

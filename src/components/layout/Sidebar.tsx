@@ -17,6 +17,7 @@ import {
     Database,
     Layers,
     LucideIcon,
+    MessageSquare,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -238,6 +239,22 @@ export function Sidebar() {
                     );
                 })}
             </nav>
+
+            {/* Footer section with Feedback link */}
+            <div className="mt-auto pt-4 border-t">
+                <Link
+                    href="/feedback"
+                    className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                        pathname === "/feedback"
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                >
+                    <MessageSquare className="h-4 w-4" />
+                    Feedback
+                </Link>
+            </div>
         </div>
     );
 }

@@ -249,3 +249,55 @@ export interface RecurringTransactionTemplate {
     createdAt: Date;
     updatedAt: Date;
 }
+
+// Feedback System Types
+export type FeedbackType = 'bug' | 'improvement' | 'question' | 'praise';
+export type FeedbackStatus = 'pending' | 'in_review' | 'resolved' | 'wont_fix';
+export type FeedbackPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export type SystemFeature = 
+    | 'dashboard'
+    | 'contas_pagar'
+    | 'contas_receber'
+    | 'centros_custo'
+    | 'recorrencias'
+    | 'lotes'
+    | 'relatorios'
+    | 'configuracoes'
+    | 'cadastros'
+    | 'outro';
+
+export interface Feedback {
+    id: string;
+    userId: string;
+    userEmail: string;
+    userName: string;
+    
+    // Content
+    type: FeedbackType;
+    priority: FeedbackPriority;
+    relatedFeatures: SystemFeature[];
+    title: string;
+    description: string;
+    screenshotUrl?: string;
+    
+    // Error context (when coming from ErrorBoundary)
+    errorContext?: {
+        message: string;
+        url: string;
+        timestamp: Date;
+    };
+    
+    // Status
+    status: FeedbackStatus;
+    read: boolean;
+    
+    // Admin response
+    adminResponse?: string;
+    respondedBy?: string;
+    respondedByEmail?: string;
+    respondedAt?: Date;
+    
+    createdAt: Date;
+    updatedAt: Date;
+}
