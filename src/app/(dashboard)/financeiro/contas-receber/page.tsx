@@ -148,7 +148,7 @@ export default function AccountsReceivablePage() {
 
     const getStatusBadge = (status: string) => {
         switch (status) {
-            case "approved": return <Badge className="bg-emerald-500">Aprovado</Badge>;
+            case "approved": return <Badge className="bg-emerald-500">Aguardando Recebimento</Badge>;
             case "pending_approval": return <Badge className="bg-amber-500">Pendente</Badge>;
             case "paid": return <Badge className="bg-blue-500">Recebido</Badge>;
             case "rejected": return <Badge className="bg-red-500">Rejeitado</Badge>;

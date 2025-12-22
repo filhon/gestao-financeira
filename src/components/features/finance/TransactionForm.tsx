@@ -6,7 +6,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { TransactionFormData, transactionSchema } from "@/lib/validations/transaction";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
     Form,
     FormControl,
@@ -48,6 +47,9 @@ import { entityService } from "@/lib/services/entityService";
 import { Entity } from "@/lib/types";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatCurrency } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertTriangle } from "lucide-react";
 
 interface TransactionFormProps {
     defaultValues?: Partial<TransactionFormData>;
@@ -60,10 +62,12 @@ interface TransactionFormProps {
 export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, type }: TransactionFormProps) {
     const { selectedCompany } = useCompany();
     const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+    const [costCenterBalances, setCostCenterBalances] = useState<Record<string, number>>({});
     const [isUploading, setIsUploading] = useState(false);
     const [entities, setEntities] = useState<Entity[]>([]);
     const [useEntity, setUseEntity] = useState(true);
     const [openEntityCombobox, setOpenEntityCombobox] = useState(false);
+    const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
 
     useEffect(() => {
         const loadEntities = async () => {
@@ -115,6 +119,10 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
     const { user } = useAuth();
     const { onlyOwnPayables } = usePermissions();
 
+    // Watch dueDate to get the year for balance calculation
+    const watchedDueDate = form.watch("dueDate");
+    const balanceYear = watchedDueDate ? new Date(watchedDueDate).getFullYear() : new Date().getFullYear();
+
     useEffect(() => {
         const loadCostCenters = async () => {
             if (selectedCompany && user) {
@@ -123,13 +131,45 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                 const forUserId = onlyOwnPayables ? user.uid : undefined;
                 const data = await costCenterService.getAll(selectedCompany.id, forUserId);
                 setCostCenters(data);
+
+                // Load balances for payables (to show in dropdown) - filtered by year
+                if (type === 'payable') {
+                    const balances: Record<string, number> = {};
+                    for (const cc of data) {
+                        const balance = await costCenterService.getEffectiveBalance(cc.id, selectedCompany.id, balanceYear);
+                        balances[cc.id] = balance.available;
+                    }
+                    setCostCenterBalances(balances);
+                }
             }
         };
         loadCostCenters();
-    }, [selectedCompany, user, onlyOwnPayables]);
+    }, [selectedCompany, user, onlyOwnPayables, type, balanceYear]);
 
     // Update allocation amounts when total amount changes
     const totalAmount = form.watch("amount");
+    const allocations = form.watch("costCenterAllocation");
+
+    // Check balance warning for payables
+    useEffect(() => {
+        if (type === 'payable' && allocations && totalAmount > 0) {
+            let warning = null;
+            for (const alloc of allocations) {
+                if (alloc.costCenterId && alloc.amount > 0) {
+                    const available = costCenterBalances[alloc.costCenterId] || 0;
+                    if (alloc.amount > available) {
+                        const ccName = costCenters.find(cc => cc.id === alloc.costCenterId)?.name || 'Centro de Custo';
+                        warning = `Saldo insuficiente em "${ccName}". Disponível: ${formatCurrency(available)} | Necessário: ${formatCurrency(alloc.amount)}`;
+                        break;
+                    }
+                }
+            }
+            setBalanceWarning(warning);
+        } else {
+            setBalanceWarning(null);
+        }
+    }, [allocations, totalAmount, costCenterBalances, costCenters, type]);
+
     useEffect(() => {
         if (totalAmount) {
             const allocations = form.getValues("costCenterAllocation");
@@ -583,9 +623,14 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                                     <SelectContent>
                                                         {hierarchicalCostCenters.map((cc) => (
                                                             <SelectItem key={cc.id} value={cc.id}>
-                                                                <span style={{ paddingLeft: `${cc.level * 10}px` }}>
+                                                                <span style={{ paddingLeft: `${cc.level * 10}px` }} className="flex items-center gap-2">
                                                                     {cc.level > 0 && "↳ "}
                                                                     {cc.name}
+                                                                    {type === 'payable' && costCenterBalances[cc.id] !== undefined && (
+                                                                        <span className={`text-xs ${costCenterBalances[cc.id] > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                                                                            ({formatCurrency(costCenterBalances[cc.id])})
+                                                                        </span>
+                                                                    )}
                                                                 </span>
                                                             </SelectItem>
                                                         ))}
@@ -620,6 +665,18 @@ export function TransactionForm({ defaultValues, onSubmit, isLoading, onCancel, 
                                 </div>
                             ))}
                             <FormMessage>{form.formState.errors.costCenterAllocation?.root?.message}</FormMessage>
+                            
+                            {/* Balance Warning */}
+                            {balanceWarning && (
+                                <Alert variant="destructive" className="mt-4">
+                                    <AlertTriangle className="h-4 w-4" />
+                                    <AlertDescription>
+                                        {balanceWarning}
+                                        <br />
+                                        <span className="text-xs">Solicite alocação de recursos ao gestor financeiro para continuar.</span>
+                                    </AlertDescription>
+                                </Alert>
+                            )}
                         </div>
                     </CardContent>
                 </Card>

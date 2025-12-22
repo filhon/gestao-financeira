@@ -30,8 +30,10 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { userService } from "@/lib/services/userService";
 import { budgetService } from "@/lib/services/budgetService";
+import { costCenterService } from "@/lib/services/costCenterService";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { formatCurrency } from "@/lib/utils";
 
 interface CostCenterFormProps {
     defaultValues?: CostCenterFormData;
@@ -45,6 +47,16 @@ interface CostCenterFormProps {
 export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, availableCostCenters, editingId }: CostCenterFormProps) {
     const { selectedCompany } = useCompany();
     const [users, setUsers] = useState<UserProfile[]>([]);
+    const [balanceInfo, setBalanceInfo] = useState<{
+        fromReceivables: number;
+        fromParent: number;
+        allocatedToChildren: number;
+        spentOnPayables: number;
+        available: number;
+    } | null>(null);
+    const [parentBalanceInfo, setParentBalanceInfo] = useState<{
+        available: number;
+    } | null>(null);
 
     const form = useForm<CostCenterFormData>({
         resolver: zodResolver(costCenterSchema),
@@ -110,6 +122,40 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
         loadBudget();
     }, [editingId, watchedYear, form]);
 
+    // Load balance info when editing (filtered by selected year)
+    useEffect(() => {
+        const loadBalance = async () => {
+            if (editingId && selectedCompany && watchedYear) {
+                try {
+                    const balance = await costCenterService.getEffectiveBalance(editingId, selectedCompany.id, watchedYear);
+                    setBalanceInfo(balance);
+                } catch (error) {
+                    console.error("Error loading balance:", error);
+                }
+            }
+        };
+        loadBalance();
+    }, [editingId, selectedCompany, watchedYear]);
+
+    // Watch parent selection and load parent's balance (filtered by selected year)
+    const watchedParentId = form.watch("parentId");
+    useEffect(() => {
+        const loadParentBalance = async () => {
+            if (watchedParentId && watchedParentId !== "none" && selectedCompany && watchedYear) {
+                try {
+                    const balance = await costCenterService.getEffectiveBalance(watchedParentId, selectedCompany.id, watchedYear);
+                    setParentBalanceInfo({ available: balance.available });
+                } catch (error) {
+                    console.error("Error loading parent balance:", error);
+                    setParentBalanceInfo(null);
+                }
+            } else {
+                setParentBalanceInfo(null);
+            }
+        };
+        loadParentBalance();
+    }, [watchedParentId, selectedCompany, watchedYear]);
+
     // Filter out self and potential children (simple circular check: just self for now)
     const potentialParents = availableCostCenters.filter(cc => cc.id !== editingId);
 
@@ -145,6 +191,11 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                        {parentBalanceInfo && (
+                                            <p className="text-sm text-muted-foreground mt-1">
+                                                Saldo disponível do pai: <span className={parentBalanceInfo.available > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>{formatCurrency(parentBalanceInfo.available)}</span>
+                                            </p>
+                                        )}
                                         <FormMessage />
                                     </FormItem>
                                 )}
@@ -240,6 +291,41 @@ export function CostCenterForm({ defaultValues, onSubmit, isLoading, onCancel, a
                         </div>
                     </div>
                 </div>
+
+                {/* Balance Info Section (only when editing) */}
+                {editingId && balanceInfo && (
+                    <div className="space-y-4 border-t pt-4">
+                        <h3 className="text-lg font-medium">Saldo Disponível</h3>
+                        <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Receitas Projetadas:</span>
+                                <span className="font-medium text-green-600">+{formatCurrency(balanceInfo.fromReceivables)}</span>
+                            </div>
+                            {balanceInfo.fromParent > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Recebido do Pai:</span>
+                                    <span className="font-medium text-blue-600">+{formatCurrency(balanceInfo.fromParent)}</span>
+                                </div>
+                            )}
+                            {balanceInfo.allocatedToChildren > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Alocado para Filhos:</span>
+                                    <span className="font-medium text-orange-600">-{formatCurrency(balanceInfo.allocatedToChildren)}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Despesas Previstas:</span>
+                                <span className="font-medium text-red-600">-{formatCurrency(balanceInfo.spentOnPayables)}</span>
+                            </div>
+                            <div className="border-t pt-2 mt-2 flex justify-between">
+                                <span className="font-semibold">Saldo Líquido:</span>
+                                <span className={`font-bold ${balanceInfo.available >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {formatCurrency(balanceInfo.available)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <div className="space-y-4 border-t pt-4">
                     <h3 className="text-lg font-medium">Permissões e Controle</h3>

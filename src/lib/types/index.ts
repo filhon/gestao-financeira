@@ -67,6 +67,11 @@ export interface CostCenter {
     releaserEmail?: string;    // Email of the person responsible for releasing payment
     budgetLimit?: number;      // Monthly budget limit
 
+    // Balance from projected receivables
+    availableBalance?: number;      // Manually set or calculated from receivables
+    allocatedToChildren?: number;   // Amount allocated to child cost centers
+    allocatedFromParent?: number;   // Amount received from parent (for children)
+
     createdAt: Date;
     updatedAt: Date;
 }

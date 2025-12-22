@@ -76,11 +76,15 @@ export default function DashboardLayout({
             <Sidebar />
             <div className="flex flex-1 flex-col overflow-hidden">
                 <Header />
-                <main className="flex-1 overflow-y-auto bg-muted/10 p-6">
-                    <Breadcrumbs />
-                    <ErrorBoundary>
-                        {children}
-                    </ErrorBoundary>
+                <main className="flex flex-1 flex-col overflow-hidden bg-muted/10">
+                    <div className="flex-none p-6 pb-0">
+                        <Breadcrumbs />
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-6 min-h-0">
+                        <ErrorBoundary>
+                            {children}
+                        </ErrorBoundary>
+                    </div>
                 </main>
             </div>
             <GlobalSearch />

@@ -44,6 +44,7 @@ export function TransactionDetailsDialog({
     onClose,
     onUpdate,
 }: TransactionDetailsDialogProps) {
+    const isReceivable = transaction?.type === 'receivable';
     const { user } = useAuth();
     const { selectedCompany } = useCompany();
     const {
@@ -228,11 +229,16 @@ export function TransactionDetailsDialog({
 
     const getStatusBadge = (status: string) => {
         switch (status) {
-            case "approved": return <Badge className="bg-emerald-500">Aprovado</Badge>;
-            case "pending_approval": return <Badge className="bg-amber-500">Pendente</Badge>;
-            case "paid": return <Badge className="bg-blue-500">Pago</Badge>;
-            case "rejected": return <Badge className="bg-red-500">Rejeitado</Badge>;
-            default: return <Badge variant="secondary">Rascunho</Badge>;
+            case "approved": 
+                return <Badge className="bg-emerald-500">{isReceivable ? 'Aguardando Recebimento' : 'Aprovado'}</Badge>;
+            case "pending_approval": 
+                return <Badge className="bg-amber-500">Pendente</Badge>;
+            case "paid": 
+                return <Badge className="bg-blue-500">{isReceivable ? 'Recebido' : 'Pago'}</Badge>;
+            case "rejected": 
+                return <Badge className="bg-red-500">Rejeitado</Badge>;
+            default: 
+                return <Badge variant="secondary">Rascunho</Badge>;
         }
     };
 
@@ -436,7 +442,8 @@ export function TransactionDetailsDialog({
                                     </Button>
                                 )}
 
-                                {transaction.status === 'draft' && (
+                                {/* Approval flow only for payables */}
+                                {transaction.status === 'draft' && !isReceivable && (
                                     <Button
                                         className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
                                         onClick={() => handleStatusUpdate('pending_approval')}
@@ -447,7 +454,8 @@ export function TransactionDetailsDialog({
                                     </Button>
                                 )}
 
-                                {transaction.status === 'pending_approval' && canApprove && (
+                                {/* Approval/Rejection only for payables */}
+                                {transaction.status === 'pending_approval' && canApprove && !isReceivable && (
                                     <div className="flex gap-2 w-full sm:w-auto">
                                         <Button
                                             variant="destructive"

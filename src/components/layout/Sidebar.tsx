@@ -18,6 +18,7 @@ import {
     Layers,
     LucideIcon,
     MessageSquare,
+    Map as MapIcon,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -103,6 +104,11 @@ const allMenuItems: MenuItem[] = [
         href: "/configuracoes",
         icon: Settings,
         permission: "canAccessSettings", // Only managers and admins
+    },
+    {
+        title: "Roadmap",
+        href: "/roadmap",
+        icon: MapIcon,
     },
 ];
 

@@ -95,6 +95,123 @@ export const costCenterService = {
             } as CostCenter;
         });
     },
+
+    /**
+     * Calculate effective balance for a cost center for a specific year
+     * Balance = (approved receivables) + (parent allocation) - (allocated to children) - (payables)
+     * Only includes transactions with dueDate in the specified year
+     */
+    getEffectiveBalance: async (costCenterId: string, companyId: string, year?: number): Promise<{
+        fromReceivables: number;
+        fromParent: number;
+        allocatedToChildren: number;
+        spentOnPayables: number;
+        available: number;
+    }> => {
+        const targetYear = year || new Date().getFullYear();
+        const yearStart = new Date(targetYear, 0, 1); // Jan 1
+        const yearEnd = new Date(targetYear, 11, 31, 23, 59, 59); // Dec 31
+
+        // Get the cost center
+        const costCenter = await costCenterService.getById(costCenterId);
+        if (!costCenter) {
+            return { fromReceivables: 0, fromParent: 0, allocatedToChildren: 0, spentOnPayables: 0, available: 0 };
+        }
+
+        // Get all non-rejected receivables allocated to this cost center
+        // Include all statuses (draft, pending_approval, approved, paid) for projected revenue
+        const receivablesQuery = query(
+            collection(db, "transactions"),
+            where("companyId", "==", companyId),
+            where("type", "==", "receivable"),
+            where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
+            where("dueDate", ">=", yearStart),
+            where("dueDate", "<=", yearEnd)
+        );
+        const receivablesSnapshot = await getDocs(receivablesQuery);
+        let fromReceivables = 0;
+        receivablesSnapshot.docs.forEach(docSnap => {
+            const tx = docSnap.data();
+            const allocations = tx.costCenterAllocation || [];
+            allocations.forEach((alloc: { costCenterId: string; amount: number }) => {
+                if (alloc.costCenterId === costCenterId) {
+                    fromReceivables += alloc.amount || 0;
+                }
+            });
+        });
+
+        // Get payables (non-rejected) allocated to this cost center
+        const payablesQuery = query(
+            collection(db, "transactions"),
+            where("companyId", "==", companyId),
+            where("type", "==", "payable"),
+            where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
+            where("dueDate", ">=", yearStart),
+            where("dueDate", "<=", yearEnd)
+        );
+        const payablesSnapshot = await getDocs(payablesQuery);
+        let spentOnPayables = 0;
+        payablesSnapshot.docs.forEach(docSnap => {
+            const tx = docSnap.data();
+            const allocations = tx.costCenterAllocation || [];
+            allocations.forEach((alloc: { costCenterId: string; amount: number }) => {
+                if (alloc.costCenterId === costCenterId) {
+                    spentOnPayables += alloc.amount || 0;
+                }
+            });
+        });
+
+        const fromParent = costCenter.allocatedFromParent || 0;
+        const allocatedToChildren = costCenter.allocatedToChildren || 0;
+        
+        const available = fromReceivables + fromParent - allocatedToChildren - spentOnPayables;
+
+        return {
+            fromReceivables,
+            fromParent,
+            allocatedToChildren,
+            spentOnPayables,
+            available: Math.max(0, available)
+        };
+    },
+
+    /**
+     * Update the manual balance allocation from parent to child
+     */
+    allocateToChild: async (parentId: string, childId: string, amount: number) => {
+        const parentRef = doc(db, COLLECTION_NAME, parentId);
+        const childRef = doc(db, COLLECTION_NAME, childId);
+
+        const parent = await costCenterService.getById(parentId);
+        const child = await costCenterService.getById(childId);
+
+        if (!parent || !child) throw new Error("Cost center not found");
+
+        // Update parent's allocatedToChildren
+        const newParentAllocated = (parent.allocatedToChildren || 0) + amount;
+        await updateDoc(parentRef, {
+            allocatedToChildren: newParentAllocated,
+            updatedAt: serverTimestamp()
+        });
+
+        // Update child's allocatedFromParent
+        const newChildAllocated = (child.allocatedFromParent || 0) + amount;
+        await updateDoc(childRef, {
+            allocatedFromParent: newChildAllocated,
+            updatedAt: serverTimestamp()
+        });
+    },
+
+    /**
+     * Update the available balance directly (manual adjustment)
+     */
+    updateBalance: async (id: string, availableBalance: number) => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        return updateDoc(docRef, {
+            availableBalance,
+            updatedAt: serverTimestamp()
+        });
+    }
 };
 
 export const getHierarchicalCostCenters = (items: CostCenter[]) => {

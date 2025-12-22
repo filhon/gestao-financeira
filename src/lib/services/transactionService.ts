@@ -96,7 +96,8 @@ export const transactionService = {
         const { useInstallments, installmentsCount, ...transactionData } = cleanData;
         const userId = user.uid;
 
-        const status = cleanData.status || "draft";
+        // Receivables start as 'approved' (already projected/accounted), payables start as 'draft'
+        const status = cleanData.status || (transactionData.type === 'receivable' ? 'approved' : 'draft');
 
         if (useInstallments && installmentsCount && installmentsCount > 1) {
             const groupId = crypto.randomUUID();
@@ -106,14 +107,21 @@ export const transactionService = {
 
             const promises = [];
             for (let i = 1; i <= installmentsCount; i++) {
-                const amount = i === installmentsCount ? baseAmount + remainder : baseAmount;
+                const installmentAmount = i === installmentsCount ? baseAmount + remainder : baseAmount;
                 const dueDate = i === 1 ? transactionData.dueDate : addMonths(transactionData.dueDate, i - 1);
                 const description = `${transactionData.description} (${i}/${installmentsCount})`;
+
+                // Recalculate costCenterAllocation amounts for this installment
+                const installmentAllocations = transactionData.costCenterAllocation?.map(alloc => ({
+                    ...alloc,
+                    amount: (installmentAmount * alloc.percentage) / 100
+                }));
 
                 promises.push(addDoc(collection(db, COLLECTION_NAME), {
                     ...transactionData,
                     description,
-                    amount,
+                    amount: installmentAmount,
+                    costCenterAllocation: installmentAllocations,
                     dueDate,
                     installments: {
                         current: i,
