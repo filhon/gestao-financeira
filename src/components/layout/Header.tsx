@@ -37,6 +37,18 @@ export function Header() {
             .substring(0, 2);
     };
 
+    const translateRole = (role: string | undefined): string => {
+        const roleTranslations: Record<string, string> = {
+            admin: "Administrador",
+            financial_manager: "Gestor Financeiro",
+            approver: "Aprovador",
+            releaser: "Liberador",
+            auditor: "Auditor",
+            user: "Usuário",
+        };
+        return role ? roleTranslations[role] || role : "Visitante";
+    };
+
     return (
         <header className="flex h-16 items-center justify-between border-b bg-card px-6">
             <div
@@ -65,14 +77,14 @@ export function Header() {
                 <div className="flex items-center gap-3 border-l pl-4">
                     <div className="text-right hidden sm:block">
                         <p className="text-sm font-medium">{user?.displayName || "Usuário"}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{user?.role?.replace('_', ' ') || "Visitante"}</p>
+                        <p className="text-xs text-muted-foreground">{translateRole(user?.role)}</p>
                     </div>
 
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                                 <Avatar>
-                                    <AvatarImage src={user?.photoURL || ""} />
+                                    <AvatarImage src={user?.photoURL || undefined} />
                                     <AvatarFallback>{user?.displayName ? getInitials(user.displayName) : "U"}</AvatarFallback>
                                 </Avatar>
                             </Button>

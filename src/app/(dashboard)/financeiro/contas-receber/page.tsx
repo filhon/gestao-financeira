@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Loader2, Trash2, Eye } from "lucide-react";
+import { Plus, Loader2, Trash2, Eye, Upload } from "lucide-react";
+import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
 import {
     Card,
@@ -55,6 +56,7 @@ export default function AccountsReceivablePage() {
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [deleteId, setDeleteId] = useState<string | null>(null);
+    const [isImportOpen, setIsImportOpen] = useState(false);
 
     // Use centralized permissions
     const {
@@ -158,14 +160,20 @@ export default function AccountsReceivablePage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">Contas a Receber</h1>
-                {canCreateReceivables && (
-                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                        <DialogTrigger asChild>
-                            <Button>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Nova Receita
+                <div className="flex gap-2">
+                    {canCreateReceivables && (
+                        <>
+                            <Button variant="outline" onClick={() => setIsImportOpen(true)}>
+                                <Upload className="mr-2 h-4 w-4" />
+                                Importar
                             </Button>
-                        </DialogTrigger>
+                            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                                <DialogTrigger asChild>
+                                    <Button>
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        Nova Receita
+                                    </Button>
+                                </DialogTrigger>
                         <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Nova Conta a Receber</DialogTitle>
@@ -176,10 +184,19 @@ export default function AccountsReceivablePage() {
                                 isLoading={isSubmitting}
                                 onCancel={() => setIsDialogOpen(false)}
                             />
-                        </DialogContent>
-                    </Dialog>
-                )}
+                            </DialogContent>
+                        </Dialog>
+                        </>
+                    )}
+                </div>
             </div>
+
+            <BulkImportDialog
+                isOpen={isImportOpen}
+                onClose={() => setIsImportOpen(false)}
+                onSuccess={fetchTransactions}
+                type="receivable"
+            />
 
             <Card>
                 <CardHeader>

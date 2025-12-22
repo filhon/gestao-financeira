@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Check } from "lucide-react";
+import { Bell, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
     Popover,
@@ -124,6 +125,18 @@ export function NotificationBell() {
                         </div>
                     )}
                 </ScrollArea>
+                
+                {/* Footer with link to full notifications page */}
+                <div className="border-t p-2">
+                    <Link
+                        href="/notificacoes"
+                        onClick={() => setIsOpen(false)}
+                        className="flex items-center justify-center gap-2 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        <ExternalLink className="h-4 w-4" />
+                        Abrir Central de Notificações
+                    </Link>
+                </div>
             </PopoverContent>
         </Popover>
     );

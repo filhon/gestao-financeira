@@ -2,7 +2,6 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Transaction } from "@/lib/types";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { formatCurrency } from "@/lib/utils";
 
 export const reportService = {

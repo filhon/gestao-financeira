@@ -2,7 +2,6 @@ import { db } from "@/lib/firebase/client";
 import { collection, doc, getDocs, getDoc, updateDoc, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { UserRole, UserProfile } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
-import { generateChanges } from "@/lib/auditFormatter";
 
 const COLLECTION_NAME = "users";
 
@@ -113,6 +112,18 @@ export const userService = {
             pendingCompanyId: deleteField(),
             pendingRole: deleteField(),
             updatedAt: serverTimestamp()
+        });
+    },
+
+    /**
+     * Get users by role for a specific company
+     * Useful for selecting approvers or authorizers
+     */
+    getUsersByRole: async (companyId: string, roles: UserRole[]): Promise<UserProfile[]> => {
+        const allUsers = await userService.getAll(companyId);
+        return allUsers.filter(user => {
+            const companyRole = user.companyRoles?.[companyId];
+            return companyRole && roles.includes(companyRole);
         });
     }
 };

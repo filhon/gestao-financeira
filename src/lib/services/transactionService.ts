@@ -272,7 +272,6 @@ export const transactionService = {
 
             const snapshot = await getDocs(q);
             const promises = snapshot.docs.map(async (docSnapshot) => {
-                const t = docSnapshot.data();
                 // Avoid updating 'dueDate' relative to each other if it's not a generic update
                 // For simplified 'Edit', we might replace description, amount, category, etc.
                 // We typically DO NOT update 'dueDate' in batch because each installment has its own month.

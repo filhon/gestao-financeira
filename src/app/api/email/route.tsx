@@ -1,4 +1,4 @@
-import { ApprovalRequestEmail, StatusUpdateEmail } from '@/components/emails/EmailTemplates';
+import { ApprovalRequestEmail, StatusUpdateEmail, BatchApprovalEmail, BatchAuthorizationEmail } from '@/components/emails/EmailTemplates';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
@@ -14,6 +14,12 @@ export async function POST(request: Request) {
     } else if (type === 'status_update') {
         emailComponent = <StatusUpdateEmail {...data} />;
         subject = `Atualização de Status: ${data.description}`;
+    } else if (type === 'batch_approval_request') {
+        emailComponent = <BatchApprovalEmail {...data} />;
+        subject = `Lote Aguardando Aprovação: ${data.batchName}`;
+    } else if (type === 'batch_authorization_request') {
+        emailComponent = <BatchAuthorizationEmail {...data} />;
+        subject = `Autorização Necessária: ${data.batchName}`;
     } else {
         return NextResponse.json({ error: "Invalid email type" }, { status: 400 });
     }

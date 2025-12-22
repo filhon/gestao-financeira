@@ -7,6 +7,7 @@ import { entityService } from "@/lib/services/entityService";
 import { transactionService } from "@/lib/services/transactionService";
 import { Entity, Transaction } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,9 @@ import {
     Mail,
     FileText,
     Banknote,
-    CreditCard
+    CreditCard,
+    BarChart3,
+    Info
 } from "lucide-react";
 import {
     Table,
@@ -220,7 +223,6 @@ export default function EntityDashboard() {
                     <div>
                         <div className="flex items-center gap-3">
                             <h2 className="text-3xl font-bold tracking-tight">{entity.name}</h2>
-                            {getCategoryBadge(entity.category)}
                         </div>
                         <p className="text-muted-foreground">
                             {entity.type === 'company' ? 'Pessoa Jurídica' : 'Pessoa Física'}
@@ -247,300 +249,405 @@ export default function EntityDashboard() {
                 </div>
             </div>
 
-            {/* Entity Info Cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {entity.email && (
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-3">
-                                <Mail className="h-5 w-5 text-muted-foreground" />
-                                <div>
-                                    <p className="text-sm text-muted-foreground">E-mail</p>
-                                    <p className="font-medium">{entity.email}</p>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-                {entity.phone && (
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-3">
-                                <Phone className="h-5 w-5 text-muted-foreground" />
-                                <div>
-                                    <p className="text-sm text-muted-foreground">Telefone</p>
-                                    <p className="font-medium">{entity.phone}</p>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-                {entity.pixKey && (
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-3">
-                                <CreditCard className="h-5 w-5 text-muted-foreground" />
-                                <div>
-                                    <p className="text-sm text-muted-foreground">Chave PIX</p>
-                                    <p className="font-medium truncate max-w-[150px]">{entity.pixKey}</p>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-                {entity.bankName && (
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center gap-3">
-                                <Banknote className="h-5 w-5 text-muted-foreground" />
-                                <div>
-                                    <p className="text-sm text-muted-foreground">Banco</p>
-                                    <p className="font-medium">{entity.bankName} - Ag {entity.agency} / CC {entity.account}</p>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-            </div>
+            <Tabs defaultValue="overview" className="space-y-4">
+                <TabsList>
+                    <TabsTrigger value="overview" className="gap-2">
+                        <BarChart3 className="h-4 w-4" />
+                        Visão Geral
+                    </TabsTrigger>
+                    <TabsTrigger value="info" className="gap-2">
+                        <Info className="h-4 w-4" />
+                        Informações
+                    </TabsTrigger>
+                </TabsList>
 
-            {/* KPI Cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total a Pagar</CardTitle>
-                        <TrendingDown className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-red-600">{formatCurrency(totalPayables)}</div>
-                        <p className="text-xs text-muted-foreground">
-                            Pendente: {formatCurrency(pendingPayables)}
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total a Receber</CardTitle>
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-green-600">{formatCurrency(totalReceivables)}</div>
-                        <p className="text-xs text-muted-foreground">
-                            Pendente: {formatCurrency(pendingReceivables)}
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Saldo</CardTitle>
-                        {balance >= 0 ? (
-                            <TrendingUp className="h-4 w-4 text-green-500" />
-                        ) : (
-                            <TrendingDown className="h-4 w-4 text-red-500" />
-                        )}
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(balance)}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            Receitas - Despesas
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Transações</CardTitle>
-                        <FileText className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{yearTransactions.length}</div>
-                        <p className="text-xs text-muted-foreground">
-                            Em {selectedYear}
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
+                <TabsContent value="overview" className="space-y-4">
+                    {/* KPI Cards */}
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total a Pagar</CardTitle>
+                                <TrendingDown className="h-4 w-4 text-red-500" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-red-600">{formatCurrency(totalPayables)}</div>
+                                <p className="text-xs text-muted-foreground">
+                                    Pendente: {formatCurrency(pendingPayables)}
+                                </p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total a Receber</CardTitle>
+                                <TrendingUp className="h-4 w-4 text-green-500" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-green-600">{formatCurrency(totalReceivables)}</div>
+                                <p className="text-xs text-muted-foreground">
+                                    Pendente: {formatCurrency(pendingReceivables)}
+                                </p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Saldo</CardTitle>
+                                {balance >= 0 ? (
+                                    <TrendingUp className="h-4 w-4 text-green-500" />
+                                ) : (
+                                    <TrendingDown className="h-4 w-4 text-red-500" />
+                                )}
+                            </CardHeader>
+                            <CardContent>
+                                <div className={`text-2xl font-bold ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {formatCurrency(balance)}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    Receitas - Despesas
+                                </p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Transações</CardTitle>
+                                <FileText className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{yearTransactions.length}</div>
+                                <p className="text-xs text-muted-foreground">
+                                    Em {selectedYear}
+                                </p>
+                            </CardContent>
+                        </Card>
+                    </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-                {/* Monthly Trend Chart */}
-                <Card className="col-span-4">
-                    <CardHeader>
-                        <CardTitle>Movimentação Mensal ({selectedYear})</CardTitle>
-                    </CardHeader>
-                    <CardContent className="pl-2">
-                        <div className="h-[300px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={monthlyTrendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="payablesGradient" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
-                                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
-                                        </linearGradient>
-                                        <linearGradient id="receivablesGradient" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
-                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                    <XAxis
-                                        dataKey="name"
-                                        stroke="#888888"
-                                        fontSize={12}
-                                        tickLine={false}
-                                        axisLine={false}
-                                    />
-                                    <YAxis
-                                        stroke="#888888"
-                                        fontSize={12}
-                                        tickLine={false}
-                                        axisLine={false}
-                                        tickFormatter={(value) => {
-                                            if (Math.abs(value) >= 1000) {
-                                                return `R$${(value / 1000).toFixed(0)}k`;
-                                            }
-                                            return `R$${value}`;
-                                        }}
-                                    />
-                                    <Tooltip
-                                        content={({ active, payload, label }) => {
-                                            if (active && payload && payload.length) {
-                                                return (
-                                                    <div className="rounded-lg border bg-popover p-3 shadow-md">
-                                                        <p className="text-sm font-medium text-popover-foreground">{label}</p>
-                                                        <p className="text-sm text-red-600">
-                                                            Despesas: {formatCurrency(payload[0]?.value as number || 0)}
-                                                        </p>
-                                                        <p className="text-sm text-green-600">
-                                                            Receitas: {formatCurrency(payload[1]?.value as number || 0)}
-                                                        </p>
-                                                    </div>
-                                                );
-                                            }
-                                            return null;
-                                        }}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="payables"
-                                        stroke="#ef4444"
-                                        strokeWidth={2}
-                                        fill="url(#payablesGradient)"
-                                        dot={false}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="receivables"
-                                        stroke="#22c55e"
-                                        strokeWidth={2}
-                                        fill="url(#receivablesGradient)"
-                                        dot={false}
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Status Distribution */}
-                <Card className="col-span-3">
-                    <CardHeader>
-                        <CardTitle>Status das Transações</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex flex-col h-[300px]">
-                            <div className="flex-1 min-h-0">
-                                {statusDistribution.length > 0 ? (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                        {/* Monthly Trend Chart */}
+                        <Card className="col-span-4">
+                            <CardHeader>
+                                <CardTitle>Movimentação Mensal ({selectedYear})</CardTitle>
+                            </CardHeader>
+                            <CardContent className="pl-2">
+                                <div className="h-[300px]">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie
-                                                data={statusDistribution}
-                                                cx="50%"
-                                                cy="50%"
-                                                innerRadius={50}
-                                                outerRadius={70}
-                                                paddingAngle={5}
-                                                dataKey="value"
-                                            >
-                                                {statusDistribution.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip
-                                                formatter={(value: number) => `${value} transações`}
-                                                contentStyle={{
-                                                    borderRadius: '8px',
-                                                    border: '1px solid #e5e7eb',
-                                                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                                        <AreaChart data={monthlyTrendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                <linearGradient id="payablesGradient" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
+                                                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                                                </linearGradient>
+                                                <linearGradient id="receivablesGradient" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                                                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                                            <XAxis
+                                                dataKey="name"
+                                                stroke="#888888"
+                                                fontSize={12}
+                                                tickLine={false}
+                                                axisLine={false}
+                                            />
+                                            <YAxis
+                                                stroke="#888888"
+                                                fontSize={12}
+                                                tickLine={false}
+                                                axisLine={false}
+                                                tickFormatter={(value) => {
+                                                    if (Math.abs(value) >= 1000) {
+                                                        return `R$${(value / 1000).toFixed(0)}k`;
+                                                    }
+                                                    return `R$${value}`;
                                                 }}
                                             />
-                                        </PieChart>
+                                            <Tooltip
+                                                content={({ active, payload, label }) => {
+                                                    if (active && payload && payload.length) {
+                                                        return (
+                                                            <div className="rounded-lg border bg-popover p-3 shadow-md">
+                                                                <p className="text-sm font-medium text-popover-foreground">{label}</p>
+                                                                <p className="text-sm text-red-600">
+                                                                    Despesas: {formatCurrency(payload[0]?.value as number || 0)}
+                                                                </p>
+                                                                <p className="text-sm text-green-600">
+                                                                    Receitas: {formatCurrency(payload[1]?.value as number || 0)}
+                                                                </p>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return null;
+                                                }}
+                                            />
+                                            <Area
+                                                type="monotone"
+                                                dataKey="payables"
+                                                stroke="#ef4444"
+                                                strokeWidth={2}
+                                                fill="url(#payablesGradient)"
+                                                dot={false}
+                                            />
+                                            <Area
+                                                type="monotone"
+                                                dataKey="receivables"
+                                                stroke="#22c55e"
+                                                strokeWidth={2}
+                                                fill="url(#receivablesGradient)"
+                                                dot={false}
+                                            />
+                                        </AreaChart>
                                     </ResponsiveContainer>
-                                ) : (
-                                    <div className="flex items-center justify-center h-full text-muted-foreground">
-                                        Nenhuma transação encontrada
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Status Distribution */}
+                        <Card className="col-span-3">
+                            <CardHeader>
+                                <CardTitle>Status das Transações</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="flex flex-col h-[300px]">
+                                    <div className="flex-1 min-h-0">
+                                        {statusDistribution.length > 0 ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={statusDistribution}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={50}
+                                                        outerRadius={70}
+                                                        paddingAngle={5}
+                                                        dataKey="value"
+                                                    >
+                                                        {statusDistribution.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip
+                                                        formatter={(value: number) => `${value} transações`}
+                                                        contentStyle={{
+                                                            borderRadius: '8px',
+                                                            border: '1px solid #e5e7eb',
+                                                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                                                        }}
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="flex items-center justify-center h-full text-muted-foreground">
+                                                Nenhuma transação encontrada
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
+                                        {statusDistribution.map((entry, index) => (
+                                            <div key={index} className="flex items-center gap-2">
+                                                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                                                <span className="text-xs text-muted-foreground">{entry.name}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* Recent Transactions */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Últimas Transações</CardTitle>
+                            <CardDescription>
+                                Transações mais recentes com esta entidade em {selectedYear}
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {recentTransactions.length > 0 ? (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Data</TableHead>
+                                            <TableHead>Descrição</TableHead>
+                                            <TableHead>Tipo</TableHead>
+                                            <TableHead>Valor</TableHead>
+                                            <TableHead>Status</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {recentTransactions.map((tx) => (
+                                            <TableRow key={tx.id}>
+                                                <TableCell>{format(tx.dueDate, "dd/MM/yyyy")}</TableCell>
+                                                <TableCell className="font-medium">{tx.description}</TableCell>
+                                                <TableCell>
+                                                    {tx.type === 'payable' ? (
+                                                        <Badge variant="outline" className="border-red-500 text-red-600">A Pagar</Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="border-green-500 text-green-600">A Receber</Badge>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className={tx.type === 'payable' ? 'text-red-600' : 'text-green-600'}>
+                                                    {tx.type === 'payable' ? '-' : '+'}{formatCurrency(tx.amount)}
+                                                </TableCell>
+                                                <TableCell>{getStatusBadge(tx.status)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            ) : (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    Nenhuma transação encontrada para esta entidade em {selectedYear}.
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="info" className="space-y-4">
+                    {/* Contact Information */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <User className="h-5 w-5" />
+                                Informações de Contato
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                {entity.email && (
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-muted">
+                                            <Mail className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">E-mail</p>
+                                            <p className="font-medium">{entity.email}</p>
+                                        </div>
                                     </div>
                                 )}
-                            </div>
-                            <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
-                                {statusDistribution.map((entry, index) => (
-                                    <div key={index} className="flex items-center gap-2">
-                                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
-                                        <span className="text-xs text-muted-foreground">{entry.name}</span>
+                                {entity.phone && (
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-muted">
+                                            <Phone className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Telefone</p>
+                                            <p className="font-medium">{entity.phone}</p>
+                                        </div>
                                     </div>
-                                ))}
+                                )}
+                                {!entity.email && !entity.phone && (
+                                    <p className="text-muted-foreground col-span-full">
+                                        Nenhuma informação de contato cadastrada.
+                                    </p>
+                                )}
                             </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+                        </CardContent>
+                    </Card>
 
-            {/* Recent Transactions */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Últimas Transações</CardTitle>
-                    <CardDescription>
-                        Transações mais recentes com esta entidade em {selectedYear}
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {recentTransactions.length > 0 ? (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Data</TableHead>
-                                    <TableHead>Descrição</TableHead>
-                                    <TableHead>Tipo</TableHead>
-                                    <TableHead>Valor</TableHead>
-                                    <TableHead>Status</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {recentTransactions.map((tx) => (
-                                    <TableRow key={tx.id}>
-                                        <TableCell>{format(tx.dueDate, "dd/MM/yyyy")}</TableCell>
-                                        <TableCell className="font-medium">{tx.description}</TableCell>
-                                        <TableCell>
-                                            {tx.type === 'payable' ? (
-                                                <Badge variant="outline" className="border-red-500 text-red-600">A Pagar</Badge>
-                                            ) : (
-                                                <Badge variant="outline" className="border-green-500 text-green-600">A Receber</Badge>
-                                            )}
-                                        </TableCell>
-                                        <TableCell className={tx.type === 'payable' ? 'text-red-600' : 'text-green-600'}>
-                                            {tx.type === 'payable' ? '-' : '+'}{formatCurrency(tx.amount)}
-                                        </TableCell>
-                                        <TableCell>{getStatusBadge(tx.status)}</TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    ) : (
-                        <div className="text-center py-8 text-muted-foreground">
-                            Nenhuma transação encontrada para esta entidade em {selectedYear}.
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+                    {/* Bank Information */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Banknote className="h-5 w-5" />
+                                Informações Bancárias
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                {entity.pixKey && (
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-muted">
+                                            <CreditCard className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">
+                                                Chave PIX
+                                                {entity.pixKeyType && (
+                                                    <span className="ml-1">
+                                                        ({entity.pixKeyType === 'cpf' ? 'CPF' : 
+                                                          entity.pixKeyType === 'cnpj' ? 'CNPJ' : 
+                                                          entity.pixKeyType === 'email' ? 'E-mail' : 
+                                                          entity.pixKeyType === 'phone' ? 'Telefone' : 
+                                                          entity.pixKeyType === 'random' ? 'Chave Aleatória' : ''})
+                                                    </span>
+                                                )}
+                                            </p>
+                                            <p className="font-medium break-all">{entity.pixKey}</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {entity.bankName && (
+                                    <div className="flex items-center gap-3 md:col-span-2">
+                                        <div className="p-2 rounded-lg bg-muted">
+                                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Conta Bancária</p>
+                                            <p className="font-medium">
+                                                {entity.bankName}
+                                                {entity.agency && ` • Agência: ${entity.agency}`}
+                                                {entity.account && ` • Conta: ${entity.account}`}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                                {!entity.pixKey && !entity.bankName && (
+                                    <p className="text-muted-foreground col-span-full">
+                                        Nenhuma informação bancária cadastrada.
+                                    </p>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Additional Information */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <FileText className="h-5 w-5" />
+                                Informações Adicionais
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-muted">
+                                        <Building2 className="h-4 w-4 text-muted-foreground" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-muted-foreground">Tipo</p>
+                                        <p className="font-medium">
+                                            {entity.type === 'company' ? 'Pessoa Jurídica' : 'Pessoa Física'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {entity.document && (
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-muted">
+                                            <FileText className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">
+                                                {entity.type === 'company' ? 'CNPJ' : 'CPF'}
+                                            </p>
+                                            <p className="font-medium">{entity.document}</p>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-muted">
+                                        <FileText className="h-4 w-4 text-muted-foreground" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-muted-foreground">Categoria</p>
+                                        <div className="mt-1">{getCategoryBadge(entity.category)}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }

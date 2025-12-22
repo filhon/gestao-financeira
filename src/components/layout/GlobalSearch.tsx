@@ -12,7 +12,12 @@ import {
     Bell,
     Wallet,
     FolderTree,
-    RotateCcw
+    RotateCcw,
+    LayoutDashboard,
+    MessageSquare,
+    ShieldCheck,
+    ClipboardList,
+    Layers,
 } from "lucide-react";
 import {
     CommandDialog,
@@ -23,26 +28,56 @@ import {
     CommandItem,
     CommandSeparator,
 } from "@/components/ui/command";
+import { usePermissions, Permissions } from "@/hooks/usePermissions";
 
-// Quick navigation pages
-const navigationPages = [
-    { name: "Contas a Pagar", href: "/financeiro/contas-pagar", icon: Receipt, keywords: ["pagar", "despesas", "saidas"] },
-    { name: "Contas a Receber", href: "/financeiro/contas-receber", icon: Wallet, keywords: ["receber", "receitas", "entradas"] },
-    { name: "Lotes de Pagamento", href: "/financeiro/lotes", icon: FileText, keywords: ["lotes", "batch"] },
-    { name: "Recorrências", href: "/financeiro/recorrencias", icon: RotateCcw, keywords: ["recorrencia", "automatico"] },
-    { name: "Centros de Custo", href: "/centros-custo", icon: FolderTree, keywords: ["centro", "custo", "departamento"] },
-    { name: "Entidades", href: "/cadastros/entidades", icon: Users, keywords: ["fornecedor", "cliente", "entidade"] },
-    { name: "Empresas", href: "/configuracoes/empresas", icon: Building2, keywords: ["empresa", "company"] },
-    { name: "Usuários", href: "/configuracoes/usuarios", icon: Users, keywords: ["usuario", "user"] },
-    { name: "Configurações", href: "/configuracoes", icon: Settings, keywords: ["config", "settings"] },
-    { name: "Relatórios", href: "/relatorios", icon: FileText, keywords: ["relatorio", "report"] },
-    { name: "Notificações", href: "/notificacoes", icon: Bell, keywords: ["notificacao", "alerta"] },
+// Quick navigation pages with permission requirements
+type PermissionKey = keyof Permissions | 'always';
+
+interface NavigationPage {
+    name: string;
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+    keywords: string[];
+    permission: PermissionKey;
+}
+
+const navigationPages: NavigationPage[] = [
+    // Dashboard - everyone can see
+    { name: "Dashboard", href: "/", icon: LayoutDashboard, keywords: ["dashboard", "inicio", "home", "principal"], permission: "canViewDashboard" },
+    
+    // Financeiro
+    { name: "Contas a Pagar", href: "/financeiro/contas-pagar", icon: Receipt, keywords: ["pagar", "despesas", "saidas"], permission: "canViewPayables" },
+    { name: "Contas a Receber", href: "/financeiro/contas-receber", icon: Wallet, keywords: ["receber", "receitas", "entradas"], permission: "canViewReceivables" },
+    { name: "Lotes de Pagamento", href: "/financeiro/lotes", icon: Layers, keywords: ["lotes", "batch", "pagamento"], permission: "canViewBatches" },
+    { name: "Recorrências", href: "/financeiro/recorrencias", icon: RotateCcw, keywords: ["recorrencia", "automatico", "mensal"], permission: "canViewRecurrences" },
+    
+    // Centros de Custo
+    { name: "Centros de Custo", href: "/centros-custo", icon: FolderTree, keywords: ["centro", "custo", "departamento"], permission: "canViewCostCenters" },
+    
+    // Cadastros
+    { name: "Cadastros", href: "/cadastros", icon: ClipboardList, keywords: ["cadastro", "registro"], permission: "canViewEntities" },
+    { name: "Entidades", href: "/cadastros/entidades", icon: Users, keywords: ["fornecedor", "cliente", "entidade"], permission: "canViewEntities" },
+    
+    // Relatórios
+    { name: "Relatórios", href: "/relatorios", icon: FileText, keywords: ["relatorio", "report", "exportar"], permission: "canViewReports" },
+    
+    // Configurações
+    { name: "Configurações", href: "/configuracoes", icon: Settings, keywords: ["config", "settings", "opcoes"], permission: "canAccessSettings" },
+    { name: "Usuários", href: "/configuracoes/usuarios", icon: Users, keywords: ["usuario", "user", "permissao"], permission: "canManageUsers" },
+    { name: "Empresas", href: "/configuracoes/empresas", icon: Building2, keywords: ["empresa", "company", "holding"], permission: "canManageCompanies" },
+    { name: "Auditoria", href: "/configuracoes/auditoria", icon: ShieldCheck, keywords: ["auditoria", "logs", "seguranca"], permission: "canViewAuditLogs" },
+    { name: "Gerenciar Feedbacks", href: "/configuracoes/feedbacks", icon: MessageSquare, keywords: ["feedback", "admin", "gerenciar"], permission: "canManageFeedback" },
+    
+    // Sistema - always visible
+    { name: "Notificações", href: "/notificacoes", icon: Bell, keywords: ["notificacao", "alerta", "aviso"], permission: "always" },
+    { name: "Feedback", href: "/feedback", icon: MessageSquare, keywords: ["feedback", "sugestao", "bug", "reportar"], permission: "always" },
 ];
 
 export function GlobalSearch() {
     const [open, setOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const router = useRouter();
+    const permissions = usePermissions();
 
     // Handle Ctrl+K / Cmd+K keyboard shortcut
     useEffect(() => {
@@ -57,16 +92,23 @@ export function GlobalSearch() {
         return () => document.removeEventListener("keydown", handleKeyDown);
     }, []);
 
-    // Filter navigation pages based on query
+    // Filter navigation pages based on permissions and query
     const filteredPages = useMemo(() => {
-        if (!searchQuery.trim()) return navigationPages;
+        // First filter by permissions
+        const permittedPages = navigationPages.filter(page => {
+            if (page.permission === 'always') return true;
+            return permissions[page.permission] === true;
+        });
+
+        // Then filter by search query
+        if (!searchQuery.trim()) return permittedPages;
 
         const query = searchQuery.toLowerCase().replace(/^\//, "");
-        return navigationPages.filter(page =>
+        return permittedPages.filter(page =>
             page.name.toLowerCase().includes(query) ||
             page.keywords.some(kw => kw.includes(query))
         );
-    }, [searchQuery]);
+    }, [searchQuery, permissions]);
 
     const handleSearch = useCallback(() => {
         if (searchQuery.trim()) {
@@ -122,7 +164,7 @@ export function GlobalSearch() {
 
                 {/* Quick Navigation */}
                 <CommandGroup heading="Navegação Rápida">
-                    {filteredPages.slice(0, 6).map((page) => (
+                    {filteredPages.map((page) => (
                         <CommandItem
                             key={page.href}
                             onSelect={() => handleNavigate(page.href)}

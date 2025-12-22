@@ -113,5 +113,93 @@ export const notificationService = {
                 link: '/configuracoes/usuarios'
             });
         }
+    },
+
+    // ============================================
+    // Payment Batch Workflow Notifications
+    // ============================================
+
+    notifyBatchCreated: async (
+        managerId: string,
+        batchName: string,
+        batchId: string,
+        companyId: string
+    ): Promise<void> => {
+        await notificationService.create({
+            userId: managerId,
+            companyId,
+            title: "Novo lote de pagamento criado",
+            message: `O lote "${batchName}" foi criado automaticamente e está pronto para revisão.`,
+            type: 'info',
+            link: `/financeiro/lotes`
+        });
+    },
+
+    notifyBatchForApproval: async (
+        approverId: string,
+        batchName: string,
+        batchId: string,
+        senderName: string,
+        companyId: string
+    ): Promise<void> => {
+        await notificationService.create({
+            userId: approverId,
+            companyId,
+            title: "Lote aguardando sua aprovação",
+            message: `${senderName} enviou o lote "${batchName}" para sua aprovação.`,
+            type: 'warning',
+            link: `/financeiro/lotes`
+        });
+    },
+
+    notifyBatchApproved: async (
+        managerId: string,
+        batchName: string,
+        batchId: string,
+        approverName: string,
+        companyId: string
+    ): Promise<void> => {
+        await notificationService.create({
+            userId: managerId,
+            companyId,
+            title: "Lote aprovado",
+            message: `${approverName} aprovou o lote "${batchName}". Pronto para exportação bancária.`,
+            type: 'success',
+            link: `/financeiro/lotes`
+        });
+    },
+
+    notifyBatchForAuthorization: async (
+        authorizerId: string,
+        batchName: string,
+        batchId: string,
+        senderName: string,
+        companyId: string
+    ): Promise<void> => {
+        await notificationService.create({
+            userId: authorizerId,
+            companyId,
+            title: "Lote aguardando autorização bancária",
+            message: `${senderName} enviou o lote "${batchName}" para autorização no banco.`,
+            type: 'warning',
+            link: `/financeiro/lotes`
+        });
+    },
+
+    notifyBatchAuthorized: async (
+        managerId: string,
+        batchName: string,
+        batchId: string,
+        authorizerName: string,
+        companyId: string
+    ): Promise<void> => {
+        await notificationService.create({
+            userId: managerId,
+            companyId,
+            title: "Lote autorizado",
+            message: `${authorizerName} autorizou o lote "${batchName}" no banco. Confirme os pagamentos quando concluídos.`,
+            type: 'success',
+            link: `/financeiro/lotes`
+        });
     }
 };

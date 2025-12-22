@@ -19,6 +19,10 @@ export interface Company {
     logoUrl?: string;
     createdAt: Date;
     updatedAt: Date;
+
+    // Batch auto-creation settings
+    batchFrequencyDays?: number;  // Default: 7
+    lastBatchCreatedAt?: Date;
 }
 
 export interface UserProfile {
@@ -185,9 +189,20 @@ export interface Transaction {
     createdAt: Date;
     updatedAt: Date;
     batchId?: string;
+
+    // Batch approval tracking
+    batchRejectionReason?: string;  // Why rejected from batch
+    batchAdjustedAmount?: number;   // Approver-adjusted amount
 }
 
-export type PaymentBatchStatus = 'open' | 'pending_approval' | 'approved' | 'paid' | 'rejected';
+export type PaymentBatchStatus = 
+    | 'open'                  // Being assembled by manager
+    | 'pending_approval'      // Sent to approver, awaiting review
+    | 'approved'              // Approver approved, ready for bank export
+    | 'pending_authorization' // Sent to releaser for bank confirmation
+    | 'authorized'            // Releaser confirmed bank processing
+    | 'paid'                  // Manager confirmed payments complete
+    | 'rejected';             // Batch rejected
 
 export interface PaymentBatch {
     id: string;
@@ -198,12 +213,36 @@ export interface PaymentBatch {
     transactionIds: string[];
     totalAmount: number;
 
+    // Creator
     createdBy: string;
-    approvedBy?: string;
-    approvedAt?: Date;
-
     createdAt: Date;
     updatedAt: Date;
+
+    // Approval workflow
+    approverId?: string;
+    approverEmail?: string;
+    approvedBy?: string;
+    approvedAt?: Date;
+    approverComment?: string;
+    sentForApprovalAt?: Date;
+
+    // Authorization workflow (releaser = authorizer)
+    authorizerId?: string;
+    authorizerEmail?: string;
+    authorizedBy?: string;
+    authorizedAt?: Date;
+    sentForAuthorizationAt?: Date;
+
+    // Payment confirmation
+    paidAt?: Date;
+    paidBy?: string;
+
+    // Rejected transaction IDs (for audit)
+    rejectedTransactionIds?: string[];
+
+    // Magic Link tokens
+    approvalToken?: string | null;
+    approvalTokenExpiresAt?: Date | null;
 }
 
 export interface Notification {

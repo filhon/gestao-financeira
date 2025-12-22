@@ -52,7 +52,7 @@ export const entityService = {
 
         // Remove undefined values (Firestore doesn't accept them)
         const cleanData = Object.fromEntries(
-            Object.entries(data).filter(([_, value]) => value !== undefined)
+            Object.entries(data).filter(([_key, value]) => value !== undefined)
         );
 
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
@@ -89,7 +89,7 @@ export const entityService = {
 
         // Remove undefined values (Firestore doesn't accept them)
         const cleanData = Object.fromEntries(
-            Object.entries(data).filter(([_, value]) => value !== undefined)
+            Object.entries(data).filter(([_key, value]) => value !== undefined)
         );
 
         await updateDoc(docRef, {

@@ -1,6 +1,6 @@
 import { db } from "@/lib/firebase/client";
-import { collection, doc, getDocs, getDoc, setDoc, query, where, Timestamp, addDoc, updateDoc } from "firebase/firestore";
-import { RecurringTransactionTemplate, Transaction } from "@/lib/types";
+import { collection, doc, getDocs, query, where, Timestamp, addDoc, updateDoc } from "firebase/firestore";
+import { RecurringTransactionTemplate } from "@/lib/types";
 import { transactionService } from "./transactionService";
 import { addDays, addWeeks, addMonths, addYears, isBefore, isSameDay } from "date-fns";
 
