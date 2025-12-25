@@ -3,6 +3,7 @@ import {
   StatusUpdateEmail,
   BatchApprovalEmail,
   BatchAuthorizationEmail,
+  FeedbackNotificationEmail,
 } from "@/components/emails/EmailTemplates";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
@@ -55,39 +56,66 @@ export async function POST(request: Request) {
   } else if (type === "batch_authorization_request") {
     emailComponent = <BatchAuthorizationEmail {...data} />;
     subject = `Autorização Necessária: ${data.batchName}`;
+  } else if (type === "feedback_notification") {
+    emailComponent = <FeedbackNotificationEmail {...data} />;
+    subject = `Novo Feedback: ${data.feedbackTypeLabel} - ${data.title}`;
   } else {
     return NextResponse.json({ error: "Invalid email type" }, { status: 400 });
   }
 
   try {
+    // Check if email sending is enabled
+    const isEmailEnabled = process.env.EMAIL_ENABLED !== "false";
+
+    if (!isEmailEnabled) {
+      logger.warn(
+        "Email sending is disabled (EMAIL_ENABLED=false). Email simulation:"
+      );
+      logger.log("To:", to);
+      logger.log("Subject:", subject);
+      logger.log("Type:", type);
+      return NextResponse.json({
+        success: true,
+        message: "Email disabled (EMAIL_ENABLED=false)",
+        simulated: true,
+      });
+    }
+
     if (!process.env.RESEND_API_KEY) {
       logger.warn("RESEND_API_KEY is missing. Email simulation:");
       logger.log("To:", to);
+      logger.log("Subject:", subject);
       logger.log("Type:", type);
-      logger.log("Data:", data);
       return NextResponse.json({
         success: true,
         message: "Email simulated (API Key missing)",
+        simulated: true,
       });
     }
 
     const resend = new Resend(process.env.RESEND_API_KEY);
 
-    // Resend Free Tier Restriction: Can only send to verified email.
-    // We redirect to the developer's email in dev mode.
+    // In development, redirect emails to fallback email for testing
     const isDev = process.env.NODE_ENV === "development";
-    const verifiedEmail =
-      process.env.NEXT_PUBLIC_DEV_FALLBACK_EMAIL || "noreply@example.com";
-    const recipient = isDev ? verifiedEmail : to;
+    const fallbackEmail = process.env.NEXT_PUBLIC_DEV_FALLBACK_EMAIL;
+    const recipient = isDev && fallbackEmail ? fallbackEmail : to;
 
-    if (isDev && to !== verifiedEmail) {
-      logger.log(`[DEV] Redirecting email from ${to} to ${verifiedEmail}`);
+    if (isDev && fallbackEmail && to !== fallbackEmail) {
+      logger.log(`[DEV] Redirecting email from ${to} to ${fallbackEmail}`);
     }
 
+    // Use configured domain or fallback to Resend's default
+    const fromDomain =
+      process.env.EMAIL_FROM_DOMAIN || "updates.fincontrol.ia.br";
+    const fromEmail = `Fin Control <noreply@${fromDomain}>`;
+
     const { data: result, error } = await resend.emails.send({
-      from: "Fin Control <onboarding@resend.dev>",
+      from: fromEmail,
       to: recipient,
-      subject: isDev ? `[TESTE - Original: ${to}] ${subject}` : subject,
+      subject:
+        isDev && fallbackEmail
+          ? `[TESTE - Original: ${to}] ${subject}`
+          : subject,
       react: emailComponent,
     });
 

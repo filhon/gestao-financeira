@@ -11,6 +11,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Fin Control",
   description: "Sistema de Gestão Financeira",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
