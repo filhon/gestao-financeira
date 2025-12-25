@@ -13,6 +13,10 @@ export const emailService = {
     approverEmail: string
   ): Promise<EmailResponse> => {
     try {
+      // Use environment variable for app domain, fallback to window.location.origin
+      const appDomain =
+        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+
       const response = await fetch("/api/email", {
         method: "POST",
         headers: {
@@ -29,7 +33,7 @@ export const emailService = {
               currency: "BRL",
             }).format(transaction.amount),
             requesterName: transaction.requestOrigin?.name || "Solicitante",
-            link: `${window.location.origin}/approve/${transaction.approvalToken}`,
+            link: `${appDomain}/approve/${transaction.approvalToken}`,
           },
         }),
       });
@@ -46,6 +50,9 @@ export const emailService = {
     updatedBy: string
   ): Promise<EmailResponse> => {
     try {
+      const appDomain =
+        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+
       const response = await fetch("/api/email", {
         method: "POST",
         headers: {
@@ -59,7 +66,7 @@ export const emailService = {
             description: transaction.description,
             status: transaction.status,
             updatedBy: updatedBy,
-            link: `${window.location.origin}/financeiro/${transaction.type === "payable" ? "contas-pagar" : "contas-receber"}`,
+            link: `${appDomain}/financeiro/${transaction.type === "payable" ? "contas-pagar" : "contas-receber"}`,
           },
         }),
       });
@@ -84,6 +91,9 @@ export const emailService = {
     approverEmail: string
   ): Promise<EmailResponse> => {
     try {
+      const appDomain =
+        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+
       const response = await fetch("/api/email", {
         method: "POST",
         headers: {
@@ -101,7 +111,7 @@ export const emailService = {
               currency: "BRL",
             }).format(totalAmount),
             senderName,
-            link: `${window.location.origin}/approve-batch/${token}`,
+            link: `${appDomain}/approve-batch/${token}`,
           },
         }),
       });
@@ -122,6 +132,9 @@ export const emailService = {
     authorizerEmail: string
   ): Promise<EmailResponse> => {
     try {
+      const appDomain =
+        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+
       const response = await fetch("/api/email", {
         method: "POST",
         headers: {
@@ -139,7 +152,7 @@ export const emailService = {
               currency: "BRL",
             }).format(totalAmount),
             senderName,
-            link: `${window.location.origin}/authorize-batch/${token}`,
+            link: `${appDomain}/authorize-batch/${token}`,
           },
         }),
       });
@@ -164,6 +177,12 @@ export const emailService = {
       description: string;
     }
   ): Promise<EmailResponse[]> => {
+    const appDomain =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      (typeof window !== "undefined"
+        ? window.location.origin
+        : "https://fincontrol.ia.br");
+
     const typeLabels = {
       bug: "Bug",
       improvement: "Sugestão",
@@ -185,7 +204,7 @@ export const emailService = {
               data: {
                 ...feedbackData,
                 feedbackTypeLabel: typeLabels[feedbackData.feedbackType],
-                link: `${window.location.origin}/configuracoes/feedbacks`,
+                link: `${appDomain}/configuracoes/feedbacks`,
               },
             }),
           });

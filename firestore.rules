@@ -172,8 +172,10 @@ service cloud.firestore {
             isGlobalAdmin() ||
             hasCompanyRole(getCompanyId(), ['auditor', 'approver', 'releaser', 'financial_manager'])
         );
-        allow write: if false; // Only backend/triggers should write audit logs ideally. 
-                             // If client writes, use `allow create: if isAuthenticated()`
+        // Allow authenticated users to create audit logs (client-side logging)
+        allow create: if isAuthenticated();
+        // Prevent updates and deletes (audit logs should be immutable)
+        allow update, delete: if false;
     }
 
     // 10. Budgets

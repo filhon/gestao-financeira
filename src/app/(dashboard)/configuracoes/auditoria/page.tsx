@@ -71,13 +71,13 @@ function ChangeItem({ change }: { change: FieldChange }) {
   return (
     <div className="flex items-start gap-2 py-1">
       {icon === "increase" && (
-        <ArrowUpRight className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+        <ArrowUpRight className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
       )}
       {icon === "decrease" && (
-        <ArrowDownRight className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+        <ArrowDownRight className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
       )}
       {icon === "change" && (
-        <RefreshCw className="h-3 w-3 text-blue-600 mt-1 flex-shrink-0" />
+        <RefreshCw className="h-3 w-3 text-blue-600 mt-1 shrink-0" />
       )}
       {!icon && <span className="w-4" />}
       <span

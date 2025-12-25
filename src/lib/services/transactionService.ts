@@ -429,7 +429,7 @@ export const transactionService = {
     status: TransactionStatus,
     user: { uid: string; email: string },
     companyId: string
-  ) => {
+  ): Promise<Transaction> => {
     const docRef = doc(db, COLLECTION_NAME, id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: any = { status, updatedAt: serverTimestamp() };
@@ -466,6 +466,16 @@ export const transactionService = {
       entityId: id,
       details: { status },
     });
+
+    // Fetch and return updated transaction
+    const updatedDoc = await getDoc(docRef);
+    if (!updatedDoc.exists()) {
+      throw new Error("Transaction not found after update");
+    }
+    return {
+      id: updatedDoc.id,
+      ...updatedDoc.data(),
+    } as Transaction;
   },
 
   delete: async (
@@ -487,7 +497,12 @@ export const transactionService = {
     });
   },
 
-  approveByToken: async (token: string, userId: string) => {
+  approveByToken: async (
+    token: string,
+    userId: string,
+    comment?: string,
+    adjustedAmount?: number
+  ) => {
     const q = query(
       collection(db, COLLECTION_NAME),
       where("approvalToken", "==", token)
@@ -515,14 +530,110 @@ export const transactionService = {
       throw new Error("Esta transação já foi processada.");
     }
 
-    // Approve
-    const docRef = doc(db, COLLECTION_NAME, transaction.id);
-    await updateDoc(docRef, {
+    // Prepare update data
+    const updateData: any = {
       status: "approved",
       approvedBy: userId,
       approvedAt: serverTimestamp(),
       approvalToken: null, // Consume token
       approvalTokenExpiresAt: null,
+    };
+
+    // Add comment if provided
+    if (comment) {
+      updateData.approvalComment = comment;
+    }
+
+    // Add adjusted amount if provided
+    if (adjustedAmount !== undefined && adjustedAmount !== transaction.amount) {
+      updateData.amount = adjustedAmount;
+      updateData.originalAmount = transaction.amount;
+    }
+
+    // Approve
+    const docRef = doc(db, COLLECTION_NAME, transaction.id);
+    await updateDoc(docRef, updateData);
+
+    // Log audit
+    await auditService.log({
+      companyId: transaction.companyId,
+      userId: userId,
+      userName: "Aprovador via Link",
+      action: "approve_transaction",
+      entity: "transaction",
+      entityId: transaction.id,
+      details: `Transação aprovada via magic link${adjustedAmount !== undefined ? ` com ajuste de valor de ${transaction.amount} para ${adjustedAmount}` : ""}${comment ? `. Comentário: ${comment}` : ""}`,
+    });
+
+    return transaction;
+  },
+
+  getByApprovalToken: async (token: string): Promise<Transaction | null> => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("approvalToken", "==", token)
+    );
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const docSnapshot = snapshot.docs[0];
+    return convertDates({
+      id: docSnapshot.id,
+      ...docSnapshot.data(),
+    });
+  },
+
+  rejectByToken: async (token: string, userId: string, reason: string) => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("approvalToken", "==", token)
+    );
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      throw new Error("Token inválido ou não encontrado.");
+    }
+
+    const docSnapshot = snapshot.docs[0];
+    const transaction = convertDates({
+      id: docSnapshot.id,
+      ...docSnapshot.data(),
+    });
+
+    if (
+      transaction.approvalTokenExpiresAt &&
+      transaction.approvalTokenExpiresAt < new Date()
+    ) {
+      throw new Error("Este link de aprovação expirou.");
+    }
+
+    if (transaction.status !== "pending_approval") {
+      throw new Error("Esta transação já foi processada.");
+    }
+
+    // Reject
+    const docRef = doc(db, COLLECTION_NAME, transaction.id);
+    await updateDoc(docRef, {
+      status: "rejected",
+      rejectedBy: userId,
+      rejectedAt: serverTimestamp(),
+      rejectionReason: reason,
+      approvalToken: null, // Consume token
+      approvalTokenExpiresAt: null,
+    });
+
+    // Log audit
+    await auditService.log({
+      companyId: transaction.companyId,
+      userId: userId,
+      userName: "Aprovador via Link",
+      action: "reject_transaction",
+      entity: "transaction",
+      entityId: transaction.id,
+      details: `Transação rejeitada via magic link. Motivo: ${reason}`,
     });
 
     return transaction;

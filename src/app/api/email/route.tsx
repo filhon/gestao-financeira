@@ -95,7 +95,8 @@ export async function POST(request: Request) {
 
     const resend = new Resend(process.env.RESEND_API_KEY);
 
-    // In development, redirect emails to fallback email for testing
+    // In development mode, redirect emails to fallback email for testing
+    // But don't modify subject in production even if fallback is set
     const isDev = process.env.NODE_ENV === "development";
     const fallbackEmail = process.env.NEXT_PUBLIC_DEV_FALLBACK_EMAIL;
     const recipient = isDev && fallbackEmail ? fallbackEmail : to;
@@ -109,13 +110,14 @@ export async function POST(request: Request) {
       process.env.EMAIL_FROM_DOMAIN || "updates.fincontrol.ia.br";
     const fromEmail = `Fin Control <noreply@${fromDomain}>`;
 
+    // Only modify subject in development mode with fallback email
+    const emailSubject =
+      isDev && fallbackEmail ? `[TESTE - Original: ${to}] ${subject}` : subject;
+
     const { data: result, error } = await resend.emails.send({
       from: fromEmail,
       to: recipient,
-      subject:
-        isDev && fallbackEmail
-          ? `[TESTE - Original: ${to}] ${subject}`
-          : subject,
+      subject: emailSubject,
       react: emailComponent,
     });
 
