@@ -4,9 +4,9 @@
  * In production, errors are suppressed or sent to monitoring service
  */
 
-type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+type LogLevel = "log" | "info" | "warn" | "error" | "debug";
 
-const isDevelopment = process.env.NODE_ENV === 'development';
+const isDevelopment = process.env.NODE_ENV === "development";
 
 export const logger = {
   /**
@@ -45,7 +45,7 @@ export const logger = {
     } else {
       // In production, send to monitoring service (e.g., Sentry)
       // For now, just log generic error without details
-      console.error('An error occurred. Check monitoring service for details.');
+      console.error("An error occurred. Check monitoring service for details.");
       // TODO: Integrate with Sentry, LogRocket, or similar
       // Sentry.captureException(args[0]);
     }
@@ -67,5 +67,5 @@ export const logger = {
     if (isDevelopment) {
       console[level](...args);
     }
-  }
+  },
 };
