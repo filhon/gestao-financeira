@@ -45,10 +45,13 @@ import {
     AuditDetails,
     FieldChange,
 } from "@/lib/auditFormatter";
+import { formatTextWithBold } from "@/lib/sanitizer";
+import { logger } from "@/lib/logger";
 
 // Component to render a single change item
 function ChangeItem({ change }: { change: FieldChange }) {
     const icon = getChangeIcon(change.field, change.oldValue, change.newValue);
+    const formattedText = formatAuditDetails('update', '', { changes: [change] })[0] || '';
 
     return (
         <div className="flex items-start gap-2 py-1">
@@ -65,8 +68,7 @@ function ChangeItem({ change }: { change: FieldChange }) {
             <span
                 className="text-sm"
                 dangerouslySetInnerHTML={{
-                    __html: formatAuditDetails('update', '', { changes: [change] })[0]
-                        ?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') || ''
+                    __html: formatTextWithBold(formattedText)
                 }}
             />
         </div>
@@ -119,7 +121,7 @@ function AuditDetailsDisplay({ log }: { log: AuditLog }) {
                                 key={index}
                                 className="text-sm py-1"
                                 dangerouslySetInnerHTML={{
-                                    __html: detail.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                    __html: formatTextWithBold(detail)
                                 }}
                             />
                         ))
@@ -160,7 +162,7 @@ export default function AuditLogsPage() {
             const data = await auditService.getLogs(selectedCompany.id, filter);
             setLogs(data);
         } catch (error) {
-            console.error("Error fetching logs:", error);
+            logger.error("Error fetching logs:", error);
             toast.error("Erro ao carregar logs de auditoria.");
         } finally {
             setIsLoading(false);

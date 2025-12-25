@@ -1,8 +1,36 @@
 import { ApprovalRequestEmail, StatusUpdateEmail, BatchApprovalEmail, BatchAuthorizationEmail } from '@/components/emails/EmailTemplates';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
+import { checkRateLimit } from '@/lib/rateLimit';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: Request) {
+    // Get IP address for rate limiting
+    const forwarded = request.headers.get('x-forwarded-for');
+    const ip = forwarded ? forwarded.split(',')[0] : '127.0.0.1';
+    
+    // Check rate limit: 10 emails per minute per IP
+    const rateLimitResult = checkRateLimit({
+        maxRequests: 10,
+        windowSeconds: 60,
+        identifier: `email:${ip}`
+    });
+    
+    if (!rateLimitResult.success) {
+        return NextResponse.json(
+            { 
+                error: "Too many requests. Please try again later.",
+                resetAt: new Date(rateLimitResult.reset).toISOString()
+            }, 
+            { 
+                status: 429,
+                headers: {
+                    'Retry-After': String(Math.ceil((rateLimitResult.reset - Date.now()) / 1000))
+                }
+            }
+        );
+    }
+
     const { type, to, data } = await request.json();
 
     let emailComponent;
@@ -26,10 +54,10 @@ export async function POST(request: Request) {
 
     try {
         if (!process.env.RESEND_API_KEY) {
-            console.warn("RESEND_API_KEY is missing. Email simulation:");
-            console.log("To:", to);
-            console.log("Type:", type);
-            console.log("Data:", data);
+            logger.warn("RESEND_API_KEY is missing. Email simulation:");
+            logger.log("To:", to);
+            logger.log("Type:", type);
+            logger.log("Data:", data);
             return NextResponse.json({ success: true, message: "Email simulated (API Key missing)" });
         }
 
@@ -40,11 +68,11 @@ export async function POST(request: Request) {
         // Resend Free Tier Restriction: Can only send to verified email.
         // We redirect to the developer's email in dev mode.
         const isDev = process.env.NODE_ENV === 'development';
-        const verifiedEmail = 'filipe.honorio@hebron.com.br';
+        const verifiedEmail = process.env.NEXT_PUBLIC_DEV_FALLBACK_EMAIL || 'noreply@example.com';
         const recipient = isDev ? verifiedEmail : to;
 
         if (isDev && to !== verifiedEmail) {
-            console.log(`[DEV] Redirecting email from ${to} to ${verifiedEmail}`);
+            logger.log(`[DEV] Redirecting email from ${to} to ${verifiedEmail}`);
         }
 
         const { data: result, error } = await resend.emails.send({
@@ -55,14 +83,14 @@ export async function POST(request: Request) {
         });
 
         if (error) {
-            console.error("Resend API Error:", error);
+            logger.error("Resend API Error:", error);
             return NextResponse.json({ error }, { status: 500 });
         }
 
         return NextResponse.json(result);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
-        console.error("Email API Internal Error:", error);
+        logger.error("Email API Internal Error:", error);
         return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });
     }
 }
