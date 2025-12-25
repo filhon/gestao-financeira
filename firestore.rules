@@ -162,10 +162,8 @@ service cloud.firestore {
 
     // 9. Audit Logs
     match /audit_logs/{logId} {
-        // Read: Admin, Auditor, Approver, Releaser
-        // Manager: Spec says NO? Weird, but following spec or simplifying?
-        // Let's Simplify: Allow Manager too. It's safer to allow Managers to see logs than to block them and confuse them.
-        // Actually, Auditor is the main consumer.
+        // Read: Admin, Auditor, Approver, Releaser, Manager
+        // User role: Cannot access audit logs
         function getCompanyId() { return resource.data.companyId; }
         
         allow read: if isAuthenticated() && (

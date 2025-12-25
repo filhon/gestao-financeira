@@ -32,7 +32,7 @@ export async function POST(request: Request) {
         status: 429,
         headers: {
           "Retry-After": String(
-            Math.ceil((rateLimitResult.reset - Date.now()) / 1000)
+            Math.ceil((rateLimitResult.reset - new Date().getTime()) / 1000)
           ),
         },
       }

@@ -92,6 +92,7 @@ export default function AccountsPayablePage() {
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
 
   // Use centralized permissions
   const { canDeletePayables, canCreatePayables, onlyOwnPayables } =
@@ -128,7 +129,11 @@ export default function AccountsPayablePage() {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(transactions.map((t) => t.id)));
+      // Only select draft transactions
+      const draftTransactions = paginatedTransactions.filter(
+        (t) => t.status === "draft"
+      );
+      setSelectedIds(new Set(draftTransactions.map((t) => t.id)));
     } else {
       setSelectedIds(new Set());
     }
@@ -157,6 +162,18 @@ export default function AccountsPayablePage() {
   const handleAddToBatch = async (batchId: string) => {
     try {
       const selectedTx = transactions.filter((t) => selectedIds.has(t.id));
+
+      // Validate that only draft transactions can be added to batch
+      const nonDraftTransactions = selectedTx.filter(
+        (t) => t.status !== "draft"
+      );
+      if (nonDraftTransactions.length > 0) {
+        toast.error(
+          "Apenas transações em rascunho podem ser adicionadas ao lote"
+        );
+        return;
+      }
+
       await paymentBatchService.addTransactions(batchId, selectedTx);
       toast.success("Transações adicionadas ao lote");
       setIsBatchDialogOpen(false);
@@ -259,20 +276,31 @@ export default function AccountsPayablePage() {
     }
   };
 
-  // Filter transactions due within next 7 days or show all
+  // Filter transactions due within next 7 days or show all, and by status
   const filteredTransactions = useMemo(() => {
-    if (showAllTransactions) {
-      return sortedTransactions;
-    }
-    const sevenDaysFromNow = new Date();
-    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-    sevenDaysFromNow.setHours(23, 59, 59, 999);
+    let filtered = sortedTransactions;
 
-    return sortedTransactions.filter((t) => {
-      const dueDate = new Date(t.dueDate);
-      return dueDate <= sevenDaysFromNow;
-    });
-  }, [sortedTransactions, showAllTransactions]);
+    // Filter by status
+    if (statusFilter === "exclude-paid") {
+      filtered = filtered.filter((t) => t.status !== "paid");
+    } else if (statusFilter !== "all") {
+      filtered = filtered.filter((t) => t.status === statusFilter);
+    }
+
+    // Filter by due date
+    if (!showAllTransactions) {
+      const sevenDaysFromNow = new Date();
+      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+      sevenDaysFromNow.setHours(23, 59, 59, 999);
+
+      filtered = filtered.filter((t) => {
+        const dueDate = new Date(t.dueDate);
+        return dueDate <= sevenDaysFromNow;
+      });
+    }
+
+    return filtered;
+  }, [sortedTransactions, showAllTransactions, statusFilter]);
 
   // Pagination logic
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
@@ -285,7 +313,7 @@ export default function AccountsPayablePage() {
   // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [showAllTransactions, itemsPerPage]);
+  }, [showAllTransactions, itemsPerPage, statusFilter]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -406,10 +434,36 @@ export default function AccountsPayablePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Transações</CardTitle>
-          <CardDescription>
-            Gerencie suas contas a pagar e fluxo de aprovação.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Transações</CardTitle>
+              <CardDescription>
+                Gerencie suas contas a pagar e fluxo de aprovação.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label
+                htmlFor="status-filter"
+                className="text-sm text-muted-foreground"
+              >
+                Filtrar:
+              </Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger id="status-filter" className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="exclude-paid">Excluir Pagas</SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="draft">Rascunho</SelectItem>
+                  <SelectItem value="pending_approval">Pendente</SelectItem>
+                  <SelectItem value="approved">Aprovado</SelectItem>
+                  <SelectItem value="paid">Pago</SelectItem>
+                  <SelectItem value="rejected">Rejeitado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -423,8 +477,12 @@ export default function AccountsPayablePage() {
                   <TableHead className="w-[50px]">
                     <Checkbox
                       checked={
-                        transactions.length > 0 &&
-                        selectedIds.size === transactions.length
+                        paginatedTransactions.filter(
+                          (t) => t.status === "draft"
+                        ).length > 0 &&
+                        paginatedTransactions
+                          .filter((t) => t.status === "draft")
+                          .every((t) => selectedIds.has(t.id))
                       }
                       onCheckedChange={toggleSelectAll}
                     />
@@ -491,6 +549,7 @@ export default function AccountsPayablePage() {
                         <Checkbox
                           checked={selectedIds.has(t.id)}
                           onCheckedChange={() => toggleSelect(t.id)}
+                          disabled={t.status !== "draft"}
                         />
                       </TableCell>
                       <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>

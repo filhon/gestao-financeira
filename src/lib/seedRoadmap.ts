@@ -1,48 +1,56 @@
-import { roadmapService } from "@/lib/services/roadmapService";
+import { roadmapService, RoadmapStatus } from "@/lib/services/roadmapService";
 import { toast } from "sonner";
 
 const INITIAL_DATA = [
   // DONE
   {
     title: "Dashboard Financeiro",
-    description: "Visualização completa dos indicadores financeiros, gráficos de receitas vs despesas e saldos.",
+    description:
+      "Visualização completa dos indicadores financeiros, gráficos de receitas vs despesas e saldos.",
     status: "done",
   },
   {
     title: "Gestão de Contas a Pagar e Receber",
-    description: "Controle total de fluxo de caixa, com status de pagamentos e recebimentos.",
+    description:
+      "Controle total de fluxo de caixa, com status de pagamentos e recebimentos.",
     status: "done",
   },
   {
     title: "Recorrências e Automação",
-    description: "Criação de templates para despesas e receitas recorrentes (mensais, semanais, etc).",
+    description:
+      "Criação de templates para despesas e receitas recorrentes (mensais, semanais, etc).",
     status: "done",
   },
   {
     title: "Gestão de Usuários e Permissões",
-    description: "Controle granular de acesso com funções (Admin, Gerente, Aprovador).",
+    description:
+      "Controle granular de acesso com funções (Admin, Gerente, Aprovador).",
     status: "done",
   },
   {
     title: "Multi-empresas",
-    description: "Suporte para gerenciamento de múltiplas empresas e filiais na mesma conta.",
+    description:
+      "Suporte para gerenciamento de múltiplas empresas e filiais na mesma conta.",
     status: "done",
   },
   {
     title: "Auditoria e Logs",
-    description: "Rastreamento de ações críticas no sistema para segurança e compliance.",
+    description:
+      "Rastreamento de ações críticas no sistema para segurança e compliance.",
     status: "done",
   },
 
   // IN PROGRESS
   {
     title: "Roadmap Público",
-    description: "Página para transparência do desenvolvimento e coleta de sugestões dos usuários.",
+    description:
+      "Página para transparência do desenvolvimento e coleta de sugestões dos usuários.",
     status: "in_progress",
   },
   {
     title: "Otimização de Performance",
-    description: "Melhorias no carregamento de dados e renderização para maior fluidez.",
+    description:
+      "Melhorias no carregamento de dados e renderização para maior fluidez.",
     status: "in_progress",
   },
 
@@ -73,10 +81,10 @@ const INITIAL_DATA = [
 
 export async function seedRoadmapData(userId: string) {
   try {
-    const promises = INITIAL_DATA.map(item => 
+    const promises = INITIAL_DATA.map((item) =>
       roadmapService.addItem({
         ...item,
-        status: item.status as any,
+        status: item.status as RoadmapStatus,
         userId: userId,
         userEmail: "sistema@fincontrol.com",
       })

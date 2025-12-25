@@ -44,6 +44,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { format } from "date-fns";
 // ptBR removed
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useSortableData } from "@/hooks/useSortableData";
@@ -80,6 +81,7 @@ export default function AccountsReceivablePage() {
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
 
   // Use centralized permissions
   const { canDeleteReceivables, canCreateReceivables } = usePermissions();
@@ -180,20 +182,31 @@ export default function AccountsReceivablePage() {
     }
   };
 
-  // Filter transactions due within next 7 days or show all
+  // Filter transactions due within next 7 days or show all, and by status
   const filteredTransactions = useMemo(() => {
-    if (showAllTransactions) {
-      return sortedTransactions;
-    }
-    const sevenDaysFromNow = new Date();
-    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-    sevenDaysFromNow.setHours(23, 59, 59, 999);
+    let filtered = sortedTransactions;
 
-    return sortedTransactions.filter((t) => {
-      const dueDate = new Date(t.dueDate);
-      return dueDate <= sevenDaysFromNow;
-    });
-  }, [sortedTransactions, showAllTransactions]);
+    // Filter by status
+    if (statusFilter === "exclude-paid") {
+      filtered = filtered.filter((t) => t.status !== "paid");
+    } else if (statusFilter !== "all") {
+      filtered = filtered.filter((t) => t.status === statusFilter);
+    }
+
+    // Filter by due date
+    if (!showAllTransactions) {
+      const sevenDaysFromNow = new Date();
+      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+      sevenDaysFromNow.setHours(23, 59, 59, 999);
+
+      filtered = filtered.filter((t) => {
+        const dueDate = new Date(t.dueDate);
+        return dueDate <= sevenDaysFromNow;
+      });
+    }
+
+    return filtered;
+  }, [sortedTransactions, showAllTransactions, statusFilter]);
 
   // Pagination logic
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
@@ -206,7 +219,7 @@ export default function AccountsReceivablePage() {
   // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [showAllTransactions, itemsPerPage]);
+  }, [showAllTransactions, itemsPerPage, statusFilter]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -267,8 +280,38 @@ export default function AccountsReceivablePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Transações</CardTitle>
-          <CardDescription>Gerencie suas contas a receber.</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Transações</CardTitle>
+              <CardDescription>Gerencie suas contas a receber.</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label
+                htmlFor="status-filter"
+                className="text-sm text-muted-foreground"
+              >
+                Filtrar:
+              </Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger id="status-filter" className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="exclude-paid">
+                    Excluir Recebidas
+                  </SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="draft">Rascunho</SelectItem>
+                  <SelectItem value="pending_approval">Pendente</SelectItem>
+                  <SelectItem value="approved">
+                    Aguardando Recebimento
+                  </SelectItem>
+                  <SelectItem value="paid">Recebido</SelectItem>
+                  <SelectItem value="rejected">Rejeitado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (

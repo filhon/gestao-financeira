@@ -35,6 +35,11 @@ const convertDates = (data: DocumentData): Transaction => {
     releasedAt: (data.releasedAt as Timestamp)?.toDate(),
     createdAt: (data.createdAt as Timestamp)?.toDate(),
     updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+    approvalTokenExpiresAt: data.approvalTokenExpiresAt
+      ? data.approvalTokenExpiresAt instanceof Date
+        ? data.approvalTokenExpiresAt
+        : (data.approvalTokenExpiresAt as Timestamp)?.toDate()
+      : undefined,
   } as Transaction;
 };
 
@@ -93,12 +98,18 @@ export const transactionService = {
 
   getByCostCenter: async (
     costCenterId: string,
-    companyId: string
+    companyId: string,
+    userId?: string
   ): Promise<Transaction[]> => {
     // Since we can't easily query array of objects in Firestore without a specific index structure,
     // we'll fetch company transactions and filter.
     // Optimization: In a real app, we should maintain a 'relatedCostCenterIds' array field on the transaction.
-    const all = await transactionService.getAll({ companyId });
+    // For 'user' role, filter by createdBy to match Firestore rules
+    const filter: { companyId: string; createdBy?: string } = { companyId };
+    if (userId) {
+      filter.createdBy = userId;
+    }
+    const all = await transactionService.getAll(filter);
     return all.filter((t) =>
       t.costCenterAllocation?.some((a) => a.costCenterId === costCenterId)
     );
@@ -192,7 +203,7 @@ export const transactionService = {
             // Update the first installment with the token
             await updateDoc(refs[0], {
               approvalToken: token,
-              approvalTokenExpiresAt: expiresAt,
+              approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
             });
 
             // Send Email
@@ -247,7 +258,7 @@ export const transactionService = {
 
           await updateDoc(docRef, {
             approvalToken: token,
-            approvalTokenExpiresAt: expiresAt,
+            approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
           });
 
           await emailService.sendApprovalRequest(
@@ -447,7 +458,7 @@ export const transactionService = {
       // Set expiration for 7 days
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
-      updateData.approvalTokenExpiresAt = expiresAt;
+      updateData.approvalTokenExpiresAt = Timestamp.fromDate(expiresAt);
     }
 
     await updateDoc(docRef, updateData);
@@ -531,7 +542,7 @@ export const transactionService = {
     }
 
     // Prepare update data
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       status: "approved",
       approvedBy: userId,
       approvedAt: serverTimestamp(),
@@ -558,11 +569,16 @@ export const transactionService = {
     await auditService.log({
       companyId: transaction.companyId,
       userId: userId,
-      userName: "Aprovador via Link",
-      action: "approve_transaction",
+      userEmail: "magic-link-approval@system",
+      action: "approve",
       entity: "transaction",
       entityId: transaction.id,
-      details: `Transação aprovada via magic link${adjustedAmount !== undefined ? ` com ajuste de valor de ${transaction.amount} para ${adjustedAmount}` : ""}${comment ? `. Comentário: ${comment}` : ""}`,
+      details: {
+        via: "magic_link",
+        originalAmount: transaction.amount,
+        adjustedAmount: adjustedAmount,
+        comment: comment,
+      },
     });
 
     return transaction;
@@ -629,11 +645,14 @@ export const transactionService = {
     await auditService.log({
       companyId: transaction.companyId,
       userId: userId,
-      userName: "Aprovador via Link",
-      action: "reject_transaction",
+      userEmail: "magic-link-approval@system",
+      action: "reject",
       entity: "transaction",
       entityId: transaction.id,
-      details: `Transação rejeitada via magic link. Motivo: ${reason}`,
+      details: {
+        via: "magic_link",
+        reason: reason,
+      },
     });
 
     return transaction;
