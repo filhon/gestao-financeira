@@ -597,6 +597,7 @@ export default function EntityDashboard() {
                                 | number
                                 | string
                                 | Array<number | string>
+                                | readonly (number | string)[]
                                 | undefined
                             ) => `${value} transações`}
                             contentStyle={{
