@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -73,5 +73,52 @@ export function useBudgetProgress() {
       return dashboardService.getBudgetProgressByCostCenter(selectedCompany.id);
     },
     enabled: !!selectedCompany,
+  });
+}
+
+export function useOverdueTransactions() {
+  const { selectedCompany } = useCompany();
+
+  return useQuery({
+    queryKey: ["overdue-transactions", selectedCompany?.id],
+    queryFn: async () => {
+      if (!selectedCompany) return [];
+      return dashboardService.getOverdueTransactions(selectedCompany.id);
+    },
+    enabled: !!selectedCompany,
+  });
+}
+
+export function usePendingApprovals() {
+  const { selectedCompany } = useCompany();
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ["pending-approvals", selectedCompany?.id, user?.uid],
+    queryFn: async () => {
+      if (!selectedCompany) return [];
+      return dashboardService.getPendingApprovals(
+        selectedCompany.id,
+        user?.uid
+      );
+    },
+    enabled: !!selectedCompany,
+  });
+}
+
+export function useRecalculateStats() {
+  const queryClient = useQueryClient();
+  const { selectedCompany } = useCompany();
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!selectedCompany) throw new Error("No company selected");
+      await dashboardService.recalculateCompanyStats(selectedCompany.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["projected-cash-flow", selectedCompany?.id],
+      });
+    },
   });
 }

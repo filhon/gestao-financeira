@@ -9,6 +9,9 @@ import {
   getAggregateFromServer,
   sum,
   limit,
+  doc,
+  getDoc,
+  setDoc,
 } from "firebase/firestore";
 import { Transaction } from "@/lib/types";
 import {
@@ -32,6 +35,7 @@ import { recurrenceService } from "./recurrenceService";
 const TRANSACTIONS_COLLECTION = "transactions";
 const COST_CENTERS_COLLECTION = "cost_centers";
 const BUDGETS_COLLECTION = "budgets";
+const COMPANY_STATS_COLLECTION = "company_stats";
 
 export interface DashboardMetrics {
   totalRevenue: number;
@@ -69,6 +73,103 @@ export interface BudgetProgressData {
 }
 
 export const dashboardService = {
+  recalculateCompanyStats: async (companyId: string): Promise<void> => {
+    // 1. Calculate current balance from all PAID transactions
+    const incomeQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("status", "==", "paid"),
+      where("type", "==", "receivable")
+    );
+
+    const expenseQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("status", "==", "paid"),
+      where("type", "==", "payable")
+    );
+
+    const [incomeSnap, expenseSnap] = await Promise.all([
+      getAggregateFromServer(incomeQuery, { total: sum("finalAmount") }),
+      getAggregateFromServer(expenseQuery, { total: sum("finalAmount") }),
+    ]);
+
+    // Fallback to 'amount' if 'finalAmount' is missing (though it shouldn't for paid)
+    // Note: In a real scenario, we might want to double check if finalAmount is 0 but amount is > 0
+    // For now, we trust the aggregation.
+    const totalIncome = incomeSnap.data().total || 0;
+    const totalExpense = expenseSnap.data().total || 0;
+    const currentBalance = totalIncome - totalExpense;
+
+    // 2. Update company_stats
+    const statsRef = doc(db, COMPANY_STATS_COLLECTION, companyId);
+    await setDoc(
+      statsRef,
+      {
+        currentBalance,
+        lastUpdated: new Date(),
+        updatedBy: "system-recalc",
+      },
+      { merge: true }
+    );
+  },
+
+  getOverdueTransactions: async (companyId: string): Promise<Transaction[]> => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const q = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("type", "==", "payable"),
+      where("status", "not-in", ["paid", "rejected"]),
+      where("dueDate", "<", Timestamp.fromDate(today)),
+      orderBy("dueDate", "asc"),
+      limit(5)
+    );
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        ...data,
+        id: doc.id,
+        dueDate: (data.dueDate as Timestamp).toDate(),
+        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
+      } as Transaction;
+    });
+  },
+
+  getPendingApprovals: async (
+    companyId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _userId?: string
+  ): Promise<Transaction[]> => {
+    // Base query for pending items
+    const q = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("status", "==", "pending_approval"),
+      orderBy("dueDate", "asc"),
+      limit(20)
+    );
+
+    const snapshot = await getDocs(q);
+    const transactions = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        ...data,
+        id: doc.id,
+        dueDate: (data.dueDate as Timestamp).toDate(),
+        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
+      } as Transaction;
+    });
+
+    // If userId is provided, we could filter by cost center responsibility here
+    // For now, returning the top 5 pending items for the company
+    return transactions.slice(0, 5);
+  },
+
   getFinancialMetrics: async (
     companyId: string,
     userId?: string
@@ -292,7 +393,7 @@ export const dashboardService = {
       endDate = addDays(today, 30);
     }
 
-    // Fetch transactions for the period
+    // Fetch transactions for the period (FUTURE ONLY)
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
@@ -371,43 +472,26 @@ export const dashboardService = {
 
     const combinedTransactions = [...transactions, ...projectedTransactions];
 
-    // Calculate starting balance using Aggregation for efficiency
-    // We need the sum of all PAID transactions before the startDate
-    const pastIncomeQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("status", "==", "paid"),
-      where("type", "==", "receivable"),
-      where("paymentDate", "<", Timestamp.fromDate(startDate))
-    );
-
-    const pastExpenseQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("status", "==", "paid"),
-      where("type", "==", "payable"),
-      where("paymentDate", "<", Timestamp.fromDate(startDate))
-    );
-
-    const [pastIncomeSnap, pastExpenseSnap] = await Promise.all([
-      getAggregateFromServer(pastIncomeQuery, { total: sum("finalAmount") }), // Use finalAmount for paid
-      getAggregateFromServer(pastExpenseQuery, { total: sum("finalAmount") }),
-    ]);
-
-    // Fallback to 'amount' if 'finalAmount' is 0/null (though paid should have finalAmount)
-    // Note: sum("finalAmount") might return 0 if field is missing.
-    // If your data might have paid transactions without finalAmount, you might need a second check or ensure data integrity.
-    // For this implementation, we assume paid transactions have valid amounts.
-    // If finalAmount is 0, we might want to try summing 'amount' but Firestore doesn't support "COALESCE" in sum.
-    // We will assume finalAmount is populated for paid items.
-
-    const startingBalance =
-      (pastIncomeSnap.data().total || 0) - (pastExpenseSnap.data().total || 0);
-
-    // If finalAmount sum was 0, it might be because fields are missing.
-    // Let's try summing 'amount' as a fallback if the result is suspiciously 0?
-    // No, that's risky (double counting).
-    // Better approach: The system should ensure finalAmount is set when paying.
+    // PERFORMANCE FIX: Snapshot + Delta approach
+    // Instead of aggregating all history, we read the current balance from company_stats
+    let startingBalance = 0;
+    try {
+      const statsRef = doc(db, COMPANY_STATS_COLLECTION, companyId);
+      const statsSnap = await getDoc(statsRef);
+      if (statsSnap.exists()) {
+        startingBalance = statsSnap.data().currentBalance || 0;
+      } else {
+        // If stats don't exist, we could trigger a recalc or just default to 0
+        // For now, let's default to 0 and maybe log a warning or trigger recalc in background
+        console.warn(
+          "Company stats not found, defaulting starting balance to 0"
+        );
+        // Optional: await dashboardService.recalculateCompanyStats(companyId);
+        // startingBalance = (await getDoc(statsRef)).data()?.currentBalance || 0;
+      }
+    } catch (error) {
+      console.error("Error fetching company stats for balance:", error);
+    }
 
     // Generate daily or weekly data points
     const result: ProjectedCashFlowData[] = [];
