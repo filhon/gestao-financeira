@@ -54,11 +54,18 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
               tickFormatter={(value) => `R$${value}`}
             />
             <Tooltip
-              formatter={(value: number | undefined) =>
+              formatter={(
+                value:
+                  | number
+                  | string
+                  | Array<number | string>
+                  | readonly (number | string)[]
+                  | undefined
+              ) =>
                 new Intl.NumberFormat("pt-BR", {
                   style: "currency",
                   currency: "BRL",
-                }).format(value || 0)
+                }).format(Number(value) || 0)
               }
             />
             <Legend />

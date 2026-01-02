@@ -460,9 +460,14 @@ export default function CostCenterDashboard() {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number | undefined) =>
-                        formatCurrency(value || 0)
-                      }
+                      formatter={(
+                        value:
+                          | number
+                          | string
+                          | Array<number | string>
+                          | readonly (number | string)[]
+                          | undefined
+                      ) => formatCurrency(Number(value) || 0)}
                       contentStyle={{
                         borderRadius: "8px",
                         border: "1px solid #e5e7eb",
