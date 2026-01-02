@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   TrendingDown,
-  TrendingUp,
   Wallet,
   PieChart as PieChartIcon,
   Calendar,
@@ -40,7 +39,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Legend,
 } from "recharts";
 import {
   Select,
@@ -50,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { budgetService } from "@/lib/services/budgetService";
+import { usageService } from "@/lib/services/usageService";
 
 export default function CostCenterDashboard() {
   const params = useParams();
@@ -60,7 +59,11 @@ export default function CostCenterDashboard() {
   const [costCenter, setCostCenter] = useState<CostCenter | null>(null);
   const [children, setChildren] = useState<CostCenter[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [usageData, setUsageData] = useState<
+    { monthKey: string; amount: number }[]
+  >([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isTransactionsLoading, setIsTransactionsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [budgetAmount, setBudgetAmount] = useState(0);
 
@@ -71,18 +74,20 @@ export default function CostCenterDashboard() {
       if (selectedCompany && id && user) {
         setIsLoading(true);
         try {
-          // For 'user' role, pass userId to filter transactions
-          const userId = onlyOwnPayables ? user.uid : undefined;
-          const [cc, kids, txs, budget] = await Promise.all([
+          const [cc, kids, usage, budget] = await Promise.all([
             costCenterService.getById(id),
             costCenterService.getChildren(id),
-            transactionService.getByCostCenter(id, selectedCompany.id, userId),
+            usageService.getUsageByCostCenter(
+              selectedCompany.id,
+              id,
+              selectedYear
+            ),
             budgetService.getByCostCenterAndYear(id, selectedYear),
           ]);
 
           setCostCenter(cc);
           setChildren(kids);
-          setTransactions(txs);
+          setUsageData(usage);
           setBudgetAmount(budget?.amount || 0);
         } catch (error) {
           console.error("Error loading dashboard data:", error);
@@ -92,7 +97,49 @@ export default function CostCenterDashboard() {
       }
     };
     loadData();
-  }, [selectedCompany, id, selectedYear, user, onlyOwnPayables]);
+  }, [selectedCompany, id, selectedYear, user]);
+
+  useEffect(() => {
+    const loadTransactions = async () => {
+      if (selectedCompany && id && user) {
+        const now = new Date();
+        // Only fetch if selected year is current or future
+        if (selectedYear < now.getFullYear()) {
+          setTransactions([]);
+          return;
+        }
+
+        setIsTransactionsLoading(true);
+        try {
+          const userId = onlyOwnPayables ? user.uid : undefined;
+          // Optimization: Fetch only upcoming payables instead of all history
+          const { transactions: txs } = await transactionService.getPaginated(
+            selectedCompany.id,
+            100, // Fetch enough to likely find items for this cost center
+            null,
+            {
+              startDate: now,
+              type: "payable",
+              excludeStatus: ["paid", "rejected"],
+              createdBy: userId,
+            }
+          );
+
+          // Filter by cost center in memory
+          const filtered = txs.filter((t) =>
+            t.costCenterAllocation?.some((a) => a.costCenterId === id)
+          );
+
+          setTransactions(filtered);
+        } catch (error) {
+          console.error("Error loading transactions:", error);
+        } finally {
+          setIsTransactionsLoading(false);
+        }
+      }
+    };
+    loadTransactions();
+  }, [selectedCompany, id, user, onlyOwnPayables, selectedYear]);
 
   if (isLoading) {
     return (
@@ -110,14 +157,6 @@ export default function CostCenterDashboard() {
     );
   }
 
-  // Filter transactions for the selected year
-  // For paid transactions, use paymentDate; for others use dueDate
-  const yearTransactions = transactions.filter((t) => {
-    const dateToCheck =
-      t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-    return dateToCheck.getFullYear() === selectedYear;
-  });
-
   // Calculations
   const totalBudget = budgetAmount;
   // Note: Children allocation is still using the legacy budget field.
@@ -127,25 +166,8 @@ export default function CostCenterDashboard() {
     0
   );
 
-  // Calculate direct expenses (sum of transaction amounts allocated to this CC)
-  const directExpenses = yearTransactions
-    .filter((t) => t.type === "payable" && t.status !== "rejected")
-    .reduce((acc, t) => {
-      const allocation = t.costCenterAllocation?.find(
-        (a) => a.costCenterId === id
-      );
-      if (allocation) {
-        // For paid transactions, use finalAmount if available
-        const baseAmount =
-          t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-        // Calculate allocation amount based on percentage
-        const allocationAmount = allocation.percentage
-          ? (baseAmount * allocation.percentage) / 100
-          : allocation.amount;
-        return acc + allocationAmount;
-      }
-      return acc;
-    }, 0);
+  // Calculate direct expenses from usage data
+  const directExpenses = usageData.reduce((acc, curr) => acc + curr.amount, 0);
 
   const remainingBalance = totalBudget - allocatedToChildren - directExpenses;
 
@@ -171,40 +193,35 @@ export default function CostCenterDashboard() {
     }, // green-500
   ].filter((d) => d.value > 0);
 
-  // Monthly Spending Trend (Last 6 months or all months of selected year?)
-  // Let's show all months of selected year
-  const monthlyTrendData = yearTransactions
-    .filter((t) => t.type === "payable" && t.status !== "rejected")
+  // Monthly Spending Trend from Usage Data
+  const monthlyTrendData = usageData
     .reduce(
-      (acc, t) => {
-        const dateToUse =
-          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-        const key = format(dateToUse, "MMM", { locale: ptBR });
-        const monthIndex = dateToUse.getMonth();
-        const allocation = t.costCenterAllocation?.find(
-          (a) => a.costCenterId === id
-        );
+      (acc, curr) => {
+        const [year, month] = curr.monthKey.split("-").map(Number);
+        if (year !== selectedYear) return acc;
 
-        // Calculate allocation amount, using finalAmount for paid transactions
-        const baseAmount =
-          t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-        const amount = allocation
-          ? allocation.percentage
-            ? (baseAmount * allocation.percentage) / 100
-            : allocation.amount
-          : 0;
+        const date = new Date(year, month - 1, 1);
+        const key = format(date, "MMM", { locale: ptBR });
+        const monthIndex = month - 1;
 
         const existing = acc.find((d) => d.monthIndex === monthIndex);
         if (existing) {
-          existing.amount += amount;
+          existing.amount += curr.amount;
         } else {
-          acc.push({ name: key, amount, monthIndex });
+          acc.push({ name: key, amount: curr.amount, monthIndex });
         }
         return acc;
       },
       [] as { name: string; amount: number; monthIndex: number }[]
     )
     .sort((a, b) => a.monthIndex - b.monthIndex);
+
+  // Filter transactions for the selected year for the list
+  const yearTransactions = transactions.filter((t) => {
+    const dateToCheck =
+      t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+    return dateToCheck.getFullYear() === selectedYear;
+  });
 
   const upcomingExpenses = yearTransactions
     .filter(
@@ -443,7 +460,9 @@ export default function CostCenterDashboard() {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number) => formatCurrency(value)}
+                      formatter={(value: number | undefined) =>
+                        formatCurrency(value || 0)
+                      }
                       contentStyle={{
                         borderRadius: "8px",
                         border: "1px solid #e5e7eb",

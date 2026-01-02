@@ -6,6 +6,9 @@ import {
   getDocs,
   orderBy,
   Timestamp,
+  getAggregateFromServer,
+  sum,
+  limit,
 } from "firebase/firestore";
 import { Transaction } from "@/lib/types";
 import {
@@ -66,47 +69,72 @@ export const dashboardService = {
     companyId: string,
     userId?: string
   ): Promise<DashboardMetrics> => {
-    // Fetch all transactions for the company (we might want to limit this in the future)
-    // For accurate totals, we need everything.
-    // Optimization: Create aggregation counters in Firestore or use a cloud function.
-    // For MVP: Client-side aggregation.
-    // For 'user' role, filter by createdBy to match Firestore rules
+    // Optimization: Use Firestore Aggregation Queries to avoid fetching all documents.
+    // This reduces reads from N (thousands) to 4 (one per query).
 
-    let q = query(
+    const baseQuery = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId)
     );
 
-    if (userId) {
-      q = query(q, where("createdBy", "==", userId));
-    }
+    // Helper to apply user filter
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const applyUserFilter = (q: any) =>
+      userId ? query(q, where("createdBy", "==", userId)) : q;
 
-    const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map((doc) => doc.data() as Transaction);
+    // 1. Total Revenue (Paid Receivables)
+    // Note: Using 'amount' as per original code. If 'finalAmount' is needed,
+    // we would need a separate field or ensure finalAmount is always populated.
+    const revenueQuery = applyUserFilter(
+      query(
+        baseQuery,
+        where("status", "==", "paid"),
+        where("type", "==", "receivable")
+      )
+    );
 
-    let totalRevenue = 0;
-    let totalExpenses = 0;
-    let pendingPayables = 0;
-    let pendingReceivables = 0;
+    // 2. Total Expenses (Paid Payables)
+    const expensesQuery = applyUserFilter(
+      query(
+        baseQuery,
+        where("status", "==", "paid"),
+        where("type", "==", "payable")
+      )
+    );
 
-    transactions.forEach((t) => {
-      const amount = Number(t.amount) || 0;
+    // 3. Pending Receivables (Not Paid, Not Rejected)
+    const pendingStatuses = ["draft", "pending_approval", "approved"];
+    const pendingReceivablesQuery = applyUserFilter(
+      query(
+        baseQuery,
+        where("status", "in", pendingStatuses),
+        where("type", "==", "receivable")
+      )
+    );
 
-      if (t.status === "paid") {
-        if (t.type === "receivable") {
-          totalRevenue += amount;
-        } else {
-          totalExpenses += amount;
-        }
-      } else if (t.status !== "rejected") {
-        // Pending (draft, pending_approval, approved)
-        if (t.type === "receivable") {
-          pendingReceivables += amount;
-        } else {
-          pendingPayables += amount;
-        }
-      }
-    });
+    // 4. Pending Payables
+    const pendingPayablesQuery = applyUserFilter(
+      query(
+        baseQuery,
+        where("status", "in", pendingStatuses),
+        where("type", "==", "payable")
+      )
+    );
+
+    const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap] =
+      await Promise.all([
+        getAggregateFromServer(revenueQuery, { total: sum("amount") }),
+        getAggregateFromServer(expensesQuery, { total: sum("amount") }),
+        getAggregateFromServer(pendingReceivablesQuery, {
+          total: sum("amount"),
+        }),
+        getAggregateFromServer(pendingPayablesQuery, { total: sum("amount") }),
+      ]);
+
+    const totalRevenue = revenueSnap.data().total || 0;
+    const totalExpenses = expensesSnap.data().total || 0;
+    const pendingReceivables = pendingRecSnap.data().total || 0;
+    const pendingPayables = pendingPaySnap.data().total || 0;
 
     return {
       totalRevenue,
@@ -117,12 +145,42 @@ export const dashboardService = {
     };
   },
 
+  getUpcomingTransactions: async (
+    companyId: string,
+    userId?: string
+  ): Promise<Transaction[]> => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let q = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("dueDate", ">=", Timestamp.fromDate(today)),
+      where("status", "not-in", ["paid", "rejected"]),
+      orderBy("dueDate", "asc"),
+      limit(5)
+    );
+
+    if (userId) {
+      q = query(q, where("createdBy", "==", userId));
+    }
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        ...data,
+        id: doc.id,
+        dueDate: (data.dueDate as Timestamp).toDate(),
+        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
+      } as Transaction;
+    });
+  },
+
   getCashFlowData: async (
     companyId: string,
     months: number = 6
   ): Promise<CashFlowData[]> => {
-    const startDate = startOfMonth(subMonths(new Date(), months - 1));
-
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
@@ -344,10 +402,6 @@ export const dashboardService = {
     const currentMonth = now.getMonth(); // 0-indexed (0 = January)
     const remainingMonths = 12 - currentMonth; // Includes current month
 
-    const currentMonthStart = startOfMonth(now);
-    const currentMonthEnd = endOfMonth(now);
-    const yearStart = startOfYear(now);
-
     // Get all cost centers for the company
     const ccQuery = query(
       collection(db, COST_CENTERS_COLLECTION),
@@ -371,81 +425,36 @@ export const dashboardService = {
       annualBudgets.set(data.costCenterId, data.amount);
     });
 
-    // Get ALL transactions for the year to calculate YTD spending
-    // We need to fetch all transactions and then filter by paymentDate for paid ones
-    const yearTxQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
+    // Optimization: Use Cost Center Usage collection instead of fetching all transactions
+    const usageQuery = query(
+      collection(db, "cost_center_usage"),
       where("companyId", "==", companyId),
-      where("type", "==", "payable")
+      where("monthKey", ">=", `${currentYear}-01`),
+      where("monthKey", "<=", `${currentYear}-12`)
     );
-    const yearTxSnapshot = await getDocs(yearTxQuery);
-    const allYearTransactions = yearTxSnapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
-        dueDate: (data.dueDate as Timestamp).toDate(),
-        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
-      } as Transaction;
-    });
+    const usageSnapshot = await getDocs(usageQuery);
 
-    // Filter transactions for YTD (before current month)
-    // Use paymentDate for paid transactions, dueDate for others
-    const yearTransactions = allYearTransactions.filter((t) => {
-      if (t.status === "rejected") return false;
-      const dateToCheck =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      return dateToCheck >= yearStart && dateToCheck < currentMonthStart;
-    });
-
-    // Calculate YTD expenses per cost center (before current month)
     const ytdExpensesByCC = new Map<string, number>();
-    yearTransactions.forEach((t) => {
-      const amountToUse =
-        t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-
-      if (t.costCenterAllocation && t.costCenterAllocation.length > 0) {
-        t.costCenterAllocation.forEach((alloc) => {
-          const current = ytdExpensesByCC.get(alloc.costCenterId) || 0;
-          ytdExpensesByCC.set(
-            alloc.costCenterId,
-            current + (alloc.amount || 0)
-          );
-        });
-      } else if (t.costCenterId) {
-        const current = ytdExpensesByCC.get(t.costCenterId) || 0;
-        ytdExpensesByCC.set(t.costCenterId, current + Number(amountToUse));
-      }
-    });
-
-    // Filter transactions for current month
-    // Use paymentDate for paid transactions, dueDate for others
-    const transactions = allYearTransactions.filter((t) => {
-      if (t.status === "rejected") return false;
-      const dateToCheck =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      return dateToCheck >= currentMonthStart && dateToCheck <= currentMonthEnd;
-    });
-
-    // Calculate current month expenses per cost center
     const currentMonthExpensesByCC = new Map<string, number>();
-    transactions.forEach((t) => {
-      const amountToUse =
-        t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
 
-      if (t.costCenterAllocation && t.costCenterAllocation.length > 0) {
-        t.costCenterAllocation.forEach((alloc) => {
-          const current = currentMonthExpensesByCC.get(alloc.costCenterId) || 0;
-          currentMonthExpensesByCC.set(
-            alloc.costCenterId,
-            current + (alloc.amount || 0)
-          );
-        });
-      } else if (t.costCenterId) {
-        const current = currentMonthExpensesByCC.get(t.costCenterId) || 0;
-        currentMonthExpensesByCC.set(
-          t.costCenterId,
-          current + Number(amountToUse)
-        );
+    const currentMonthKey = format(now, "yyyy-MM");
+
+    usageSnapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      const ccId = data.costCenterId;
+      const amount = data.amount || 0;
+      const monthKey = data.monthKey;
+
+      // YTD (before current month)
+      if (monthKey < currentMonthKey) {
+        const current = ytdExpensesByCC.get(ccId) || 0;
+        ytdExpensesByCC.set(ccId, current + amount);
+      }
+
+      // Current Month
+      if (monthKey === currentMonthKey) {
+        const current = currentMonthExpensesByCC.get(ccId) || 0;
+        currentMonthExpensesByCC.set(ccId, current + amount);
       }
     });
 

@@ -1,15 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import {
-  Plus,
-  Loader2,
-  Trash2,
-  Eye,
-  Upload,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Plus, Loader2, Trash2, Eye, Upload } from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,7 +33,7 @@ import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { format } from "date-fns";
+import { format, addDays } from "date-fns";
 // ptBR removed
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -57,6 +49,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 
 // ...
 
@@ -64,6 +57,9 @@ export default function AccountsReceivablePage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+
   const {
     items: sortedTransactions,
     requestSort,
@@ -79,28 +75,59 @@ export default function AccountsReceivablePage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [itemsPerPage] = useState(25);
   const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
 
   // Use centralized permissions
   const { canDeleteReceivables, canCreateReceivables } = usePermissions();
 
-  const fetchTransactions = useCallback(async () => {
-    if (!selectedCompany || !user) return;
-    try {
-      const data = await transactionService.getAll({
-        type: "receivable",
-        companyId: selectedCompany.id,
-      });
-      setTransactions(data);
-    } catch (error) {
-      console.error("Error fetching transactions:", error);
-      toast.error("Erro ao carregar transações.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedCompany, user]);
+  const fetchTransactions = useCallback(
+    async (isLoadMore = false) => {
+      if (!selectedCompany || !user) return;
+      try {
+        setIsLoading(true);
+        const filter: {
+          type: string;
+          excludeStatus?: string[];
+          status?: string;
+          endDate?: Date;
+        } = {
+          type: "receivable",
+          excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
+          status:
+            statusFilter !== "all" && statusFilter !== "exclude-paid"
+              ? statusFilter
+              : undefined,
+          endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
+        };
+
+        const currentLastDoc = isLoadMore ? lastDocRef.current : null;
+
+        const { transactions: newTransactions, lastDoc: newLastDoc } =
+          await transactionService.getPaginated(
+            selectedCompany.id,
+            itemsPerPage,
+            currentLastDoc,
+            filter
+          );
+
+        if (isLoadMore) {
+          setTransactions((prev) => [...prev, ...newTransactions]);
+        } else {
+          setTransactions(newTransactions);
+        }
+
+        lastDocRef.current = newLastDoc;
+        setHasMore(newTransactions.length === itemsPerPage);
+      } catch (error) {
+        console.error("Error fetching transactions:", error);
+        toast.error("Erro ao carregar transações.");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [selectedCompany, user, statusFilter, showAllTransactions, itemsPerPage]
+  );
 
   useEffect(() => {
     fetchTransactions();
@@ -182,43 +209,13 @@ export default function AccountsReceivablePage() {
     }
   };
 
-  // Filter transactions due within next 7 days or show all, and by status
-  const filteredTransactions = useMemo(() => {
-    let filtered = sortedTransactions;
+  // Filter logic moved to server-side fetchTransactions
 
-    // Filter by status
-    if (statusFilter === "exclude-paid") {
-      filtered = filtered.filter((t) => t.status !== "paid");
-    } else if (statusFilter !== "all") {
-      filtered = filtered.filter((t) => t.status === statusFilter);
-    }
-
-    // Filter by due date
-    if (!showAllTransactions) {
-      const sevenDaysFromNow = new Date();
-      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-      sevenDaysFromNow.setHours(23, 59, 59, 999);
-
-      filtered = filtered.filter((t) => {
-        const dueDate = new Date(t.dueDate);
-        return dueDate <= sevenDaysFromNow;
-      });
-    }
-
-    return filtered;
-  }, [sortedTransactions, showAllTransactions, statusFilter]);
-
-  // Pagination logic
-  const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
-  const paginatedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return filteredTransactions.slice(startIndex, endIndex);
-  }, [filteredTransactions, currentPage, itemsPerPage]);
+  // Pagination logic removed (Server-side pagination used)
 
   // Reset to first page when filters change
   useEffect(() => {
-    setCurrentPage(1);
+    // setCurrentPage(1); // Removed
   }, [showAllTransactions, itemsPerPage, statusFilter]);
 
   const getStatusBadge = (status: string) => {
@@ -366,7 +363,7 @@ export default function AccountsReceivablePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedTransactions.length === 0 ? (
+                {sortedTransactions.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -378,7 +375,7 @@ export default function AccountsReceivablePage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedTransactions.map((t) => (
+                  sortedTransactions.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
                       <TableCell>{t.description}</TableCell>
@@ -418,7 +415,7 @@ export default function AccountsReceivablePage() {
               </TableBody>
             </Table>
           )}
-          {!isLoading && sortedTransactions.length > 0 && (
+          {!isLoading && (
             <div className="mt-4 flex flex-col gap-4">
               {!showAllTransactions && (
                 <Button
@@ -426,58 +423,21 @@ export default function AccountsReceivablePage() {
                   className="w-full"
                   onClick={() => setShowAllTransactions(true)}
                 >
-                  Ver Todas as Transações ({sortedTransactions.length})
+                  Ver Todas as Transações
                 </Button>
               )}
-              {showAllTransactions && filteredTransactions.length > 25 && (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      Mostrando {(currentPage - 1) * itemsPerPage + 1} a{" "}
-                      {Math.min(
-                        currentPage * itemsPerPage,
-                        filteredTransactions.length
-                      )}{" "}
-                      de {filteredTransactions.length}
-                    </span>
-                    <Select
-                      value={itemsPerPage.toString()}
-                      onValueChange={(value) => setItemsPerPage(Number(value))}
-                    >
-                      <SelectTrigger className="w-[100px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="25">25 / pág</SelectItem>
-                        <SelectItem value="50">50 / pág</SelectItem>
-                        <SelectItem value="100">100 / pág</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="text-sm">
-                      Página {currentPage} de {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setCurrentPage((p) => Math.min(totalPages, p + 1))
-                      }
-                      disabled={currentPage === totalPages}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+              {hasMore && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => fetchTransactions(true)}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Carregar Mais
+                </Button>
               )}
             </div>
           )}

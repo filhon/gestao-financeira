@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { UserRole } from "@/lib/types";
@@ -73,8 +73,11 @@ export function usePermissions(): Permissions {
 
   // Helpers
   const isRole = (role: UserRole) => effectiveRole === role;
-  const isOneOf = (roles: UserRole[]) =>
-    effectiveRole ? roles.includes(effectiveRole) : false;
+  const isOneOf = useCallback(
+    (roles: UserRole[]) =>
+      effectiveRole ? roles.includes(effectiveRole) : false,
+    [effectiveRole]
+  );
 
   // Role definitions
   const isAdmin = isGlobalAdmin;

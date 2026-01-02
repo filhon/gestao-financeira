@@ -195,6 +195,17 @@ service cloud.firestore {
       allow create: if isAuthenticated(); // Usuários logados
       allow update, delete: if isGlobalAdmin(); // Apenas admins
     }
+
+    // 12. Cost Center Usage (Denormalized for performance)
+    match /cost_center_usage/{usageId} {
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+       
+       // Read: Same as reports/dashboard
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+       
+       // Write: Anyone who can create/update transactions needs to update usage
+       allow write: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'user']);
+    }
     
     // Default Deny
     match /{document=**} {

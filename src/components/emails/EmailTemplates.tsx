@@ -123,14 +123,7 @@ interface BatchApprovalEmailProps {
 
 export const BatchApprovalEmail: React.FC<
   Readonly<BatchApprovalEmailProps>
-> = ({
-  batchName,
-  batchId,
-  transactionCount,
-  totalAmount,
-  senderName,
-  link,
-}) => (
+> = ({ batchName, transactionCount, totalAmount, senderName, link }) => (
   <div
     style={{
       fontFamily: "sans-serif",
@@ -258,14 +251,7 @@ interface BatchAuthorizationEmailProps {
 
 export const BatchAuthorizationEmail: React.FC<
   Readonly<BatchAuthorizationEmailProps>
-> = ({
-  batchName,
-  batchId,
-  transactionCount,
-  totalAmount,
-  senderName,
-  link,
-}) => (
+> = ({ batchName, transactionCount, totalAmount, senderName, link }) => (
   <div
     style={{
       fontFamily: "sans-serif",

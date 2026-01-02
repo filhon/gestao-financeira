@@ -12,6 +12,9 @@ import {
   serverTimestamp,
   Timestamp,
   DocumentData,
+  startAfter,
+  limit,
+  QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { Transaction, TransactionStatus } from "@/lib/types";
@@ -22,6 +25,7 @@ import { costCenterService } from "@/lib/services/costCenterService";
 import { auditService } from "@/lib/services/auditService";
 import { emailService } from "@/lib/services/emailService";
 import { generateChanges } from "@/lib/auditFormatter";
+import { usageService } from "@/lib/services/usageService";
 
 const COLLECTION_NAME = "transactions";
 
@@ -96,6 +100,74 @@ export const transactionService = {
     );
   },
 
+  getPaginated: async (
+    companyId: string,
+    pageSize: number,
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null,
+    filters?: {
+      type?: string;
+      status?: string;
+      excludeStatus?: string[];
+      startDate?: Date;
+      endDate?: Date;
+      createdBy?: string;
+    }
+  ): Promise<{
+    transactions: Transaction[];
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null;
+  }> => {
+    let q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", companyId)
+    );
+
+    if (filters?.type) {
+      q = query(q, where("type", "==", filters.type));
+    }
+
+    if (filters?.status) {
+      q = query(q, where("status", "==", filters.status));
+    } else if (filters?.excludeStatus && filters.excludeStatus.length > 0) {
+      q = query(q, where("status", "not-in", filters.excludeStatus));
+    }
+
+    if (filters?.createdBy) {
+      q = query(q, where("createdBy", "==", filters.createdBy));
+    }
+
+    if (filters?.startDate) {
+      q = query(
+        q,
+        where("dueDate", ">=", Timestamp.fromDate(filters.startDate))
+      );
+    }
+    if (filters?.endDate) {
+      q = query(q, where("dueDate", "<=", Timestamp.fromDate(filters.endDate)));
+    }
+
+    // Default sort by dueDate
+    q = query(q, orderBy("dueDate", "asc"));
+
+    if (lastDoc) {
+      q = query(q, startAfter(lastDoc));
+    }
+
+    q = query(q, limit(pageSize));
+
+    const snapshot = await getDocs(q);
+    const transactions = snapshot.docs.map((doc) =>
+      convertDates({ id: doc.id, ...doc.data() })
+    );
+
+    return {
+      transactions,
+      lastDoc:
+        snapshot.docs.length > 0
+          ? snapshot.docs[snapshot.docs.length - 1]
+          : null,
+    };
+  },
+
   getByCostCenter: async (
     costCenterId: string,
     companyId: string,
@@ -161,23 +233,31 @@ export const transactionService = {
             })
           );
 
+        const txData = {
+          ...transactionData,
+          description,
+          amount: installmentAmount,
+          costCenterAllocation: installmentAllocations,
+          dueDate,
+          installments: {
+            current: i,
+            total: installmentsCount,
+            groupId,
+          },
+          companyId,
+          createdBy: userId,
+          status: status,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+
         promises.push(
-          addDoc(collection(db, COLLECTION_NAME), {
-            ...transactionData,
-            description,
-            amount: installmentAmount,
-            costCenterAllocation: installmentAllocations,
-            dueDate,
-            installments: {
-              current: i,
-              total: installmentsCount,
-              groupId,
-            },
-            companyId,
-            createdBy: userId,
-            status: status,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+          addDoc(collection(db, COLLECTION_NAME), txData).then(async (ref) => {
+            await usageService.updateUsage(
+              { ...txData, id: ref.id } as unknown as Transaction,
+              1
+            );
+            return ref;
           })
         );
       }
@@ -234,6 +314,19 @@ export const transactionService = {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    // Update Cost Center Usage
+    await usageService.updateUsage(
+      {
+        ...transactionData,
+        id: docRef.id,
+        companyId,
+        createdBy: userId,
+        status: status,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+      1
+    );
 
     // Trigger Notification if pending approval
     if (status === "pending_approval" && transactionData.costCenterAllocation) {
@@ -304,12 +397,24 @@ export const transactionService = {
 
     // Fetch current document to generate diff
     const currentDoc = await getDoc(docRef);
-    const currentData = currentDoc.exists() ? currentDoc.data() : {};
+    if (!currentDoc.exists()) throw new Error("Transaction not found");
+
+    const currentData = currentDoc.data();
+    const oldTransaction = convertDates({ id: currentDoc.id, ...currentData });
 
     await updateDoc(docRef, {
       ...cleanData,
       updatedAt: serverTimestamp(),
     });
+
+    // Update Usage
+    await usageService.updateUsage(oldTransaction, -1);
+
+    const newTransaction = {
+      ...oldTransaction,
+      ...cleanData,
+    } as Transaction;
+    await usageService.updateUsage(newTransaction, 1);
 
     // Generate changes for audit log
     const changes = generateChanges(
@@ -495,6 +600,18 @@ export const transactionService = {
     companyId: string
   ) => {
     const docRef = doc(db, COLLECTION_NAME, id);
+
+    // Fetch before delete to update usage
+    const currentDoc = await getDoc(docRef);
+    if (currentDoc.exists()) {
+      const currentData = currentDoc.data();
+      const oldTransaction = convertDates({
+        id: currentDoc.id,
+        ...currentData,
+      });
+      await usageService.updateUsage(oldTransaction, -1);
+    }
+
     await deleteDoc(docRef);
 
     await auditService.log({

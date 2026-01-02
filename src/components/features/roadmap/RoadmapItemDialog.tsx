@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { RoadmapItem, roadmapService, RoadmapStatus } from "@/lib/services/roadmapService";
+import {
+  RoadmapItem,
+  roadmapService,
+  RoadmapStatus,
+} from "@/lib/services/roadmapService";
 import { Loader2, Trash2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -42,10 +46,15 @@ const statusLabels: Record<RoadmapStatus, string> = {
   done: "Concluído",
 };
 
-export function RoadmapItemDialog({ item, open, onOpenChange, onSuccess }: RoadmapItemDialogProps) {
+export function RoadmapItemDialog({
+  item,
+  open,
+  onOpenChange,
+  onSuccess,
+}: RoadmapItemDialogProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
@@ -72,7 +81,7 @@ export function RoadmapItemDialog({ item, open, onOpenChange, onSuccess }: Roadm
       toast.success("Item atualizado!");
       onSuccess();
       setIsEditing(false); // Exit edit mode
-    } catch (error) {
+    } catch {
       toast.error("Erro ao atualizar item.");
     } finally {
       setLoading(false);
@@ -88,7 +97,7 @@ export function RoadmapItemDialog({ item, open, onOpenChange, onSuccess }: Roadm
       toast.success("Item removido!");
       onSuccess();
       onOpenChange(false);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao remover item.");
     } finally {
       setLoading(false);
@@ -105,7 +114,10 @@ export function RoadmapItemDialog({ item, open, onOpenChange, onSuccess }: Roadm
             {isEditing ? "Editar Item" : item.title}
           </DialogTitle>
           <DialogDescription>
-             Status: <span className="font-medium text-primary">{statusLabels[item.status]}</span>
+            Status:{" "}
+            <span className="font-medium text-primary">
+              {statusLabels[item.status]}
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -113,82 +125,99 @@ export function RoadmapItemDialog({ item, open, onOpenChange, onSuccess }: Roadm
           {isEditing ? (
             <>
               <div className="space-y-2">
-                <Input 
-                    placeholder="Título" 
-                    value={title} 
-                    onChange={(e) => setTitle(e.target.value)}
-                    disabled={loading}
+                <Input
+                  placeholder="Título"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
-                <Textarea 
-                    placeholder="Descrição" 
-                    value={description} 
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={5}
-                    disabled={loading}
+                <Textarea
+                  placeholder="Descrição"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={5}
+                  disabled={loading}
                 />
               </div>
             </>
           ) : (
-             <div className="text-sm text-foreground whitespace-pre-wrap">
-                 {item.description}
-             </div>
+            <div className="text-sm text-foreground whitespace-pre-wrap">
+              {item.description}
+            </div>
           )}
         </div>
 
         <DialogFooter className="flex justify-between sm:justify-between w-full">
-            {/* Left side actions (Delete) */}
-            <div>
-              {isAdmin && (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Esta ação não pode ser desfeita.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
-                            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-              )}
-            </div>
+          {/* Left side actions (Delete) */}
+          <div>
+            {isAdmin && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta ação não pode ser desfeita.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleDelete}
+                      className="bg-destructive hover:bg-destructive/90"
+                    >
+                      {loading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Excluir"
+                      )}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
 
-            {/* Right side actions (Edit/Save/Close) */}
-            <div className="flex gap-2">
-              {isEditing ? (
-                 <>
-                    <Button variant="outline" onClick={() => setIsEditing(false)} disabled={loading}>
-                        Cancelar
-                    </Button>
-                    <Button onClick={handleUpdate} disabled={loading}>
-                        {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Salvar"}
-                    </Button>
-                 </>
-              ) : (
-                 <>
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>
-                        Fechar
-                    </Button>
-                    {isAdmin && (
-                        <Button onClick={() => setIsEditing(true)}>
-                            Editar
-                        </Button>
-                    )}
-                 </>
-              )}
-            </div>
+          {/* Right side actions (Edit/Save/Close) */}
+          <div className="flex gap-2">
+            {isEditing ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditing(false)}
+                  disabled={loading}
+                >
+                  Cancelar
+                </Button>
+                <Button onClick={handleUpdate} disabled={loading}>
+                  {loading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    "Salvar"
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => onOpenChange(false)}>
+                  Fechar
+                </Button>
+                {isAdmin && (
+                  <Button onClick={() => setIsEditing(true)}>Editar</Button>
+                )}
+              </>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -11,11 +11,10 @@ import { CashFlowChart } from "@/components/features/dashboard/CashFlowChart";
 import { CostCenterChart } from "@/components/features/dashboard/CostCenterChart";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { transactionService } from "@/lib/services/transactionService";
-import { format, isAfter, startOfDay } from "date-fns";
 import { Transaction } from "@/lib/types";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
+import { format } from "date-fns";
 
 export default function DashboardPage() {
   const { selectedCompany } = useCompany();
@@ -40,39 +39,18 @@ export default function DashboardPage() {
           filter.createdBy = user.uid;
         }
 
-        const [metricsData, transactions] = await Promise.all([
+        const [metricsData, upcoming] = await Promise.all([
           dashboardService.getFinancialMetrics(
             selectedCompany.id,
             onlyOwnPayables ? user.uid : undefined
           ),
-          transactionService.getAll(filter),
+          dashboardService.getUpcomingTransactions(
+            selectedCompany.id,
+            onlyOwnPayables ? user.uid : undefined
+          ),
         ]);
 
         setMetrics(metricsData);
-
-        // Filter and sort upcoming transactions
-        // 1. Filter: only future or today's transactions that are not paid/rejected
-        // 2. Sort: closest date first, then highest value first for same date
-        const today = startOfDay(new Date());
-        const upcoming = transactions
-          .filter((t) => {
-            const dueDate = startOfDay(t.dueDate);
-            return (
-              (isAfter(dueDate, today) ||
-                dueDate.getTime() === today.getTime()) &&
-              t.status !== "paid" &&
-              t.status !== "rejected"
-            );
-          })
-          .sort((a, b) => {
-            // First, sort by date (closest first)
-            const dateCompare = a.dueDate.getTime() - b.dueDate.getTime();
-            if (dateCompare !== 0) return dateCompare;
-            // If same date, sort by amount (highest first)
-            return b.amount - a.amount;
-          })
-          .slice(0, 5);
-
         setUpcomingTransactions(upcoming);
       } catch (error) {
         console.error("Error loading dashboard:", error);

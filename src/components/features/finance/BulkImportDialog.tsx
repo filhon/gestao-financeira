@@ -9,8 +9,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Trash2,
-  X,
-  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -335,7 +333,7 @@ export function BulkImportDialog({
       if (importResult.success > 0) {
         onSuccess();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro durante a importação");
       setStep("preview");
     }
@@ -518,9 +516,6 @@ export function BulkImportDialog({
             {rows.map((row) => {
               const hasError = !row.isValid;
               const hasWarning = row.isValid && row.warnings.length > 0;
-              const costCenter = costCenters.find(
-                (cc) => cc.id === row.costCenterId
-              );
 
               return (
                 <TableRow

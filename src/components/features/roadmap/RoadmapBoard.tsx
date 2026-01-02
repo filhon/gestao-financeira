@@ -1,22 +1,26 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { 
-  DndContext, 
-  DragOverlay, 
-  closestCorners, 
-  KeyboardSensor, 
-  PointerSensor, 
-  useSensor, 
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
   useSensors,
   DragStartEvent,
   DragOverEvent,
   DragEndEvent,
   defaultDropAnimationSideEffects,
-  DropAnimation
+  DropAnimation,
 } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { RoadmapItem as RoadmapItemType, RoadmapStatus, roadmapService } from "@/lib/services/roadmapService";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import {
+  RoadmapItem as RoadmapItemType,
+  RoadmapStatus,
+  roadmapService,
+} from "@/lib/services/roadmapService";
 import { RoadmapColumn } from "./RoadmapColumn";
 import { RoadmapItem } from "./RoadmapItem";
 import { AddSuggestionDialog } from "./AddSuggestionDialog";
@@ -38,17 +42,23 @@ export function RoadmapBoard() {
   const [activeId, setActiveId] = useState<string | null>(null);
 
   // Check strictly for 'admin' role
-  const isAdmin = user?.role === "admin"; 
+  const isAdmin = user?.role === "admin";
 
-  const pointerSensorOptions = useMemo(() => ({
-    activationConstraint: {
+  const pointerSensorOptions = useMemo(
+    () => ({
+      activationConstraint: {
         distance: 5,
-    },
-  }), []);
+      },
+    }),
+    []
+  );
 
-  const keyboardSensorOptions = useMemo(() => ({
-    coordinateGetter: sortableKeyboardCoordinates,
-  }), []);
+  const keyboardSensorOptions = useMemo(
+    () => ({
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+    []
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, pointerSensorOptions),
@@ -76,12 +86,12 @@ export function RoadmapBoard() {
   };
 
   const findContainer = (id: string): RoadmapStatus | undefined => {
-    if (items.find(item => item.id === id)) {
-        return items.find(item => item.id === id)?.status;
+    if (items.find((item) => item.id === id)) {
+      return items.find((item) => item.id === id)?.status;
     }
     // If id is a column id
-    if (COLUMNS.find(col => col.id === id)) {
-        return id as RoadmapStatus;
+    if (COLUMNS.find((col) => col.id === id)) {
+      return id as RoadmapStatus;
     }
     return undefined;
   };
@@ -100,11 +110,11 @@ export function RoadmapBoard() {
     if (!overId || active.id === overId) return;
 
     const activeContainer = findContainer(active.id as string);
-    // Determine the container over which the item is dropped
-    const overContainer = findContainer(overId as string); 
-    
+
     // If over item, get its status, if over column, get the column id
-    const targetStatus = items.find(i => i.id === overId)?.status || (COLUMNS.find(c => c.id === overId)?.id as RoadmapStatus);
+    const targetStatus =
+      items.find((i) => i.id === overId)?.status ||
+      (COLUMNS.find((c) => c.id === overId)?.id as RoadmapStatus);
 
     if (!activeContainer || !targetStatus || activeContainer === targetStatus) {
       return;
@@ -112,27 +122,9 @@ export function RoadmapBoard() {
 
     // Optimistically update status for visual feedback during drag
     setItems((prev) => {
-      const activeItems = prev.filter(item => item.status === activeContainer);
-      const targetItems = prev.filter(item => item.status === targetStatus);
-      const activeIndex = activeItems.findIndex(item => item.id === active.id);
-      const overIndex = targetItems.findIndex(item => item.id === overId);
-
-      let newIndex;
-      if (overId in COLUMNS.map(c => c.id)) {
-        newIndex = targetItems.length + 1;
-      } else {
-        const isBelowOverItem =
-          over &&
-          active.rect.current.translated &&
-          active.rect.current.translated.top > over.rect.top + over.rect.height;
-
-        const modifier = isBelowOverItem ? 1 : 0;
-        newIndex = overIndex >= 0 ? overIndex + modifier : targetItems.length + 1;
-      }
-
-      return prev.map(item => {
+      return prev.map((item) => {
         if (item.id === active.id) {
-            return { ...item, status: targetStatus };
+          return { ...item, status: targetStatus };
         }
         return item;
       });
@@ -141,26 +133,24 @@ export function RoadmapBoard() {
 
   const handleDragEnd = async (event: DragEndEvent) => {
     if (!isAdmin) {
-        setActiveId(null);
-        return;
+      setActiveId(null);
+      return;
     }
-    
-    const { active, over } = event;
-    const activeContainer = findContainer(active.id as string);
-    const overContainer = findContainer(over?.id as string); // Could be item or column
-    
+
+    const { active } = event;
+
     // Final status check
-    const finalStatus = items.find(i => i.id === active.id)?.status; 
+    const finalStatus = items.find((i) => i.id === active.id)?.status;
 
     if (activeId && finalStatus) {
-        // Persist change to backend
-        try {
-           await roadmapService.updateItemStatus(activeId, finalStatus);
-           toast.success("Status atualizado!");
-        } catch (error) {
-            toast.error("Erro ao salvar alteração.");
-            fetchItems(); // Revert on error
-        }
+      // Persist change to backend
+      try {
+        await roadmapService.updateItemStatus(activeId, finalStatus);
+        toast.success("Status atualizado!");
+      } catch {
+        toast.error("Erro ao salvar alteração.");
+        fetchItems(); // Revert on error
+      }
     }
 
     setActiveId(null);
@@ -170,7 +160,7 @@ export function RoadmapBoard() {
     sideEffects: defaultDropAnimationSideEffects({
       styles: {
         active: {
-          opacity: '0.5',
+          opacity: "0.5",
         },
       },
     }),
@@ -178,9 +168,9 @@ export function RoadmapBoard() {
 
   if (loading) {
     return (
-        <div className="flex items-center justify-center h-[50vh]">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+      <div className="flex items-center justify-center h-[50vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     );
   }
 
@@ -200,17 +190,21 @@ export function RoadmapBoard() {
             title={col.title}
             items={getItemsByStatus(col.id)}
             isAdmin={!!isAdmin}
-            extraHeader={col.id === 'suggestion' && <AddSuggestionDialog onSuccess={fetchItems} />}
+            extraHeader={
+              col.id === "suggestion" && (
+                <AddSuggestionDialog onSuccess={fetchItems} />
+              )
+            }
           />
         ))}
       </div>
-      
+
       <DragOverlay dropAnimation={dropAnimation}>
         {activeId ? (
-            <RoadmapItem 
-                item={items.find(i => i.id === activeId)!} 
-                isAdmin={true} 
-            />
+          <RoadmapItem
+            item={items.find((i) => i.id === activeId)!}
+            isAdmin={true}
+          />
         ) : null}
       </DragOverlay>
     </DndContext>

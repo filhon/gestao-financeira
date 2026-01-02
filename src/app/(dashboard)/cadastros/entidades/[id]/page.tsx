@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { entityService } from "@/lib/services/entityService";
 import { transactionService } from "@/lib/services/transactionService";
 import { Entity, Transaction } from "@/lib/types";
 import {
@@ -593,7 +592,13 @@ export default function EntityDashboard() {
                             ))}
                           </Pie>
                           <Tooltip
-                            formatter={(value: number) => `${value} transações`}
+                            formatter={(
+                              value:
+                                | number
+                                | string
+                                | Array<number | string>
+                                | undefined
+                            ) => `${value} transações`}
                             contentStyle={{
                               borderRadius: "8px",
                               border: "1px solid #e5e7eb",
