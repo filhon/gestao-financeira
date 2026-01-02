@@ -194,7 +194,7 @@ export function CostCenterForm({
         <div className="space-y-4">
           <h3 className="text-lg font-medium">Informações Básicas</h3>
           <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-12 md:col-span-6">
+            <div className="col-span-12 md:col-span-7">
               <FormField
                 control={form.control}
                 name="parentId"
@@ -208,7 +208,7 @@ export function CostCenterForm({
                       defaultValue={field.value || "none"}
                     >
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue placeholder="Selecione..." />
                         </SelectTrigger>
                       </FormControl>
@@ -241,7 +241,7 @@ export function CostCenterForm({
               />
             </div>
 
-            <div className="col-span-12 md:col-span-3">
+            <div className="col-span-12 md:col-span-2">
               <FormField
                 control={form.control}
                 name="code"

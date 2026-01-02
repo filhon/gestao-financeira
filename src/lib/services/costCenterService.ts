@@ -15,6 +15,7 @@ import {
 import { db } from "@/lib/firebase/client";
 import { CostCenter } from "@/lib/types";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
+import { budgetService } from "@/lib/services/budgetService";
 
 const COLLECTION_NAME = "cost_centers";
 
@@ -194,8 +195,22 @@ export const costCenterService = {
     const fromParent = costCenter.allocatedFromParent || 0;
     const allocatedToChildren = costCenter.allocatedToChildren || 0;
 
-    const available =
-      fromReceivables + fromParent - allocatedToChildren - spentOnPayables;
+    // Fetch budget for the year
+    const budget = await budgetService.getByCostCenterAndYear(
+      costCenterId,
+      targetYear
+    );
+    const budgetAmount = budget?.amount || 0;
+
+    let available = 0;
+    if (budgetAmount > 0) {
+      // If budget is set, it overrides the "cash flow" logic for availability
+      available = budgetAmount - allocatedToChildren - spentOnPayables;
+    } else {
+      // Fallback to cash flow logic
+      available =
+        fromReceivables + fromParent - allocatedToChildren - spentOnPayables;
+    }
 
     return {
       fromReceivables,
@@ -204,6 +219,90 @@ export const costCenterService = {
       spentOnPayables,
       available: Math.max(0, available),
     };
+  },
+
+  /**
+   * Optimized method to get balances for all cost centers at once
+   * Reduces database reads by fetching transactions only once
+   */
+  getAllBalances: async (
+    companyId: string,
+    costCenters: CostCenter[],
+    year?: number,
+    userId?: string
+  ): Promise<Record<string, number>> => {
+    const targetYear = year || new Date().getFullYear();
+    const yearStart = new Date(targetYear, 0, 1);
+    const yearEnd = new Date(targetYear, 11, 31, 23, 59, 59);
+
+    // 1. Fetch all relevant transactions for the company/year ONCE
+    let transactionsQuery = query(
+      collection(db, "transactions"),
+      where("companyId", "==", companyId),
+      where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
+      where("dueDate", ">=", yearStart),
+      where("dueDate", "<=", yearEnd)
+    );
+
+    if (userId) {
+      transactionsQuery = query(
+        transactionsQuery,
+        where("createdBy", "==", userId)
+      );
+    }
+
+    const transactionsSnapshot = await getDocs(transactionsQuery);
+    const transactions = transactionsSnapshot.docs.map((doc) => doc.data());
+
+    // 2. Fetch budgets for all cost centers (parallel)
+    // Note: Ideally we would query budgets by companyId, but schema doesn't have it yet
+    const budgets = await Promise.all(
+      costCenters.map((cc) =>
+        budgetService.getByCostCenterAndYear(cc.id, targetYear)
+      )
+    );
+    const budgetMap = new Map(
+      budgets.filter((b) => b !== null).map((b) => [b!.costCenterId, b!.amount])
+    );
+
+    // 3. Calculate balances in memory
+    const balances: Record<string, number> = {};
+
+    for (const cc of costCenters) {
+      let fromReceivables = 0;
+      let spentOnPayables = 0;
+
+      // Aggregate from loaded transactions
+      for (const tx of transactions) {
+        const allocations = tx.costCenterAllocation || [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        allocations.forEach((alloc: any) => {
+          if (alloc.costCenterId === cc.id) {
+            if (tx.type === "receivable") {
+              fromReceivables += alloc.amount || 0;
+            } else if (tx.type === "payable") {
+              spentOnPayables += alloc.amount || 0;
+            }
+          }
+        });
+      }
+
+      const fromParent = cc.allocatedFromParent || 0;
+      const allocatedToChildren = cc.allocatedToChildren || 0;
+      const budgetAmount = budgetMap.get(cc.id) || 0;
+
+      let available = 0;
+      if (budgetAmount > 0) {
+        available = budgetAmount - allocatedToChildren - spentOnPayables;
+      } else {
+        available =
+          fromReceivables + fromParent - allocatedToChildren - spentOnPayables;
+      }
+
+      balances[cc.id] = Math.max(0, available);
+    }
+
+    return balances;
   },
 
   /**

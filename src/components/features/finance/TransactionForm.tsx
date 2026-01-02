@@ -169,18 +169,14 @@ export function TransactionForm({
 
         // Load balances for payables (to show in dropdown) - filtered by year
         if (type === "payable") {
-          const balances: Record<string, number> = {};
-          // For 'user' role, pass userId to filter transactions
+          // Optimized: Fetch all balances at once
           const forUserId = onlyOwnPayables ? user.uid : undefined;
-          for (const cc of data) {
-            const balance = await costCenterService.getEffectiveBalance(
-              cc.id,
-              selectedCompany.id,
-              balanceYear,
-              forUserId
-            );
-            balances[cc.id] = balance.available;
-          }
+          const balances = await costCenterService.getAllBalances(
+            selectedCompany.id,
+            data,
+            balanceYear,
+            forUserId
+          );
           setCostCenterBalances(balances);
         }
       }
@@ -313,7 +309,7 @@ export function TransactionForm({
                       defaultValue={field.value}
                     >
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue placeholder="Selecione..." />
                         </SelectTrigger>
                       </FormControl>
@@ -381,11 +377,13 @@ export function TransactionForm({
                                   !field.value && "text-muted-foreground"
                                 )}
                               >
-                                {field.value
-                                  ? entities.find(
-                                      (entity) => entity.id === field.value
-                                    )?.name
-                                  : "Selecione..."}
+                                <span className="truncate">
+                                  {field.value
+                                    ? entities.find(
+                                        (entity) => entity.id === field.value
+                                      )?.name
+                                    : "Selecione..."}
+                                </span>
                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                               </Button>
                             </FormControl>
