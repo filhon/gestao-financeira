@@ -1,0 +1,147 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // --- Helper Functions ---
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Get user data from Firestore
+    function getUserData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Check if the user is a Global Admin
+    function isGlobalAdmin() {
+      return getUserData().role == 'admin';
+    }
+
+    // Check if the user has a specific role within a company
+    function hasCompanyRole(companyId, allowedRoles) {
+      let user = getUserData();
+      let globalRole = user.role;
+      let isAdmin = globalRole == 'admin';
+      let companyRole = user.companyRoles[companyId];
+      return isAdmin || (companyRole in allowedRoles);
+    }
+
+    // Check if user is Manager for the company
+    function isManager(companyId) {
+      return hasCompanyRole(companyId, ['financial_manager']);
+    }
+
+    // Check if user can create transactions (Manager or User)
+    function canCreateTransactions(companyId) {
+      return hasCompanyRole(companyId, ['financial_manager', 'user']);
+    }
+
+    // Check if user can view transactions (All roles except no role)
+    function canViewTransactions(companyId) {
+      return hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+    }
+
+    // --- Storage Rules ---
+
+    // 1. Transaction Attachments
+    // Path: attachments/{companyId}/{transactionId}/{fileId}-{filename}
+    match /attachments/{companyId}/{transactionId}/{fileName} {
+      // READ: Users who can view transactions in the company
+      allow read: if isAuthenticated() && canViewTransactions(companyId);
+
+      // WRITE (Upload): Users who can create/edit transactions (Manager, User)
+      allow write: if isAuthenticated() && canCreateTransactions(companyId)
+        && request.resource.size < 10 * 1024 * 1024 // Max 10MB
+        && request.resource.contentType.matches('image/.*|application/pdf|application/msword|application/vnd.openxmlformats-officedocument.*|text/.*');
+
+      // DELETE: Only Managers and Global Admins
+      allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
+    }
+
+    // 2. Company Documents (Invoices, Receipts, etc.)
+    // Path: documents/{companyId}/{category}/{fileId}-{filename}
+    // Categories: invoices, receipts, contracts, reports, etc.
+    match /documents/{companyId}/{category}/{fileName} {
+      // READ: All authenticated users in the company
+      allow read: if isAuthenticated() && canViewTransactions(companyId);
+
+      // WRITE: Managers and Users
+      allow write: if isAuthenticated() && canCreateTransactions(companyId)
+        && request.resource.size < 20 * 1024 * 1024 // Max 20MB
+        && request.resource.contentType.matches('image/.*|application/pdf|application/msword|application/vnd.openxmlformats-officedocument.*|text/.*|application/vnd.ms-excel');
+
+      // DELETE: Only Managers and Global Admins
+      allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
+    }
+
+    // 3. User Profile Pictures
+    // Path: profiles/{userId}/{fileId}-{filename}
+    match /profiles/{userId}/{fileName} {
+      // READ: All authenticated users
+      allow read: if isAuthenticated();
+
+      // WRITE: Only the user themselves or Global Admin
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isGlobalAdmin())
+        && request.resource.size < 5 * 1024 * 1024 // Max 5MB
+        && request.resource.contentType.matches('image/.*');
+
+      // DELETE: Only the user themselves or Global Admin
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isGlobalAdmin());
+    }
+
+    // 4. Company Logos
+    // Path: logos/{companyId}/{fileId}-{filename}
+    match /logos/{companyId}/{fileName} {
+      // READ: All authenticated users
+      allow read: if isAuthenticated();
+
+      // WRITE: Only Managers and Global Admins
+      allow write: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin())
+        && request.resource.size < 2 * 1024 * 1024 // Max 2MB
+        && request.resource.contentType.matches('image/.*');
+
+      // DELETE: Only Managers and Global Admins
+      allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
+    }
+
+    // 5. Temporary Uploads (for preview/validation before final storage)
+    // Path: temp/{userId}/{fileId}-{filename}
+    // Auto-delete after 24h using Firebase Functions (not enforced here)
+    match /temp/{userId}/{fileName} {
+      // READ: Only the user who uploaded
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      // WRITE: Only the user themselves
+      allow write: if isAuthenticated() && request.auth.uid == userId
+        && request.resource.size < 10 * 1024 * 1024; // Max 10MB
+
+      // DELETE: Only the user themselves or Global Admin
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isGlobalAdmin());
+    }
+
+    // 6. Reports/Exports (Generated PDF/Excel reports)
+    // Path: exports/{companyId}/{userId}/{fileId}-{filename}
+    match /exports/{companyId}/{userId}/{fileName} {
+      // READ: Only the user who generated the report (and Managers/Admins)
+      allow read: if isAuthenticated() && 
+        (request.auth.uid == userId || isManager(companyId) || isGlobalAdmin());
+
+      // WRITE: Users who can generate reports
+      allow write: if isAuthenticated() && 
+        (request.auth.uid == userId && canViewTransactions(companyId))
+        && request.resource.size < 50 * 1024 * 1024; // Max 50MB for reports
+
+      // DELETE: Owner, Manager, or Global Admin
+      allow delete: if isAuthenticated() && 
+        (request.auth.uid == userId || isManager(companyId) || isGlobalAdmin());
+    }
+
+    // Default: Deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
