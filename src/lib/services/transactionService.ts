@@ -74,6 +74,8 @@ export const transactionService = {
     companyId?: string;
     batchId?: string;
     createdBy?: string;
+    startDate?: Date;
+    endDate?: Date;
   }): Promise<Transaction[]> => {
     let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
@@ -92,6 +94,15 @@ export const transactionService = {
     // Filter by createdBy - essential for 'user' role to match Firestore rules
     if (filter?.createdBy) {
       q = query(q, where("createdBy", "==", filter.createdBy));
+    }
+    if (filter?.startDate) {
+      q = query(
+        q,
+        where("dueDate", ">=", Timestamp.fromDate(filter.startDate))
+      );
+    }
+    if (filter?.endDate) {
+      q = query(q, where("dueDate", "<=", Timestamp.fromDate(filter.endDate)));
     }
 
     const snapshot = await getDocs(q);

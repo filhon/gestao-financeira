@@ -1,65 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import {
-  dashboardService,
-  DashboardMetrics,
-} from "@/lib/services/dashboardService";
 import { KPICards } from "@/components/features/dashboard/KPICards";
 import { CashFlowChart } from "@/components/features/dashboard/CashFlowChart";
 import { CostCenterChart } from "@/components/features/dashboard/CostCenterChart";
-import { useCompany } from "@/components/providers/CompanyProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Transaction } from "@/lib/types";
-import { useAuth } from "@/components/providers/AuthProvider";
-import { usePermissions } from "@/hooks/usePermissions";
 import { format } from "date-fns";
+import {
+  useDashboardMetrics,
+  useUpcomingTransactions,
+} from "@/hooks/useDashboardData";
 
 export default function DashboardPage() {
-  const { selectedCompany } = useCompany();
-  const { user } = useAuth();
-  const { onlyOwnPayables } = usePermissions();
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: metrics, isLoading: isMetricsLoading } = useDashboardMetrics();
+  const { data: upcomingTransactions, isLoading: isTransactionsLoading } =
+    useUpcomingTransactions();
 
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [upcomingTransactions, setUpcomingTransactions] = useState<
-    Transaction[]
-  >([]);
-
-  useEffect(() => {
-    const loadDashboard = async () => {
-      if (!selectedCompany || !user) return;
-      try {
-        // For 'user' role, filter by createdBy to match Firestore rules
-        const filter: { companyId: string; createdBy?: string } = {
-          companyId: selectedCompany.id,
-        };
-        if (onlyOwnPayables) {
-          filter.createdBy = user.uid;
-        }
-
-        const [metricsData, upcoming] = await Promise.all([
-          dashboardService.getFinancialMetrics(
-            selectedCompany.id,
-            onlyOwnPayables ? user.uid : undefined
-          ),
-          dashboardService.getUpcomingTransactions(
-            selectedCompany.id,
-            onlyOwnPayables ? user.uid : undefined
-          ),
-        ]);
-
-        setMetrics(metricsData);
-        setUpcomingTransactions(upcoming);
-      } catch (error) {
-        console.error("Error loading dashboard:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    loadDashboard();
-  }, [selectedCompany, user, onlyOwnPayables]);
+  const isLoading = isMetricsLoading || isTransactionsLoading;
 
   if (isLoading) {
     return (
@@ -89,12 +46,12 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingTransactions.length === 0 ? (
+              {upcomingTransactions?.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   Nenhuma transação pendente.
                 </p>
               ) : (
-                upcomingTransactions.map((t) => (
+                upcomingTransactions?.map((t) => (
                   <div
                     key={t.id}
                     className="flex items-center justify-between py-2 border-b last:border-0"

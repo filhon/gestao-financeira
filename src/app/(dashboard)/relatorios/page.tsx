@@ -52,8 +52,15 @@ export default function ReportsPage() {
       setIsLoading(true);
 
       // For 'user' role, filter by createdBy to match Firestore rules
-      const filter: { companyId: string; createdBy?: string } = {
+      const filter: {
+        companyId: string;
+        createdBy?: string;
+        startDate?: Date;
+        endDate?: Date;
+      } = {
         companyId: selectedCompany.id,
+        startDate: startDate,
+        endDate: endDate,
       };
       if (onlyOwnPayables) {
         filter.createdBy = user.uid;

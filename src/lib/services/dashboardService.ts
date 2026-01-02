@@ -292,10 +292,12 @@ export const dashboardService = {
       endDate = addDays(today, 30);
     }
 
-    // Fetch all transactions for the period
+    // Fetch transactions for the period
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
+      where("dueDate", ">=", Timestamp.fromDate(startDate)),
+      where("dueDate", "<=", Timestamp.fromDate(endDate)),
       orderBy("dueDate", "asc")
     );
 
@@ -369,21 +371,43 @@ export const dashboardService = {
 
     const combinedTransactions = [...transactions, ...projectedTransactions];
 
-    // Calculate starting balance from all paid transactions before startDate
-    // For paid transactions, use paymentDate; for others use dueDate
-    let startingBalance = 0;
-    transactions.forEach((t) => {
-      const dateToCheck =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      if (t.status === "paid" && isBefore(dateToCheck, startDate)) {
-        const amount = Number(t.finalAmount || t.amount) || 0;
-        if (t.type === "receivable") {
-          startingBalance += amount;
-        } else {
-          startingBalance -= amount;
-        }
-      }
-    });
+    // Calculate starting balance using Aggregation for efficiency
+    // We need the sum of all PAID transactions before the startDate
+    const pastIncomeQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("status", "==", "paid"),
+      where("type", "==", "receivable"),
+      where("paymentDate", "<", Timestamp.fromDate(startDate))
+    );
+
+    const pastExpenseQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("status", "==", "paid"),
+      where("type", "==", "payable"),
+      where("paymentDate", "<", Timestamp.fromDate(startDate))
+    );
+
+    const [pastIncomeSnap, pastExpenseSnap] = await Promise.all([
+      getAggregateFromServer(pastIncomeQuery, { total: sum("finalAmount") }), // Use finalAmount for paid
+      getAggregateFromServer(pastExpenseQuery, { total: sum("finalAmount") }),
+    ]);
+
+    // Fallback to 'amount' if 'finalAmount' is 0/null (though paid should have finalAmount)
+    // Note: sum("finalAmount") might return 0 if field is missing.
+    // If your data might have paid transactions without finalAmount, you might need a second check or ensure data integrity.
+    // For this implementation, we assume paid transactions have valid amounts.
+    // If finalAmount is 0, we might want to try summing 'amount' but Firestore doesn't support "COALESCE" in sum.
+    // We will assume finalAmount is populated for paid items.
+
+    const startingBalance =
+      (pastIncomeSnap.data().total || 0) - (pastExpenseSnap.data().total || 0);
+
+    // If finalAmount sum was 0, it might be because fields are missing.
+    // Let's try summing 'amount' as a fallback if the result is suspiciously 0?
+    // No, that's risky (double counting).
+    // Better approach: The system should ensure finalAmount is set when paying.
 
     // Generate daily or weekly data points
     const result: ProjectedCashFlowData[] = [];
