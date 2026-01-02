@@ -22,8 +22,12 @@ import {
   isBefore,
   isAfter,
   isSameDay,
+  addWeeks,
+  addMonths,
+  addYears,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { recurrenceService } from "./recurrenceService";
 
 const TRANSACTIONS_COLLECTION = "transactions";
 const COST_CENTERS_COLLECTION = "cost_centers";
@@ -158,7 +162,7 @@ export const dashboardService = {
       where("dueDate", ">=", Timestamp.fromDate(today)),
       where("status", "not-in", ["paid", "rejected"]),
       orderBy("dueDate", "asc"),
-      limit(5)
+      limit(10)
     );
 
     if (userId) {
@@ -166,7 +170,7 @@ export const dashboardService = {
     }
 
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => {
+    const realTransactions = snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
         ...data,
@@ -175,6 +179,44 @@ export const dashboardService = {
         paymentDate: (data.paymentDate as Timestamp)?.toDate(),
       } as Transaction;
     });
+
+    // Fetch active recurring templates
+    const recurringTemplates = await recurrenceService.getTemplates(companyId);
+    const activeTemplates = recurringTemplates.filter((t) => t.active);
+
+    const projectedTransactions: Transaction[] = [];
+
+    // We only care about the *next* occurrence for the "Upcoming" list
+    activeTemplates.forEach((template) => {
+      if (
+        isAfter(template.nextDueDate, today) ||
+        isSameDay(template.nextDueDate, today)
+      ) {
+        // Check if expired
+        if (template.endDate && isAfter(template.nextDueDate, template.endDate))
+          return;
+
+        projectedTransactions.push({
+          id: `projected-${template.id}`,
+          companyId: template.companyId,
+          description: `${template.description} (Recorrência)`,
+          amount: template.amount,
+          type: template.type,
+          status: "draft",
+          dueDate: template.nextDueDate,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          createdBy: "system",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any as Transaction);
+      }
+    });
+
+    // Merge and Sort
+    const all = [...realTransactions, ...projectedTransactions];
+    all.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+
+    return all.slice(0, 5);
   },
 
   getCashFlowData: async (
@@ -271,6 +313,62 @@ export const dashboardService = {
     // Filter out rejected transactions
     const transactions = allTransactions.filter((t) => t.status !== "rejected");
 
+    // Fetch active recurring templates to project future transactions
+    const recurringTemplates = await recurrenceService.getTemplates(companyId);
+    const activeTemplates = recurringTemplates.filter((t) => t.active);
+
+    const projectedTransactions: Transaction[] = [];
+
+    activeTemplates.forEach((template) => {
+      let nextDate = template.nextDueDate;
+      const interval = template.interval || 1;
+
+      // Loop until we pass the projection end date
+      while (isBefore(nextDate, endDate) || isSameDay(nextDate, endDate)) {
+        // Check if template expires
+        if (template.endDate && isAfter(nextDate, template.endDate)) {
+          break;
+        }
+
+        // Only add if it falls within our projection window
+        if (isAfter(nextDate, startDate) || isSameDay(nextDate, startDate)) {
+          projectedTransactions.push({
+            id: `projected-${template.id}-${nextDate.getTime()}`,
+            companyId: template.companyId,
+            description: `${template.description} (Projeção)`,
+            amount: template.amount,
+            type: template.type,
+            status: "draft", // Treated as pending for cash flow
+            dueDate: nextDate,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            createdBy: "system",
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any as Transaction);
+        }
+
+        // Advance date
+        switch (template.frequency) {
+          case "daily":
+            nextDate = addDays(nextDate, interval);
+            break;
+          case "weekly":
+            nextDate = addWeeks(nextDate, interval);
+            break;
+          case "monthly":
+            nextDate = addMonths(nextDate, interval);
+            break;
+          case "yearly":
+            nextDate = addYears(nextDate, interval);
+            break;
+          default:
+            nextDate = addMonths(nextDate, interval);
+        }
+      }
+    });
+
+    const combinedTransactions = [...transactions, ...projectedTransactions];
+
     // Calculate starting balance from all paid transactions before startDate
     // For paid transactions, use paymentDate; for others use dueDate
     let startingBalance = 0;
@@ -301,7 +399,7 @@ export const dashboardService = {
       let dayExpense = 0;
 
       // Find transactions for this day/period
-      transactions.forEach((t) => {
+      combinedTransactions.forEach((t) => {
         // For paid transactions, use paymentDate; for others use dueDate
         const dateToUse =
           t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
