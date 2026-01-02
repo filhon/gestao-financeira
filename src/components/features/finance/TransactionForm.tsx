@@ -226,9 +226,12 @@ export function TransactionForm({
       try {
         setIsUploading(true);
         const file = e.target.files[0];
+
+        if (!selectedCompany) return;
+
         const uploadedFile = await storageService.uploadFile(
           file,
-          "transactions"
+          `transactions/${selectedCompany.id}`
         );
 
         appendAttachment({

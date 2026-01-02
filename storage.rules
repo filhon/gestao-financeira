@@ -139,6 +139,16 @@ service firebase.storage {
         (request.auth.uid == userId || isManager(companyId) || isGlobalAdmin());
     }
 
+    // 7. Transactions (Direct uploads)
+    // Path: transactions/{companyId}/{fileId}-{filename}
+    match /transactions/{companyId}/{fileName} {
+      allow read: if isAuthenticated() && canViewTransactions(companyId);
+      allow write: if isAuthenticated() && canCreateTransactions(companyId)
+        && request.resource.size < 10 * 1024 * 1024 // Max 10MB
+        && request.resource.contentType.matches('image/.*|application/pdf|application/msword|application/vnd.openxmlformats-officedocument.*|text/.*');
+      allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
+    }
+
     // Default: Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;
