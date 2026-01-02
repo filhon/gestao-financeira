@@ -156,7 +156,7 @@ export default function AccountsReceivablePage() {
             entityId: data.entityId,
             paymentMethod: data.paymentMethod,
             requestOrigin: data.requestOrigin,
-            notes: data.notes,
+            notes: data.notes || "",
           },
         });
         toast.success("Recorrência criada com sucesso!");

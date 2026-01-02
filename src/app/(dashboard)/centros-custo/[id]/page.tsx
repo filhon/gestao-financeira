@@ -63,7 +63,6 @@ export default function CostCenterDashboard() {
     { monthKey: string; amount: number }[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isTransactionsLoading, setIsTransactionsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [budgetAmount, setBudgetAmount] = useState(0);
 
@@ -109,7 +108,6 @@ export default function CostCenterDashboard() {
           return;
         }
 
-        setIsTransactionsLoading(true);
         try {
           const userId = onlyOwnPayables ? user.uid : undefined;
           // Optimization: Fetch only upcoming payables instead of all history
@@ -133,8 +131,6 @@ export default function CostCenterDashboard() {
           setTransactions(filtered);
         } catch (error) {
           console.error("Error loading transactions:", error);
-        } finally {
-          setIsTransactionsLoading(false);
         }
       }
     };
