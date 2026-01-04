@@ -113,4 +113,117 @@ export const onUserRoleUpdate = functions.firestore
     } catch (error) {
       console.error(`Error updating custom claims for user ${userId}`, error);
     }
+    return null;
+  });
+
+/**
+ * Trigger que atualiza o resumo financeiro (financial_summaries)
+ * sempre que uma transação é criada, atualizada ou deletada.
+ * Agrupa por Mês/Ano e Empresa.
+ */
+export const updateFinancialSummary = functions.firestore
+  .document("transactions/{transactionId}")
+  .onWrite(async (change, context) => {
+    const beforeDoc = change.before;
+    const afterDoc = change.after;
+
+    // Helper para extrair dados relevantes da transação
+    const getTransactionData = (doc: any) => {
+      if (!doc || !doc.exists) return null;
+      const data = doc.data();
+
+      // Só contabilizamos transações pagas
+      if (data.status !== "paid") return null;
+
+      const amount = Number(data.finalAmount ?? data.amount ?? 0);
+
+      // Determina a data para agrupamento (PaymentDate > DueDate > Now)
+      const date = data.paymentDate
+        ? data.paymentDate.toDate()
+        : data.dueDate
+          ? data.dueDate.toDate()
+          : new Date();
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const monthKey = `${year}-${month}`;
+
+      return {
+        companyId: data.companyId,
+        monthKey,
+        type: data.type, // 'payable' | 'receivable'
+        amount,
+      };
+    };
+
+    const beforeData = getTransactionData(beforeDoc);
+    const afterData = getTransactionData(afterDoc);
+
+    if (!beforeData && !afterData) return;
+
+    // Mapa para consolidar atualizações (evita escrita duplicada no mesmo doc)
+    const updates = new Map<
+      string,
+      { income: number; expense: number; companyId: string; month: string }
+    >();
+
+    const addUpdate = (data: any, multiplier: number) => {
+      const docId = `${data.companyId}_${data.monthKey}`;
+      if (!updates.has(docId)) {
+        updates.set(docId, {
+          income: 0,
+          expense: 0,
+          companyId: data.companyId,
+          month: data.monthKey,
+        });
+      }
+      const entry = updates.get(docId)!;
+      if (data.type === "receivable") {
+        entry.income += data.amount * multiplier;
+      } else {
+        entry.expense += data.amount * multiplier;
+      }
+    };
+
+    // Se existia antes (e era paga), subtrai
+    if (beforeData) addUpdate(beforeData, -1);
+
+    // Se existe agora (e é paga), adiciona
+    if (afterData) addUpdate(afterData, 1);
+
+    const batch = db.batch();
+    let hasUpdates = false;
+
+    for (const [docId, update] of updates) {
+      // Se o saldo líquido da mudança for 0, não precisa escrever (opcional, mas economiza escrita)
+      if (update.income === 0 && update.expense === 0) continue;
+
+      const ref = db.collection("financial_summaries").doc(docId);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updateData: any = {
+        companyId: update.companyId,
+        month: update.month,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      if (update.income !== 0) {
+        updateData.income = admin.firestore.FieldValue.increment(update.income);
+      }
+      if (update.expense !== 0) {
+        updateData.expense = admin.firestore.FieldValue.increment(
+          update.expense
+        );
+      }
+
+      batch.set(ref, updateData, { merge: true });
+      hasUpdates = true;
+    }
+
+    if (hasUpdates) {
+      await batch.commit();
+      console.log("Financial summary updated successfully.");
+    }
+
+    return null;
   });
