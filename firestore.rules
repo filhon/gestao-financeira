@@ -15,22 +15,33 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Check if the user is a Global Admin using Custom Claims
+    // Check if the user is a Global Admin using Custom Claims (with DB fallback)
     function isGlobalAdmin() {
-      return request.auth.token.role == 'admin';
+      return (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'admin') ||
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
     }
 
-    // Check if the user has a specific role within a company using Custom Claims
+    // Helper to check Token Claims
+    function hasTokenRole(companyId, allowedRoles) {
+      return (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'admin') ||
+             (request.auth.token.keys().hasAny(['companyRoles']) && 
+              request.auth.token.companyRoles.keys().hasAny([companyId]) && 
+              request.auth.token.companyRoles[companyId] in allowedRoles);
+    }
+
+    // Helper to check Firestore Document (Fallback)
+    function hasDbRole(companyId, allowedRoles) {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.keys().hasAny(['companyRoles']) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyRoles.keys().hasAny([companyId]) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyRoles[companyId] in allowedRoles));
+    }
+
+    // Check if the user has a specific role within a company using Custom Claims or DB Fallback
     function hasCompanyRole(companyId, allowedRoles) {
-      let globalRole = request.auth.token.role;
-      let isAdmin = globalRole == 'admin';
-      
-      // Access companyRoles from token. 
-      // Note: token.companyRoles might be undefined if not set yet.
-      let companyRoles = request.auth.token.companyRoles;
-      let companyRole = (companyRoles != null && companyId in companyRoles) ? companyRoles[companyId] : null;
-      
-      return isAdmin || (companyRole in allowedRoles);
+      return hasTokenRole(companyId, allowedRoles) || hasDbRole(companyId, allowedRoles);
     }
     
     // Helper for "Manager or Admin" check (Common pattern)
