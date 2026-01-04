@@ -82,3 +82,35 @@ export const onTransactionWrite = functions.firestore
 
     return null;
   });
+
+/**
+ * Trigger que atualiza as Custom Claims do usuário no Firebase Auth
+ * sempre que o documento do usuário for criado ou atualizado.
+ * Isso permite verificar permissões no Firestore Rules sem leituras extras (get()).
+ */
+export const onUserRoleUpdate = functions.firestore
+  .document("users/{userId}")
+  .onWrite(async (change, context) => {
+    const userId = context.params.userId;
+    const newData = change.after.exists ? change.after.data() : null;
+
+    // Se o usuário foi deletado, não fazemos nada (ou poderíamos limpar as claims)
+    if (!newData) {
+      return null;
+    }
+
+    const { role, companyRoles } = newData;
+
+    try {
+      // Define as custom claims
+      // role: 'admin' | 'user' | ...
+      // companyRoles: { 'companyId': 'role' }
+      await admin.auth().setCustomUserClaims(userId, {
+        role: role || null,
+        companyRoles: companyRoles || {},
+      });
+      console.log(`Custom claims updated for user ${userId}`);
+    } catch (error) {
+      console.error(`Error updating custom claims for user ${userId}`, error);
+    }
+  });

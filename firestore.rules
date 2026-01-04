@@ -15,29 +15,21 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Fetch the current user's profile document
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    // Check if the user is a Global Admin
+    // Check if the user is a Global Admin using Custom Claims
     function isGlobalAdmin() {
-      // Safely access data, if user doc doesn't exist or role is missing, this returns false/error (interpreted as deny)
-      return getUserData().role == 'admin';
+      return request.auth.token.role == 'admin';
     }
 
-    // Check if the user has a specific role within a company
+    // Check if the user has a specific role within a company using Custom Claims
     function hasCompanyRole(companyId, allowedRoles) {
-      let user = getUserData();
-      let globalRole = user.role;
-      // Admin global role bypasses all checks
+      let globalRole = request.auth.token.role;
       let isAdmin = globalRole == 'admin';
       
-      // Get role specific to the company
-      // 'companyRoles' is a Map: { "companyId": "role" }
-      let companyRole = user.companyRoles[companyId];
+      // Access companyRoles from token. 
+      // Note: token.companyRoles might be undefined if not set yet.
+      let companyRoles = request.auth.token.companyRoles;
+      let companyRole = (companyRoles != null && companyId in companyRoles) ? companyRoles[companyId] : null;
       
-      // Allow if Global Admin OR if the user's company role is in the allowed list
       return isAdmin || (companyRole in allowedRoles);
     }
     
@@ -54,7 +46,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated(); // Allow creation during sign-up
-      allow update: if isOwner(userId) || isGlobalAdmin();
+      allow update: if isGlobalAdmin() || (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'companyRoles', 'active', 'status']));
       allow delete: if isGlobalAdmin();
     }
 

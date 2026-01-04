@@ -37,6 +37,14 @@ const convertDates = (data: DocumentData): PaymentBatch => {
   } as PaymentBatch;
 };
 
+const hashToken = async (token: string): Promise<string> => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(token);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
 export const paymentBatchService = {
   getAll: async (companyId: string): Promise<PaymentBatch[]> => {
     const q = query(
@@ -189,6 +197,7 @@ export const paymentBatchService = {
 
     // Generate token with 48h expiration
     const token = crypto.randomUUID();
+    const tokenHash = await hashToken(token);
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 48);
 
@@ -197,7 +206,8 @@ export const paymentBatchService = {
       status: "pending_approval",
       approverId,
       approverEmail,
-      approvalToken: token,
+      approvalTokenHash: tokenHash,
+      approvalToken: null, // Clear plain token if it existed
       approvalTokenExpiresAt: expiresAt,
       sentForApprovalAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -331,6 +341,7 @@ export const paymentBatchService = {
 
     // Generate token with 48h expiration
     const token = crypto.randomUUID();
+    const tokenHash = await hashToken(token);
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 48);
 
@@ -339,7 +350,8 @@ export const paymentBatchService = {
       status: "pending_authorization",
       authorizerId,
       authorizerEmail,
-      approvalToken: token,
+      approvalTokenHash: tokenHash,
+      approvalToken: null,
       approvalTokenExpiresAt: expiresAt,
       sentForAuthorizationAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -442,9 +454,10 @@ export const paymentBatchService = {
    * Get batch by approval token with validation
    */
   getByApprovalToken: async (token: string): Promise<PaymentBatch | null> => {
+    const tokenHash = await hashToken(token);
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token)
+      where("approvalTokenHash", "==", tokenHash)
     );
     const snapshot = await getDocs(q);
 
@@ -495,6 +508,7 @@ export const paymentBatchService = {
       status: "approved",
       approvedBy: "magic-link",
       approvedAt: serverTimestamp(),
+      approvalTokenHash: null,
       approvalToken: null,
       approvalTokenExpiresAt: null,
       updatedAt: serverTimestamp(),
@@ -560,6 +574,7 @@ export const paymentBatchService = {
       status: "authorized",
       authorizedBy: "magic-link",
       authorizedAt: serverTimestamp(),
+      approvalTokenHash: null,
       approvalToken: null,
       approvalTokenExpiresAt: null,
       updatedAt: serverTimestamp(),
@@ -579,6 +594,7 @@ export const paymentBatchService = {
     const batch = writeBatch(db);
     batch.update(batchRef, {
       status: "open",
+      approvalTokenHash: null,
       approvalToken: null,
       approvalTokenExpiresAt: null,
       approverId: null,
