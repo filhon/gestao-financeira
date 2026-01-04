@@ -11,7 +11,6 @@ import {
   limit,
   doc,
   getDoc,
-  setDoc,
 } from "firebase/firestore";
 import { Transaction } from "@/lib/types";
 import {
@@ -73,47 +72,6 @@ export interface BudgetProgressData {
 }
 
 export const dashboardService = {
-  recalculateCompanyStats: async (companyId: string): Promise<void> => {
-    // 1. Calculate current balance from all PAID transactions
-    const incomeQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("status", "==", "paid"),
-      where("type", "==", "receivable")
-    );
-
-    const expenseQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("status", "==", "paid"),
-      where("type", "==", "payable")
-    );
-
-    const [incomeSnap, expenseSnap] = await Promise.all([
-      getAggregateFromServer(incomeQuery, { total: sum("finalAmount") }),
-      getAggregateFromServer(expenseQuery, { total: sum("finalAmount") }),
-    ]);
-
-    // Fallback to 'amount' if 'finalAmount' is missing (though it shouldn't for paid)
-    // Note: In a real scenario, we might want to double check if finalAmount is 0 but amount is > 0
-    // For now, we trust the aggregation.
-    const totalIncome = incomeSnap.data().total || 0;
-    const totalExpense = expenseSnap.data().total || 0;
-    const currentBalance = totalIncome - totalExpense;
-
-    // 2. Update company_stats
-    const statsRef = doc(db, COMPANY_STATS_COLLECTION, companyId);
-    await setDoc(
-      statsRef,
-      {
-        currentBalance,
-        lastUpdated: new Date(),
-        updatedBy: "system-recalc",
-      },
-      { merge: true }
-    );
-  },
-
   getOverdueTransactions: async (companyId: string): Promise<Transaction[]> => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -486,7 +444,6 @@ export const dashboardService = {
         console.warn(
           "Company stats not found, defaulting starting balance to 0"
         );
-        // Optional: await dashboardService.recalculateCompanyStats(companyId);
         // startingBalance = (await getDoc(statsRef)).data()?.currentBalance || 0;
       }
     } catch (error) {

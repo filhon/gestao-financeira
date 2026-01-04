@@ -207,6 +207,16 @@ service cloud.firestore {
        allow write: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'user']);
     }
     
+    // 13. Company Stats (Current Balance)
+    match /company_stats/{companyId} {
+       // Read: All roles in the company
+       allow read: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+       
+       // Write: Manager only (for manual recalculation)
+       // Note: Cloud Functions bypass these rules.
+       allow write: if isAuthenticated() && isManager(companyId);
+    }
+    
     // Default Deny
     match /{document=**} {
       allow read, write: if false;

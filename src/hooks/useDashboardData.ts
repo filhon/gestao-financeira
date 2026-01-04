@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -103,22 +103,5 @@ export function usePendingApprovals() {
       );
     },
     enabled: !!selectedCompany,
-  });
-}
-
-export function useRecalculateStats() {
-  const queryClient = useQueryClient();
-  const { selectedCompany } = useCompany();
-
-  return useMutation({
-    mutationFn: async () => {
-      if (!selectedCompany) throw new Error("No company selected");
-      await dashboardService.recalculateCompanyStats(selectedCompany.id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["projected-cash-flow", selectedCompany?.id],
-      });
-    },
   });
 }

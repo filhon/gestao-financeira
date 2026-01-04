@@ -7,8 +7,6 @@ import {
   ChevronRight,
   ShieldCheck,
   MessageSquare,
-  RefreshCw,
-  Database,
 } from "lucide-react";
 import {
   Card,
@@ -17,9 +15,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
-import { useRecalculateStats } from "@/hooks/useDashboardData";
 
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -34,9 +29,6 @@ export default function SettingsPage() {
     canViewAuditLogs,
     canManageFeedback,
   } = usePermissions();
-
-  const { mutateAsync: recalculateStats, isPending: isRecalculating } =
-    useRecalculateStats();
 
   useEffect(() => {
     if (!canAccessSettings) {
@@ -108,53 +100,6 @@ export default function SettingsPage() {
           </Link>
         ))}
       </div>
-
-      {canManageCompanies && (
-        <div className="space-y-4 pt-6 border-t">
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2">
-              <Database className="h-5 w-5" />
-              Manutenção de Dados
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Ferramentas para manutenção e correção de dados do sistema.
-            </p>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                Sincronização de Saldo
-              </CardTitle>
-              <CardDescription>
-                Recalcula o saldo atual da empresa baseando-se em todo o
-                histórico de transações pagas. Use isso se notar divergências no
-                dashboard.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  toast.promise(recalculateStats(), {
-                    loading: "Recalculando saldo...",
-                    success: "Saldo atualizado com sucesso!",
-                    error: "Erro ao atualizar saldo.",
-                  });
-                }}
-                disabled={isRecalculating}
-              >
-                <RefreshCw
-                  className={`mr-2 h-4 w-4 ${
-                    isRecalculating ? "animate-spin" : ""
-                  }`}
-                />
-                Recalcular Saldo Agora
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
