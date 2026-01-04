@@ -42,20 +42,28 @@ service cloud.firestore {
 
     // 1. Users Collection
     // - Read: All authenticated users (needed for interactions, assigning users, etc.)
-    // - Write: Owner can edit self; Global Admin can edit all.
+    // - Write: Owner can edit self (with restrictions); Global Admin can edit all.
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated(); // Allow creation during sign-up
-      allow update: if isGlobalAdmin() || (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'companyRoles', 'active', 'status']));
+      allow update: if isGlobalAdmin() || (
+        isOwner(userId) && 
+        // Owner cannot change critical fields directly
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'companyRoles', 'active']) &&
+        // If Owner changes status, it must be to 'pending_approval' (Invite-Only flow)
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) || request.resource.data.status == 'pending_approval')
+      );
       allow delete: if isGlobalAdmin();
     }
 
     // 2. Companies Collection
-    // - Read: Authenticated users (Simple approach).
-    // - Write: Global Admin only.
+    // - Read: Authenticated users.
+    // - Create: Authenticated users (Invite-Only / Setup flow).
+    // - Update/Delete: Global Admin only.
     match /companies/{companyId} {
       allow read: if isAuthenticated();
-      allow write: if isGlobalAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isGlobalAdmin();
     }
 
     // 3. Transactions (Payables & Receivables)
