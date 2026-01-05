@@ -51,6 +51,17 @@ service cloud.firestore {
 
     // --- Collection Rules ---
 
+    // Legal Documents (Public Read, Admin Write)
+    match /legal_documents/{docId} {
+      allow read: if true;
+      allow write: if isGlobalAdmin();
+      
+      match /versions/{versionId} {
+        allow read: if true;
+        allow write: if isGlobalAdmin();
+      }
+    }
+
     // 1. Users Collection
     // - Read: All authenticated users (needed for interactions, assigning users, etc.)
     // - Write: Owner can edit self (with restrictions); Global Admin can edit all.

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ShieldCheck,
   MessageSquare,
+  FileText,
 } from "lucide-react";
 import {
   Card,
@@ -66,6 +67,13 @@ export default function SettingsPage() {
       href: "/configuracoes/feedbacks",
       icon: MessageSquare,
       show: canManageFeedback,
+    },
+    {
+      title: "Documentos Legais",
+      description: "Edite os Termos de Uso e Política de Privacidade.",
+      href: "/configuracoes/documentos-legais",
+      icon: FileText,
+      show: canAccessSettings,
     },
   ];
 

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { Search, LogOut, User } from "lucide-react";
+import { Search, LogOut, User, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -114,6 +114,13 @@ export function Header() {
               >
                 <User className="mr-2 h-4 w-4" />
                 <span>Meu Perfil</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push("/feedback")}
+                className="cursor-pointer"
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                <span>Feedback</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
