@@ -638,22 +638,24 @@ export function TransactionDetailsDialog({
                     </div>
                   )}
 
-                {transaction.status === "approved" && canPay && (
-                  <Button
-                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
-                    onClick={() => setIsPaymentDialogOpen(true)}
-                    disabled={isProcessing}
-                  >
-                    {isProcessing ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Banknote className="mr-2 h-4 w-4" />
-                    )}
-                    {transaction.type === "payable"
-                      ? "Confirmar Pagamento"
-                      : "Confirmar Recebimento"}
-                  </Button>
-                )}
+                {(transaction.status === "approved" ||
+                  (transaction.status === "draft" && isReceivable)) &&
+                  canPay && (
+                    <Button
+                      className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
+                      onClick={() => setIsPaymentDialogOpen(true)}
+                      disabled={isProcessing}
+                    >
+                      {isProcessing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Banknote className="mr-2 h-4 w-4" />
+                      )}
+                      {transaction.type === "payable"
+                        ? "Confirmar Pagamento"
+                        : "Confirmar Recebimento"}
+                    </Button>
+                  )}
 
                 <Button
                   variant="outline"

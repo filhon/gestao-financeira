@@ -554,13 +554,15 @@ export default function AccountsPayablePage() {
                         />
                       </TableCell>
                       <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span>{t.description}</span>
+                      <TableCell className="max-w-[300px]">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate" title={t.description}>
+                            {t.description}
+                          </span>
                           {t.batchId && (
                             <Badge
                               variant="outline"
-                              className="w-fit text-[10px] mt-1"
+                              className="shrink-0 text-[10px]"
                             >
                               Em Lote
                             </Badge>

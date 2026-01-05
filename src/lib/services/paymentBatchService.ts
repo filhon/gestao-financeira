@@ -7,6 +7,7 @@ import {
   query,
   where,
   writeBatch,
+  updateDoc,
   serverTimestamp,
   orderBy,
   addDoc,
@@ -78,6 +79,14 @@ export const paymentBatchService = {
     });
   },
 
+  update: async (id: string, data: Partial<PaymentBatch>) => {
+    const docRef = doc(db, COLLECTION_NAME, id);
+    await updateDoc(docRef, {
+      ...data,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
   addTransactions: async (batchId: string, transactions: Transaction[]) => {
     const batch = writeBatch(db);
     const batchRef = doc(db, COLLECTION_NAME, batchId);
@@ -87,8 +96,21 @@ export const paymentBatchService = {
     if (!batchSnap.exists()) throw new Error("Batch not found");
     const batchData = batchSnap.data() as PaymentBatch;
 
-    const newIds = transactions.map((t) => t.id);
-    const additionalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
+    // Filter out transactions that are already in the batch
+    const existingIds = new Set(batchData.transactionIds);
+    const uniqueTransactions = transactions.filter(
+      (t) => !existingIds.has(t.id)
+    );
+
+    if (uniqueTransactions.length === 0) {
+      return; // All transactions are already in the batch
+    }
+
+    const newIds = uniqueTransactions.map((t) => t.id);
+    const additionalAmount = uniqueTransactions.reduce(
+      (sum, t) => sum + t.amount,
+      0
+    );
 
     // Update Batch
     batch.update(batchRef, {
@@ -98,7 +120,7 @@ export const paymentBatchService = {
     });
 
     // Update Transactions
-    transactions.forEach((t) => {
+    uniqueTransactions.forEach((t) => {
       const tRef = doc(db, TRANSACTIONS_COLLECTION, t.id);
       batch.update(tRef, { batchId: batchId });
     });

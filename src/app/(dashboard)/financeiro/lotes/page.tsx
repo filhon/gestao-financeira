@@ -7,7 +7,7 @@ import { notificationService } from "@/lib/services/notificationService";
 import { emailService } from "@/lib/services/emailService";
 import { PaymentBatch } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { Plus, MoreHorizontal, Loader2 } from "lucide-react";
+import { Plus, MoreHorizontal, Loader2, Edit } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -58,6 +58,10 @@ export default function PaymentBatchesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newBatchName, setNewBatchName] = useState("");
+
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingBatchName, setEditingBatchName] = useState("");
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
 
   const [selectedBatch, setSelectedBatch] = useState<PaymentBatch | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -111,6 +115,29 @@ export default function PaymentBatchesPage() {
     } catch (error) {
       console.error("Error creating batch:", error);
       toast.error("Erro ao criar lote");
+    }
+  };
+
+  const handleEditBatch = (batch: PaymentBatch) => {
+    setEditingBatchId(batch.id);
+    setEditingBatchName(batch.name);
+    setIsEditOpen(true);
+  };
+
+  const handleUpdateBatch = async () => {
+    if (!editingBatchId || !editingBatchName.trim()) return;
+    try {
+      await paymentBatchService.update(editingBatchId, {
+        name: editingBatchName,
+      });
+      toast.success("Lote atualizado com sucesso");
+      setIsEditOpen(false);
+      setEditingBatchId(null);
+      setEditingBatchName("");
+      fetchBatches();
+    } catch (error) {
+      console.error("Error updating batch:", error);
+      toast.error("Erro ao atualizar lote");
     }
   };
 
@@ -406,6 +433,14 @@ export default function PaymentBatchesPage() {
                           >
                             Ver Detalhes
                           </DropdownMenuItem>
+                          {canManageBatches && (
+                            <DropdownMenuItem
+                              onClick={() => handleEditBatch(batch)}
+                            >
+                              <Edit className="mr-2 h-4 w-4" />
+                              Editar
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
 
                           {/* Status: Open - Manager can send for approval */}
@@ -476,6 +511,32 @@ export default function PaymentBatchesPage() {
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
       />
+
+      {/* Edit Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Lote</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Nome do Lote</Label>
+              <Input
+                id="edit-name"
+                placeholder="Ex: Pagamentos Semana 42"
+                value={editingBatchName}
+                onChange={(e) => setEditingBatchName(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleUpdateBatch}>Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Send for Approval Dialog */}
       {selectedCompany && (
