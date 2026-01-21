@@ -46,7 +46,7 @@ export default function LegalDocumentsSettingsPage() {
 
   useEffect(() => {
     if (!canAccessSettings) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [canAccessSettings, router]);
 

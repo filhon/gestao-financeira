@@ -76,7 +76,7 @@ export default function PaymentBatchesPage() {
   // Guard: redirect if no permission
   useEffect(() => {
     if (!canViewBatches) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [canViewBatches, router]);
 

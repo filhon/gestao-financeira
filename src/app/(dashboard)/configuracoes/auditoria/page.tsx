@@ -170,7 +170,7 @@ export default function AuditLogsPage() {
   useEffect(() => {
     if (!canViewAuditLogs) {
       toast.error("Acesso negado.");
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [canViewAuditLogs, router]);
 

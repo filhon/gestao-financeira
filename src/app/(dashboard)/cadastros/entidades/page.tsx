@@ -73,7 +73,7 @@ export default function EntitiesPage() {
 
   useEffect(() => {
     if (!canViewEntities) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [canViewEntities, router]);
 

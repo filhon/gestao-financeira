@@ -56,7 +56,7 @@ export default function RecorrenciasPage() {
   // Guard: redirect if no permission
   useEffect(() => {
     if (!canViewRecurrences) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [canViewRecurrences, router]);
 

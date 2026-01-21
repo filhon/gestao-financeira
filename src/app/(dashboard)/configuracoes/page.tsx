@@ -33,7 +33,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!canAccessSettings) {
-      router.push("/");
+      router.push("/dashboard");
     }
   }, [canAccessSettings, router]);
 

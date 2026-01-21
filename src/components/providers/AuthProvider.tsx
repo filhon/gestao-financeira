@@ -125,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-      router.push("/");
+      router.push("/dashboard");
     } catch (error) {
       console.error("Error logging in with Google:", error);
       throw error;
@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithEmail = async (email: string, password: string) => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      router.push("/");
+      router.push("/dashboard");
     } catch (error) {
       console.error("Error logging in with Email:", error);
       throw error;

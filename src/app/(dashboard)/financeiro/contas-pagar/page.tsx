@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Loader2, Trash2, Eye, Upload } from "lucide-react";
+import { Plus, Loader2, Trash2, Eye, Upload, Search } from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +45,7 @@ import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useSortableData } from "@/hooks/useSortableData";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useDebounce } from "@/hooks/useDebounce";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Select,
@@ -63,12 +64,20 @@ export default function AccountsPayablePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
+  // Filter existing transactions locally (preserved for smooth UI while typing before debounce triggers if needed, but simplistic approach first)
+  // Actually, we will replace the transactions list based on search mode vs pagination mode.
 
   const {
     items: sortedTransactions,
     requestSort,
     sortConfig,
-  } = useSortableData(transactions, { key: "dueDate", direction: "asc" });
+  } = useSortableData(transactions, {
+    key: "dueDate",
+    direction: "asc",
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,6 +104,10 @@ export default function AccountsPayablePage() {
   const fetchTransactions = useCallback(
     async (isLoadMore = false) => {
       if (!selectedCompany || !user) return;
+
+      // If searching, prevent standard fetch (handled by effect)
+      if (debouncedSearchTerm) return;
+
       try {
         setIsLoading(true);
         // For 'user' role, pass createdBy filter directly to Firestore query
@@ -151,13 +164,71 @@ export default function AccountsPayablePage() {
       statusFilter,
       showAllTransactions,
       itemsPerPage,
+      debouncedSearchTerm,
     ]
   );
 
   useEffect(() => {
-    fetchTransactions();
-    setSelectedIds(new Set()); // Clear selection on company change
-  }, [fetchTransactions, selectedCompany]);
+    if (!debouncedSearchTerm) {
+      fetchTransactions();
+    } else {
+      const performSearch = async () => {
+        if (!selectedCompany || !user) return;
+        setIsLoading(true);
+        try {
+          const filter: {
+            companyId: string;
+            type: string;
+            createdBy?: string;
+          } = {
+            companyId: selectedCompany.id,
+            type: "payable",
+          };
+
+          if (onlyOwnPayables) {
+            filter.createdBy = user.uid;
+          }
+
+          // Fetch all matching basic criteria
+          const all = await transactionService.getAll(filter);
+
+          const search = debouncedSearchTerm
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
+
+          const filtered = all.filter((t) => {
+            const description = t.description
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "");
+            const supplier = (t.supplierOrClient || "")
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "");
+            return description.includes(search) || supplier.includes(search);
+          });
+
+          setTransactions(filtered);
+          setHasMore(false);
+        } catch (e) {
+          console.error(e);
+          toast.error("Erro na busca");
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      performSearch();
+    }
+
+    setSelectedIds(new Set()); // Clear selection on company change/search
+  }, [
+    fetchTransactions,
+    selectedCompany,
+    debouncedSearchTerm,
+    user,
+    onlyOwnPayables,
+  ]);
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -444,12 +515,19 @@ export default function AccountsPayablePage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar transações..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-[250px] pl-8"
+                />
+              </div>
               <Label
                 htmlFor="status-filter"
                 className="text-sm text-muted-foreground"
-              >
-                Filtrar:
-              </Label>
+              ></Label>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger id="status-filter" className="w-[200px]">
                   <SelectValue />

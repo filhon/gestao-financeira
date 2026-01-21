@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const publicRoutes = [
+  "/",
   "/login",
   "/pending-approval",
   "/company-setup",
@@ -17,12 +18,14 @@ export function proxy(request: NextRequest) {
   // Check if route is public
   if (
     publicRoutes.some(
-      (route) => pathname === route || pathname.startsWith(route + "/")
+      (route) =>
+        pathname === route ||
+        (route !== "/" && pathname.startsWith(route + "/"))
     )
   ) {
     // If user is logged in and active, redirect login to dashboard
     if (token && status === "active" && pathname === "/login") {
-      return NextResponse.redirect(new URL("/", request.url));
+      return NextResponse.redirect(new URL("/dashboard", request.url));
     }
     // If user needs company setup but is on pending-approval, redirect to company-setup
     if (
