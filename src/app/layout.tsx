@@ -6,6 +6,8 @@ import { ToastProvider } from "@/components/providers/ToastProvider";
 import { CompanyProvider } from "@/components/providers/CompanyProvider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -35,6 +37,8 @@ export default function RootLayout({
             <AuthProvider>
               <CompanyProvider>
                 {children}
+                <SpeedInsights />
+                <Analytics />
                 <ToastProvider />
               </CompanyProvider>
             </AuthProvider>

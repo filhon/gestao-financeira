@@ -94,7 +94,7 @@ export default function LandingPage() {
       <footer className="w-full border-t py-6">
         <div className="container mx-auto flex flex-col items-center gap-2 px-4 md:px-6 sm:flex-row">
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            © 2024 Fin Control. Todos os direitos reservados.
+            © 2025 Fin Control. Todos os direitos reservados.
           </p>
           <nav className="flex gap-4 sm:ml-auto sm:gap-6">
             <Link
