@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
@@ -28,10 +28,19 @@ import {
   PlayCircle,
   RefreshCw,
   Pencil,
+  Search,
 } from "lucide-react";
 import { format } from "date-fns";
 // ptBR removed
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -39,15 +48,26 @@ import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurren
 
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
+import { useDebounce } from "@/hooks/useDebounce";
+import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 
 export default function RecorrenciasPage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
+
   const [templates, setTemplates] = useState<RecurringTransactionTemplate[]>(
-    []
+    [],
   );
+  const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [itemsPerPage] = useState(25);
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
   const [isLoading, setIsLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editTemplate, setEditTemplate] =
@@ -60,23 +80,107 @@ export default function RecorrenciasPage() {
     }
   }, [canViewRecurrences, router]);
 
-  const fetchTemplates = useCallback(async () => {
-    if (!selectedCompany || !canViewRecurrences) return;
-    try {
-      setIsLoading(true);
-      const data = await recurrenceService.getTemplates(selectedCompany.id);
-      setTemplates(data);
-    } catch (error) {
-      console.error("Error fetching templates:", error);
-      toast.error("Erro ao carregar recorrências.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedCompany, canViewRecurrences]);
+  const fetchTemplates = useCallback(
+    async (isLoadMore = false) => {
+      if (!selectedCompany || !canViewRecurrences) return;
 
+      // If searching, prevent standard fetch
+      if (debouncedSearchTerm) return;
+
+      try {
+        setIsLoading(true);
+
+        const filter = {
+          active:
+            statusFilter === "all" ? undefined : statusFilter === "active",
+        };
+
+        const currentLastDoc = isLoadMore ? lastDocRef.current : null;
+
+        const { templates: newTemplates, lastDoc: newLastDoc } =
+          await recurrenceService.getPaginated(
+            selectedCompany.id,
+            itemsPerPage,
+            currentLastDoc,
+            filter,
+          );
+
+        if (isLoadMore) {
+          setTemplates((prev) => [...prev, ...newTemplates]);
+        } else {
+          setTemplates(newTemplates);
+        }
+
+        lastDocRef.current = newLastDoc;
+        setHasMore(newTemplates.length === itemsPerPage);
+      } catch (error) {
+        console.error("Error fetching templates:", error);
+        toast.error("Erro ao carregar recorrências.");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [
+      selectedCompany,
+      canViewRecurrences,
+      statusFilter,
+      itemsPerPage,
+      debouncedSearchTerm,
+    ],
+  );
+
+  // Initial load and filter changes
   useEffect(() => {
-    fetchTemplates();
-  }, [fetchTemplates, selectedCompany]);
+    if (!debouncedSearchTerm) {
+      // Reset pagination when filters change (except load more)
+      lastDocRef.current = null;
+      fetchTemplates();
+    }
+  }, [fetchTemplates, debouncedSearchTerm, statusFilter]);
+
+  // Client-side search logic
+  useEffect(() => {
+    if (debouncedSearchTerm && selectedCompany) {
+      const performSearch = async () => {
+        setIsLoading(true);
+        try {
+          // Fetch all for current company (and status filter if applicable, generally search ignores status or applies it too? lets apply if possible)
+          // Since getTemplates supports filter now:
+          const filter = {
+            active:
+              statusFilter === "all" ? undefined : statusFilter === "active",
+          };
+
+          const all = await recurrenceService.getTemplates(
+            selectedCompany.id,
+            filter,
+          );
+
+          const search = debouncedSearchTerm
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
+
+          const filtered = all.filter((t) => {
+            const description = t.description
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "");
+            return description.includes(search);
+          });
+
+          setTemplates(filtered);
+          setHasMore(false); // No pagination in search mode
+        } catch (e) {
+          console.error(e);
+          toast.error("Erro na busca");
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      performSearch();
+    }
+  }, [debouncedSearchTerm, selectedCompany, statusFilter]);
 
   if (!canViewRecurrences) return null;
 
@@ -86,7 +190,7 @@ export default function RecorrenciasPage() {
         active: !template.active,
       });
       toast.success(
-        `Recorrência ${template.active ? "pausada" : "ativada"} com sucesso!`
+        `Recorrência ${template.active ? "pausada" : "ativada"} com sucesso!`,
       );
       fetchTemplates();
     } catch {
@@ -112,7 +216,7 @@ export default function RecorrenciasPage() {
     try {
       const count = await recurrenceService.processDueTemplates(
         selectedCompany.id,
-        { uid: user.uid, email: user.email }
+        { uid: user.uid, email: user.email },
       );
       if (count > 0) {
         toast.success(`${count} transações geradas com sucesso!`);
@@ -169,10 +273,35 @@ export default function RecorrenciasPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Modelos Ativos</CardTitle>
-          <CardDescription>
-            Lista de transações que são geradas automaticamente.
-          </CardDescription>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle>Modelos de Recorrência</CardTitle>
+              <CardDescription>
+                Lista de transações que são geradas automaticamente.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por descrição..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 w-[250px]"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os Status</SelectItem>
+                  <SelectItem value="active">Ativos</SelectItem>
+                  <SelectItem value="paused">Pausados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -269,6 +398,25 @@ export default function RecorrenciasPage() {
               )}
             </TableBody>
           </Table>
+
+          {hasMore && !debouncedSearchTerm && (
+            <div className="flex justify-center py-4">
+              <Button
+                variant="outline"
+                onClick={() => fetchTemplates(true)}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Carregando...
+                  </>
+                ) : (
+                  "Carregar Mais"
+                )}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

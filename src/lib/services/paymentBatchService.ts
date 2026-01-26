@@ -51,11 +51,11 @@ export const paymentBatchService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
   },
 
@@ -99,7 +99,7 @@ export const paymentBatchService = {
     // Filter out transactions that are already in the batch
     const existingIds = new Set(batchData.transactionIds);
     const uniqueTransactions = transactions.filter(
-      (t) => !existingIds.has(t.id)
+      (t) => !existingIds.has(t.id),
     );
 
     if (uniqueTransactions.length === 0) {
@@ -109,7 +109,7 @@ export const paymentBatchService = {
     const newIds = uniqueTransactions.map((t) => t.id);
     const additionalAmount = uniqueTransactions.reduce(
       (sum, t) => sum + t.amount,
-      0
+      0,
     );
 
     // Update Batch
@@ -138,7 +138,7 @@ export const paymentBatchService = {
 
     const idsToRemove = new Set(transactions.map((t) => t.id));
     const newIds = batchData.transactionIds.filter(
-      (id) => !idsToRemove.has(id)
+      (id) => !idsToRemove.has(id),
     );
     const amountToRemove = transactions.reduce((sum, t) => sum + t.amount, 0);
 
@@ -159,7 +159,7 @@ export const paymentBatchService = {
   updateStatus: async (
     batchId: string,
     status: PaymentBatchStatus,
-    userId: string
+    userId: string,
   ) => {
     const batch = writeBatch(db);
     const batchRef = doc(db, COLLECTION_NAME, batchId);
@@ -211,7 +211,7 @@ export const paymentBatchService = {
   sendForApproval: async (
     batchId: string,
     approverId: string,
-    approverEmail: string
+    approverEmail: string,
   ): Promise<string> => {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
@@ -246,7 +246,7 @@ export const paymentBatchService = {
     batchId: string,
     userId: string,
     comment?: string,
-    transactionUpdates?: Array<{ id: string; adjustedAmount?: number }>
+    transactionUpdates?: Array<{ id: string; adjustedAmount?: number }>,
   ) => {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
@@ -308,7 +308,7 @@ export const paymentBatchService = {
   rejectTransaction: async (
     batchId: string,
     transactionId: string,
-    reason: string
+    reason: string,
   ) => {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
@@ -325,7 +325,7 @@ export const paymentBatchService = {
 
     // Remove from transactionIds, add to rejectedTransactionIds
     const newTransactionIds = batchData.transactionIds.filter(
-      (id) => id !== transactionId
+      (id) => id !== transactionId,
     );
     const rejectedIds = [
       ...(batchData.rejectedTransactionIds || []),
@@ -355,7 +355,7 @@ export const paymentBatchService = {
   sendForAuthorization: async (
     batchId: string,
     authorizerId: string,
-    authorizerEmail: string
+    authorizerEmail: string,
   ): Promise<string> => {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
@@ -438,7 +438,7 @@ export const paymentBatchService = {
   updateTransactionAmount: async (
     batchId: string,
     transactionId: string,
-    newAmount: number
+    newAmount: number,
   ) => {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
@@ -479,7 +479,7 @@ export const paymentBatchService = {
     const tokenHash = await hashToken(token);
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("approvalTokenHash", "==", tokenHash)
+      where("approvalTokenHash", "==", tokenHash),
     );
     const snapshot = await getDocs(q);
 
@@ -496,7 +496,7 @@ export const paymentBatchService = {
       batch.approvalTokenExpiresAt < new Date()
     ) {
       throw new Error(
-        "Link expirado. Solicite um novo link ao gestor financeiro."
+        "Link expirado. Solicite um novo link ao gestor financeiro.",
       );
     }
 
@@ -509,7 +509,7 @@ export const paymentBatchService = {
   approveByToken: async (
     token: string,
     comment?: string,
-    transactionUpdates?: Array<{ id: string; adjustedAmount?: number }>
+    transactionUpdates?: Array<{ id: string; adjustedAmount?: number }>,
   ): Promise<void> => {
     const paymentBatch = await paymentBatchService.getByApprovalToken(token);
     if (!paymentBatch) {
@@ -518,7 +518,7 @@ export const paymentBatchService = {
 
     if (paymentBatch.status !== "pending_approval") {
       throw new Error(
-        `Este lote não está aguardando aprovação (status: ${paymentBatch.status}).`
+        `Este lote não está aguardando aprovação (status: ${paymentBatch.status}).`,
       );
     }
 
@@ -585,7 +585,7 @@ export const paymentBatchService = {
 
     if (paymentBatch.status !== "pending_authorization") {
       throw new Error(
-        `Este lote não está aguardando autorização (status: ${paymentBatch.status}).`
+        `Este lote não está aguardando autorização (status: ${paymentBatch.status}).`,
       );
     }
 

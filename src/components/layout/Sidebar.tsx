@@ -40,7 +40,7 @@ interface MenuItem {
 const allMenuItems: MenuItem[] = [
   {
     title: "Dashboard",
-    href: "/",
+    href: "/dashboard",
     icon: LayoutDashboard,
     permission: "canViewDashboard", // Restricted to Admin/Manager/Approver/Releaser
   },
@@ -145,19 +145,19 @@ export function Sidebar() {
   // Automatically open groups if a child is active
   useEffect(() => {
     const activeGroup = menuItems.find((item) =>
-      item.items?.some((subItem) => subItem.href === pathname)
+      item.items?.some((subItem) => subItem.href === pathname),
     );
     if (activeGroup) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpenGroups((prev) =>
-        prev.includes(activeGroup.title) ? prev : [...prev, activeGroup.title]
+        prev.includes(activeGroup.title) ? prev : [...prev, activeGroup.title],
       );
     }
   }, [pathname, menuItems]);
 
   const toggleGroup = (title: string) => {
     setOpenGroups((prev) =>
-      prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]
+      prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title],
     );
   };
 
@@ -174,7 +174,7 @@ export function Sidebar() {
           if (item.items) {
             const isOpen = openGroups.includes(item.title);
             const isActiveGroup = item.items.some(
-              (subItem) => subItem.href === pathname
+              (subItem) => subItem.href === pathname,
             );
 
             return (
@@ -188,7 +188,7 @@ export function Sidebar() {
                   <button
                     className={cn(
                       "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground",
-                      isActiveGroup ? "text-primary" : "text-muted-foreground"
+                      isActiveGroup ? "text-primary" : "text-muted-foreground",
                     )}
                   >
                     <div className="flex items-center gap-3">
@@ -198,7 +198,7 @@ export function Sidebar() {
                     <ChevronRight
                       className={cn(
                         "h-4 w-4 transition-transform duration-200",
-                        isOpen && "rotate-90"
+                        isOpen && "rotate-90",
                       )}
                     />
                   </button>
@@ -214,7 +214,7 @@ export function Sidebar() {
                           "flex items-center gap-3 rounded-lg pl-9 pr-3 py-2 text-sm font-medium transition-colors",
                           isActive
                             ? "bg-primary/10 text-primary"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
                         )}
                       >
                         <subItem.icon className="h-4 w-4" />
@@ -236,7 +236,7 @@ export function Sidebar() {
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
               <item.icon className="h-4 w-4" />

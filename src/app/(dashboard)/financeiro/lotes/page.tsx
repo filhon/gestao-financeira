@@ -106,7 +106,7 @@ export default function PaymentBatchesPage() {
       await paymentBatchService.create(
         newBatchName,
         selectedCompany.id,
-        user.uid
+        user.uid,
       );
       toast.success("Lote criado com sucesso");
       setIsCreateOpen(false);
@@ -156,7 +156,7 @@ export default function PaymentBatchesPage() {
   const handleSendForApproval = async (
     approverId: string,
     approverEmail: string,
-    approverName: string
+    approverName: string,
   ) => {
     if (!actionBatch || !user || !selectedCompany) return;
     try {
@@ -164,7 +164,7 @@ export default function PaymentBatchesPage() {
       const token = await paymentBatchService.sendForApproval(
         actionBatch.id,
         approverId,
-        approverEmail
+        approverEmail,
       );
 
       // Send email with Magic Link
@@ -175,7 +175,7 @@ export default function PaymentBatchesPage() {
         actionBatch.transactionIds.length,
         actionBatch.totalAmount,
         user.displayName,
-        approverEmail
+        approverEmail,
       );
 
       // Also send in-app notification
@@ -184,7 +184,7 @@ export default function PaymentBatchesPage() {
         actionBatch.name,
         actionBatch.id,
         user.displayName,
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success(`Lote enviado para ${approverName} (email enviado)`);
       fetchBatches();
@@ -211,7 +211,7 @@ export default function PaymentBatchesPage() {
         actionBatch.name,
         actionBatch.id,
         user.displayName,
-        selectedCompany.id
+        selectedCompany.id,
       );
       fetchBatches();
     } catch (error) {
@@ -229,7 +229,7 @@ export default function PaymentBatchesPage() {
   const handleSendForAuthorization = async (
     authorizerId: string,
     authorizerEmail: string,
-    authorizerName: string
+    authorizerName: string,
   ) => {
     if (!actionBatch || !user || !selectedCompany) return;
     try {
@@ -237,7 +237,7 @@ export default function PaymentBatchesPage() {
       const token = await paymentBatchService.sendForAuthorization(
         actionBatch.id,
         authorizerId,
-        authorizerEmail
+        authorizerEmail,
       );
 
       // Send email with Magic Link
@@ -248,7 +248,7 @@ export default function PaymentBatchesPage() {
         actionBatch.transactionIds.length,
         actionBatch.totalAmount,
         user.displayName,
-        authorizerEmail
+        authorizerEmail,
       );
 
       // Also send in-app notification
@@ -257,7 +257,7 @@ export default function PaymentBatchesPage() {
         actionBatch.name,
         actionBatch.id,
         user.displayName,
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success(`Lote enviado para ${authorizerName} (email enviado)`);
       fetchBatches();
@@ -278,7 +278,7 @@ export default function PaymentBatchesPage() {
         batch.name,
         batch.id,
         user.displayName,
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Autorização confirmada");
       fetchBatches();
@@ -510,6 +510,7 @@ export default function PaymentBatchesPage() {
         batch={selectedBatch}
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
+        onUpdate={fetchBatches}
       />
 
       {/* Edit Dialog */}

@@ -8,6 +8,11 @@ import {
   Timestamp,
   addDoc,
   updateDoc,
+  orderBy,
+  startAfter,
+  limit,
+  QueryDocumentSnapshot,
+  DocumentData,
 } from "firebase/firestore";
 import { RecurringTransactionTemplate } from "@/lib/types";
 import { transactionService } from "./transactionService";
@@ -27,7 +32,7 @@ export const recurrenceService = {
     data: Omit<
       RecurringTransactionTemplate,
       "id" | "createdAt" | "updatedAt" | "lastGeneratedAt"
-    >
+    >,
   ): Promise<string> => {
     const docRef = await addDoc(collection(db, COLLECTION_NAME), {
       ...data,
@@ -39,12 +44,18 @@ export const recurrenceService = {
   },
 
   getTemplates: async (
-    companyId: string
+    companyId: string,
+    filter?: { active?: boolean },
   ): Promise<RecurringTransactionTemplate[]> => {
-    const q = query(
+    let q = query(
       collection(db, COLLECTION_NAME),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
+
+    if (filter?.active !== undefined) {
+      q = query(q, where("active", "==", filter.active));
+    }
+
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) => {
       const data = doc.data();
@@ -60,9 +71,57 @@ export const recurrenceService = {
     });
   },
 
+  getPaginated: async (
+    companyId: string,
+    pageSize: number,
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null,
+    filters?: {
+      active?: boolean;
+    },
+  ): Promise<{
+    templates: RecurringTransactionTemplate[];
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null;
+  }> => {
+    let q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", companyId),
+    );
+
+    if (filters?.active !== undefined) {
+      q = query(q, where("active", "==", filters.active));
+    }
+
+    q = query(q, orderBy("nextDueDate", "asc"));
+
+    if (lastDoc) {
+      q = query(q, startAfter(lastDoc));
+    }
+
+    q = query(q, limit(pageSize));
+
+    const snapshot = await getDocs(q);
+    const templates = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        nextDueDate: data.nextDueDate.toDate(),
+        endDate: data.endDate?.toDate(),
+        lastGeneratedAt: data.lastGeneratedAt?.toDate(),
+        createdAt: data.createdAt.toDate(),
+        updatedAt: data.updatedAt.toDate(),
+      } as RecurringTransactionTemplate;
+    });
+
+    return {
+      templates,
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] || null,
+    };
+  },
+
   updateTemplate: async (
     id: string,
-    data: Partial<RecurringTransactionTemplate>
+    data: Partial<RecurringTransactionTemplate>,
   ): Promise<void> => {
     const docRef = doc(db, COLLECTION_NAME, id);
     await updateDoc(docRef, {
@@ -78,13 +137,13 @@ export const recurrenceService = {
 
   processDueTemplates: async (
     companyId: string,
-    user: { uid: string; email: string }
+    user: { uid: string; email: string },
   ): Promise<number> => {
     // 1. Get active templates for company
     const q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
-      where("active", "==", true)
+      where("active", "==", true),
     );
     const snapshot = await getDocs(q);
     const templates = snapshot.docs.map(
@@ -94,7 +153,7 @@ export const recurrenceService = {
           ...doc.data(),
           nextDueDate: doc.data().nextDueDate.toDate(),
           endDate: doc.data().endDate?.toDate(),
-        }) as RecurringTransactionTemplate
+        }) as RecurringTransactionTemplate,
     );
 
     let generatedCount = 0;

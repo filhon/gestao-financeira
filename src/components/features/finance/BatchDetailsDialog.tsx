@@ -5,8 +5,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PaymentBatch, Transaction } from "@/lib/types";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { transactionService } from "@/lib/services/transactionService";
+import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import {
   Table,
   TableBody,
@@ -17,46 +18,92 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
-import { Loader2, Download } from "lucide-react";
+import {
+  Loader2,
+  Download,
+  Trash2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Workbook, Style } from "exceljs";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { dashboardService } from "@/lib/services/dashboardService";
+import { usePermissions } from "@/hooks/usePermissions";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useSortableData } from "@/hooks/useSortableData";
 
 interface BatchDetailsDialogProps {
   batch: PaymentBatch | null;
   isOpen: boolean;
   onClose: () => void;
+  onUpdate?: () => void;
 }
 
 export function BatchDetailsDialog({
   batch,
   isOpen,
   onClose,
+  onUpdate,
 }: BatchDetailsDialogProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const { user } = useAuth();
+  const { canManageBatches } = usePermissions();
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const {
+    items: sortedTransactions,
+    requestSort,
+    sortConfig,
+  } = useSortableData(transactions);
+
+  const loadTransactions = useCallback(async () => {
+    if (batch && isOpen) {
+      setIsLoading(true);
+      try {
+        const data = await transactionService.getAll({ batchId: batch.id });
+        setTransactions(data);
+      } catch (error) {
+        console.error("Error loading batch transactions", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  }, [batch, isOpen]);
 
   useEffect(() => {
-    const loadTransactions = async () => {
-      if (batch && isOpen) {
-        setIsLoading(true);
-        try {
-          const data = await transactionService.getAll({ batchId: batch.id });
-          setTransactions(data);
-        } catch (error) {
-          console.error("Error loading batch transactions", error);
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    };
     loadTransactions();
-  }, [batch, isOpen]);
+  }, [loadTransactions]);
+
+  const handleRemoveTransaction = async () => {
+    if (!batch || !deleteId) return;
+
+    try {
+      const tx = transactions.find((t) => t.id === deleteId);
+      if (!tx) return;
+
+      await paymentBatchService.removeTransactions(batch.id, [tx]);
+      toast.success("Transação removida do lote");
+      setDeleteId(null);
+
+      // Update local list
+      loadTransactions();
+
+      // Notify parent to update batch details (total amount, etc)
+      if (onUpdate) {
+        onUpdate();
+      }
+    } catch (error) {
+      console.error("Error removing transaction", error);
+      toast.error("Erro ao remover transação");
+    }
+  };
 
   const handleExport = async () => {
     if (!batch || !user) return;
@@ -261,7 +308,7 @@ export function BatchDetailsDialog({
       addFooterRow(
         "Saldo após pagamentos:",
         balanceAfter,
-        balanceAfter < 0 ? "FFFF0000" : "FF008000"
+        balanceAfter < 0 ? "FFFF0000" : "FF008000",
       ); // Red if negative, Green if positive
 
       // --- Summary Sheet ---
@@ -303,10 +350,10 @@ export function BatchDetailsDialog({
 
       // Sort Summaries (Total Descending)
       const sortedCostCenters = Array.from(costCenterSummary.entries()).sort(
-        (a, b) => b[1].total - a[1].total
+        (a, b) => b[1].total - a[1].total,
       );
       const sortedSuppliers = Array.from(supplierSummary.entries()).sort(
-        (a, b) => b[1].total - a[1].total
+        (a, b) => b[1].total - a[1].total,
       );
 
       // Cost Center Table
@@ -442,24 +489,93 @@ export function BatchDetailsDialog({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Vencimento</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead>Fornecedor</TableHead>
-                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => requestSort("dueDate")}
+                    >
+                      <div className="flex items-center gap-2">
+                        Vencimento
+                        {sortConfig?.key === "dueDate" ? (
+                          sortConfig.direction === "asc" ? (
+                            <ArrowUp className="h-4 w-4" />
+                          ) : (
+                            <ArrowDown className="h-4 w-4" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => requestSort("description")}
+                    >
+                      <div className="flex items-center gap-2">
+                        Descrição
+                        {sortConfig?.key === "description" ? (
+                          sortConfig.direction === "asc" ? (
+                            <ArrowUp className="h-4 w-4" />
+                          ) : (
+                            <ArrowDown className="h-4 w-4" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => requestSort("supplierOrClient")}
+                    >
+                      <div className="flex items-center gap-2">
+                        Fornecedor
+                        {sortConfig?.key === "supplierOrClient" ? (
+                          sortConfig.direction === "asc" ? (
+                            <ArrowUp className="h-4 w-4" />
+                          ) : (
+                            <ArrowDown className="h-4 w-4" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                        )}
+                      </div>
+                    </TableHead>
+                    <TableHead
+                      className="text-right cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => requestSort("amount")}
+                    >
+                      <div className="flex items-center justify-end gap-2">
+                        Valor
+                        {sortConfig?.key === "amount" ? (
+                          sortConfig.direction === "asc" ? (
+                            <ArrowUp className="h-4 w-4" />
+                          ) : (
+                            <ArrowDown className="h-4 w-4" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                        )}
+                      </div>
+                    </TableHead>
+                    {batch.status === "open" && canManageBatches && (
+                      <TableHead className="w-[50px]"></TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {transactions.length === 0 ? (
+                  {sortedTransactions.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={4}
+                        colSpan={
+                          batch.status === "open" && canManageBatches ? 5 : 4
+                        }
                         className="text-center py-4 text-muted-foreground"
                       >
                         Nenhuma transação encontrada neste lote.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    transactions.map((t) => (
+                    sortedTransactions.map((t) => (
                       <TableRow key={t.id}>
                         <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
                         <TableCell className="max-w-[300px]">
@@ -479,6 +595,18 @@ export function BatchDetailsDialog({
                         <TableCell className="text-right">
                           {formatCurrency(t.amount)}
                         </TableCell>
+                        {batch.status === "open" && canManageBatches && (
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => setDeleteId(t.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))
                   )}
@@ -487,6 +615,16 @@ export function BatchDetailsDialog({
             </div>
           )}
         </div>
+
+        <ConfirmDialog
+          open={!!deleteId}
+          onOpenChange={(open) => !open && setDeleteId(null)}
+          title="Remover transação"
+          description="Tem certeza que deseja remover esta transação do lote? Ela voltará para a lista de contas a pagar disponíveis."
+          confirmText="Remover"
+          variant="destructive"
+          onConfirm={handleRemoveTransaction}
+        />
       </DialogContent>
     </Dialog>
   );
