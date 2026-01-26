@@ -22,7 +22,7 @@ interface AuthContextType {
   registerWithEmail: (
     email: string,
     password: string,
-    name: string
+    name: string,
   ) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -119,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, [router]);
+  }, []); // Changed dependency from [router] to [] to prevent unnecessary re-subscriptions
 
   const loginWithGoogle = async () => {
     try {
@@ -145,18 +145,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const registerWithEmail = async (
     email: string,
     password: string,
-    name: string
+    name: string,
   ) => {
     try {
       // 1. Create Auth User
       const userCredential = await import("firebase/auth").then((m) =>
-        m.createUserWithEmailAndPassword(auth, email, password)
+        m.createUserWithEmailAndPassword(auth, email, password),
       );
       const firebaseUser = userCredential.user;
 
       // 2. Update Profile Name
       await import("firebase/auth").then((m) =>
-        m.updateProfile(firebaseUser, { displayName: name })
+        m.updateProfile(firebaseUser, { displayName: name }),
       );
 
       // 3. Create Firestore Profile (explicitly here to ensure setting name correctly)

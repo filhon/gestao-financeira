@@ -26,7 +26,7 @@ export default function DashboardLayout({
   const mounted = useSyncExternalStore(
     emptySubscribe,
     getSnapshot,
-    getServerSnapshot
+    getServerSnapshot,
   );
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -52,6 +52,15 @@ export default function DashboardLayout({
       }
     }
   }, [loading, user, effectiveStatus, canViewDashboard, pathname, router]);
+
+  // Show loading spinner while AuthProvider is initializing
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (!loading && user && effectiveStatus !== "active") {
     return (
