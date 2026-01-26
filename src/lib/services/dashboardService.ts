@@ -83,7 +83,7 @@ export const dashboardService = {
       where("status", "not-in", ["paid", "rejected"]),
       where("dueDate", "<", Timestamp.fromDate(today)),
       orderBy("dueDate", "asc"),
-      limit(5)
+      limit(5),
     );
 
     const snapshot = await getDocs(q);
@@ -101,7 +101,7 @@ export const dashboardService = {
   getPendingApprovals: async (
     companyId: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _userId?: string
+    _userId?: string,
   ): Promise<Transaction[]> => {
     // Base query for pending items
     const q = query(
@@ -109,7 +109,7 @@ export const dashboardService = {
       where("companyId", "==", companyId),
       where("status", "==", "pending_approval"),
       orderBy("dueDate", "asc"),
-      limit(20)
+      limit(20),
     );
 
     const snapshot = await getDocs(q);
@@ -130,14 +130,14 @@ export const dashboardService = {
 
   getFinancialMetrics: async (
     companyId: string,
-    userId?: string
+    userId?: string,
   ): Promise<DashboardMetrics> => {
     // Optimization: Use Firestore Aggregation Queries to avoid fetching all documents.
     // This reduces reads from N (thousands) to 4 (one per query).
 
     const baseQuery = query(
       collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
 
     // Helper to apply user filter
@@ -152,8 +152,8 @@ export const dashboardService = {
       query(
         baseQuery,
         where("status", "==", "paid"),
-        where("type", "==", "receivable")
-      )
+        where("type", "==", "receivable"),
+      ),
     );
 
     // 2. Total Expenses (Paid Payables)
@@ -161,8 +161,8 @@ export const dashboardService = {
       query(
         baseQuery,
         where("status", "==", "paid"),
-        where("type", "==", "payable")
-      )
+        where("type", "==", "payable"),
+      ),
     );
 
     // 3. Pending Receivables (Not Paid, Not Rejected)
@@ -171,8 +171,8 @@ export const dashboardService = {
       query(
         baseQuery,
         where("status", "in", pendingStatuses),
-        where("type", "==", "receivable")
-      )
+        where("type", "==", "receivable"),
+      ),
     );
 
     // 4. Pending Payables
@@ -180,8 +180,8 @@ export const dashboardService = {
       query(
         baseQuery,
         where("status", "in", pendingStatuses),
-        where("type", "==", "payable")
-      )
+        where("type", "==", "payable"),
+      ),
     );
 
     const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap] =
@@ -210,7 +210,7 @@ export const dashboardService = {
 
   getUpcomingTransactions: async (
     companyId: string,
-    userId?: string
+    userId?: string,
   ): Promise<Transaction[]> => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -221,7 +221,7 @@ export const dashboardService = {
       where("dueDate", ">=", Timestamp.fromDate(today)),
       where("status", "not-in", ["paid", "rejected"]),
       orderBy("dueDate", "asc"),
-      limit(10)
+      limit(10),
     );
 
     if (userId) {
@@ -280,12 +280,12 @@ export const dashboardService = {
 
   getCashFlowData: async (
     companyId: string,
-    months: number = 6
+    months: number = 6,
   ): Promise<CashFlowData[]> => {
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
-      orderBy("dueDate", "asc")
+      orderBy("dueDate", "asc"),
     );
 
     const snapshot = await getDocs(q);
@@ -335,7 +335,7 @@ export const dashboardService = {
 
   getProjectedCashFlow: async (
     companyId: string,
-    mode: "30days" | "year" = "30days"
+    mode: "30days" | "year" = "30days",
   ): Promise<ProjectedCashFlowData[]> => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -357,7 +357,7 @@ export const dashboardService = {
       where("companyId", "==", companyId),
       where("dueDate", ">=", Timestamp.fromDate(startDate)),
       where("dueDate", "<=", Timestamp.fromDate(endDate)),
-      orderBy("dueDate", "asc")
+      orderBy("dueDate", "asc"),
     );
 
     const snapshot = await getDocs(q);
@@ -442,7 +442,7 @@ export const dashboardService = {
         // If stats don't exist, we could trigger a recalc or just default to 0
         // For now, let's default to 0 and maybe log a warning or trigger recalc in background
         console.warn(
-          "Company stats not found, defaulting starting balance to 0"
+          "Company stats not found, defaulting starting balance to 0",
         );
         // startingBalance = (await getDoc(statsRef)).data()?.currentBalance || 0;
       }
@@ -465,19 +465,31 @@ export const dashboardService = {
 
       // Find transactions for this day/period
       combinedTransactions.forEach((t) => {
-        // For paid transactions, use paymentDate; for others use dueDate
-        const dateToUse =
-          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+        // CORRECTION: Since we start with the REAL CURRENT BALANCE (company_stats),
+        // we must NOT include transactions that are already PAID and occurred before or on today.
+        // They are already included in the startingBalance.
+        // We only include:
+        // 1. Pending/Scheduled/Draft transactions (regardless of date, if they are selected by query)
+        // 2. Paid transactions ONLY if they are in the FUTURE relative to "now" (unlikely scenario for "paid" but handled for consistency)
+
+        // Ideally, for "Projected Cash Flow", we fundamentally care about Open Items + Future Projections.
+        // Paid items in the past/present are history (already in balance).
+
+        if (t.status === "paid") {
+          // Skip paid transactions as they are already in startingBalance
+          return;
+        }
+
+        // For remaining operations (pending/draft), use dueDate
+        const dateToUse = t.dueDate;
+
         const isInPeriod =
           mode === "year"
             ? !isBefore(dateToUse, currentDate) && isBefore(dateToUse, nextDate)
             : isSameDay(dateToUse, currentDate);
 
         if (isInPeriod) {
-          const amount =
-            t.status === "paid" && t.finalAmount
-              ? Number(t.finalAmount)
-              : Number(t.amount) || 0;
+          const amount = Number(t.amount) || 0;
           if (t.type === "receivable") {
             dayIncome += amount;
             currentBalance += amount;
@@ -502,7 +514,7 @@ export const dashboardService = {
   },
 
   getExpensesByCostCenter: async (
-    companyId: string
+    companyId: string,
   ): Promise<CostCenterData[]> => {
     // Get transactions for current month
     const start = startOfMonth(new Date());
@@ -513,7 +525,7 @@ export const dashboardService = {
       where("companyId", "==", companyId),
       where("type", "==", "payable"),
       where("dueDate", ">=", Timestamp.fromDate(start)),
-      where("dueDate", "<=", Timestamp.fromDate(end))
+      where("dueDate", "<=", Timestamp.fromDate(end)),
     );
 
     const snapshot = await getDocs(q);
@@ -522,11 +534,11 @@ export const dashboardService = {
     // Get Cost Centers to map names
     const ccQuery = query(
       collection(db, COST_CENTERS_COLLECTION),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
     const ccSnapshot = await getDocs(ccQuery);
     const costCenters = new Map(
-      ccSnapshot.docs.map((doc) => [doc.id, doc.data().name])
+      ccSnapshot.docs.map((doc) => [doc.id, doc.data().name]),
     );
 
     const expensesByCC = new Map<string, number>();
@@ -558,7 +570,7 @@ export const dashboardService = {
   },
 
   getBudgetProgressByCostCenter: async (
-    companyId: string
+    companyId: string,
   ): Promise<BudgetProgressData[]> => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -568,7 +580,7 @@ export const dashboardService = {
     // Get all cost centers for the company
     const ccQuery = query(
       collection(db, COST_CENTERS_COLLECTION),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
     const ccSnapshot = await getDocs(ccQuery);
     const costCenters = ccSnapshot.docs.map((doc) => ({
@@ -579,7 +591,7 @@ export const dashboardService = {
     // Get all budgets for current year (annual amounts)
     const budgetQuery = query(
       collection(db, BUDGETS_COLLECTION),
-      where("year", "==", currentYear)
+      where("year", "==", currentYear),
     );
     const budgetSnapshot = await getDocs(budgetQuery);
     const annualBudgets = new Map<string, number>();
@@ -593,7 +605,7 @@ export const dashboardService = {
       collection(db, "cost_center_usage"),
       where("companyId", "==", companyId),
       where("monthKey", ">=", `${currentYear}-01`),
-      where("monthKey", "<=", `${currentYear}-12`)
+      where("monthKey", "<=", `${currentYear}-12`),
     );
     const usageSnapshot = await getDocs(usageQuery);
 
