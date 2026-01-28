@@ -55,6 +55,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
+import { CostCenter } from "@/lib/types";
+import { costCenterService } from "@/lib/services/costCenterService";
 
 // ...
 
@@ -66,6 +68,10 @@ export default function AccountsPayablePage() {
   const [hasMore, setHasMore] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [selectedCostCenterId, setSelectedCostCenterId] =
+    useState<string>("all");
 
   // Filter existing transactions locally (preserved for smooth UI while typing before debounce triggers if needed, but simplistic approach first)
   // Actually, we will replace the transactions list based on search mode vs pagination mode.
@@ -110,6 +116,24 @@ export default function AccountsPayablePage() {
 
       try {
         setIsLoading(true);
+
+        const getDescendantIds = (
+          rootId: string,
+          all: CostCenter[],
+        ): string[] => {
+          const children = all.filter((c) => c.parentId === rootId);
+          let ids = [rootId];
+          for (const child of children) {
+            ids = [...ids, ...getDescendantIds(child.id, all)];
+          }
+          return ids;
+        };
+
+        const targetCostCenterIds =
+          selectedCostCenterId !== "all" && costCenters.length > 0
+            ? getDescendantIds(selectedCostCenterId, costCenters)
+            : undefined;
+
         // For 'user' role, pass createdBy filter directly to Firestore query
         // This matches the Firestore rules and prevents permission errors
         const filter: {
@@ -118,6 +142,7 @@ export default function AccountsPayablePage() {
           status?: string;
           endDate?: Date;
           createdBy?: string;
+          costCenterIds?: string[];
         } = {
           type: "payable",
           excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
@@ -126,6 +151,9 @@ export default function AccountsPayablePage() {
               ? statusFilter
               : undefined,
           endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
+          // Only apply cost center filter if we have resolved IDs and it's not "all"
+          // If the list is empty (because root has no children and is selected), we still pass [rootId]
+          costCenterIds: targetCostCenterIds,
         };
 
         if (onlyOwnPayables) {
@@ -139,7 +167,7 @@ export default function AccountsPayablePage() {
             selectedCompany.id,
             itemsPerPage,
             currentLastDoc,
-            filter
+            filter,
           );
 
         if (isLoadMore) {
@@ -165,8 +193,30 @@ export default function AccountsPayablePage() {
       showAllTransactions,
       itemsPerPage,
       debouncedSearchTerm,
-    ]
+      selectedCostCenterId,
+      costCenters,
+    ],
   );
+
+  useEffect(() => {
+    if (selectedCompany) {
+      costCenterService
+        .getAll(selectedCompany.id)
+        .then((ccs) => {
+          setCostCenters(ccs);
+          // Default to root (no parent) - "pai de todos"
+          // If there are multiple roots, checking explicitly for parentId === null/undefined or empty string
+          const root = ccs.find((c) => !c.parentId);
+          if (root) {
+            setSelectedCostCenterId(root.id);
+          } else if (ccs.length > 0) {
+            // Fallback
+            setSelectedCostCenterId(ccs[0].id);
+          }
+        })
+        .catch((err) => console.error("Error loading cost centers", err));
+    }
+  }, [selectedCompany]);
 
   useEffect(() => {
     if (!debouncedSearchTerm) {
@@ -234,7 +284,7 @@ export default function AccountsPayablePage() {
     if (checked) {
       // Only select draft transactions
       const draftTransactions = sortedTransactions.filter(
-        (t) => t.status === "draft"
+        (t) => t.status === "draft",
       );
       setSelectedIds(new Set(draftTransactions.map((t) => t.id)));
     } else {
@@ -268,11 +318,11 @@ export default function AccountsPayablePage() {
 
       // Validate that only draft transactions can be added to batch
       const nonDraftTransactions = selectedTx.filter(
-        (t) => t.status !== "draft"
+        (t) => t.status !== "draft",
       );
       if (nonDraftTransactions.length > 0) {
         toast.error(
-          "Apenas transações em rascunho podem ser adicionadas ao lote"
+          "Apenas transações em rascunho podem ser adicionadas ao lote",
         );
         return;
       }
@@ -294,7 +344,7 @@ export default function AccountsPayablePage() {
       const batchRef = await paymentBatchService.create(
         newBatchName,
         selectedCompany.id,
-        user.uid
+        user.uid,
       );
       await handleAddToBatch(batchRef.id);
     } catch (error) {
@@ -341,7 +391,7 @@ export default function AccountsPayablePage() {
         await transactionService.create(
           data,
           { uid: user.uid, email: user.email },
-          selectedCompany.id
+          selectedCompany.id,
         );
         toast.success("Conta a pagar criada com sucesso!");
       }
@@ -367,7 +417,7 @@ export default function AccountsPayablePage() {
       await transactionService.delete(
         deleteId,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Transação excluída com sucesso!");
       fetchTransactions();
@@ -524,10 +574,22 @@ export default function AccountsPayablePage() {
                   className="w-[250px] pl-8"
                 />
               </div>
-              <Label
-                htmlFor="status-filter"
-                className="text-sm text-muted-foreground"
-              ></Label>
+              <Select
+                value={selectedCostCenterId}
+                onValueChange={setSelectedCostCenterId}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Centro de Custo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {costCenters.map((cc) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger id="status-filter" className="w-[200px]">
                   <SelectValue />

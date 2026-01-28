@@ -235,6 +235,9 @@ export interface PaymentBatch {
   transactionIds: string[];
   totalAmount: number;
 
+  startDate?: Date;
+  endDate?: Date;
+
   // Creator
   createdBy: string;
   createdAt: Date;

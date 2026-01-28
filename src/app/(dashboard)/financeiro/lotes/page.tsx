@@ -7,7 +7,14 @@ import { notificationService } from "@/lib/services/notificationService";
 import { emailService } from "@/lib/services/emailService";
 import { PaymentBatch } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { Plus, MoreHorizontal, Loader2, Edit } from "lucide-react";
+import {
+  Plus,
+  MoreHorizontal,
+  Loader2,
+  Edit,
+  CalendarIcon,
+  Trash2,
+} from "lucide-react";
 import {
   Table,
   TableBody,
@@ -16,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +50,13 @@ import {
 import { BatchDetailsDialog } from "@/components/features/finance/BatchDetailsDialog";
 import { BatchSendDialog } from "@/components/features/finance/BatchSendDialog";
 import { BatchApprovalDialog } from "@/components/features/finance/BatchApprovalDialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
@@ -58,6 +72,8 @@ export default function PaymentBatchesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newBatchName, setNewBatchName] = useState("");
+  const [startDate, setStartDate] = useState<Date>();
+  const [endDate, setEndDate] = useState<Date>();
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingBatchName, setEditingBatchName] = useState("");
@@ -65,6 +81,7 @@ export default function PaymentBatchesPage() {
 
   const [selectedBatch, setSelectedBatch] = useState<PaymentBatch | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [deleteBatchId, setDeleteBatchId] = useState<string | null>(null);
 
   // New workflow dialogs
   const [isSendForApprovalOpen, setIsSendForApprovalOpen] = useState(false);
@@ -103,14 +120,30 @@ export default function PaymentBatchesPage() {
   const handleCreateBatch = async () => {
     if (!selectedCompany || !user || !newBatchName.trim()) return;
     try {
+      let start: Date | undefined;
+      let end: Date | undefined;
+
+      if (startDate) {
+        start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+      }
+      if (endDate) {
+        end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+      }
+
       await paymentBatchService.create(
         newBatchName,
         selectedCompany.id,
         user.uid,
+        start,
+        end,
       );
       toast.success("Lote criado com sucesso");
       setIsCreateOpen(false);
       setNewBatchName("");
+      setStartDate(undefined);
+      setEndDate(undefined);
       fetchBatches();
     } catch (error) {
       console.error("Error creating batch:", error);
@@ -301,6 +334,22 @@ export default function PaymentBatchesPage() {
     }
   };
 
+  const handleDeleteBatch = async () => {
+    if (!deleteBatchId) return;
+    try {
+      await paymentBatchService.delete(deleteBatchId);
+      toast.success("Lote excluído com sucesso");
+      setDeleteBatchId(null);
+      fetchBatches();
+    } catch (error) {
+      console.error("Error deleting batch:", error);
+      toast.error(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (error as any)?.message || "Erro ao excluir lote",
+      );
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "open":
@@ -362,6 +411,70 @@ export default function PaymentBatchesPage() {
                     onChange={(e) => setNewBatchName(e.target.value)}
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2 flex flex-col">
+                    <Label htmlFor="startDate">Data Inicial</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={"outline"}
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !startDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {startDate ? (
+                            format(startDate, "dd/MM/yyyy", { locale: ptBR })
+                          ) : (
+                            <span>Selecione uma data</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={startDate}
+                          onSelect={setStartDate}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="space-y-2 flex flex-col">
+                    <Label htmlFor="endDate">Data Final</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={"outline"}
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !endDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {endDate ? (
+                            format(endDate, "dd/MM/yyyy", { locale: ptBR })
+                          ) : (
+                            <span>Selecione uma data</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={endDate}
+                          onSelect={setEndDate}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Ao definir as datas, as contas em rascunho (draft) dentro
+                  deste período serão adicionadas automaticamente.
+                </p>
               </div>
               <DialogFooter>
                 <Button
@@ -494,6 +607,16 @@ export default function PaymentBatchesPage() {
                                 Confirmar Pagamentos
                               </DropdownMenuItem>
                             )}
+                          <DropdownMenuSeparator />
+                          {batch.status === "open" && canManageBatches && (
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => setDeleteBatchId(batch.id)}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Excluir Lote
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -586,6 +709,16 @@ export default function PaymentBatchesPage() {
           buttonText="Enviar para Autorização"
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteBatchId}
+        onOpenChange={(open) => !open && setDeleteBatchId(null)}
+        title="Excluir Lote"
+        description="Tem certeza que deseja excluir este lote? As transações vinculadas voltarão para o status 'sem lote', mas não serão excluídas."
+        confirmText="Excluir"
+        variant="destructive"
+        onConfirm={handleDeleteBatch}
+      />
     </div>
   );
 }

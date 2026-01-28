@@ -119,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Changed dependency from [router] to [] to prevent unnecessary re-subscriptions
 
   const loginWithGoogle = async () => {

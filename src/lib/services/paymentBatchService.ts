@@ -13,6 +13,7 @@ import {
   addDoc,
   Timestamp,
   DocumentData,
+  deleteField,
 } from "firebase/firestore";
 import { PaymentBatch, PaymentBatchStatus, Transaction } from "@/lib/types";
 
@@ -35,6 +36,8 @@ const convertDates = (data: DocumentData): PaymentBatch => {
     approvalTokenExpiresAt: (
       data.approvalTokenExpiresAt as Timestamp
     )?.toDate(),
+    startDate: (data.startDate as Timestamp)?.toDate(),
+    endDate: (data.endDate as Timestamp)?.toDate(),
   } as PaymentBatch;
 };
 
@@ -66,8 +69,15 @@ export const paymentBatchService = {
     return convertDates({ id: snapshot.id, ...snapshot.data() });
   },
 
-  create: async (name: string, companyId: string, createdBy: string) => {
-    return addDoc(collection(db, COLLECTION_NAME), {
+  create: async (
+    name: string,
+    companyId: string,
+    createdBy: string,
+    startDate?: Date,
+    endDate?: Date,
+  ) => {
+    // Create the batch
+    const batchRef = await addDoc(collection(db, COLLECTION_NAME), {
       name,
       companyId,
       createdBy,
@@ -76,7 +86,38 @@ export const paymentBatchService = {
       totalAmount: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      startDate: startDate || null,
+      endDate: endDate || null,
     });
+
+    // If dates are provided, auto-add draft transactions
+    if (startDate && endDate) {
+      try {
+        const q = query(
+          collection(db, TRANSACTIONS_COLLECTION),
+          where("companyId", "==", companyId),
+          where("status", "==", "draft"),
+          where("dueDate", ">=", startDate),
+          where("dueDate", "<=", endDate),
+        );
+
+        const snapshot = await getDocs(q);
+        const transactions = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }) as Transaction)
+          .filter((t) => !t.batchId); // Only add if not already in a batch
+
+        if (transactions.length > 0) {
+          await paymentBatchService.addTransactions(batchRef.id, transactions);
+        }
+      } catch (error) {
+        console.error("Error auto-adding transactions to batch:", error);
+        // We don't fail the batch creation if auto-add fails,
+        // but maybe we should notify/throw?
+        // For now logging is safer to avoid breaking the main flow.
+      }
+    }
+
+    return batchRef;
   },
 
   update: async (id: string, data: Partial<PaymentBatch>) => {
@@ -126,6 +167,38 @@ export const paymentBatchService = {
     });
 
     await batch.commit();
+  },
+
+  delete: async (batchId: string) => {
+    const batchRef = doc(db, COLLECTION_NAME, batchId);
+    const batchSnap = await getDoc(batchRef);
+
+    if (!batchSnap.exists()) throw new Error("Batch not found");
+    const batchData = batchSnap.data() as PaymentBatch;
+
+    if (batchData.status !== "open") {
+      throw new Error("Apenas lotes com status 'Aberto' podem ser excluídos");
+    }
+
+    const batchWrite = writeBatch(db);
+
+    // 1. Find all transactions in this batch
+    // We trust the transaction collection query more than the array for mass updates
+    const q = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("batchId", "==", batchId),
+    );
+    const transactionsSnap = await getDocs(q);
+
+    // 2. Remove batchId from them
+    transactionsSnap.docs.forEach((tDoc) => {
+      batchWrite.update(tDoc.ref, { batchId: deleteField() });
+    });
+
+    // 3. Delete the batch document
+    batchWrite.delete(batchRef);
+
+    await batchWrite.commit();
   },
 
   removeTransactions: async (batchId: string, transactions: Transaction[]) => {

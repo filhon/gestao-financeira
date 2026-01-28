@@ -25,6 +25,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Plus,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,11 +52,15 @@ export function BatchDetailsDialog({
   onUpdate,
 }: BatchDetailsDialogProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [missingTransactions, setMissingTransactions] = useState<Transaction[]>(
+    [],
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const { user } = useAuth();
   const { canManageBatches } = usePermissions();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [addingId, setAddingId] = useState<string | null>(null);
 
   const {
     items: sortedTransactions,
@@ -77,9 +82,37 @@ export function BatchDetailsDialog({
     }
   }, [batch, isOpen]);
 
+  const loadMissingTransactions = useCallback(async () => {
+    if (
+      batch &&
+      isOpen &&
+      batch.status === "open" &&
+      batch.startDate &&
+      batch.endDate
+    ) {
+      try {
+        const allInPeriod = await transactionService.getAll({
+          companyId: batch.companyId,
+          startDate: batch.startDate,
+          endDate: batch.endDate,
+          status: "draft",
+        });
+
+        // Filter out those that have a batchId (already in a batch)
+        const missing = allInPeriod.filter((t) => !t.batchId);
+        setMissingTransactions(missing);
+      } catch (err) {
+        console.error("Error loading missing transactions", err);
+      }
+    } else {
+      setMissingTransactions([]);
+    }
+  }, [batch, isOpen]);
+
   useEffect(() => {
     loadTransactions();
-  }, [loadTransactions]);
+    loadMissingTransactions();
+  }, [loadTransactions, loadMissingTransactions]);
 
   const handleRemoveTransaction = async () => {
     if (!batch || !deleteId) return;
@@ -94,6 +127,7 @@ export function BatchDetailsDialog({
 
       // Update local list
       loadTransactions();
+      loadMissingTransactions();
 
       // Notify parent to update batch details (total amount, etc)
       if (onUpdate) {
@@ -102,6 +136,23 @@ export function BatchDetailsDialog({
     } catch (error) {
       console.error("Error removing transaction", error);
       toast.error("Erro ao remover transação");
+    }
+  };
+
+  const handleAddTransaction = async (tx: Transaction) => {
+    if (!batch) return;
+    setAddingId(tx.id);
+    try {
+      await paymentBatchService.addTransactions(batch.id, [tx]);
+      toast.success("Transação adicionada ao lote");
+      loadTransactions();
+      loadMissingTransactions();
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      console.error("Error adding transaction", error);
+      toast.error("Erro ao adicionar transação");
+    } finally {
+      setAddingId(null);
     }
   };
 
@@ -479,6 +530,64 @@ export function BatchDetailsDialog({
               Exportar
             </Button>
           </div>
+
+          {missingTransactions.length > 0 &&
+            batch.status === "open" &&
+            canManageBatches && (
+              <div className="border rounded-md border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+                <div className="p-4 border-b border-amber-200">
+                  <h3 className="font-semibold text-amber-800 dark:text-amber-200">
+                    Transações não incluídas ({missingTransactions.length})
+                  </h3>
+                  <p className="text-sm text-amber-700 dark:text-amber-300">
+                    Existem transações em rascunho neste período que ainda não
+                    foram adicionadas ao lote.
+                  </p>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Vencimento</TableHead>
+                      <TableHead>Descrição</TableHead>
+                      <TableHead>Fornecedor</TableHead>
+                      <TableHead className="text-right">Valor</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {missingTransactions.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
+                        <TableCell className="max-w-[300px]">
+                          <span className="truncate" title={t.description}>
+                            {t.description}
+                          </span>
+                        </TableCell>
+                        <TableCell>{t.supplierOrClient}</TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(t.amount)}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-primary"
+                            onClick={() => handleAddTransaction(t)}
+                            disabled={addingId === t.id}
+                          >
+                            {addingId === t.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
 
           {isLoading ? (
             <div className="flex justify-center py-8">

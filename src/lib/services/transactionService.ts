@@ -98,7 +98,7 @@ export const transactionService = {
     if (filter?.startDate) {
       q = query(
         q,
-        where("dueDate", ">=", Timestamp.fromDate(filter.startDate))
+        where("dueDate", ">=", Timestamp.fromDate(filter.startDate)),
       );
     }
     if (filter?.endDate) {
@@ -107,7 +107,7 @@ export const transactionService = {
 
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
   },
 
@@ -122,24 +122,67 @@ export const transactionService = {
       startDate?: Date;
       endDate?: Date;
       createdBy?: string;
-    }
+      costCenterIds?: string[];
+    },
   ): Promise<{
     transactions: Transaction[];
     lastDoc: QueryDocumentSnapshot<DocumentData> | null;
   }> => {
     let q = query(
       collection(db, COLLECTION_NAME),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
 
     if (filters?.type) {
       q = query(q, where("type", "==", filters.type));
     }
 
+    let hasInFilter = false;
+
+    if (filters?.costCenterIds && filters.costCenterIds.length > 0) {
+      if (filters.costCenterIds.length === 1) {
+        q = query(
+          q,
+          where("costCenterIds", "array-contains", filters.costCenterIds[0]),
+        );
+      } else {
+        // Split into chunks if > 10 (Firestore limit for 'array-contains-any')
+        const limit = 10;
+        if (filters.costCenterIds.length <= limit) {
+          q = query(
+            q,
+            where("costCenterIds", "array-contains-any", filters.costCenterIds),
+          );
+          hasInFilter = true;
+        } else {
+          console.warn(
+            `Too many cost centers selected for filter, truncating to ${limit}`,
+          );
+          q = query(
+            q,
+            where(
+              "costCenterIds",
+              "array-contains-any",
+              filters.costCenterIds.slice(0, limit),
+            ),
+          );
+          hasInFilter = true;
+        }
+      }
+    }
+
+    let clientSideStatusFilter: string[] | null = null;
+
     if (filters?.status) {
       q = query(q, where("status", "==", filters.status));
     } else if (filters?.excludeStatus && filters.excludeStatus.length > 0) {
-      q = query(q, where("status", "not-in", filters.excludeStatus));
+      // Cannot combine 'in' (from costCenterIds) with 'not-in' (status)
+      if (hasInFilter) {
+        // Defer to client-side filtering
+        clientSideStatusFilter = filters.excludeStatus;
+      } else {
+        q = query(q, where("status", "not-in", filters.excludeStatus));
+      }
     }
 
     if (filters?.createdBy) {
@@ -149,7 +192,7 @@ export const transactionService = {
     if (filters?.startDate) {
       q = query(
         q,
-        where("dueDate", ">=", Timestamp.fromDate(filters.startDate))
+        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
       );
     }
     if (filters?.endDate) {
@@ -166,9 +209,16 @@ export const transactionService = {
     q = query(q, limit(pageSize));
 
     const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+    let transactions = snapshot.docs.map((doc) =>
+      convertDates({ id: doc.id, ...doc.data() }),
     );
+
+    // Apply client-side filtering if needed
+    if (clientSideStatusFilter) {
+      transactions = transactions.filter(
+        (t) => !clientSideStatusFilter!.includes(t.status),
+      );
+    }
 
     return {
       transactions,
@@ -182,7 +232,7 @@ export const transactionService = {
   getByCostCenter: async (
     costCenterId: string,
     companyId: string,
-    userId?: string
+    userId?: string,
   ): Promise<Transaction[]> => {
     // Since we can't easily query array of objects in Firestore without a specific index structure,
     // we'll fetch company transactions and filter.
@@ -194,16 +244,16 @@ export const transactionService = {
     }
     const all = await transactionService.getAll(filter);
     return all.filter((t) =>
-      t.costCenterAllocation?.some((a) => a.costCenterId === costCenterId)
+      t.costCenterAllocation?.some((a) => a.costCenterId === costCenterId),
     );
   },
 
   create: async (
     data: TransactionFormData,
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ) => {
-    const cleanData = stripUndefined(data); // Clean data on create too
+    const cleanData = stripUndefined(data) as TransactionFormData; // Clean data on create too
     const { useInstallments, installmentsCount, ...transactionData } =
       cleanData;
     const userId = user.uid;
@@ -241,14 +291,20 @@ export const transactionService = {
             }) => ({
               ...alloc,
               amount: (installmentAmount * alloc.percentage) / 100,
-            })
+            }),
           );
+
+        const costCenterIds =
+          installmentAllocations?.map((a) => a.costCenterId) || [];
+        const costCenterId = costCenterIds[0];
 
         const txData = {
           ...transactionData,
           description,
           amount: installmentAmount,
           costCenterAllocation: installmentAllocations,
+          costCenterIds,
+          costCenterId,
           dueDate,
           installments: {
             current: i,
@@ -266,10 +322,10 @@ export const transactionService = {
           addDoc(collection(db, COLLECTION_NAME), txData).then(async (ref) => {
             await usageService.updateUsage(
               { ...txData, id: ref.id } as unknown as Transaction,
-              1
+              1,
             );
             return ref;
-          })
+          }),
         );
       }
 
@@ -282,7 +338,7 @@ export const transactionService = {
       ) {
         for (const allocation of transactionData.costCenterAllocation) {
           const costCenter = await costCenterService.getById(
-            allocation.costCenterId
+            allocation.costCenterId,
           );
           if (costCenter?.approverEmail) {
             // Generate token for the first installment to allow approval start
@@ -307,7 +363,7 @@ export const transactionService = {
                 requestOrigin: transactionData.requestOrigin,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
               } as any,
-              costCenter.approverEmail
+              costCenter.approverEmail,
             );
           }
         }
@@ -317,8 +373,14 @@ export const transactionService = {
     }
 
     // Single Create
+    const costCenterIds =
+      transactionData.costCenterAllocation?.map((a) => a.costCenterId) || [];
+    const costCenterId = costCenterIds[0];
+
     const docRef = await addDoc(collection(db, COLLECTION_NAME), {
       ...transactionData,
+      costCenterIds,
+      costCenterId,
       companyId,
       createdBy: userId,
       status: status,
@@ -336,14 +398,14 @@ export const transactionService = {
         status: status,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      1
+      1,
     );
 
     // Trigger Notification if pending approval
     if (status === "pending_approval" && transactionData.costCenterAllocation) {
       for (const allocation of transactionData.costCenterAllocation) {
         const costCenter = await costCenterService.getById(
-          allocation.costCenterId
+          allocation.costCenterId,
         );
         if (costCenter?.approverEmail) {
           // We need to ensure the transaction has a token if we want magic links.
@@ -374,7 +436,7 @@ export const transactionService = {
               requestOrigin: transactionData.requestOrigin, // Ensure this is passed
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
             } as any,
-            costCenter.approverEmail
+            costCenter.approverEmail,
           );
         }
       }
@@ -401,10 +463,10 @@ export const transactionService = {
     id: string,
     data: Partial<TransactionFormData>,
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ) => {
     const docRef = doc(db, COLLECTION_NAME, id);
-    const cleanData = stripUndefined(data); // Sanitize data
+    const cleanData = stripUndefined(data) as Partial<TransactionFormData>; // Sanitize data
 
     // Fetch current document to generate diff
     const currentDoc = await getDoc(docRef);
@@ -413,10 +475,20 @@ export const transactionService = {
     const currentData = currentDoc.data();
     const oldTransaction = convertDates({ id: currentDoc.id, ...currentData });
 
-    await updateDoc(docRef, {
+    const updatePayload: DocumentData = {
       ...cleanData,
       updatedAt: serverTimestamp(),
-    });
+    };
+
+    if (cleanData.costCenterAllocation) {
+      const costCenterIds = cleanData.costCenterAllocation.map(
+        (a) => a.costCenterId,
+      );
+      updatePayload.costCenterIds = costCenterIds;
+      updatePayload.costCenterId = costCenterIds[0];
+    }
+
+    await updateDoc(docRef, updatePayload);
 
     // Update Usage
     await usageService.updateUsage(oldTransaction, -1);
@@ -430,7 +502,7 @@ export const transactionService = {
     // Generate changes for audit log
     const changes = generateChanges(
       currentData as Record<string, unknown>,
-      cleanData as Record<string, unknown>
+      cleanData as Record<string, unknown>,
     );
 
     await auditService.log({
@@ -449,14 +521,14 @@ export const transactionService = {
     data: Partial<TransactionFormData>,
     scope: "single" | "series",
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ) => {
     if (scope === "single" || !originalTransaction.installments?.groupId) {
       await transactionService.update(
         originalTransaction.id,
         data,
         user,
-        companyId
+        companyId,
       );
       return;
     }
@@ -468,9 +540,9 @@ export const transactionService = {
         where(
           "installments.groupId",
           "==",
-          originalTransaction.installments.groupId
+          originalTransaction.installments.groupId,
         ),
-        where("dueDate", ">=", originalTransaction.dueDate) // Filter for this and future
+        where("dueDate", ">=", originalTransaction.dueDate), // Filter for this and future
       );
 
       const snapshot = await getDocs(q);
@@ -505,12 +577,12 @@ export const transactionService = {
         action: "update",
         entity: "transaction",
         entityId: originalTransaction.installments.groupId,
-        details: {
+        details: stripUndefined({
           ...data,
           scope,
           count: snapshot.size,
           isRecurrenceUpdate: true,
-        },
+        }),
       });
     }
   },
@@ -524,7 +596,7 @@ export const transactionService = {
       interest: number;
     },
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ) => {
     const docRef = doc(db, COLLECTION_NAME, id);
 
@@ -536,7 +608,7 @@ export const transactionService = {
       action: "update",
       entity: "transaction",
       entityId: id,
-      details: { status: "paid", ...data },
+      details: stripUndefined({ status: "paid", ...data }),
     });
 
     return updateDoc(docRef, {
@@ -555,7 +627,7 @@ export const transactionService = {
     id: string,
     status: TransactionStatus,
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ): Promise<Transaction> => {
     const docRef = doc(db, COLLECTION_NAME, id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -608,7 +680,7 @@ export const transactionService = {
   delete: async (
     id: string,
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ) => {
     const docRef = doc(db, COLLECTION_NAME, id);
 
@@ -640,11 +712,11 @@ export const transactionService = {
     token: string,
     userId: string,
     comment?: string,
-    adjustedAmount?: number
+    adjustedAmount?: number,
   ) => {
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token)
+      where("approvalToken", "==", token),
     );
     const snapshot = await getDocs(q);
 
@@ -701,12 +773,12 @@ export const transactionService = {
       action: "approve",
       entity: "transaction",
       entityId: transaction.id,
-      details: {
+      details: stripUndefined({
         via: "magic_link",
         originalAmount: transaction.amount,
         adjustedAmount: adjustedAmount,
         comment: comment,
-      },
+      }),
     });
 
     return transaction;
@@ -715,7 +787,7 @@ export const transactionService = {
   getByApprovalToken: async (token: string): Promise<Transaction | null> => {
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token)
+      where("approvalToken", "==", token),
     );
     const snapshot = await getDocs(q);
 
@@ -733,7 +805,7 @@ export const transactionService = {
   rejectByToken: async (token: string, userId: string, reason: string) => {
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token)
+      where("approvalToken", "==", token),
     );
     const snapshot = await getDocs(q);
 
@@ -795,7 +867,7 @@ export const transactionService = {
 
     const snapshot = await getDocs(q);
     const transactions = snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
 
     const now = new Date();
@@ -885,7 +957,7 @@ export const transactionService = {
     userId: string,
     userEmail: string | null | undefined,
     companyId: string,
-    days: number = 7
+    days: number = 7,
   ): Promise<Transaction[]> => {
     // Calculate date range
     const startDate = new Date();
@@ -913,7 +985,7 @@ export const transactionService = {
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
       where("type", "==", "payable"),
-      where("status", "in", ["draft", "pending_approval", "approved"])
+      where("status", "in", ["draft", "pending_approval", "approved"]),
     );
 
     const snapshot = await getDocs(q);
@@ -930,7 +1002,7 @@ export const transactionService = {
         // 2. I need to approve it
         if (t.status === "pending_approval" && t.costCenterAllocation) {
           const needsMyApproval = t.costCenterAllocation.some((alloc) =>
-            approverCcIds.has(alloc.costCenterId)
+            approverCcIds.has(alloc.costCenterId),
           );
           if (needsMyApproval) return true;
         }
@@ -938,7 +1010,7 @@ export const transactionService = {
         // 3. I need to release (pay) it
         if (t.status === "approved" && t.costCenterAllocation) {
           const needsMyRelease = t.costCenterAllocation.some((alloc) =>
-            releaserCcIds.has(alloc.costCenterId)
+            releaserCcIds.has(alloc.costCenterId),
           );
           if (needsMyRelease) return true;
         }
