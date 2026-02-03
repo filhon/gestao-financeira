@@ -19,7 +19,7 @@ import {
 import { db } from "@/lib/firebase/client";
 import { Transaction, TransactionStatus } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
-import { format, addMonths } from "date-fns";
+import { format, addMonths, addDays, differenceInCalendarDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { auditService } from "@/lib/services/auditService";
@@ -545,25 +545,44 @@ export const transactionService = {
         where("dueDate", ">=", originalTransaction.dueDate), // Filter for this and future
       );
 
+      // Calculate shift if date changed
+      let daysDiff = 0;
+      if (data.dueDate && originalTransaction.dueDate) {
+        daysDiff = differenceInCalendarDays(
+          data.dueDate,
+          originalTransaction.dueDate,
+        );
+      }
+
       const snapshot = await getDocs(q);
       const promises = snapshot.docs.map(async (docSnapshot) => {
-        // Avoid updating 'dueDate' relative to each other if it's not a generic update
-        // For simplified 'Edit', we might replace description, amount, category, etc.
-        // We typically DO NOT update 'dueDate' in batch because each installment has its own month.
-        // If user changed Date in Form, it's ambiguous if they mean "Shift all by X days" or "Set all to Date Y".
-        // For MVP, let's exclude 'dueDate' from batch updates or handle explicitly.
-        // Let's exclude 'dueDate' and 'installments' data from batch to be safe, unless needed.
-
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const payload = data as any;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { dueDate, installments: _installments, ...safeData } = payload;
         const cleanData = stripUndefined(safeData); // Sanitize data
 
-        const updateData = {
+        const updateData: DocumentData = {
           ...cleanData,
           updatedAt: serverTimestamp(),
         };
+
+        // If shifting dates, calculate for this instance
+        if (daysDiff !== 0) {
+          const currentDocData = docSnapshot.data();
+          const currentDueDate = (currentDocData.dueDate as Timestamp).toDate();
+          updateData.dueDate = addDays(currentDueDate, daysDiff);
+        }
+
+        // Handle description update for installments
+        if (cleanData.description && docSnapshot.data().installments) {
+          const installments = docSnapshot.data().installments;
+          const baseDescription = cleanData.description.replace(
+            /\s\(\d+\/\d+\)$/,
+            "",
+          );
+          updateData.description = `${baseDescription} (${installments.current}/${installments.total})`;
+        }
 
         return updateDoc(docSnapshot.ref, updateData);
       });

@@ -6,6 +6,8 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { transactionService } from "@/lib/services/transactionService";
 import { reportService } from "@/lib/services/reportService";
+import { recurrenceService } from "@/lib/services/recurrenceService";
+import { Transaction } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,7 +26,16 @@ import {
 } from "@/components/ui/select";
 import { Loader2, FileText, Download, CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
-import { startOfMonth, endOfMonth, format } from "date-fns";
+import {
+  startOfMonth,
+  endOfMonth,
+  format,
+  addDays,
+  addWeeks,
+  addMonths,
+  addYears,
+  isAfter,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -33,6 +44,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { CurrencyInput } from "@/components/ui/currency-input";
 
 export default function ReportsPage() {
   const { user } = useAuth();
@@ -44,6 +56,7 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState<Date>(startOfMonth(new Date()));
   const [endDate, setEndDate] = useState<Date>(endOfMonth(new Date()));
   const [reportType, setReportType] = useState("cash_flow");
+  const [initialBalance, setInitialBalance] = useState(0);
 
   const handleGenerate = async (formatType: "pdf" | "csv") => {
     if (!selectedCompany || !user) return;
@@ -74,11 +87,73 @@ export default function ReportsPage() {
       end.setHours(23, 59, 59, 999);
 
       // Filter using paymentDate for paid transactions, dueDate for others
-      const filtered = allTransactions.filter((t) => {
+      let filtered = allTransactions.filter((t) => {
         const dateToCheck =
           t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
         return dateToCheck >= start && dateToCheck <= end;
       });
+
+      // Include Projections for Consolidated Cash Flow
+      if (reportType === "consolidated") {
+        const templates = await recurrenceService.getTemplates(
+          selectedCompany.id,
+          {
+            active: true,
+          },
+        );
+
+        const projectedTransactions: Transaction[] = [];
+
+        templates.forEach((template) => {
+          let nextDate = template.nextDueDate;
+          const interval = template.interval || 1;
+
+          // Generate occurrences until end date
+          while (
+            !isAfter(nextDate, end) &&
+            (!template.endDate || !isAfter(nextDate, template.endDate))
+          ) {
+            // Only add if within range (startDate <= nextDate <= endDate)
+            if (nextDate >= start) {
+              projectedTransactions.push({
+                ...template.baseTransactionData,
+                id: `proj_${template.id}_${nextDate.getTime()}`, // Ephemeral ID
+                companyId: selectedCompany.id,
+                description: `${template.description} (Projeção)`,
+                amount: template.amount,
+                type: template.type,
+                status: "draft", // Treated as projection
+                dueDate: nextDate,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                createdBy: "system",
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any as Transaction);
+            }
+
+            // Advance date
+            switch (template.frequency) {
+              case "daily":
+                nextDate = addDays(nextDate, interval);
+                break;
+              case "weekly":
+                nextDate = addWeeks(nextDate, interval);
+                break;
+              case "monthly":
+                nextDate = addMonths(nextDate, interval);
+                break;
+              case "yearly":
+                nextDate = addYears(nextDate, interval);
+                break;
+              default:
+                nextDate = addMonths(nextDate, interval);
+            }
+          }
+        });
+
+        filtered = [...filtered, ...projectedTransactions];
+        filtered.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+      }
 
       if (filtered.length === 0) {
         toast.warning("Nenhuma transação encontrada no período.");
@@ -95,14 +170,22 @@ export default function ReportsPage() {
             filtered,
             start,
             end,
-            selectedCompany.name
+            selectedCompany.name,
           );
         } else if (reportType === "dre") {
           reportService.generateDREPDF(
             filtered,
             start,
             end,
-            selectedCompany.name
+            selectedCompany.name,
+          );
+        } else if (reportType === "consolidated") {
+          reportService.generateConsolidatedCashFlowPDF(
+            filtered,
+            start,
+            end,
+            selectedCompany.name,
+            initialBalance,
           );
         }
         toast.success("Relatório PDF gerado!");
@@ -141,7 +224,7 @@ export default function ReportsPage() {
                     variant="outline"
                     className={cn(
                       "w-full pl-3 text-left font-normal",
-                      !startDate && "text-muted-foreground"
+                      !startDate && "text-muted-foreground",
                     )}
                   >
                     {startDate ? (
@@ -171,7 +254,7 @@ export default function ReportsPage() {
                     variant="outline"
                     className={cn(
                       "w-full pl-3 text-left font-normal",
-                      !endDate && "text-muted-foreground"
+                      !endDate && "text-muted-foreground",
                     )}
                   >
                     {endDate ? (
@@ -201,6 +284,9 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="cash_flow">Fluxo de Caixa</SelectItem>
+                  <SelectItem value="consolidated">
+                    Fluxo de Caixa Consolidado
+                  </SelectItem>
                   <SelectItem value="dre">
                     DRE (Demonstrativo de Resultados)
                   </SelectItem>
@@ -208,6 +294,22 @@ export default function ReportsPage() {
               </Select>
             </div>
           </div>
+
+          {reportType === "consolidated" && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Saldo Inicial</Label>
+                <CurrencyInput
+                  value={initialBalance}
+                  onChange={setInitialBalance}
+                  placeholder="R$ 0,00"
+                />
+                <p className="text-[0.8rem] text-muted-foreground">
+                  Saldo das contas no dia anterior ao início.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-4 pt-4">
             <Button

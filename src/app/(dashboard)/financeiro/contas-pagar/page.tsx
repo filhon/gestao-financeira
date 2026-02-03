@@ -1,9 +1,29 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Loader2, Trash2, Eye, Upload, Search } from "lucide-react";
+import {
+  Plus,
+  Loader2,
+  Trash2,
+  Eye,
+  Upload,
+  Search,
+  RotateCcw,
+  CheckCheck,
+  CheckCircle2,
+  DollarSign,
+  MoreHorizontal,
+} from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Card,
   CardContent,
@@ -32,7 +52,7 @@ import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { format, addDays } from "date-fns";
+import { format, addDays, isBefore, startOfDay } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -57,6 +77,58 @@ import {
 import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 import { CostCenter } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
+import { CurrencyInput } from "@/components/ui/currency-input";
+
+function useAnimatedValue(targetValue: number, duration: number = 800) {
+  const [currentValue, setCurrentValue] = useState(targetValue);
+  const startValueRef = useRef(targetValue);
+  const startTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    startValueRef.current = currentValue;
+    startTimeRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetValue]);
+
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const animate = (timestamp: number) => {
+      if (!startTimeRef.current) startTimeRef.current = timestamp;
+      const progress = Math.min(
+        (timestamp - startTimeRef.current) / duration,
+        1,
+      );
+      // Ease out quart
+      const ease = 1 - Math.pow(1 - progress, 4);
+
+      const nextValue =
+        startValueRef.current + (targetValue - startValueRef.current) * ease;
+
+      setCurrentValue(nextValue);
+
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [targetValue, duration]);
+
+  return currentValue;
+}
+
+const AnimatedNumber = ({
+  value,
+  formatter,
+}: {
+  value: number;
+  formatter?: (n: number) => string;
+}) => {
+  const animated = useAnimatedValue(value);
+  return <>{formatter ? formatter(animated) : Math.round(animated)}</>;
+};
 
 // ...
 
@@ -99,13 +171,87 @@ export default function AccountsPayablePage() {
   const [newBatchName, setNewBatchName] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
+
+  // Payment Confirmation State
+  const [transactionToConfirm, setTransactionToConfirm] =
+    useState<Transaction | null>(null);
+  const [paymentDate, setPaymentDate] = useState<Date>(new Date());
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false); // Validating batch/opening dialog
+
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [itemsPerPage] = useState(25);
   const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
 
   // Use centralized permissions
-  const { canDeletePayables, canCreatePayables, onlyOwnPayables } =
-    usePermissions();
+  const {
+    canDeletePayables,
+    canCreatePayables,
+    onlyOwnPayables,
+    canEditPayables,
+    isAdmin,
+    isFinancialManager,
+  } = usePermissions();
+
+  const handleOpenPaymentConfirmation = async (t: Transaction) => {
+    if (!user || !selectedCompany) return;
+    try {
+      if (t.batchId) {
+        setIsConfirmingPayment(true);
+        const batch = await paymentBatchService.getById(t.batchId);
+        setIsConfirmingPayment(false);
+        if (batch) {
+          const allowedStatuses = [
+            "approved",
+            "authorized",
+            "pending_authorization",
+            "paid",
+          ];
+          if (!allowedStatuses.includes(batch.status)) {
+            toast.error(
+              "O lote desta transação precisa estar aprovado para confirmar o pagamento.",
+            );
+            return;
+          }
+        }
+      }
+
+      setTransactionToConfirm(t);
+      setPaymentDate(new Date());
+      setPaymentAmount(t.amount); // Default to full amount
+    } catch (error) {
+      console.error("Error validating batch:", error);
+      toast.error("Erro ao validar lote.");
+      setIsConfirmingPayment(false);
+    }
+  };
+
+  const handleExecutePayment = async () => {
+    if (!transactionToConfirm || !user || !selectedCompany) return;
+
+    try {
+      setIsConfirmingPayment(true);
+      await transactionService.update(
+        transactionToConfirm.id,
+        {
+          status: "paid",
+          paymentDate: paymentDate,
+          finalAmount: paymentAmount, // Store actual paid amount
+        },
+        { uid: user.uid, email: user.email },
+        selectedCompany.id,
+      );
+
+      toast.success("Pagamento confirmado com sucesso!");
+      fetchTransactions();
+      setTransactionToConfirm(null);
+    } catch (error) {
+      console.error("Error confirming payment:", error);
+      toast.error("Erro ao confirmar pagamento.");
+    } finally {
+      setIsConfirmingPayment(false);
+    }
+  };
 
   const fetchTransactions = useCallback(
     async (isLoadMore = false) => {
@@ -204,15 +350,6 @@ export default function AccountsPayablePage() {
         .getAll(selectedCompany.id)
         .then((ccs) => {
           setCostCenters(ccs);
-          // Default to root (no parent) - "pai de todos"
-          // If there are multiple roots, checking explicitly for parentId === null/undefined or empty string
-          const root = ccs.find((c) => !c.parentId);
-          if (root) {
-            setSelectedCostCenterId(root.id);
-          } else if (ccs.length > 0) {
-            // Fallback
-            setSelectedCostCenterId(ccs[0].id);
-          }
         })
         .catch((err) => console.error("Error loading cost centers", err));
     }
@@ -411,6 +548,23 @@ export default function AccountsPayablePage() {
     setIsDetailsOpen(true);
   };
 
+  const handleRevertToDraft = async (transaction: Transaction) => {
+    if (!user || !selectedCompany) return;
+    try {
+      await transactionService.update(
+        transaction.id,
+        { status: "draft" },
+        { uid: user.uid, email: user.email },
+        selectedCompany.id,
+      );
+      toast.success("Transação revertida para rascunho!");
+      fetchTransactions();
+    } catch (error) {
+      console.error("Error reverting transaction:", error);
+      toast.error("Erro ao reverter transação.");
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteId || !user || !selectedCompany) return;
     try {
@@ -453,10 +607,53 @@ export default function AccountsPayablePage() {
     }
   };
 
+  const selectedTotal = transactions
+    .filter((t) => selectedIds.has(t.id))
+    .reduce((acc, t) => acc + t.amount, 0);
+
   return (
     <div className="space-y-6">
+      {selectedIds.size > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 animate-in fade-in slide-in-from-top-4 duration-500">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Selecionadas
+              </CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                <AnimatedNumber value={selectedIds.size} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Transações marcadas
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Valor Total</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-primary">
+                <AnimatedNumber
+                  value={selectedTotal}
+                  formatter={formatCurrency}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Soma dos valores originais
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Contas a Pagar</h1>
+
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
             <Dialog
@@ -684,63 +881,118 @@ export default function AccountsPayablePage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sortedTransactions.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedIds.has(t.id)}
-                          onCheckedChange={() => toggleSelect(t.id)}
-                          disabled={t.status !== "draft"}
-                        />
-                      </TableCell>
-                      <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
-                      <TableCell className="max-w-[300px]">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate" title={t.description}>
-                            {t.description}
-                          </span>
-                          {t.batchId && (
-                            <Badge
-                              variant="outline"
-                              className="shrink-0 text-[10px]"
-                            >
-                              Em Lote
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{t.supplierOrClient}</TableCell>
-                      <TableCell>
-                        {new Intl.NumberFormat("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                        }).format(t.amount)}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(t.status)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleViewDetails(t)}
-                            title="Ver detalhes"
+                  sortedTransactions.map((t) => {
+                    const isOverdue =
+                      (t.status === "draft" ||
+                        t.status === "pending_approval" ||
+                        t.status === "approved" ||
+                        t.status === "rejected") &&
+                      isBefore(t.dueDate, startOfDay(new Date()));
+
+                    return (
+                      <TableRow
+                        key={t.id}
+                        className={
+                          isOverdue ? "bg-red-50 dark:bg-red-900/10" : ""
+                        }
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedIds.has(t.id)}
+                            onCheckedChange={() => toggleSelect(t.id)}
+                            disabled={t.status !== "draft"}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div
+                            className={
+                              isOverdue
+                                ? "font-medium text-red-600 dark:text-red-400"
+                                : ""
+                            }
                           >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {canDeletePayables && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-red-500 hover:text-red-700"
-                              onClick={() => setDeleteId(t.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                            {format(t.dueDate, "dd/MM/yyyy")}
+                            {isOverdue && (
+                              <div className="text-[10px] font-bold uppercase text-red-600 dark:text-red-400">
+                                Vencida
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="max-w-[300px]">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate" title={t.description}>
+                              {t.description}
+                            </span>
+                            {t.batchId && (
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 text-[10px]"
+                              >
+                                Em Lote
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{t.supplierOrClient}</TableCell>
+                        <TableCell>
+                          {new Intl.NumberFormat("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                          }).format(t.amount)}
+                        </TableCell>
+                        <TableCell>{getStatusBadge(t.status)}</TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Abrir menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onClick={() => handleViewDetails(t)}
+                              >
+                                <Eye className="mr-2 h-4 w-4" /> Ver detalhes
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {(isAdmin || isFinancialManager) &&
+                                t.status !== "paid" && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      handleOpenPaymentConfirmation(t)
+                                    }
+                                    className="text-green-600 focus:text-green-700"
+                                  >
+                                    <CheckCheck className="mr-2 h-4 w-4" />{" "}
+                                    Confirmar Pagamento
+                                  </DropdownMenuItem>
+                                )}
+                              {canEditPayables &&
+                                t.status === "pending_approval" && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleRevertToDraft(t)}
+                                  >
+                                    <RotateCcw className="mr-2 h-4 w-4" />{" "}
+                                    Reverter para Rascunho
+                                  </DropdownMenuItem>
+                                )}
+                              {canDeletePayables && (
+                                <DropdownMenuItem
+                                  onClick={() => setDeleteId(t.id)}
+                                  className="text-red-600 focus:text-red-700"
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" /> Excluir
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -780,6 +1032,64 @@ export default function AccountsPayablePage() {
         onClose={() => setIsDetailsOpen(false)}
         onUpdate={fetchTransactions}
       />
+
+      <Dialog
+        open={!!transactionToConfirm}
+        onOpenChange={(open) => {
+          if (!open) setTransactionToConfirm(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar Pagamento</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Data do Pagamento</Label>
+              <Input
+                type="date"
+                value={format(paymentDate, "yyyy-MM-dd")}
+                onChange={(e) => {
+                  const date = e.target.valueAsDate;
+                  if (date) {
+                    // Fix timezone offset issue with input type=date
+                    const userTimezoneOffset = date.getTimezoneOffset() * 60000;
+                    setPaymentDate(
+                      new Date(date.getTime() + userTimezoneOffset),
+                    );
+                  }
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Valor Pago</Label>
+              <CurrencyInput
+                value={paymentAmount}
+                onChange={(val) => setPaymentAmount(val)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setTransactionToConfirm(null)}
+                disabled={isConfirmingPayment}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleExecutePayment}
+                disabled={isConfirmingPayment}
+              >
+                {isConfirmingPayment && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Confirmar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={!!deleteId}

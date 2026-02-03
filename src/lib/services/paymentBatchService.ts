@@ -96,6 +96,7 @@ export const paymentBatchService = {
         const q = query(
           collection(db, TRANSACTIONS_COLLECTION),
           where("companyId", "==", companyId),
+          where("type", "==", "payable"),
           where("status", "==", "draft"),
           where("dueDate", ">=", startDate),
           where("dueDate", "<=", endDate),

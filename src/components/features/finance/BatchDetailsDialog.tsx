@@ -96,6 +96,7 @@ export function BatchDetailsDialog({
           startDate: batch.startDate,
           endDate: batch.endDate,
           status: "draft",
+          type: "payable",
         });
 
         // Filter out those that have a batchId (already in a batch)

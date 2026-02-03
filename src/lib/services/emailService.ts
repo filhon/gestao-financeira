@@ -7,15 +7,20 @@ interface EmailResponse {
   id?: string;
 }
 
+const getAppDomain = () => {
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+};
+
 export const emailService = {
   sendApprovalRequest: async (
     transaction: Transaction,
-    approverEmail: string
+    approverEmail: string,
   ): Promise<EmailResponse> => {
     try {
-      // Use environment variable for app domain, fallback to window.location.origin
-      const appDomain =
-        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const appDomain = getAppDomain();
 
       const response = await fetch("/api/email", {
         method: "POST",
@@ -47,11 +52,10 @@ export const emailService = {
   sendStatusUpdate: async (
     transaction: Transaction,
     recipientEmail: string,
-    updatedBy: string
+    updatedBy: string,
   ): Promise<EmailResponse> => {
     try {
-      const appDomain =
-        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const appDomain = getAppDomain();
 
       const response = await fetch("/api/email", {
         method: "POST",
@@ -88,11 +92,10 @@ export const emailService = {
     transactionCount: number,
     totalAmount: number,
     senderName: string,
-    approverEmail: string
+    approverEmail: string,
   ): Promise<EmailResponse> => {
     try {
-      const appDomain =
-        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const appDomain = getAppDomain();
 
       const response = await fetch("/api/email", {
         method: "POST",
@@ -129,11 +132,10 @@ export const emailService = {
     transactionCount: number,
     totalAmount: number,
     senderName: string,
-    authorizerEmail: string
+    authorizerEmail: string,
   ): Promise<EmailResponse> => {
     try {
-      const appDomain =
-        process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const appDomain = getAppDomain();
 
       const response = await fetch("/api/email", {
         method: "POST",
@@ -175,13 +177,9 @@ export const emailService = {
       feedbackType: "bug" | "improvement" | "question" | "praise";
       title: string;
       description: string;
-    }
+    },
   ): Promise<EmailResponse[]> => {
-    const appDomain =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "https://fincontrol.ia.br");
+    const appDomain = getAppDomain();
 
     const typeLabels = {
       bug: "Bug",
@@ -212,11 +210,11 @@ export const emailService = {
         } catch (error) {
           console.error(
             `Error sending feedback notification to ${email}:`,
-            error
+            error,
           );
           return { error };
         }
-      })
+      }),
     );
 
     return results;
