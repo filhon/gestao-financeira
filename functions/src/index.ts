@@ -30,7 +30,7 @@ export const onTransactionWrite = functions.firestore
 
       // Prioriza finalAmount, fallback para amount
       const amount = Number(
-        data.finalAmount !== undefined ? data.finalAmount : data.amount || 0
+        data.finalAmount !== undefined ? data.finalAmount : data.amount || 0,
       );
 
       if (data.type === "receivable") {
@@ -50,7 +50,7 @@ export const onTransactionWrite = functions.firestore
     }
 
     console.log(
-      `Updating balance for company ${companyId}. Change: ${balanceChange}`
+      `Updating balance for company ${companyId}. Change: ${balanceChange}`,
     );
 
     try {
@@ -212,7 +212,7 @@ export const updateFinancialSummary = functions.firestore
       }
       if (update.expense !== 0) {
         updateData.expense = admin.firestore.FieldValue.increment(
-          update.expense
+          update.expense,
         );
       }
 
@@ -227,3 +227,76 @@ export const updateFinancialSummary = functions.firestore
 
     return null;
   });
+
+/**
+ * Função chamável (Callable) para recalcular o saldo da empresa.
+ * Útil para corrigir inconsistências causadas por falhas em triggers anteriores
+ * ou dados legados.
+ */
+export const recalculateCompanyBalance = functions.https.onCall(
+  async (data, context) => {
+    // Verificação de autenticação
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "O usuário precisa estar autenticado.",
+      );
+    }
+
+    const companyId = data.companyId;
+    if (!companyId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Company ID é obrigatório.",
+      );
+    }
+
+    try {
+      const snapshot = await db
+        .collection("transactions")
+        .where("companyId", "==", companyId)
+        .where("status", "==", "paid")
+        .get();
+
+      let calculatedBalance = 0;
+
+      snapshot.docs.forEach((doc) => {
+        const t = doc.data();
+        let amount = Number(t.amount || 0);
+        if (t.finalAmount !== undefined && t.finalAmount !== null) {
+          amount = Number(t.finalAmount);
+        }
+
+        if (t.type === "receivable") {
+          calculatedBalance += amount;
+        } else {
+          calculatedBalance -= amount;
+        }
+      });
+
+      const statsRef = db.collection("company_stats").doc(companyId);
+
+      await statsRef.set(
+        {
+          currentBalance: calculatedBalance,
+          lastRecalculation: admin.firestore.FieldValue.serverTimestamp(),
+          recalculatedBy: context.auth.uid,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      return {
+        success: true,
+        newBalance: calculatedBalance,
+        transactionCount: snapshot.size,
+      };
+    } catch (error) {
+      console.error("Error recalculating balance:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Erro ao recalcular saldo.",
+      );
+    }
+  },
+);

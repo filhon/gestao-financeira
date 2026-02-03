@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   MessageSquare,
   FileText,
+  Wrench,
 } from "lucide-react";
 import {
   Card,
@@ -74,6 +75,13 @@ export default function SettingsPage() {
       href: "/configuracoes/documentos-legais",
       icon: FileText,
       show: canAccessSettings,
+    },
+    {
+      title: "Sistema",
+      description: "Ferramentas de manutenção e recalibração de dados.",
+      href: "/configuracoes/sistema",
+      icon: Wrench,
+      show: canManageCompanies,
     },
   ];
 

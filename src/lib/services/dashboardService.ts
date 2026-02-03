@@ -1,4 +1,4 @@
-import { db } from "@/lib/firebase/client";
+import { db, functions } from "@/lib/firebase/client";
 import {
   collection,
   query,
@@ -12,6 +12,7 @@ import {
   doc,
   getDoc,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { Transaction } from "@/lib/types";
 import {
   startOfMonth,
@@ -452,7 +453,38 @@ export const dashboardService = {
 
     // Generate daily or weekly data points
     const result: ProjectedCashFlowData[] = [];
+    // const today = new Date(); -- Removed duplicate declaration
+    // today.setHours(0, 0, 0, 0); -- Removed duplicate
+
     let currentBalance = startingBalance;
+
+    // RECONSTRUCTION LOGIC
+    // If we are showing the full year, we start at Jan 1st.
+    // However, 'startingBalance' is the balance at 'Today'.
+    // To find the balance at Jan 1st, we must subtract all net changes that occurred between Jan 1st and Today.
+    if (mode === "year") {
+      const pastTransactions = combinedTransactions.filter((t) => {
+        // We consider 'paid' transactions as having affected the balance
+        // We use dueDate as a proxy for paymentDate in this projection view
+        return t.status === "paid" && isBefore(t.dueDate, today);
+      });
+
+      const netChangeBeforeToday = pastTransactions.reduce((acc, t) => {
+        const amount = Number(t.amount) || 0;
+        // If receivable (income): it added to balance, so we subtract to go back.
+        // If payable (expense): it removed from balance, so we add to go back.
+        // Wait, simpler: calculate Net Change, then subtract Net Change from Current.
+        // Net Change = Income - Expense.
+        if (t.type === "receivable") {
+          return acc + amount;
+        } else {
+          return acc - amount;
+        }
+      }, 0);
+
+      currentBalance = startingBalance - netChangeBeforeToday;
+    }
+
     let currentDate = new Date(startDate);
 
     // Use daily for 30 days, weekly for year view
@@ -465,38 +497,40 @@ export const dashboardService = {
 
       // Find transactions for this day/period
       combinedTransactions.forEach((t) => {
-        // CORRECTION: Since we start with the REAL CURRENT BALANCE (company_stats),
-        // we must NOT include transactions that are already PAID and occurred before or on today.
-        // They are already included in the startingBalance.
-        // We only include:
-        // 1. Pending/Scheduled/Draft transactions (regardless of date, if they are selected by query)
-        // 2. Paid transactions ONLY if they are in the FUTURE relative to "now" (unlikely scenario for "paid" but handled for consistency)
-
-        // Ideally, for "Projected Cash Flow", we fundamentally care about Open Items + Future Projections.
-        // Paid items in the past/present are history (already in balance).
-
-        if (t.status === "paid") {
-          // Skip paid transactions as they are already in startingBalance
-          return;
-        }
-
-        // For remaining operations (pending/draft), use dueDate
         const dateToUse = t.dueDate;
 
+        // Filter for period
         const isInPeriod =
           mode === "year"
             ? !isBefore(dateToUse, currentDate) && isBefore(dateToUse, nextDate)
             : isSameDay(dateToUse, currentDate);
 
-        if (isInPeriod) {
-          const amount = Number(t.amount) || 0;
-          if (t.type === "receivable") {
-            dayIncome += amount;
-            currentBalance += amount;
-          } else {
-            dayExpense += amount;
-            currentBalance -= amount;
+        if (!isInPeriod) return;
+
+        // Handling 'paid' vs 'unpaid'
+        // In 'year' mode (Historical + Projection):
+        // - We reconstruct history, so we INCLUDE paid transactions (they build the curve up to today).
+        // - We INCLUDE unpaid/projected (they build the curve after today).
+
+        // In '30days' mode (Forecast):
+        // - We start from Today's Balance.
+        // - We SKIP paid transactions that are before or on today (already in balance).
+        // - We INCLUDE future items.
+
+        if (mode === "30days") {
+          const isPastOrToday = !isAfter(dateToUse, today); // <= today
+          if (t.status === "paid" && isPastOrToday) {
+            return;
           }
+        }
+
+        const amount = Number(t.amount) || 0;
+        if (t.type === "receivable") {
+          dayIncome += amount;
+          currentBalance += amount;
+        } else {
+          dayExpense += amount;
+          currentBalance -= amount;
         }
       });
 
@@ -679,5 +713,15 @@ export const dashboardService = {
       if (b.percentage !== a.percentage) return b.percentage - a.percentage;
       return b.spent - a.spent;
     });
+  },
+
+  recalculateBalance: async (companyId: string) => {
+    const recalibrate = httpsCallable(functions, "recalculateCompanyBalance");
+    const result = await recalibrate({ companyId });
+    return result.data as {
+      success: boolean;
+      newBalance: number;
+      transactionCount: number;
+    };
   },
 };
