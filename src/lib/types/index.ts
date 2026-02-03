@@ -215,6 +215,12 @@ export interface Transaction {
   // Batch approval tracking
   batchRejectionReason?: string; // Why rejected from batch
   batchAdjustedAmount?: number; // Approver-adjusted amount
+
+  // Reconciliation
+  reconciled?: boolean;
+  reconciledAt?: Date;
+  externalId?: string; // ID from bank statement
+  reconciledBy?: string;
 }
 
 export type PaymentBatchStatus =
@@ -361,6 +367,49 @@ export interface Feedback {
   respondedBy?: string;
   respondedByEmail?: string;
   respondedAt?: Date;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Reconciliation Types
+
+export type ReconciliationStatus =
+  | "matched"
+  | "unmatched"
+  | "ignored"
+  | "potential_match";
+
+export interface BankTransaction {
+  id: string; // generated unique id for session
+  date: Date;
+  amount: number;
+  description: string;
+  documentNumber?: string; // check number, etc.
+  type: "credit" | "debit";
+
+  // Matching State
+  status: ReconciliationStatus;
+  matchedTransactionId?: string; // ID of the system transaction (Legacy/Single)
+  matchedTransactionIds?: string[]; // IDs for bundled matches
+  confidence?: number; // 0-100 score of match quality
+}
+
+export interface ReconciliationRule {
+  id: string;
+  companyId: string;
+  name: string;
+  active: boolean;
+
+  // Conditions
+  conditionField: "description" | "amount";
+  conditionOperator: "contains" | "equals" | "starts_with" | "ends_with";
+  conditionValue: string;
+
+  // Actions
+  actionCategoryId?: string; // Link to cost center?
+  actionEntityId?: string;
+  actionDescription?: string;
 
   createdAt: Date;
   updatedAt: Date;

@@ -18,6 +18,7 @@ import {
   Layers,
   LucideIcon,
   Map as MapIcon,
+  Scale,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -65,6 +66,12 @@ const allMenuItems: MenuItem[] = [
         href: "/financeiro/recorrencias",
         icon: RefreshCw,
         permission: "canViewRecurrences",
+      },
+      {
+        title: "Conciliação Bancária",
+        href: "/financeiro/conciliacao",
+        icon: Scale,
+        permission: "canViewPayables",
       },
       {
         title: "Lotes de Pagamento",
