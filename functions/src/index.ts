@@ -300,3 +300,108 @@ export const recalculateCompanyBalance = functions.https.onCall(
     }
   },
 );
+
+/**
+ * Trigger que atualiza a colecao 'cost_center_usage'
+ * sempre que uma transacao do tipo 'payable' (despesa) paga e criada/atualizada.
+ */
+export const updateCostCenterUsage = functions.firestore
+  .document("transactions/{transactionId}")
+  .onWrite(async (change, context) => {
+    const beforeDoc = change.before;
+    const afterDoc = change.after;
+
+    const getUsageData = (docSnap: any) => {
+      if (!docSnap || !docSnap.exists) return [];
+      const data = docSnap.data();
+
+      // Consideramos apenas despesas (payable) que estao PAGAS
+      if (data.type !== "payable" || data.status !== "paid") return [];
+
+      const allocations = data.costCenterAllocation || [];
+      // Se nao tiver alocacao mas tiver costCenterId (legado ou simples)
+      if (allocations.length === 0 && data.costCenterId) {
+        // Criar alocacao ficticia de 100%
+        // Mas o ideal seria sempre normalizar no write da transacao.
+        // Vamos assumir que se nao tem array, nao contabiliza ou fallback.
+        // Fallback:
+        // return [{ companyId: data.companyId, costCenterId: data.costCenterId, amount: data.finalAmount || data.amount || 0 }];
+      }
+      if (allocations.length === 0) return [];
+
+      const date = data.paymentDate
+        ? data.paymentDate.toDate()
+        : data.dueDate
+          ? data.dueDate.toDate()
+          : new Date();
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const monthKey = `${year}-${month}`;
+
+      return allocations.map((alloc: any) => ({
+        companyId: data.companyId,
+        costCenterId: alloc.costCenterId,
+        monthKey,
+        amount: Number(alloc.amount || 0),
+      }));
+    };
+
+    const beforeUsage = getUsageData(beforeDoc);
+    const afterUsage = getUsageData(afterDoc);
+
+    if (beforeUsage.length === 0 && afterUsage.length === 0) return null;
+
+    const batch = db.batch();
+    const updates = new Map<
+      string,
+      {
+        delta: number;
+        companyId: string;
+        costCenterId: string;
+        monthKey: string;
+      }
+    >();
+
+    const registerUpdate = (u: any, multiplier: number) => {
+      // Usamos uma key deterministica para o Map, mas guardamos os dados decompostos
+      const key = `${u.companyId}_${u.costCenterId}_${u.monthKey}`;
+      const current = updates.get(key) || {
+        delta: 0,
+        companyId: u.companyId,
+        costCenterId: u.costCenterId,
+        monthKey: u.monthKey,
+      };
+      current.delta += u.amount * multiplier;
+      updates.set(key, current);
+    };
+
+    beforeUsage.forEach((u: any) => registerUpdate(u, -1));
+    afterUsage.forEach((u: any) => registerUpdate(u, 1));
+
+    let hasUpdates = false;
+    for (const [key, data] of updates) {
+      if (data.delta === 0) continue;
+
+      const ref = db.collection("cost_center_usage").doc(key);
+
+      // Set inicial com merge
+      const updatePayload: any = {
+        companyId: data.companyId,
+        costCenterId: data.costCenterId,
+        monthKey: data.monthKey,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        amount: admin.firestore.FieldValue.increment(data.delta),
+      };
+
+      batch.set(ref, updatePayload, { merge: true });
+      hasUpdates = true;
+    }
+
+    if (hasUpdates) {
+      await batch.commit();
+      console.log("Cost center usage updated.");
+    }
+
+    return null;
+  });
