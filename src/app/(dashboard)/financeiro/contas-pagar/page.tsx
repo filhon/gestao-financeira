@@ -155,15 +155,15 @@ export default function AccountsPayablePage() {
         const batch = await paymentBatchService.getById(t.batchId);
         setIsConfirmingPayment(false);
         if (batch) {
+          // Allow payment only if Authorized (or already Paid/Partially Paid context)
+          // User requested to change logic from Approved to Authorized.
           const allowedStatuses = [
-            "approved",
             "authorized",
-            "pending_authorization",
             "paid",
           ];
           if (!allowedStatuses.includes(batch.status)) {
             toast.error(
-              "O lote desta transação precisa estar aprovado para confirmar o pagamento.",
+              "O lote desta transação precisa estar AUTORIZADO para confirmar o pagamento.",
             );
             return;
           }
@@ -196,12 +196,21 @@ export default function AccountsPayablePage() {
         selectedCompany.id,
       );
 
-      toast.success("Pagamento confirmado com sucesso!");
+      // Check if this completes a batch
+      if (transactionToConfirm.batchId) {
+        await paymentBatchService.checkAndFinalizeBatch(transactionToConfirm.batchId, user.uid);
+      }
+
+      toast.success("Pagamentos confirmados com sucesso!");
       fetchTransactions();
       setTransactionToConfirm(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error confirming payment:", error);
-      toast.error("Erro ao confirmar pagamento.");
+      if (error?.message?.includes("No document to update") || error?.code === "not-found" || error?.message?.includes("Transaction not found")) {
+        toast.error("Erro: Transação não encontrada ou já excluída.");
+      } else {
+        toast.error("Erro ao confirmar pagamento.");
+      }
     } finally {
       setIsConfirmingPayment(false);
     }
@@ -406,8 +415,8 @@ export default function AccountsPayablePage() {
   const fetchOpenBatches = async () => {
     if (!selectedCompany) return;
     try {
-      const allBatches = await paymentBatchService.getAll(selectedCompany.id);
-      setOpenBatches(allBatches.filter((b) => b.status === "open"));
+      const result = await paymentBatchService.getAll(selectedCompany.id);
+      setOpenBatches(result.batches.filter((b) => b.status === "open"));
     } catch {
       toast.error("Erro ao carregar lotes");
     }
@@ -483,6 +492,15 @@ export default function AccountsPayablePage() {
       );
 
       await Promise.all(promises);
+
+      // Check batches involved
+      const batchIds = new Set(transactionsToPay.map(t => t.batchId).filter(Boolean));
+      for (const batchId of Array.from(batchIds)) {
+        if (batchId) {
+          await paymentBatchService.checkAndFinalizeBatch(batchId, user.uid);
+        }
+      }
+
       toast.success(`${transactionsToPay.length} transações pagas com sucesso!`);
       setIsBatchPaymentOpen(false);
       setSelectedIds(new Set());

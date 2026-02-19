@@ -12,6 +12,8 @@ export type TransactionStatus =
   | "draft"
   | "pending_approval"
   | "approved"
+  | "pending_authorization" // Prepare for bank / payment
+  | "authorized" // Ready for payment
   | "paid"
   | "rejected";
 

@@ -222,6 +222,10 @@ export function BatchDetailsDialog({
         if (a.description !== b.description) {
           return a.description.localeCompare(b.description);
         }
+        // Status
+        if (a.status !== b.status) {
+          return a.status.localeCompare(b.status);
+        }
         // Supplier (A-Z)
         const supplierA = a.supplierOrClient || "";
         const supplierB = b.supplierOrClient || "";
@@ -679,6 +683,23 @@ export function BatchDetailsDialog({
                         )}
                       </div>
                     </TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50 transition-colors w-[100px]"
+                      onClick={() => requestSort("status")}
+                    >
+                      <div className="flex items-center gap-2">
+                        Status
+                        {sortConfig?.key === "status" ? (
+                          sortConfig.direction === "asc" ? (
+                            <ArrowUp className="h-4 w-4" />
+                          ) : (
+                            <ArrowDown className="h-4 w-4" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                        )}
+                      </div>
+                    </TableHead>
                     {batch.status === "open" && canManageBatches && (
                       <TableHead className="w-[50px]"></TableHead>
                     )}
@@ -717,6 +738,28 @@ export function BatchDetailsDialog({
                         <TableCell className="text-right">
                           {formatCurrency(t.amount)}
                         </TableCell>
+                        <TableCell>
+                          {(() => {
+                            switch (t.status) {
+                              case "paid":
+                                return <Badge className="bg-emerald-500 hover:bg-emerald-600">Pago</Badge>;
+                              case "authorized":
+                                return <Badge className="bg-blue-500 hover:bg-blue-600">Autorizado</Badge>;
+                              case "approved":
+                                return <Badge className="bg-blue-400 hover:bg-blue-500">Aprovado</Badge>;
+                              case "pending_authorization":
+                                return <Badge className="bg-amber-500 hover:bg-amber-600">Aguardando Autorização</Badge>;
+                              case "pending_approval":
+                                return <Badge className="bg-amber-400 hover:bg-amber-500">Aguardando Aprovação</Badge>;
+                              case "rejected":
+                                return <Badge variant="destructive">Rejeitado</Badge>;
+                              case "draft":
+                                return <Badge variant="secondary">Rascunho</Badge>;
+                              default:
+                                return <Badge variant="outline">{t.status === 'open' ? 'Aberto' : t.status}</Badge>;
+                            }
+                          })()}
+                        </TableCell>
                         {batch.status === "open" && canManageBatches && (
                           <TableCell>
                             <Button
@@ -748,6 +791,6 @@ export function BatchDetailsDialog({
           onConfirm={handleRemoveTransaction}
         />
       </DialogContent>
-    </Dialog>
+    </Dialog >
   );
 }

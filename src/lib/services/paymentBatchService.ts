@@ -52,6 +52,37 @@ const hashToken = async (token: string): Promise<string> => {
 };
 
 export const paymentBatchService = {
+  checkAndFinalizeBatch: async (batchId: string, userId: string) => {
+    const batchRef = doc(db, COLLECTION_NAME, batchId);
+    const batchSnap = await getDoc(batchRef);
+    if (!batchSnap.exists()) return;
+
+    const batchData = batchSnap.data() as PaymentBatch;
+    if (batchData.status === "paid") return; // Already paid
+
+    // Check all transactions
+    const q = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("batchId", "==", batchId)
+    );
+    const snapshot = await getDocs(q);
+    const transactions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Transaction));
+
+    const allPaid = transactions.every(t => t.status === "paid");
+
+    if (allPaid && transactions.length > 0) {
+      // Auto-close batch
+      const batch = writeBatch(db);
+      batch.update(batchRef, {
+        status: "paid",
+        paidBy: userId,
+        paidAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+    }
+  },
+
   getAll: async (
     companyId: string,
     pageSize: number = 20,
@@ -283,8 +314,15 @@ export const paymentBatchService = {
     if (status === "rejected") transactionStatus = "rejected";
 
     if (transactionStatus) {
-      batchData.transactionIds.forEach((tId) => {
-        const tRef = doc(db, TRANSACTIONS_COLLECTION, tId);
+      // Fetch all batch transactions first to ensure they exist
+      const q = query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where("batchId", "==", batchId)
+      );
+      const snapshot = await getDocs(q);
+
+      snapshot.docs.forEach((docSnap) => {
+        const tRef = doc(db, TRANSACTIONS_COLLECTION, docSnap.id);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tUpdate: any = { status: transactionStatus };
         if (status === "approved") {
