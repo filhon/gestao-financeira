@@ -73,7 +73,7 @@ export const transactionService = {
     type?: string;
     status?: string;
     companyId?: string;
-    batchId?: string;
+    batchId?: string | null;
     createdBy?: string;
     startDate?: Date;
     endDate?: Date;
@@ -90,7 +90,7 @@ export const transactionService = {
     if (filter?.status) {
       q = query(q, where("status", "==", filter.status));
     }
-    if (filter?.batchId) {
+    if (filter?.batchId !== undefined) {
       q = query(q, where("batchId", "==", filter.batchId));
     }
     // Filter by createdBy - essential for 'user' role to match Firestore rules

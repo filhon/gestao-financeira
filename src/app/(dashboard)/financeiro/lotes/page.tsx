@@ -58,6 +58,13 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 
@@ -74,6 +81,13 @@ export default function PaymentBatchesPage() {
   const [newBatchName, setNewBatchName] = useState("");
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
+
+  // Pagination & Filtering
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [lastDoc, setLastDoc] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const pageSize = 20;
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingBatchName, setEditingBatchName] = useState("");
@@ -97,19 +111,38 @@ export default function PaymentBatchesPage() {
     }
   }, [canViewBatches, router]);
 
-  const fetchBatches = useCallback(async () => {
-    if (!selectedCompany || !canViewBatches) return;
-    try {
-      setIsLoading(true);
-      const data = await paymentBatchService.getAll(selectedCompany.id);
-      setBatches(data);
-    } catch (error) {
-      console.error("Error fetching batches:", error);
-      toast.error("Erro ao carregar lotes");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedCompany, canViewBatches]);
+  const fetchBatches = useCallback(
+    async (isLoadMore = false) => {
+      if (!selectedCompany || !canViewBatches) return;
+      try {
+        setIsLoading(true);
+        const currentLastDoc = isLoadMore ? lastDoc : null;
+
+        const { batches: newBatches, lastDoc: newLastDoc } =
+          await paymentBatchService.getAll(
+            selectedCompany.id,
+            pageSize,
+            currentLastDoc,
+            filterStatus,
+          );
+
+        if (isLoadMore) {
+          setBatches((prev) => [...prev, ...newBatches]);
+        } else {
+          setBatches(newBatches);
+        }
+
+        setLastDoc(newLastDoc);
+        setHasMore(newBatches.length === pageSize);
+      } catch (error) {
+        console.error("Error fetching batches:", error);
+        toast.error("Erro ao carregar lotes");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [selectedCompany, canViewBatches, lastDoc, filterStatus],
+  );
 
   useEffect(() => {
     fetchBatches();
@@ -490,141 +523,187 @@ export default function PaymentBatchesPage() {
         )}
       </div>
 
+      <div className="flex justify-between items-center bg-muted/20 p-4 rounded-lg border">
+        <div className="flex items-center gap-2">
+          <Label>Status:</Label>
+          <Select
+            value={filterStatus}
+            onValueChange={(value) => {
+              setFilterStatus(value);
+              setBatches([]); // Clear to show loading state better or just reset
+              setLastDoc(null);
+              // The useEffect below will trigger fetch
+            }}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="open">Aberto</SelectItem>
+              <SelectItem value="pending_approval">Aguardando Aprovação</SelectItem>
+              <SelectItem value="approved">Aprovado</SelectItem>
+              <SelectItem value="pending_authorization">
+                Aguardando Autorização
+              </SelectItem>
+              <SelectItem value="authorized">Autorizado</SelectItem>
+              <SelectItem value="paid">Pago</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       <div className="border rounded-lg">
-        {isLoading ? (
+        {isLoading && batches.length === 0 ? (
           <div className="flex justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Responsável</TableHead>
-                <TableHead>Transações</TableHead>
-                <TableHead>Valor Total</TableHead>
-                <TableHead>Criado em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {batches.length === 0 ? (
+          <>
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    Nenhum lote encontrado.
-                  </TableCell>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Responsável</TableHead>
+                  <TableHead>Transações</TableHead>
+                  <TableHead>Valor Total</TableHead>
+                  <TableHead>Criado em</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
-              ) : (
-                batches.map((batch) => (
-                  <TableRow key={batch.id}>
-                    <TableCell className="font-medium">{batch.name}</TableCell>
-                    <TableCell>{getStatusBadge(batch.status)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {getResponsiblePerson(batch)}
-                    </TableCell>
-                    <TableCell>{batch.transactionIds.length}</TableCell>
-                    <TableCell>{formatCurrency(batch.totalAmount)}</TableCell>
-                    <TableCell>
-                      {format(batch.createdAt, "dd/MM/yyyy", { locale: ptBR })}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuLabel>Ações</DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() => handleViewDetails(batch)}
-                          >
-                            Ver Detalhes
-                          </DropdownMenuItem>
-                          {canManageBatches && (
-                            <DropdownMenuItem
-                              onClick={() => handleEditBatch(batch)}
-                            >
-                              <Edit className="mr-2 h-4 w-4" />
-                              Editar
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-
-                          {/* Status: Open - Manager can send for approval */}
-                          {batch.status === "open" && canManageBatches && (
-                            <DropdownMenuItem
-                              onClick={() => handleOpenSendForApproval(batch)}
-                            >
-                              Enviar para Aprovador
-                            </DropdownMenuItem>
-                          )}
-
-                          {/* Status: Pending Approval - Approver can approve */}
-                          {batch.status === "pending_approval" &&
-                            canApproveBatches && (
-                              <DropdownMenuItem
-                                onClick={() => handleOpenApproval(batch)}
-                              >
-                                Aprovar Lote
-                              </DropdownMenuItem>
-                            )}
-
-                          {/* Status: Approved - Manager can send for authorization */}
-                          {batch.status === "approved" && canManageBatches && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                handleOpenSendForAuthorization(batch)
-                              }
-                            >
-                              Enviar para Autorização
-                            </DropdownMenuItem>
-                          )}
-
-                          {/* Status: Pending Authorization - Releaser can confirm */}
-                          {batch.status === "pending_authorization" &&
-                            canPayBatches && (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  handleConfirmAuthorization(batch)
-                                }
-                              >
-                                Confirmar Autorização
-                              </DropdownMenuItem>
-                            )}
-
-                          {/* Status: Authorized - Manager can confirm payments */}
-                          {batch.status === "authorized" &&
-                            canManageBatches && (
-                              <DropdownMenuItem
-                                onClick={() => handleConfirmPayments(batch)}
-                              >
-                                Confirmar Pagamentos
-                              </DropdownMenuItem>
-                            )}
-                          <DropdownMenuSeparator />
-                          {batch.status === "open" && canManageBatches && (
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => setDeleteBatchId(batch.id)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Excluir Lote
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+              </TableHeader>
+              <TableBody>
+                {batches.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={7}
+                      className="text-center py-8 text-muted-foreground"
+                    >
+                      Nenhum lote encontrado.
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  batches.map((batch) => (
+                    <TableRow key={batch.id}>
+                      <TableCell className="font-medium">{batch.name}</TableCell>
+                      <TableCell>{getStatusBadge(batch.status)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {getResponsiblePerson(batch)}
+                      </TableCell>
+                      <TableCell>{batch.transactionIds.length}</TableCell>
+                      <TableCell>{formatCurrency(batch.totalAmount)}</TableCell>
+                      <TableCell>
+                        {format(batch.createdAt, "dd/MM/yyyy", { locale: ptBR })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <span className="sr-only">Open menu</span>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() => handleViewDetails(batch)}
+                            >
+                              Ver Detalhes
+                            </DropdownMenuItem>
+                            {canManageBatches && (
+                              <DropdownMenuItem
+                                onClick={() => handleEditBatch(batch)}
+                              >
+                                <Edit className="mr-2 h-4 w-4" />
+                                Editar
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+
+                            {/* Status: Open - Manager can send for approval */}
+                            {batch.status === "open" && canManageBatches && (
+                              <DropdownMenuItem
+                                onClick={() => handleOpenSendForApproval(batch)}
+                              >
+                                Enviar para Aprovador
+                              </DropdownMenuItem>
+                            )}
+
+                            {/* Status: Pending Approval - Approver can approve */}
+                            {batch.status === "pending_approval" &&
+                              canApproveBatches && (
+                                <DropdownMenuItem
+                                  onClick={() => handleOpenApproval(batch)}
+                                >
+                                  Aprovar Lote
+                                </DropdownMenuItem>
+                              )}
+
+                            {/* Status: Approved - Manager can send for authorization */}
+                            {batch.status === "approved" && canManageBatches && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  handleOpenSendForAuthorization(batch)
+                                }
+                              >
+                                Enviar para Autorização
+                              </DropdownMenuItem>
+                            )}
+
+                            {/* Status: Pending Authorization - Releaser can confirm */}
+                            {batch.status === "pending_authorization" &&
+                              canPayBatches && (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    handleConfirmAuthorization(batch)
+                                  }
+                                >
+                                  Confirmar Autorização
+                                </DropdownMenuItem>
+                              )}
+
+                            {/* Status: Authorized - Manager can confirm payments */}
+                            {batch.status === "authorized" &&
+                              canManageBatches && (
+                                <DropdownMenuItem
+                                  onClick={() => handleConfirmPayments(batch)}
+                                >
+                                  Confirmar Pagamentos
+                                </DropdownMenuItem>
+                              )}
+                            <DropdownMenuSeparator />
+                            {batch.status === "open" && canManageBatches && (
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => setDeleteBatchId(batch.id)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Excluir Lote
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+            {hasMore && (
+              <div className="flex justify-center p-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => fetchBatches(true)}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Carregar Mais
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

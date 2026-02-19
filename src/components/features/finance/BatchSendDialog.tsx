@@ -20,6 +20,7 @@ import {
 import { userService } from "@/lib/services/userService";
 import { UserProfile, UserRole } from "@/lib/types";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 interface BatchSendDialogProps {
     isOpen: boolean;
@@ -47,6 +48,9 @@ export function BatchSendDialog({
     const [isLoading, setIsLoading] = useState(false);
     const [isSending, setIsSending] = useState(false);
 
+    // Create a stable key for roles dependency to avoid infinite loops
+    const rolesKey = roles.join(",");
+
     useEffect(() => {
         const loadUsers = async () => {
             if (isOpen && companyId) {
@@ -56,13 +60,14 @@ export function BatchSendDialog({
                     setUsers(data);
                 } catch (error) {
                     console.error("Error loading users:", error);
+                    toast.error("Erro ao carregar lista de usuários");
                 } finally {
                     setIsLoading(false);
                 }
             }
         };
         loadUsers();
-    }, [isOpen, companyId, roles]);
+    }, [isOpen, companyId, rolesKey]);
 
     const handleSend = async () => {
         const user = users.find(u => u.uid === selectedUserId);
@@ -107,19 +112,24 @@ export function BatchSendDialog({
                                 Nenhum usuário disponível com esta permissão.
                             </p>
                         ) : (
+
                             <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                                <SelectTrigger>
+                                <SelectTrigger className="w-full">
                                     <SelectValue placeholder="Selecione um usuário" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="max-h-[200px]">
                                     {users.map((user) => (
                                         <SelectItem key={user.uid} value={user.uid}>
-                                            {user.displayName} ({user.email})
+                                            <span className="block truncate max-w-[280px]">
+                                                {user.displayName} ({user.email})
+                                            </span>
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         )}
+
+
                     </div>
                 </div>
 
@@ -135,7 +145,7 @@ export function BatchSendDialog({
                         {buttonText}
                     </Button>
                 </DialogFooter>
-            </DialogContent>
-        </Dialog>
+            </DialogContent >
+        </Dialog >
     );
 }

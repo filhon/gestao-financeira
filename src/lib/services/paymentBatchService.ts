@@ -14,6 +14,8 @@ import {
   Timestamp,
   DocumentData,
   deleteField,
+  startAfter,
+  limit,
 } from "firebase/firestore";
 import { PaymentBatch, PaymentBatchStatus, Transaction } from "@/lib/types";
 
@@ -50,16 +52,37 @@ const hashToken = async (token: string): Promise<string> => {
 };
 
 export const paymentBatchService = {
-  getAll: async (companyId: string): Promise<PaymentBatch[]> => {
-    const q = query(
+  getAll: async (
+    companyId: string,
+    pageSize: number = 20,
+    lastDoc: DocumentData | null = null,
+    filterStatus?: string,
+  ): Promise<{ batches: PaymentBatch[]; lastDoc: DocumentData | null }> => {
+    let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
       orderBy("createdAt", "desc"),
     );
+
+    if (filterStatus && filterStatus !== "all") {
+      q = query(q, where("status", "==", filterStatus));
+    }
+
+    if (lastDoc) {
+      q = query(q, startAfter(lastDoc));
+    }
+
+    q = query(q, limit(pageSize));
+
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) =>
+    const batches = snapshot.docs.map((doc) =>
       convertDates({ id: doc.id, ...doc.data() }),
     );
+
+    return {
+      batches,
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] || null,
+    };
   },
 
   getById: async (id: string): Promise<PaymentBatch | null> => {

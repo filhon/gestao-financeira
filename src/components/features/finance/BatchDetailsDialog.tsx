@@ -82,33 +82,39 @@ export function BatchDetailsDialog({
     }
   }, [batch, isOpen]);
 
+  const [hasMoreMissing, setHasMoreMissing] = useState(false);
+  const MISSING_LIMIT = 50;
+
   const loadMissingTransactions = useCallback(async () => {
     if (
       batch &&
       isOpen &&
       batch.status === "open" &&
       batch.startDate &&
-      batch.endDate
+      batch.endDate &&
+      canManageBatches
     ) {
       try {
-        const allInPeriod = await transactionService.getAll({
+        const missing = await transactionService.getAll({
           companyId: batch.companyId,
           startDate: batch.startDate,
           endDate: batch.endDate,
           status: "draft",
           type: "payable",
+          batchId: null, // Only fetch those NOT in a batch
+          limit: MISSING_LIMIT, // Limit to 50 to avoid performance issues
         });
 
-        // Filter out those that have a batchId (already in a batch)
-        const missing = allInPeriod.filter((t) => !t.batchId);
         setMissingTransactions(missing);
+        setHasMoreMissing(missing.length === MISSING_LIMIT);
       } catch (err) {
         console.error("Error loading missing transactions", err);
       }
     } else {
       setMissingTransactions([]);
+      setHasMoreMissing(false);
     }
-  }, [batch, isOpen]);
+  }, [batch, isOpen, canManageBatches]);
 
   useEffect(() => {
     loadTransactions();
@@ -587,6 +593,12 @@ export function BatchDetailsDialog({
                     ))}
                   </TableBody>
                 </Table>
+                {hasMoreMissing && (
+                  <div className="p-2 text-center text-xs text-amber-700 dark:text-amber-300 border-t border-amber-200 bg-amber-50/50">
+                    Exibindo os primeiros {MISSING_LIMIT} itens. Adicione estes
+                    itens para ver o restante ou refine o período.
+                  </div>
+                )}
               </div>
             )}
 
