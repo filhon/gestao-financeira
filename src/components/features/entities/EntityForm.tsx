@@ -73,12 +73,14 @@ interface EntityFormProps {
   defaultValues?: Partial<Entity>;
   onSubmit: (data: EntityFormData) => Promise<void>;
   isLoading?: boolean;
+  onCancel?: () => void;
 }
 
 export function EntityForm({
   defaultValues,
   onSubmit,
   isLoading,
+  onCancel,
 }: EntityFormProps) {
   const { selectedCompany } = useCompany();
   const form = useForm<EntityFormData>({
@@ -114,8 +116,8 @@ export function EntityForm({
     }
 
     const exists = await entityService.checkCnpjExists(
+      selectedCompany.id,
       document,
-      selectedCompany.id
     );
     if (exists) {
       form.setError("document", {
@@ -445,7 +447,17 @@ export function EntityForm({
           </CardContent>
         </Card>
 
-        <div className="flex justify-end pt-4">
+        <div className="flex justify-end gap-2 pt-4">
+          {onCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={isLoading}
+            >
+              Cancelar
+            </Button>
+          )}
           <Button type="submit" disabled={isLoading}>
             {isLoading ? "Salvando..." : "Salvar Entidade"}
           </Button>

@@ -66,6 +66,7 @@ export default function EntitiesPage() {
     sortConfig,
   } = useSortableData(entities);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -79,7 +80,10 @@ export default function EntitiesPage() {
 
   const fetchEntities = useCallback(
     async (isLoadMore = false) => {
-      if (!selectedCompany || !canViewEntities) return;
+      if (!selectedCompany || !canViewEntities) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       try {
         const category =
@@ -97,7 +101,7 @@ export default function EntitiesPage() {
             {
               category,
               search: searchTerm || undefined,
-            }
+            },
           );
 
         if (isLoadMore) {
@@ -115,7 +119,7 @@ export default function EntitiesPage() {
         setIsLoading(false);
       }
     },
-    [selectedCompany, canViewEntities, activeTab, itemsPerPage, searchTerm]
+    [selectedCompany, canViewEntities, activeTab, itemsPerPage, searchTerm],
   );
 
   useEffect(() => {
@@ -130,9 +134,10 @@ export default function EntitiesPage() {
   const handleCreate = async (data: any) => {
     if (!selectedCompany || !user) return;
     try {
+      setIsSubmitting(true);
       await entityService.create(
         { ...data, companyId: selectedCompany.id },
-        { uid: user.uid, email: user.email }
+        { uid: user.uid, email: user.email },
       );
       toast.success("Entidade criada com sucesso!");
       setIsDialogOpen(false);
@@ -140,6 +145,8 @@ export default function EntitiesPage() {
     } catch (error) {
       console.error("Error creating entity:", error);
       toast.error("Erro ao criar entidade.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -147,11 +154,12 @@ export default function EntitiesPage() {
   const handleUpdate = async (data: any) => {
     if (!selectedEntity || !user || !selectedCompany) return;
     try {
+      setIsSubmitting(true);
       await entityService.update(
         selectedEntity.id,
         data,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Entidade atualizada com sucesso!");
       setIsDialogOpen(false);
@@ -160,6 +168,8 @@ export default function EntitiesPage() {
     } catch (error) {
       console.error("Error updating entity:", error);
       toast.error("Erro ao atualizar entidade.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -170,7 +180,7 @@ export default function EntitiesPage() {
       await entityService.delete(
         deleteId,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Entidade excluída com sucesso!");
       fetchEntities();
@@ -300,19 +310,21 @@ export default function EntitiesPage() {
                       <TableRow
                         key={entity.id}
                         className="cursor-pointer hover:bg-muted/50"
+                        onClick={() =>
+                          router.push(`/cadastros/entidades/${entity.id}`)
+                        }
                       >
-                        <TableCell
-                          className="font-medium flex items-center gap-2"
-                          onClick={() =>
-                            router.push(`/cadastros/entidades/${entity.id}`)
-                          }
-                        >
-                          {entity.type === "company" ? (
-                            <Building2 className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <User className="h-4 w-4 text-muted-foreground" />
-                          )}
-                          <span className="hover:underline">{entity.name}</span>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {entity.type === "company" ? (
+                              <Building2 className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <User className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            <span className="hover:underline">
+                              {entity.name}
+                            </span>
+                          </div>
                         </TableCell>
                         <TableCell>
                           {entity.type === "company"
@@ -333,7 +345,7 @@ export default function EntitiesPage() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 router.push(
-                                  `/cadastros/entidades/${entity.id}`
+                                  `/cadastros/entidades/${entity.id}`,
                                 );
                               }}
                               title="Ver detalhes"
@@ -411,6 +423,8 @@ export default function EntitiesPage() {
           <EntityForm
             defaultValues={selectedEntity || {}}
             onSubmit={selectedEntity ? handleUpdate : handleCreate}
+            isLoading={isSubmitting}
+            onCancel={() => setIsDialogOpen(false)}
           />
         </DialogContent>
       </Dialog>

@@ -37,7 +37,7 @@ const convertDates = (data: DocumentData): Entity => {
 export const entityService = {
   getAll: async (
     companyId: string,
-    category?: "supplier" | "client"
+    category?: "supplier" | "client",
   ): Promise<Entity[]> => {
     const cacheKey = `${companyId}_${category || "all"}`;
     const now = Date.now();
@@ -49,7 +49,7 @@ export const entityService = {
     let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
-      orderBy("name", "asc")
+      orderBy("name", "asc"),
     );
 
     if (category) {
@@ -61,7 +61,7 @@ export const entityService = {
 
     const snapshot = await getDocs(q);
     const entities = snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
 
     cache[cacheKey] = { data: entities, timestamp: now };
@@ -75,14 +75,14 @@ export const entityService = {
     filters?: {
       category?: "supplier" | "client";
       search?: string;
-    }
+    },
   ): Promise<{
     entities: Entity[];
     lastDoc: DocumentData | null;
   }> => {
     let q = query(
       collection(db, COLLECTION_NAME),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
 
     if (filters?.category) {
@@ -90,28 +90,32 @@ export const entityService = {
     }
 
     if (filters?.search) {
-      // Simple prefix search for name or exact match for document (CNPJ/CPF)
-      // Note: Firestore doesn't support OR queries with different fields easily in this context without multiple queries.
-      // We will prioritize name search if it looks like a name, or document search if it looks like a number.
       const cleanSearch = filters.search.replace(/\D/g, "");
       const isNumeric = cleanSearch.length > 0 && /^\d+$/.test(cleanSearch);
 
       if (isNumeric) {
+        // BUG-05: orderBy must match the inequality field
         q = query(
           q,
           where("document", ">=", cleanSearch),
-          where("document", "<=", cleanSearch + "\uf8ff")
+          where("document", "<=", cleanSearch + "\uf8ff"),
+          orderBy("document", "asc"),
+          limit(pageSize),
         );
       } else {
+        // BUG-06: query against nameLower for case-insensitive prefix search
+        const searchLower = filters.search.toLowerCase();
         q = query(
           q,
-          where("name", ">=", filters.search),
-          where("name", "<=", filters.search + "\uf8ff")
+          where("nameLower", ">=", searchLower),
+          where("nameLower", "<=", searchLower + "\uf8ff"),
+          orderBy("nameLower", "asc"),
+          limit(pageSize),
         );
       }
+    } else {
+      q = query(q, orderBy("name", "asc"), limit(pageSize));
     }
-
-    q = query(q, orderBy("name", "asc"), limit(pageSize));
 
     if (lastDoc) {
       q = query(q, startAfter(lastDoc));
@@ -119,7 +123,7 @@ export const entityService = {
 
     const snapshot = await getDocs(q);
     const entities = snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
 
     return {
@@ -131,7 +135,7 @@ export const entityService = {
   checkCnpjExists: async (
     companyId: string,
     cnpj: string,
-    excludeId?: string
+    excludeId?: string,
   ): Promise<boolean> => {
     // Strip non-digits to ensure consistent comparison
     const cleanCnpj = cnpj.replace(/\D/g, "");
@@ -154,7 +158,7 @@ export const entityService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
-      where("document", "==", cleanCnpj)
+      where("document", "==", cleanCnpj),
     );
 
     const snapshot = await getDocs(q);
@@ -179,14 +183,14 @@ export const entityService = {
 
   create: async (
     data: Omit<Entity, "id" | "createdAt" | "updatedAt">,
-    user: { uid: string; email: string }
+    user: { uid: string; email: string },
   ): Promise<Entity> => {
     entityService.invalidateCache(data.companyId);
     const now = new Date();
 
     // Remove undefined values (Firestore doesn't accept them)
     const cleanData = Object.fromEntries(
-      Object.entries(data).filter(([, value]) => value !== undefined)
+      Object.entries(data).filter(([, value]) => value !== undefined),
     );
 
     // Ensure document is stripped of non-digits if it exists
@@ -196,6 +200,8 @@ export const entityService = {
 
     const docRef = await addDoc(collection(db, COLLECTION_NAME), {
       ...cleanData,
+      nameLower:
+        typeof cleanData.name === "string" ? cleanData.name.toLowerCase() : "",
       createdAt: Timestamp.fromDate(now),
       updatedAt: Timestamp.fromDate(now),
     });
@@ -222,7 +228,7 @@ export const entityService = {
     id: string,
     data: Partial<Omit<Entity, "id" | "createdAt" | "updatedAt">>,
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ): Promise<void> => {
     entityService.invalidateCache(companyId);
     const docRef = doc(db, COLLECTION_NAME, id);
@@ -234,7 +240,7 @@ export const entityService = {
 
     // Remove undefined values (Firestore doesn't accept them)
     const cleanData = Object.fromEntries(
-      Object.entries(data).filter(([, value]) => value !== undefined)
+      Object.entries(data).filter(([, value]) => value !== undefined),
     );
 
     // Ensure document is stripped of non-digits if it exists
@@ -244,13 +250,16 @@ export const entityService = {
 
     await updateDoc(docRef, {
       ...cleanData,
+      ...(cleanData.name && {
+        nameLower: (cleanData.name as string).toLowerCase(),
+      }),
       updatedAt: Timestamp.fromDate(now),
     });
 
     // Generate changes for audit log
     const changes = generateChanges(
       currentData as Record<string, unknown>,
-      cleanData as Record<string, unknown>
+      cleanData as Record<string, unknown>,
     );
 
     await auditService.log({
@@ -267,8 +276,9 @@ export const entityService = {
   delete: async (
     id: string,
     user: { uid: string; email: string },
-    companyId: string
+    companyId: string,
   ): Promise<void> => {
+    entityService.invalidateCache(companyId); // BUG-03: invalidate before delete
     const docRef = doc(db, COLLECTION_NAME, id);
     await deleteDoc(docRef);
 

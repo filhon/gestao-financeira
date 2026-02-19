@@ -29,6 +29,7 @@ import {
   CreditCard,
   BarChart3,
   Info,
+  Loader2,
 } from "lucide-react";
 import {
   Table,
@@ -118,7 +119,7 @@ export default function EntityDashboard() {
             (tx.supplierOrClient &&
               entityData.name &&
               tx.supplierOrClient.toLowerCase() ===
-                entityData.name.toLowerCase())
+                entityData.name.toLowerCase()),
         );
 
         setTransactions(entityTxs);
@@ -148,7 +149,7 @@ export default function EntityDashboard() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        Carregando...
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -171,10 +172,10 @@ export default function EntityDashboard() {
 
   // Calculations
   const payables = yearTransactions.filter(
-    (t) => t.type === "payable" && t.status !== "rejected"
+    (t) => t.type === "payable" && t.status !== "rejected",
   );
   const receivables = yearTransactions.filter(
-    (t) => t.type === "receivable" && t.status !== "rejected"
+    (t) => t.type === "receivable" && t.status !== "rejected",
   );
 
   const totalPayables = payables.reduce((acc, t) => acc + t.amount, 0);
@@ -259,7 +260,7 @@ export default function EntityDashboard() {
         monthIndex: number;
         payables: number;
         receivables: number;
-      }[]
+      }[],
     )
     .sort((a, b) => a.monthIndex - b.monthIndex);
 
@@ -276,7 +277,7 @@ export default function EntityDashboard() {
 
   const years = Array.from(
     { length: 5 },
-    (_, i) => new Date().getFullYear() - 2 + i
+    (_, i) => new Date().getFullYear() - 2 + i,
   );
 
   const getStatusBadge = (status: string) => {
@@ -530,13 +531,13 @@ export default function EntityDashboard() {
                                 <p className="text-sm text-red-600">
                                   Despesas:{" "}
                                   {formatCurrency(
-                                    (payload[0]?.value as number) || 0
+                                    (payload[0]?.value as number) || 0,
                                   )}
                                 </p>
                                 <p className="text-sm text-green-600">
                                   Receitas:{" "}
                                   {formatCurrency(
-                                    (payload[1]?.value as number) || 0
+                                    (payload[1]?.value as number) || 0,
                                   )}
                                 </p>
                               </div>
@@ -598,7 +599,7 @@ export default function EntityDashboard() {
                                 | string
                                 | Array<number | string>
                                 | readonly (number | string)[]
-                                | undefined
+                                | undefined,
                             ) => `${value} transações`}
                             contentStyle={{
                               borderRadius: "8px",

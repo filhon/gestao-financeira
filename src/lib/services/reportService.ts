@@ -103,10 +103,14 @@ export const reportService = {
       const dateKey = format(date, "yyyy-MM-dd");
       const current = dayMap.get(dateKey) || { in: 0, out: 0 };
 
+      // Usa o valor final (com desconto/juros) para transações pagas
+      const effectiveAmount =
+        t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
+
       if (t.type === "receivable") {
-        current.in += t.amount;
+        current.in += effectiveAmount;
       } else {
-        current.out += t.amount;
+        current.out += effectiveAmount;
       }
       dayMap.set(dateKey, current);
     });
@@ -331,13 +335,16 @@ export const reportService = {
       const favored = entity?.name || t.supplierOrClient || "-";
       const doc = entity?.document || "-";
       const favoredKey = doc !== "-" ? doc : normalizeName(favored);
-      const dateKey = format(t.dueDate, "yyyy-MM-dd");
+      // Usa a data efetiva: paymentDate para pagas, dueDate para as demais
+      const effectiveDate =
+        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+      const dateKey = format(effectiveDate, "yyyy-MM-dd");
       const groupKey = `${dateKey}|${favoredKey}`;
-      return { t, favored, doc, groupKey };
+      return { t, favored, doc, groupKey, effectiveDate };
     });
 
     withKeys.sort((a, b) => {
-      const dateDiff = a.t.dueDate.getTime() - b.t.dueDate.getTime();
+      const dateDiff = a.effectiveDate.getTime() - b.effectiveDate.getTime();
       if (dateDiff !== 0) return dateDiff;
       return a.groupKey.localeCompare(b.groupKey);
     });
@@ -345,19 +352,21 @@ export const reportService = {
     const groupsMap = new Map<string, GroupedTx>();
     const orderedKeys: string[] = [];
 
-    withKeys.forEach(({ t, favored, doc, groupKey }) => {
+    withKeys.forEach(({ t, favored, doc, groupKey, effectiveDate }) => {
+      const effectiveAmount =
+        t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
       const existing = groupsMap.get(groupKey);
       if (existing) {
         existing.items.push(t);
-        existing.total += t.amount;
+        existing.total += effectiveAmount;
       } else {
         groupsMap.set(groupKey, {
           key: groupKey,
-          date: t.dueDate,
+          date: effectiveDate,
           favored,
           doc,
           items: [t],
-          total: t.amount,
+          total: effectiveAmount,
         });
         orderedKeys.push(groupKey);
       }
@@ -378,16 +387,24 @@ export const reportService = {
             ? {
                 content: formatCurrency(group.total),
                 rowSpan: group.items.length,
-                styles: { halign: "center" as const, valign: "middle" as const },
+                styles: {
+                  halign: "center" as const,
+                  valign: "middle" as const,
+                },
               }
             : { content: "-", styles: { halign: "center" as const } };
 
+        const effectiveDate =
+          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+        const effectiveAmount =
+          t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
+
         return [
-          format(t.dueDate, "dd/MM/yyyy"),
+          format(effectiveDate, "dd/MM/yyyy"),
           t.type === "receivable" ? "Receita" : "Despesa",
           group.favored,
           group.doc,
-          formatCurrency(t.amount),
+          formatCurrency(effectiveAmount),
           index === 0 ? totalCell : "",
         ];
       }),
@@ -447,13 +464,23 @@ export const reportService = {
       },
     });
 
-    // Totals
+    // Totals — usa finalAmount para as transações pagas
     const totalIn = transactions
       .filter((t) => t.type === "receivable")
-      .reduce((acc, t) => acc + t.amount, 0);
+      .reduce(
+        (acc, t) =>
+          acc +
+          (t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount),
+        0,
+      );
     const totalOut = transactions
       .filter((t) => t.type === "payable")
-      .reduce((acc, t) => acc + t.amount, 0);
+      .reduce(
+        (acc, t) =>
+          acc +
+          (t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount),
+        0,
+      );
     const balance = totalIn - totalOut;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -506,33 +533,52 @@ export const reportService = {
       head: [["Descrição", "Valor"]],
       body: tableData,
       showHead: "firstPage",
+      styles: { font: reportFont, fontSize: 10, cellPadding: 3 },
+      headStyles: { font: reportFont, fontStyle: "bold" },
     });
 
     doc.save(`dre_${format(new Date(), "yyyyMMdd")}.pdf`);
   },
 
   exportToCSV: (transactions: Transaction[]) => {
+    const escapeCSV = (value: string | undefined | null): string => {
+      const str = value ?? "";
+      // Envolve em aspas e escapa aspas internas para compatibilidade com Excel
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
     const headers = [
-      "Data",
+      "Data Vencimento",
+      "Data Pagamento",
       "Descrição",
       "Tipo",
       "Entidade",
-      "Valor",
+      "Valor Original",
+      "Valor Final",
       "Status",
+      "Centro de Custo",
+      "Forma de Pagamento",
+      "Observações",
     ];
+
     const rows = transactions.map((t) => [
       format(t.dueDate, "yyyy-MM-dd"),
-      `"${t.description}"`, // Escape quotes
-      t.type,
-      `"${t.supplierOrClient || ""}"`,
+      t.paymentDate ? format(t.paymentDate, "yyyy-MM-dd") : "",
+      escapeCSV(t.description),
+      t.type === "payable" ? "Despesa" : "Receita",
+      escapeCSV(t.supplierOrClient),
       t.amount.toFixed(2),
+      (t.finalAmount ?? t.amount).toFixed(2),
       t.status,
+      t.costCenterId ?? "",
+      t.paymentMethod ?? "",
+      escapeCSV(t.notes),
     ]);
 
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((r) => r.join(",")),
-    ].join("\n");
+    // BOM UTF-8 garante que o Excel abra corretamente caracteres acentuados
+    const BOM = "\uFEFF";
+    const csvContent =
+      BOM + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);

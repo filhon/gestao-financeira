@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import {
   startOfMonth,
   endOfMonth,
+  subMonths,
   format,
   addDays,
   addWeeks,
@@ -51,19 +52,23 @@ export default function ReportsPage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const { onlyOwnPayables } = usePermissions();
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingFormat, setLoadingFormat] = useState<"pdf" | "csv" | null>(
+    null,
+  );
+  const isLoading = loadingFormat !== null;
 
   // Default to current month
   const [startDate, setStartDate] = useState<Date>(startOfMonth(new Date()));
   const [endDate, setEndDate] = useState<Date>(endOfMonth(new Date()));
   const [reportType, setReportType] = useState("cash_flow");
   const [initialBalance, setInitialBalance] = useState(0);
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const handleGenerate = async (formatType: "pdf" | "csv") => {
     if (!selectedCompany || !user) return;
 
     try {
-      setIsLoading(true);
+      setLoadingFormat(formatType);
 
       // For 'user' role, filter by createdBy to match Firestore rules
       const filter: {
@@ -159,6 +164,11 @@ export default function ReportsPage() {
         filtered.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
       }
 
+      // Aplica filtro de status, se selecionado
+      if (statusFilter !== "all") {
+        filtered = filtered.filter((t) => t.status === statusFilter);
+      }
+
       if (filtered.length === 0) {
         toast.warning("Nenhuma transação encontrada no período.");
         return;
@@ -199,7 +209,7 @@ export default function ReportsPage() {
       console.error(error);
       toast.error("Erro ao gerar relatório.");
     } finally {
-      setIsLoading(false);
+      setLoadingFormat(null);
     }
   };
 
@@ -220,7 +230,55 @@ export default function ReportsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Atalhos de período */}
+          <div className="space-y-2">
+            <Label>Período Rápido</Label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                {
+                  label: "Este mês",
+                  start: startOfMonth(new Date()),
+                  end: endOfMonth(new Date()),
+                },
+                {
+                  label: "Mês anterior",
+                  start: startOfMonth(subMonths(new Date(), 1)),
+                  end: endOfMonth(subMonths(new Date(), 1)),
+                },
+                {
+                  label: "Este trimestre",
+                  start: new Date(
+                    new Date().getFullYear(),
+                    Math.floor(new Date().getMonth() / 3) * 3,
+                    1,
+                  ),
+                  end: new Date(
+                    new Date().getFullYear(),
+                    Math.floor(new Date().getMonth() / 3) * 3 + 3,
+                    0,
+                  ),
+                },
+                {
+                  label: "Este ano",
+                  start: new Date(new Date().getFullYear(), 0, 1),
+                  end: new Date(new Date().getFullYear(), 11, 31),
+                },
+              ].map((range) => (
+                <button
+                  key={range.label}
+                  type="button"
+                  onClick={() => {
+                    setStartDate(range.start);
+                    setEndDate(range.end);
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label>Data Inicial</Label>
               <Popover>
@@ -298,6 +356,23 @@ export default function ReportsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label>Status das Transações</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="paid">Somente Pagas</SelectItem>
+                  <SelectItem value="approved">Somente Aprovadas</SelectItem>
+                  <SelectItem value="pending_approval">
+                    Somente Pendentes
+                  </SelectItem>
+                  <SelectItem value="draft">Somente Rascunhos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {reportType === "consolidated" && (
@@ -322,7 +397,7 @@ export default function ReportsPage() {
               disabled={isLoading}
               className="flex-1 md:flex-none"
             >
-              {isLoading ? (
+              {loadingFormat === "pdf" ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <FileText className="mr-2 h-4 w-4" />
@@ -335,7 +410,7 @@ export default function ReportsPage() {
               disabled={isLoading}
               className="flex-1 md:flex-none"
             >
-              {isLoading ? (
+              {loadingFormat === "csv" ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Download className="mr-2 h-4 w-4" />
