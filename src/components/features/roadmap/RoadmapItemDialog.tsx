@@ -79,8 +79,8 @@ export function RoadmapItemDialog({
     try {
       await roadmapService.updateItem(item.id, { title, description });
       toast.success("Item atualizado!");
+      setIsEditing(false);
       onSuccess();
-      setIsEditing(false); // Exit edit mode
     } catch {
       toast.error("Erro ao atualizar item.");
     } finally {

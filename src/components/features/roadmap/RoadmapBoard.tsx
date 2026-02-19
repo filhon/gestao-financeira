@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -12,6 +12,7 @@ import {
   DragStartEvent,
   DragOverEvent,
   DragEndEvent,
+  DragCancelEvent,
   defaultDropAnimationSideEffects,
   DropAnimation,
 } from "@dnd-kit/core";
@@ -40,6 +41,8 @@ export function RoadmapBoard() {
   const [items, setItems] = useState<RoadmapItemType[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeOriginalStatus, setActiveOriginalStatus] =
+    useState<RoadmapStatus | null>(null);
 
   // Check strictly for 'admin' role
   const isAdmin = user?.role === "admin";
@@ -50,22 +53,22 @@ export function RoadmapBoard() {
         distance: 5,
       },
     }),
-    []
+    [],
   );
 
   const keyboardSensorOptions = useMemo(
     () => ({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
-    []
+    [],
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, pointerSensorOptions),
-    useSensor(KeyboardSensor, keyboardSensorOptions)
+    useSensor(KeyboardSensor, keyboardSensorOptions),
   );
 
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async () => {
     try {
       const data = await roadmapService.getAllItems();
       setItems(data);
@@ -75,11 +78,11 @@ export function RoadmapBoard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchItems();
-  }, []);
+  }, [fetchItems]);
 
   const getItemsByStatus = (status: RoadmapStatus) => {
     return items.filter((item) => item.status === status);
@@ -99,7 +102,10 @@ export function RoadmapBoard() {
   const handleDragStart = (event: DragStartEvent) => {
     if (!isAdmin) return;
     const { active } = event;
-    setActiveId(active.id as string);
+    const id = active.id as string;
+    const originalStatus = items.find((item) => item.id === id)?.status ?? null;
+    setActiveId(id);
+    setActiveOriginalStatus(originalStatus);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -134,6 +140,7 @@ export function RoadmapBoard() {
   const handleDragEnd = async (event: DragEndEvent) => {
     if (!isAdmin) {
       setActiveId(null);
+      setActiveOriginalStatus(null);
       return;
     }
 
@@ -142,8 +149,8 @@ export function RoadmapBoard() {
     // Final status check
     const finalStatus = items.find((i) => i.id === active.id)?.status;
 
-    if (activeId && finalStatus) {
-      // Persist change to backend
+    // Só persiste se o status realmente mudou
+    if (activeId && finalStatus && finalStatus !== activeOriginalStatus) {
       try {
         await roadmapService.updateItemStatus(activeId, finalStatus);
         toast.success("Status atualizado!");
@@ -154,6 +161,22 @@ export function RoadmapBoard() {
     }
 
     setActiveId(null);
+    setActiveOriginalStatus(null);
+  };
+
+  const handleDragCancel = (_event: DragCancelEvent) => {
+    // Reverte o estado optimista ao cancelar o drag (ex: tecla Escape)
+    if (activeId && activeOriginalStatus) {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === activeId
+            ? { ...item, status: activeOriginalStatus }
+            : item,
+        ),
+      );
+    }
+    setActiveId(null);
+    setActiveOriginalStatus(null);
   };
 
   const dropAnimation: DropAnimation = {
@@ -181,8 +204,9 @@ export function RoadmapBoard() {
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
-      <div className="grid grid-cols-4 h-full gap-6 pb-4 min-w-0 overflow-x-auto">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 h-full gap-6 pb-4 min-w-0 overflow-x-auto">
         {COLUMNS.map((col) => (
           <RoadmapColumn
             key={col.id}
@@ -190,6 +214,7 @@ export function RoadmapBoard() {
             title={col.title}
             items={getItemsByStatus(col.id)}
             isAdmin={!!isAdmin}
+            onRefresh={fetchItems}
             extraHeader={
               col.id === "suggestion" && (
                 <AddSuggestionDialog onSuccess={fetchItems} />
@@ -204,6 +229,7 @@ export function RoadmapBoard() {
           <RoadmapItem
             item={items.find((i) => i.id === activeId)!}
             isAdmin={true}
+            onRefresh={fetchItems}
           />
         ) : null}
       </DragOverlay>

@@ -146,7 +146,7 @@ function AuditDetailsDisplay({ log }: { log: AuditLog }) {
 }
 
 export default function AuditLogsPage() {
-  const { selectedCompany } = useCompany();
+  const { selectedCompany, isLoading: isCompanyLoading } = useCompany();
   const router = useRouter();
   const { canViewAuditLogs } = usePermissions();
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -168,28 +168,28 @@ export default function AuditLogsPage() {
   });
 
   useEffect(() => {
-    if (!canViewAuditLogs) {
+    // Só redireciona depois que o carregamento da empresa for concluído
+    if (!isCompanyLoading && !canViewAuditLogs) {
       toast.error("Acesso negado.");
       router.push("/dashboard");
     }
-  }, [canViewAuditLogs, router]);
+  }, [canViewAuditLogs, router, isCompanyLoading]);
 
   // Load stats for filters
-  useEffect(() => {
-    const loadStats = async () => {
-      if (selectedCompany && canViewAuditLogs) {
-        try {
-          const data = await auditService.getAggregatedStats(
-            selectedCompany.id
-          );
-          setStats(data);
-        } catch (error) {
-          console.error("Error loading stats:", error);
-        }
+  const loadStats = useCallback(async () => {
+    if (selectedCompany && canViewAuditLogs) {
+      try {
+        const data = await auditService.getAggregatedStats(selectedCompany.id);
+        setStats(data);
+      } catch (error) {
+        console.error("Error loading stats:", error);
       }
-    };
-    loadStats();
+    }
   }, [selectedCompany, canViewAuditLogs]);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
 
   const fetchLogs = useCallback(
     async (isLoadMore = false) => {
@@ -212,7 +212,7 @@ export default function AuditLogsPage() {
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const filter: any = {};
+        const filter: Record<string, string | Date | undefined> = {};
         if (filters.action !== "all") filter.action = filters.action;
         if (filters.entity !== "all") filter.entity = filters.entity;
         if (filters.userId !== "all") filter.userId = filters.userId;
@@ -224,7 +224,7 @@ export default function AuditLogsPage() {
             selectedCompany.id,
             20,
             currentLastDoc,
-            filter
+            filter,
           );
 
         if (isLoadMore) {
@@ -242,7 +242,7 @@ export default function AuditLogsPage() {
         setIsLoading(false);
       }
     },
-    [selectedCompany, filters, canViewAuditLogs, lastDoc]
+    [selectedCompany, filters, canViewAuditLogs, lastDoc],
   );
 
   // Reset pagination when filters change
@@ -260,6 +260,22 @@ export default function AuditLogsPage() {
   ]);
 
   if (!canViewAuditLogs) return null;
+
+  // Mapeamento de ações para texto simples (usado nos SelectItems do filtro)
+  const getActionLabel = (action: string): string => {
+    const labels: Record<string, string> = {
+      create: "Criação",
+      update: "Edição",
+      delete: "Exclusão",
+      approve: "Aprovação",
+      reject: "Rejeição",
+      login: "Login",
+      pay: "Pagamento",
+      authorize: "Autorização",
+      release: "Liberação",
+    };
+    return labels[action] ?? action;
+  };
 
   const getActionBadge = (action: string) => {
     switch (action) {
@@ -286,6 +302,12 @@ export default function AuditLogsPage() {
         return <Badge className="bg-red-600">Rejeição</Badge>;
       case "login":
         return <Badge variant="outline">Login</Badge>;
+      case "pay":
+        return <Badge className="bg-violet-600">Pagamento</Badge>;
+      case "authorize":
+        return <Badge className="bg-indigo-600">Autorização</Badge>;
+      case "release":
+        return <Badge className="bg-cyan-600">Liberação</Badge>;
       default:
         return <Badge variant="outline">{action}</Badge>;
     }
@@ -314,8 +336,20 @@ export default function AuditLogsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Filtros</CardTitle>
-          <CardDescription>Refine a busca por logs.</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Filtros</CardTitle>
+              <CardDescription>Refine a busca por logs.</CardDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={loadStats}
+              title="Atualizar opções dos filtros"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           <div className="flex-1 min-w-[150px] max-w-[250px]">
@@ -373,7 +407,7 @@ export default function AuditLogsPage() {
                 <SelectItem value="all">Todas as Ações</SelectItem>
                 {stats.actions.map((action) => (
                   <SelectItem key={action.name} value={action.name}>
-                    {getActionBadge(action.name)}{" "}
+                    {getActionLabel(action.name)}{" "}
                     <span className="ml-2 text-muted-foreground">
                       ({action.count})
                     </span>

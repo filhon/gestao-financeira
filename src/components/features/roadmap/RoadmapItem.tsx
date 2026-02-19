@@ -17,16 +17,17 @@ import { RoadmapItemDialog } from "./RoadmapItemDialog";
 interface RoadmapItemProps {
   item: RoadmapItemType;
   isAdmin: boolean;
+  onRefresh: () => void;
 }
 
-export function RoadmapItem({ item, isAdmin }: RoadmapItemProps) {
+export function RoadmapItem({ item, isAdmin, onRefresh }: RoadmapItemProps) {
   const [open, setOpen] = useState(false);
   const data = useMemo(
     () => ({
       type: "Item",
       item,
     }),
-    [item]
+    [item],
   );
 
   const {
@@ -66,7 +67,7 @@ export function RoadmapItem({ item, isAdmin }: RoadmapItemProps) {
         className={cn(
           "cursor-pointer group relative hover:border-primary/50 transition-colors gap-0 py-0",
           item.status === "done" && "bg-muted/50 border-muted-foreground/20",
-          isAdmin && "active:cursor-grabbing"
+          isAdmin && "active:cursor-grabbing",
         )}
       >
         {/* Drag Handle for Admin */}
@@ -104,7 +105,7 @@ export function RoadmapItem({ item, isAdmin }: RoadmapItemProps) {
             className={cn(
               "text-sm font-medium leading-normal line-clamp-2",
               item.status === "done" &&
-                "text-muted-foreground line-through decoration-muted-foreground/30"
+                "text-muted-foreground line-through decoration-muted-foreground/30",
             )}
           >
             {item.title}
@@ -114,7 +115,7 @@ export function RoadmapItem({ item, isAdmin }: RoadmapItemProps) {
           <p
             className={cn(
               "text-xs text-muted-foreground line-clamp-3",
-              item.status === "done" && "opacity-70"
+              item.status === "done" && "opacity-70",
             )}
           >
             {item.description}
@@ -137,9 +138,7 @@ export function RoadmapItem({ item, isAdmin }: RoadmapItemProps) {
         item={item}
         open={open}
         onOpenChange={setOpen}
-        onSuccess={() => {
-          window.location.reload();
-        }}
+        onSuccess={onRefresh}
       />
     </>
   );
