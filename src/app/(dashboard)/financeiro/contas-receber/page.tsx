@@ -34,7 +34,7 @@ import { TransactionDetailsDialog } from "@/components/features/finance/Transact
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format, addDays } from "date-fns";
-// ptBR removed
+import { formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -213,10 +213,13 @@ export default function AccountsReceivablePage() {
 
   // Pagination logic removed (Server-side pagination used)
 
-  // Reset to first page when filters change
+  // Reset pagination state when "Ver Todas" is toggled
   useEffect(() => {
-    // setCurrentPage(1); // Removed
-  }, [showAllTransactions, itemsPerPage, statusFilter]);
+    if (showAllTransactions) {
+      setHasMore(false);
+      lastDocRef.current = null;
+    }
+  }, [showAllTransactions]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -369,7 +372,7 @@ export default function AccountsReceivablePage() {
                       colSpan={6}
                       className="text-center text-muted-foreground"
                     >
-                      {sortedTransactions.length === 0
+                      {showAllTransactions
                         ? "Nenhuma conta a receber encontrada."
                         : "Nenhuma conta com vencimento nos próximos 7 dias."}
                     </TableCell>
@@ -381,10 +384,7 @@ export default function AccountsReceivablePage() {
                       <TableCell>{t.description}</TableCell>
                       <TableCell>{t.supplierOrClient}</TableCell>
                       <TableCell>
-                        {new Intl.NumberFormat("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                        }).format(t.amount)}
+                        {formatCurrency(t.amount)}
                       </TableCell>
                       <TableCell>{getStatusBadge(t.status)}</TableCell>
                       <TableCell className="text-right">
@@ -417,7 +417,7 @@ export default function AccountsReceivablePage() {
           )}
           {!isLoading && (
             <div className="mt-4 flex flex-col gap-4">
-              {!showAllTransactions && (
+              {!showAllTransactions ? (
                 <Button
                   variant="outline"
                   className="w-full"
@@ -425,8 +425,7 @@ export default function AccountsReceivablePage() {
                 >
                   Ver Todas as Transações
                 </Button>
-              )}
-              {hasMore && (
+              ) : hasMore ? (
                 <Button
                   variant="outline"
                   className="w-full"
@@ -438,7 +437,7 @@ export default function AccountsReceivablePage() {
                   ) : null}
                   Carregar Mais
                 </Button>
-              )}
+              ) : null}
             </div>
           )}
         </CardContent>

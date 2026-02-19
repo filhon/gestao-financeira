@@ -45,7 +45,7 @@ export const recurrenceService = {
 
   getTemplates: async (
     companyId: string,
-    filter?: { active?: boolean },
+    filter?: { active?: boolean; limit?: number },
   ): Promise<RecurringTransactionTemplate[]> => {
     let q = query(
       collection(db, COLLECTION_NAME),
@@ -54,6 +54,10 @@ export const recurrenceService = {
 
     if (filter?.active !== undefined) {
       q = query(q, where("active", "==", filter.active));
+    }
+
+    if (filter?.limit) {
+      q = query(q, limit(filter.limit));
     }
 
     const snapshot = await getDocs(q);

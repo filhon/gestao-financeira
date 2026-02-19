@@ -31,7 +31,6 @@ import {
   Search,
 } from "lucide-react";
 import { format } from "date-fns";
-// ptBR removed
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -60,6 +59,10 @@ export default function RecorrenciasPage() {
   const [templates, setTemplates] = useState<RecurringTransactionTemplate[]>(
     [],
   );
+  // Ref to access current templates without adding to useEffect deps
+  const templatesRef = useRef(templates);
+  templatesRef.current = templates;
+
   const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [itemsPerPage] = useState(25);
@@ -144,33 +147,41 @@ export default function RecorrenciasPage() {
       const performSearch = async () => {
         setIsLoading(true);
         try {
-          // Fetch all for current company (and status filter if applicable, generally search ignores status or applies it too? lets apply if possible)
-          // Since getTemplates supports filter now:
-          const filter = {
-            active:
-              statusFilter === "all" ? undefined : statusFilter === "active",
-          };
-
-          const all = await recurrenceService.getTemplates(
-            selectedCompany.id,
-            filter,
-          );
-
+          // Try local filter first
           const search = debouncedSearchTerm
             .toLowerCase()
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "");
 
-          const filtered = all.filter((t) => {
+          const matchLocal = (t: RecurringTransactionTemplate) => {
             const description = t.description
               .toLowerCase()
               .normalize("NFD")
               .replace(/[\u0300-\u036f]/g, "");
             return description.includes(search);
-          });
+          };
 
-          setTemplates(filtered);
-          setHasMore(false); // No pagination in search mode
+          const localResults = templatesRef.current.filter(matchLocal);
+
+          if (localResults.length > 0) {
+            setTemplates(localResults);
+            setHasMore(false);
+          } else {
+            // Fetch limited set from server if no local results
+            const filter = {
+              active:
+                statusFilter === "all" ? undefined : statusFilter === "active",
+              limit: 100,
+            };
+
+            const all = await recurrenceService.getTemplates(
+              selectedCompany.id,
+              filter,
+            );
+
+            setTemplates(all.filter(matchLocal));
+            setHasMore(false);
+          }
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
@@ -423,9 +434,9 @@ export default function RecorrenciasPage() {
       <ConfirmDialog
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
-        title="Excluir Recorrência"
-        description="Tem certeza que deseja excluir esta recorrência? Esta ação não pode ser desfeita."
-        confirmText="Excluir"
+        title="Desativar Recorrência"
+        description="Tem certeza que deseja desativar esta recorrência? Ela parará de gerar transações, mas poderá ser reativada depois."
+        confirmText="Desativar"
         variant="destructive"
         onConfirm={handleDelete}
       />
