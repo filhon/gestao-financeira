@@ -516,6 +516,20 @@ export const transactionService = {
     });
   },
 
+  reconcile: async (
+    transactionId: string,
+    data: { externalId: string; reconciledBy: string },
+  ) => {
+    const docRef = doc(db, COLLECTION_NAME, transactionId);
+    return updateDoc(docRef, {
+      reconciled: true,
+      reconciledAt: serverTimestamp(),
+      externalId: data.externalId,
+      reconciledBy: data.reconciledBy,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
   updateRecurrence: async (
     originalTransaction: Transaction,
     data: Partial<TransactionFormData>,

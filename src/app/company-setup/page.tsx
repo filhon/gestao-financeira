@@ -8,6 +8,7 @@ import { userService } from "@/lib/services/userService";
 import { notificationService } from "@/lib/services/notificationService";
 import { UserRole } from "@/lib/types";
 import { ROLE_DESCRIPTIONS } from "@/lib/constants/roleDescriptions";
+import { validateCnpj, formatCnpj } from "@/lib/validations/cnpj";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -57,17 +58,7 @@ export default function CompanySetupPage() {
     }
   }, [user, router]);
 
-  // Format CNPJ as user types
-  const formatCnpj = (value: string): string => {
-    const digits = value.replace(/\D/g, "");
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
-    if (digits.length <= 8)
-      return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
-    if (digits.length <= 12)
-      return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
-    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
-  };
+  // formatCnpj imported from @/lib/validations/cnpj
 
   const handleCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatCnpj(e.target.value);
@@ -80,12 +71,6 @@ export default function CompanySetupPage() {
     if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
   };
 
-  // Validate CNPJ format (basic validation - 14 digits)
-  const isValidCnpj = (cnpj: string): boolean => {
-    const digits = cnpj.replace(/\D/g, "");
-    return digits.length === 14;
-  };
-
   const validateForm = (): boolean => {
     const newErrors: { name?: string; cnpj?: string } = {};
 
@@ -95,8 +80,8 @@ export default function CompanySetupPage() {
 
     if (!companyCnpj.trim()) {
       newErrors.cnpj = "CNPJ é obrigatório";
-    } else if (!isValidCnpj(companyCnpj)) {
-      newErrors.cnpj = "CNPJ deve ter 14 dígitos";
+    } else if (!validateCnpj(companyCnpj)) {
+      newErrors.cnpj = "CNPJ inválido. Verifique os dígitos.";
     }
 
     setErrors(newErrors);

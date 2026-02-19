@@ -23,9 +23,18 @@ export function proxy(request: NextRequest) {
         (route !== "/" && pathname.startsWith(route + "/"))
     )
   ) {
-    // If user is logged in and active, redirect login to dashboard
-    if (token && status === "active" && pathname === "/login") {
+    // If user is logged in and active, redirect login and landing to dashboard
+    if (token && status === "active" && (pathname === "/login" || pathname === "/")) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+    // If user is logged in but pending, redirect landing/login to appropriate page
+    if (token && (pathname === "/" || pathname === "/login")) {
+      if (status === "pending_company_setup") {
+        return NextResponse.redirect(new URL("/company-setup", request.url));
+      }
+      if (status === "pending_approval") {
+        return NextResponse.redirect(new URL("/pending-approval", request.url));
+      }
     }
     // If user needs company setup but is on pending-approval, redirect to company-setup
     if (
@@ -74,8 +83,9 @@ export const config = {
      * - api (API routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
+     * - favicon.ico, favicon.svg (favicon files)
+     * - approve, approve-batch, authorize-batch (magic link pages)
      */
-    "/((?!api|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api|_next/static|_next/image|favicon\\.ico|favicon\\.svg|approve|approve-batch|authorize-batch).*)",
   ],
 };

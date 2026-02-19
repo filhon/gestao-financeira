@@ -1,11 +1,67 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Transaction } from "@/lib/types";
+import { Transaction, Entity } from "@/lib/types";
 import { format, addDays, startOfDay, isAfter, isBefore } from "date-fns";
 import { formatCurrency } from "@/lib/utils";
 
+let interFontCache: string | null = null;
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+};
+
+type ReportFont = "Inter" | "helvetica";
+
+const getDocFontList = (doc: jsPDF): Record<string, string[]> => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const list = (doc as any).getFontList?.();
+  return (list ?? {}) as Record<string, string[]>;
+};
+
+const ensureInterFont = async (doc: jsPDF): Promise<boolean> => {
+  try {
+    const fontList = getDocFontList(doc);
+    if (fontList.Inter) return true;
+
+    if (!interFontCache) {
+      // Evita cache do navegador manter uma versão antiga da fonte
+      const res = await fetch("/fonts/Inter-Regular.ttf?v=4.1", {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("Falha ao carregar a fonte Inter");
+      const buffer = await res.arrayBuffer();
+      interFontCache = arrayBufferToBase64(buffer);
+    }
+
+    doc.addFileToVFS("Inter-Regular.ttf", interFontCache);
+    // Identity-H evita problemas com acentuação e métricas em alguns viewers
+    doc.addFont("Inter-Regular.ttf", "Inter", "normal", "Identity-H");
+
+    const updatedFontList = getDocFontList(doc);
+    return !!updatedFontList.Inter;
+  } catch (error) {
+    console.warn("Falha ao carregar a fonte Inter. Usando padrão.", error);
+    return false;
+  }
+};
+
+const ensureReportFont = async (doc: jsPDF): Promise<ReportFont> => {
+  const interOk = await ensureInterFont(doc);
+  const font: ReportFont = interOk ? "Inter" : "helvetica";
+  doc.setFont(font, "normal");
+  doc.setCharSpace(0);
+  return font;
+};
+
 export const reportService = {
-  generateConsolidatedCashFlowPDF: (
+  generateConsolidatedCashFlowPDF: async (
     transactions: Transaction[],
     startDate: Date,
     endDate: Date,
@@ -13,6 +69,7 @@ export const reportService = {
     initialBalance: number = 0,
   ) => {
     const doc = new jsPDF();
+    const reportFont = await ensureReportFont(doc);
 
     // --- Configuração Visual ---
     const headerColor = [34, 47, 62]; // Dark navy
@@ -107,13 +164,16 @@ export const reportService = {
       head: [["Data", "Entradas", "Saídas", "Saldo Acumulado"]],
       body: tableRows,
       theme: "plain",
+      showHead: "firstPage",
       styles: {
+        font: reportFont,
         fontSize: 10,
         cellPadding: 3,
         lineColor: [220, 220, 220],
         lineWidth: 0.1,
       },
       headStyles: {
+        font: reportFont,
         fillColor: [245, 245, 245],
         textColor: [50, 50, 50],
         fontStyle: "bold",
@@ -211,13 +271,19 @@ export const reportService = {
     doc.save(`fluxo_caixa_consolidado_${format(new Date(), "yyyyMMdd")}.pdf`);
   },
 
-  generateCashFlowPDF: (
+  generateCashFlowPDF: async (
     transactions: Transaction[],
     startDate: Date,
     endDate: Date,
     companyName: string,
+    entities: Entity[] = [],
   ) => {
-    const doc = new jsPDF();
+    const doc = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
+    });
+    const reportFont = await ensureReportFont(doc);
 
     // Header
     doc.setFontSize(18);
@@ -231,18 +297,154 @@ export const reportService = {
     );
 
     // Data Processing
-    const tableData = transactions.map((t) => [
-      format(t.dueDate, "dd/MM/yyyy"),
-      t.description,
-      t.type === "receivable" ? "Receita" : "Despesa",
-      t.supplierOrClient || "-",
-      formatCurrency(t.amount),
-    ]);
+    const entitiesMap = entities.reduce(
+      (acc, entity) => {
+        acc[entity.id] = entity;
+        return acc;
+      },
+      {} as Record<string, Entity>,
+    );
+
+    const sortedTransactions = [...transactions].sort(
+      (a, b) => a.dueDate.getTime() - b.dueDate.getTime(),
+    );
+
+    type GroupedTx = {
+      key: string;
+      date: Date;
+      favored: string;
+      doc: string;
+      items: Transaction[];
+      total: number;
+    };
+
+    const normalizeName = (value: string) =>
+      value
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const withKeys = sortedTransactions.map((t) => {
+      const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+      const favored = entity?.name || t.supplierOrClient || "-";
+      const doc = entity?.document || "-";
+      const favoredKey = doc !== "-" ? doc : normalizeName(favored);
+      const dateKey = format(t.dueDate, "yyyy-MM-dd");
+      const groupKey = `${dateKey}|${favoredKey}`;
+      return { t, favored, doc, groupKey };
+    });
+
+    withKeys.sort((a, b) => {
+      const dateDiff = a.t.dueDate.getTime() - b.t.dueDate.getTime();
+      if (dateDiff !== 0) return dateDiff;
+      return a.groupKey.localeCompare(b.groupKey);
+    });
+
+    const groupsMap = new Map<string, GroupedTx>();
+    const orderedKeys: string[] = [];
+
+    withKeys.forEach(({ t, favored, doc, groupKey }) => {
+      const existing = groupsMap.get(groupKey);
+      if (existing) {
+        existing.items.push(t);
+        existing.total += t.amount;
+      } else {
+        groupsMap.set(groupKey, {
+          key: groupKey,
+          date: t.dueDate,
+          favored,
+          doc,
+          items: [t],
+          total: t.amount,
+        });
+        orderedKeys.push(groupKey);
+      }
+    });
+
+    const groups = orderedKeys
+      .map((key) => groupsMap.get(key)!)
+      .sort((a, b) => {
+        const dateDiff = a.date.getTime() - b.date.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return a.key.localeCompare(b.key);
+      });
+
+    const tableData = groups.flatMap((group) =>
+      group.items.map((t, index) => {
+        const totalCell =
+          group.items.length > 1
+            ? {
+                content: formatCurrency(group.total),
+                rowSpan: group.items.length,
+                styles: { halign: "center" as const, valign: "middle" as const },
+              }
+            : { content: "-", styles: { halign: "center" as const } };
+
+        return [
+          format(t.dueDate, "dd/MM/yyyy"),
+          t.type === "receivable" ? "Receita" : "Despesa",
+          group.favored,
+          group.doc,
+          formatCurrency(t.amount),
+          index === 0 ? totalCell : "",
+        ];
+      }),
+    );
+
+    // Larguras calibradas para A4 em landscape (melhora legibilidade e reduz quebras)
+    const marginX = 14;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const usableWidth = pageWidth - marginX * 2;
+    const col0 = 24; // Data
+    const col1 = 26; // Lançamento
+    const col3 = 45; // CNPJ/CPF
+    const col4 = 27; // Valor
+    const col5 = 27; // Total
+    const col2 = Math.max(60, usableWidth - (col0 + col1 + col3 + col4 + col5)); // Razão Social
 
     autoTable(doc, {
       startY: 45,
-      head: [["Data", "Descrição", "Tipo", "Entidade", "Valor"]],
+      head: [
+        [
+          "Data",
+          "Lançamento",
+          "Razão Social",
+          "CNPJ/CPF",
+          "Valor (R$)",
+          "Total",
+        ],
+      ],
       body: tableData,
+      theme: "striped",
+      columnStyles: {
+        0: { cellWidth: col0 },
+        1: { cellWidth: col1 },
+        2: { cellWidth: col2 },
+        3: { cellWidth: col3 },
+        4: { cellWidth: col4, halign: "right" },
+        5: { cellWidth: col5, halign: "center", valign: "middle" },
+      },
+      styles: {
+        font: reportFont,
+        fontSize: 9,
+        cellPadding: 2.2,
+        overflow: "linebreak",
+        valign: "middle",
+      },
+      headStyles: {
+        font: reportFont,
+        fontStyle: "bold",
+        halign: "center",
+      },
+      showHead: "firstPage",
+      rowPageBreak: "auto",
+      didDrawPage: () => {
+        // Garante que nenhuma configuração global “vaze” entre páginas
+        doc.setCharSpace(0);
+        doc.setFont(reportFont, "normal");
+      },
     });
 
     // Totals
@@ -263,13 +465,14 @@ export const reportService = {
     doc.save(`fluxo_caixa_${format(new Date(), "yyyyMMdd")}.pdf`);
   },
 
-  generateDREPDF: (
+  generateDREPDF: async (
     transactions: Transaction[],
     startDate: Date,
     endDate: Date,
     companyName: string,
   ) => {
     const doc = new jsPDF();
+    await ensureReportFont(doc);
 
     // Header
     doc.setFontSize(18);
@@ -302,6 +505,7 @@ export const reportService = {
       startY: 45,
       head: [["Descrição", "Valor"]],
       body: tableData,
+      showHead: "firstPage",
     });
 
     doc.save(`dre_${format(new Date(), "yyyyMMdd")}.pdf`);

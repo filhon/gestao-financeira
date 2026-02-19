@@ -167,6 +167,10 @@ export default function AccountsPayablePage() {
   // Batch Selection State
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
+  const [isBatchPaymentOpen, setIsBatchPaymentOpen] = useState(false);
+  const [isBatchRevertOpen, setIsBatchRevertOpen] = useState(false);
+  const [isProcessingBatch, setIsProcessingBatch] = useState(false);
+  const [batchPaymentDate, setBatchPaymentDate] = useState<Date>(new Date());
   const [openBatches, setOpenBatches] = useState<PaymentBatch[]>([]);
   const [newBatchName, setNewBatchName] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -419,11 +423,8 @@ export default function AccountsPayablePage() {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      // Only select draft transactions
-      const draftTransactions = sortedTransactions.filter(
-        (t) => t.status === "draft",
-      );
-      setSelectedIds(new Set(draftTransactions.map((t) => t.id)));
+      // Select all visible transactions
+      setSelectedIds(new Set(sortedTransactions.map((t) => t.id)));
     } else {
       setSelectedIds(new Set());
     }
@@ -487,6 +488,88 @@ export default function AccountsPayablePage() {
     } catch (error) {
       console.error(error);
       toast.error("Erro ao criar e adicionar ao lote");
+    }
+  };
+
+  const handleBatchPayment = async () => {
+    if (!user || !selectedCompany) return;
+    
+    // Filter transactions that can be paid (not already paid)
+    const transactionsToPay = transactions.filter(
+      (t) => selectedIds.has(t.id) && t.status !== "paid"
+    );
+
+    if (transactionsToPay.length === 0) {
+      toast.error("Nenhuma transação elegível para pagamento selecionada.");
+      return;
+    }
+
+    try {
+      setIsProcessingBatch(true);
+      
+      const promises = transactionsToPay.map((t) => 
+        transactionService.update(
+          t.id,
+          { 
+            status: "paid", 
+            paymentDate: batchPaymentDate 
+          },
+          { uid: user.uid, email: user.email },
+          selectedCompany.id
+        )
+      );
+
+      await Promise.all(promises);
+      toast.success(`${transactionsToPay.length} transações pagas com sucesso!`);
+      setIsBatchPaymentOpen(false);
+      setSelectedIds(new Set());
+      fetchTransactions();
+    } catch (error) {
+      console.error(error);
+      toast.error("Erro ao realizar pagamento em lote.");
+    } finally {
+      setIsProcessingBatch(false);
+    }
+  };
+
+  const handleBatchRevert = async () => {
+    if (!user || !selectedCompany) return;
+
+    // Filter transactions that can be reverted (must be paid)
+    const transactionsToRevert = transactions.filter(
+      (t) => selectedIds.has(t.id) && t.status === "paid"
+    );
+
+    if (transactionsToRevert.length === 0) {
+      toast.error("Nenhuma transação paga selecionada para reversão.");
+      return;
+    }
+
+    try {
+      setIsProcessingBatch(true);
+
+      // We explicitly set paymentDate to null (or we could use deleteField if needed, 
+      // but null is often safer for types if we adjust the type definition or just cast)
+      // For now, let's just change status to draft which seems to be the standard behavior in this app
+      const promises = transactionsToRevert.map((t) => 
+        transactionService.update(
+          t.id,
+          { status: "draft" }, // Reverting to draft effectively undoes payment
+          { uid: user.uid, email: user.email },
+          selectedCompany.id
+        )
+      );
+
+      await Promise.all(promises);
+      toast.success(`${transactionsToRevert.length} pagamentos revertidos com sucesso!`);
+      setIsBatchRevertOpen(false);
+      setSelectedIds(new Set());
+      fetchTransactions();
+    } catch (error) {
+      console.error(error);
+      toast.error("Erro ao reverter pagamentos em lote.");
+    } finally {
+      setIsProcessingBatch(false);
     }
   };
 
@@ -656,64 +739,130 @@ export default function AccountsPayablePage() {
 
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
-            <Dialog
-              open={isBatchDialogOpen}
-              onOpenChange={setIsBatchDialogOpen}
-            >
-              <DialogTrigger asChild>
-                <Button variant="secondary" onClick={fetchOpenBatches}>
-                  Adicionar ao Lote ({selectedIds.size})
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Adicionar ao Lote de Pagamento</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label>Selecione um Lote Aberto</Label>
-                    {openBatches.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Nenhum lote aberto encontrado.
-                      </p>
-                    ) : (
-                      <div className="grid gap-2">
-                        {openBatches.map((batch) => (
-                          <Button
-                            key={batch.id}
-                            variant="outline"
-                            className="justify-start"
-                            onClick={() => handleAddToBatch(batch.id)}
-                          >
-                            {batch.name} ({formatCurrency(batch.totalAmount)})
-                          </Button>
-                        ))}
+            <>
+              <Dialog
+                open={isBatchDialogOpen}
+                onOpenChange={setIsBatchDialogOpen}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="secondary" onClick={fetchOpenBatches}>
+                    Adicionar ao Lote ({selectedIds.size})
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Adicionar ao Lote de Pagamento</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Selecione um Lote Aberto</Label>
+                      {openBatches.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Nenhum lote aberto encontrado.
+                        </p>
+                      ) : (
+                        <div className="grid gap-2">
+                          {openBatches.map((batch) => (
+                            <Button
+                              key={batch.id}
+                              variant="outline"
+                              className="justify-start"
+                              onClick={() => handleAddToBatch(batch.id)}
+                            >
+                              {batch.name} ({formatCurrency(batch.totalAmount)})
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t" />
                       </div>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
+                      <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-background px-2 text-muted-foreground">
+                          Ou crie um novo
+                        </span>
+                      </div>
                     </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">
-                        Ou crie um novo
-                      </span>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Nome do novo lote"
+                        value={newBatchName}
+                        onChange={(e) => setNewBatchName(e.target.value)}
+                      />
+                      <Button onClick={handleCreateAndAddToBatch}>
+                        Criar e Adicionar
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Nome do novo lote"
-                      value={newBatchName}
-                      onChange={(e) => setNewBatchName(e.target.value)}
-                    />
-                    <Button onClick={handleCreateAndAddToBatch}>
-                      Criar e Adicionar
-                    </Button>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={isBatchPaymentOpen} onOpenChange={setIsBatchPaymentOpen}>
+                <DialogTrigger asChild>
+                   <Button variant="outline" className="text-green-600 border-green-600 hover:bg-green-50">
+                     Pagar ({selectedIds.size})
+                   </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Pagamento em Lote</DialogTitle>
+                    <CardDescription>
+                      Serão pagos {transactions.filter(t => selectedIds.has(t.id) && t.status !== 'paid').length} itens selecionados.
+                      Itens já pagos serão ignorados.
+                    </CardDescription>
+                  </DialogHeader>
+                   <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Data do Pagamento</Label>
+                      <Input
+                        type="date"
+                        value={format(batchPaymentDate, "yyyy-MM-dd")}
+                        onChange={(e) => {
+                          const date = e.target.valueAsDate;
+                          if (date) {
+                             const userTimezoneOffset = date.getTimezoneOffset() * 60000;
+                             setBatchPaymentDate(new Date(date.getTime() + userTimezoneOffset));
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-4">
+                      <Button variant="outline" onClick={() => setIsBatchPaymentOpen(false)}>Cancelar</Button>
+                      <Button onClick={handleBatchPayment} disabled={isProcessingBatch}>
+                        {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Confirmar Pagamento
+                      </Button>
+                    </div>
+                   </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={isBatchRevertOpen} onOpenChange={setIsBatchRevertOpen}>
+                <DialogTrigger asChild>
+                   <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50">
+                     Reverter ({selectedIds.size})
+                   </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
+                    <CardDescription>
+                      Deseja reverter o pagamento de {transactions.filter(t => selectedIds.has(t.id) && t.status === 'paid').length} itens selecionados para Rascunho?
+                      Itens não pagos serão ignorados.
+                    </CardDescription>
+                  </DialogHeader>
+                  <div className="flex justify-end gap-2 pt-4">
+                      <Button variant="outline" onClick={() => setIsBatchRevertOpen(false)}>Cancelar</Button>
+                      <Button variant="destructive" onClick={handleBatchRevert} disabled={isProcessingBatch}>
+                        {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Confirmar Reversão
+                      </Button>
                   </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+                </DialogContent>
+              </Dialog>
+            </>
           )}
           {canCreatePayables && (
             <>
@@ -816,11 +965,8 @@ export default function AccountsPayablePage() {
                   <TableHead className="w-[50px]">
                     <Checkbox
                       checked={
-                        sortedTransactions.filter((t) => t.status === "draft")
-                          .length > 0 &&
-                        sortedTransactions
-                          .filter((t) => t.status === "draft")
-                          .every((t) => selectedIds.has(t.id))
+                        sortedTransactions.length > 0 &&
+                        sortedTransactions.every((t) => selectedIds.has(t.id))
                       }
                       onCheckedChange={toggleSelectAll}
                     />
@@ -900,7 +1046,6 @@ export default function AccountsPayablePage() {
                           <Checkbox
                             checked={selectedIds.has(t.id)}
                             onCheckedChange={() => toggleSelect(t.id)}
-                            disabled={t.status !== "draft"}
                           />
                         </TableCell>
                         <TableCell>

@@ -1,8 +1,30 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, BarChart3, CheckCircle2, ShieldCheck } from "lucide-react";
 
 export default function LandingPage() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && user) {
+      const effectiveStatus =
+        user.status || (user.active ? "active" : "pending_company_setup");
+      if (effectiveStatus === "active") {
+        router.push("/dashboard");
+      } else if (effectiveStatus === "pending_company_setup") {
+        router.push("/company-setup");
+      } else if (effectiveStatus === "pending_approval") {
+        router.push("/pending-approval");
+      }
+    }
+  }, [user, loading, router]);
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

@@ -5,9 +5,10 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { transactionService } from "@/lib/services/transactionService";
+import { entityService } from "@/lib/services/entityService";
 import { reportService } from "@/lib/services/reportService";
 import { recurrenceService } from "@/lib/services/recurrenceService";
-import { Transaction } from "@/lib/types";
+import { Transaction, Entity } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -79,7 +80,10 @@ export default function ReportsPage() {
         filter.createdBy = user.uid;
       }
 
-      const allTransactions = await transactionService.getAll(filter);
+      const [allTransactions, entities] = await Promise.all([
+        transactionService.getAll(filter),
+        entityService.getAll(selectedCompany.id),
+      ]);
 
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -166,21 +170,22 @@ export default function ReportsPage() {
         toast.success("Exportação CSV concluída!");
       } else {
         if (reportType === "cash_flow") {
-          reportService.generateCashFlowPDF(
+          await reportService.generateCashFlowPDF(
             filtered,
             start,
             end,
             selectedCompany.name,
+            entities as Entity[],
           );
         } else if (reportType === "dre") {
-          reportService.generateDREPDF(
+          await reportService.generateDREPDF(
             filtered,
             start,
             end,
             selectedCompany.name,
           );
         } else if (reportType === "consolidated") {
-          reportService.generateConsolidatedCashFlowPDF(
+          await reportService.generateConsolidatedCashFlowPDF(
             filtered,
             start,
             end,

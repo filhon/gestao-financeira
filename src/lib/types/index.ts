@@ -380,6 +380,14 @@ export type ReconciliationStatus =
   | "ignored"
   | "potential_match";
 
+export interface ReconciliationMatchCandidate {
+  id: string;
+  score: number; // 0-100
+  reasons: string[]; // explicações do match
+  transaction: Transaction;
+  entityName?: string;
+}
+
 export interface BankTransaction {
   id: string; // generated unique id for session
   date: Date;
@@ -392,6 +400,9 @@ export interface BankTransaction {
   status: ReconciliationStatus;
   matchedTransactionId?: string; // ID of the system transaction (Legacy/Single)
   matchedTransactionIds?: string[]; // IDs for bundled matches
+  matchedDetails?: Transaction; // Full transaction object for display
+  matchedBundleDetails?: Transaction[]; // Full transaction objects for bundled matches
+  matchCandidates?: ReconciliationMatchCandidate[]; // Top candidates for manual review
   confidence?: number; // 0-100 score of match quality
 }
 

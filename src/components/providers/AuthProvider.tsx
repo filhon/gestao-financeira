@@ -72,6 +72,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               window.location.pathname !== "/pending-approval"
             ) {
               router.push("/pending-approval");
+            } else if (effectiveStatus === "active") {
+              const path = window.location.pathname;
+              if (path === "/" || path === "/login") {
+                router.push("/dashboard");
+              }
             }
           } else {
             // Create new user profile if it doesn't exist (First Login with Google usually)
@@ -126,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-      router.push("/dashboard");
+      // Navigation handled by onAuthStateChanged based on user status
     } catch (error) {
       console.error("Error logging in with Google:", error);
       throw error;
@@ -136,7 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithEmail = async (email: string, password: string) => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard");
+      // Navigation handled by onAuthStateChanged based on user status
     } catch (error) {
       console.error("Error logging in with Email:", error);
       throw error;
