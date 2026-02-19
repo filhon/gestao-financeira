@@ -60,6 +60,7 @@ import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { PaymentBatch } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { AnimatedCounter } from "@/components/ui/animated-counter";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -79,58 +80,7 @@ import { CostCenter } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { CurrencyInput } from "@/components/ui/currency-input";
 
-function useAnimatedValue(targetValue: number, duration: number = 800) {
-  const [currentValue, setCurrentValue] = useState(targetValue);
-  const startValueRef = useRef(targetValue);
-  const startTimeRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    startValueRef.current = currentValue;
-    startTimeRef.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetValue]);
-
-  useEffect(() => {
-    let animationFrameId: number;
-
-    const animate = (timestamp: number) => {
-      if (!startTimeRef.current) startTimeRef.current = timestamp;
-      const progress = Math.min(
-        (timestamp - startTimeRef.current) / duration,
-        1,
-      );
-      // Ease out quart
-      const ease = 1 - Math.pow(1 - progress, 4);
-
-      const nextValue =
-        startValueRef.current + (targetValue - startValueRef.current) * ease;
-
-      setCurrentValue(nextValue);
-
-      if (progress < 1) {
-        animationFrameId = requestAnimationFrame(animate);
-      }
-    };
-
-    animationFrameId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [targetValue, duration]);
-
-  return currentValue;
-}
-
-const AnimatedNumber = ({
-  value,
-  formatter,
-}: {
-  value: number;
-  formatter?: (n: number) => string;
-}) => {
-  const animated = useAnimatedValue(value);
-  return <>{formatter ? formatter(animated) : Math.round(animated)}</>;
-};
-
-// ...
+// AnimatedNumber uses shared AnimatedCounter component
 
 export default function AccountsPayablePage() {
   const { user } = useAuth();
@@ -359,6 +309,10 @@ export default function AccountsPayablePage() {
     }
   }, [selectedCompany]);
 
+  // Ref to access current transactions without adding to useEffect deps
+  const transactionsRef = useRef(transactions);
+  transactionsRef.current = transactions;
+
   useEffect(() => {
     if (!debouncedSearchTerm) {
       fetchTransactions();
@@ -367,28 +321,12 @@ export default function AccountsPayablePage() {
         if (!selectedCompany || !user) return;
         setIsLoading(true);
         try {
-          const filter: {
-            companyId: string;
-            type: string;
-            createdBy?: string;
-          } = {
-            companyId: selectedCompany.id,
-            type: "payable",
-          };
-
-          if (onlyOwnPayables) {
-            filter.createdBy = user.uid;
-          }
-
-          // Fetch all matching basic criteria
-          const all = await transactionService.getAll(filter);
-
           const search = debouncedSearchTerm
             .toLowerCase()
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "");
 
-          const filtered = all.filter((t) => {
+          const matchLocal = (t: Transaction) => {
             const description = t.description
               .toLowerCase()
               .normalize("NFD")
@@ -398,10 +336,35 @@ export default function AccountsPayablePage() {
               .normalize("NFD")
               .replace(/[\u0300-\u036f]/g, "");
             return description.includes(search) || supplier.includes(search);
-          });
+          };
 
-          setTransactions(filtered);
-          setHasMore(false);
+          // Try local filter on current dataset first (via ref — no dep cycle)
+          const localResults = transactionsRef.current.filter(matchLocal);
+
+          if (localResults.length > 0) {
+            setTransactions(localResults);
+            setHasMore(false);
+          } else {
+            // Fetch a limited set from server (max 100) to search
+            const filter: {
+              companyId: string;
+              type: string;
+              createdBy?: string;
+              limit?: number;
+            } = {
+              companyId: selectedCompany.id,
+              type: "payable",
+              limit: 100,
+            };
+
+            if (onlyOwnPayables) {
+              filter.createdBy = user.uid;
+            }
+
+            const all = await transactionService.getAll(filter);
+            setTransactions(all.filter(matchLocal));
+            setHasMore(false);
+          }
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
@@ -412,7 +375,7 @@ export default function AccountsPayablePage() {
       performSearch();
     }
 
-    setSelectedIds(new Set()); // Clear selection on company change/search
+    setSelectedIds(new Set());
   }, [
     fetchTransactions,
     selectedCompany,
@@ -493,7 +456,7 @@ export default function AccountsPayablePage() {
 
   const handleBatchPayment = async () => {
     if (!user || !selectedCompany) return;
-    
+
     // Filter transactions that can be paid (not already paid)
     const transactionsToPay = transactions.filter(
       (t) => selectedIds.has(t.id) && t.status !== "paid"
@@ -506,13 +469,13 @@ export default function AccountsPayablePage() {
 
     try {
       setIsProcessingBatch(true);
-      
-      const promises = transactionsToPay.map((t) => 
+
+      const promises = transactionsToPay.map((t) =>
         transactionService.update(
           t.id,
-          { 
-            status: "paid", 
-            paymentDate: batchPaymentDate 
+          {
+            status: "paid",
+            paymentDate: batchPaymentDate
           },
           { uid: user.uid, email: user.email },
           selectedCompany.id
@@ -551,7 +514,7 @@ export default function AccountsPayablePage() {
       // We explicitly set paymentDate to null (or we could use deleteField if needed, 
       // but null is often safer for types if we adjust the type definition or just cast)
       // For now, let's just change status to draft which seems to be the standard behavior in this app
-      const promises = transactionsToRevert.map((t) => 
+      const promises = transactionsToRevert.map((t) =>
         transactionService.update(
           t.id,
           { status: "draft" }, // Reverting to draft effectively undoes payment
@@ -670,10 +633,13 @@ export default function AccountsPayablePage() {
 
   // Pagination logic removed (Server-side pagination used)
 
-  // Reset to first page when filters change
+  // Fix 8: Reset pagination state when "Ver Todas" is toggled
   useEffect(() => {
-    // setCurrentPage(1); // Removed
-  }, [showAllTransactions, itemsPerPage, statusFilter]);
+    if (showAllTransactions) {
+      setHasMore(false);
+      lastDocRef.current = null;
+    }
+  }, [showAllTransactions]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -707,7 +673,7 @@ export default function AccountsPayablePage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                <AnimatedNumber value={selectedIds.size} />
+                <AnimatedCounter value={selectedIds.size} formatter={(v) => String(Math.round(v))} />
               </div>
               <p className="text-xs text-muted-foreground">
                 Transações marcadas
@@ -721,7 +687,7 @@ export default function AccountsPayablePage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-primary">
-                <AnimatedNumber
+                <AnimatedCounter
                   value={selectedTotal}
                   formatter={formatCurrency}
                 />
@@ -799,69 +765,73 @@ export default function AccountsPayablePage() {
                 </DialogContent>
               </Dialog>
 
-              <Dialog open={isBatchPaymentOpen} onOpenChange={setIsBatchPaymentOpen}>
-                <DialogTrigger asChild>
-                   <Button variant="outline" className="text-green-600 border-green-600 hover:bg-green-50">
-                     Pagar ({selectedIds.size})
-                   </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Pagamento em Lote</DialogTitle>
-                    <CardDescription>
-                      Serão pagos {transactions.filter(t => selectedIds.has(t.id) && t.status !== 'paid').length} itens selecionados.
-                      Itens já pagos serão ignorados.
-                    </CardDescription>
-                  </DialogHeader>
-                   <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label>Data do Pagamento</Label>
-                      <Input
-                        type="date"
-                        value={format(batchPaymentDate, "yyyy-MM-dd")}
-                        onChange={(e) => {
-                          const date = e.target.valueAsDate;
-                          if (date) {
-                             const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-                             setBatchPaymentDate(new Date(date.getTime() + userTimezoneOffset));
-                          }
-                        }}
-                      />
+              {(isAdmin || isFinancialManager) && (
+                <Dialog open={isBatchPaymentOpen} onOpenChange={setIsBatchPaymentOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="text-green-600 border-green-600 hover:bg-green-50">
+                      Pagar ({selectedIds.size})
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Pagamento em Lote</DialogTitle>
+                      <CardDescription>
+                        Serão pagos {transactions.filter(t => selectedIds.has(t.id) && t.status !== 'paid').length} itens selecionados.
+                        Itens já pagos serão ignorados.
+                      </CardDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Data do Pagamento</Label>
+                        <Input
+                          type="date"
+                          value={format(batchPaymentDate, "yyyy-MM-dd")}
+                          onChange={(e) => {
+                            const date = e.target.valueAsDate;
+                            if (date) {
+                              const userTimezoneOffset = date.getTimezoneOffset() * 60000;
+                              setBatchPaymentDate(new Date(date.getTime() + userTimezoneOffset));
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2 pt-4">
+                        <Button variant="outline" onClick={() => setIsBatchPaymentOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleBatchPayment} disabled={isProcessingBatch}>
+                          {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Confirmar Pagamento
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex justify-end gap-2 pt-4">
-                      <Button variant="outline" onClick={() => setIsBatchPaymentOpen(false)}>Cancelar</Button>
-                      <Button onClick={handleBatchPayment} disabled={isProcessingBatch}>
-                        {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Confirmar Pagamento
-                      </Button>
-                    </div>
-                   </div>
-                </DialogContent>
-              </Dialog>
+                  </DialogContent>
+                </Dialog>
+              )}
 
-              <Dialog open={isBatchRevertOpen} onOpenChange={setIsBatchRevertOpen}>
-                <DialogTrigger asChild>
-                   <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50">
-                     Reverter ({selectedIds.size})
-                   </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
-                    <CardDescription>
-                      Deseja reverter o pagamento de {transactions.filter(t => selectedIds.has(t.id) && t.status === 'paid').length} itens selecionados para Rascunho?
-                      Itens não pagos serão ignorados.
-                    </CardDescription>
-                  </DialogHeader>
-                  <div className="flex justify-end gap-2 pt-4">
+              {(isAdmin || isFinancialManager) && (
+                <Dialog open={isBatchRevertOpen} onOpenChange={setIsBatchRevertOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50">
+                      Reverter ({selectedIds.size})
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
+                      <CardDescription>
+                        Deseja reverter o pagamento de {transactions.filter(t => selectedIds.has(t.id) && t.status === 'paid').length} itens selecionados para Rascunho?
+                        Itens não pagos serão ignorados.
+                      </CardDescription>
+                    </DialogHeader>
+                    <div className="flex justify-end gap-2 pt-4">
                       <Button variant="outline" onClick={() => setIsBatchRevertOpen(false)}>Cancelar</Button>
                       <Button variant="destructive" onClick={handleBatchRevert} disabled={isProcessingBatch}>
                         {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Confirmar Reversão
                       </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
             </>
           )}
           {canCreatePayables && (
@@ -1021,9 +991,11 @@ export default function AccountsPayablePage() {
                       colSpan={7}
                       className="text-center text-muted-foreground"
                     >
-                      {sortedTransactions.length === 0
-                        ? "Nenhuma conta a pagar encontrada."
-                        : "Nenhuma conta com vencimento nos próximos 7 dias."}
+                      {debouncedSearchTerm
+                        ? "Nenhuma conta encontrada para esta busca."
+                        : showAllTransactions
+                          ? "Nenhuma conta a pagar encontrada."
+                          : "Nenhuma conta com vencimento nos próximos 7 dias."}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1081,10 +1053,7 @@ export default function AccountsPayablePage() {
                         </TableCell>
                         <TableCell>{t.supplierOrClient}</TableCell>
                         <TableCell>
-                          {new Intl.NumberFormat("pt-BR", {
-                            style: "currency",
-                            currency: "BRL",
-                          }).format(t.amount)}
+                          {formatCurrency(t.amount)}
                         </TableCell>
                         <TableCell>{getStatusBadge(t.status)}</TableCell>
                         <TableCell className="text-right">
@@ -1144,7 +1113,7 @@ export default function AccountsPayablePage() {
           )}
           {!isLoading && (
             <div className="mt-4 flex flex-col gap-4">
-              {!showAllTransactions && (
+              {!showAllTransactions ? (
                 <Button
                   variant="outline"
                   className="w-full"
@@ -1152,8 +1121,7 @@ export default function AccountsPayablePage() {
                 >
                   Ver Todas as Transações
                 </Button>
-              )}
-              {hasMore && (
+              ) : hasMore ? (
                 <Button
                   variant="outline"
                   className="w-full"
@@ -1165,7 +1133,7 @@ export default function AccountsPayablePage() {
                   ) : null}
                   Carregar Mais
                 </Button>
-              )}
+              ) : null}
             </div>
           )}
         </CardContent>

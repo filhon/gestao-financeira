@@ -76,6 +76,7 @@ export const transactionService = {
     createdBy?: string;
     startDate?: Date;
     endDate?: Date;
+    limit?: number;
   }): Promise<Transaction[]> => {
     let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
@@ -103,6 +104,10 @@ export const transactionService = {
     }
     if (filter?.endDate) {
       q = query(q, where("dueDate", "<=", Timestamp.fromDate(filter.endDate)));
+    }
+
+    if (filter?.limit) {
+      q = query(q, limit(filter.limit));
     }
 
     const snapshot = await getDocs(q);
@@ -206,7 +211,9 @@ export const transactionService = {
       q = query(q, startAfter(lastDoc));
     }
 
-    q = query(q, limit(pageSize));
+    // When client-side filtering is needed, over-fetch to ensure full pages
+    const fetchSize = clientSideStatusFilter ? pageSize * 2 : pageSize;
+    q = query(q, limit(fetchSize));
 
     const snapshot = await getDocs(q);
     let transactions = snapshot.docs.map((doc) =>
@@ -220,8 +227,11 @@ export const transactionService = {
       );
     }
 
+    // Truncate to pageSize after client-side filtering
+    const truncated = transactions.slice(0, pageSize);
+
     return {
-      transactions,
+      transactions: truncated,
       lastDoc:
         snapshot.docs.length > 0
           ? snapshot.docs[snapshot.docs.length - 1]
