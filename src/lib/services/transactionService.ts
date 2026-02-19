@@ -16,6 +16,7 @@ import {
   limit,
   QueryDocumentSnapshot,
   getCountFromServer,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { Transaction, TransactionStatus } from "@/lib/types";
@@ -27,6 +28,7 @@ import { auditService } from "@/lib/services/auditService";
 import { emailService } from "@/lib/services/emailService";
 import { generateChanges } from "@/lib/auditFormatter";
 import { usageService } from "@/lib/services/usageService";
+import { paymentBatchService } from "@/lib/services/paymentBatchService";
 
 const COLLECTION_NAME = "transactions";
 
@@ -539,7 +541,36 @@ export const transactionService = {
       updatePayload.costCenterId = costCenterIds[0];
     }
 
-    await updateDoc(docRef, updatePayload);
+    // If the amount changed and the transaction belongs to a batch,
+    // update the batch totalAmount atomically with the diff.
+    const batchId = currentData.batchId as string | undefined;
+    const oldAmount = currentData.amount as number | undefined;
+    const newAmount = cleanData.amount;
+    if (
+      batchId &&
+      typeof newAmount === "number" &&
+      typeof oldAmount === "number" &&
+      newAmount !== oldAmount
+    ) {
+      const amountDiff = newAmount - oldAmount;
+      const PAYMENT_BATCHES = "payment_batches";
+      const batchDocRef = doc(db, PAYMENT_BATCHES, batchId);
+      const batchSnap = await getDoc(batchDocRef);
+      if (batchSnap.exists()) {
+        const currentBatchTotal = (batchSnap.data().totalAmount as number) ?? 0;
+        const firestoreBatch = writeBatch(db);
+        firestoreBatch.update(docRef, updatePayload);
+        firestoreBatch.update(batchDocRef, {
+          totalAmount: Math.max(0, currentBatchTotal + amountDiff),
+          updatedAt: serverTimestamp(),
+        });
+        await firestoreBatch.commit();
+      } else {
+        await updateDoc(docRef, updatePayload);
+      }
+    } else {
+      await updateDoc(docRef, updatePayload);
+    }
 
     // Update Usage
     await usageService.updateUsage(oldTransaction, -1);
@@ -768,7 +799,7 @@ export const transactionService = {
   ) => {
     const docRef = doc(db, COLLECTION_NAME, id);
 
-    // Fetch before delete to update usage
+    // Fetch before delete to update usage and check batch membership
     const currentDoc = await getDoc(docRef);
     if (currentDoc.exists()) {
       const currentData = currentDoc.data();
@@ -777,6 +808,22 @@ export const transactionService = {
         ...currentData,
       });
       await usageService.updateUsage(oldTransaction, -1);
+
+      // If transaction belongs to a batch, remove it atomically before deleting.
+      // This keeps the batch totalAmount and transactionIds consistent.
+      if (currentData.batchId) {
+        try {
+          await paymentBatchService.removeTransactions(currentData.batchId, [
+            oldTransaction,
+          ]);
+        } catch (err) {
+          // Log but don't block deletion — the transaction may have an orphan batchId
+          console.warn(
+            `Could not remove transaction ${id} from batch ${currentData.batchId}:`,
+            err,
+          );
+        }
+      }
     }
 
     await deleteDoc(docRef);

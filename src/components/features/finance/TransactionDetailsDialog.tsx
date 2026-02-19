@@ -112,7 +112,7 @@ export function TransactionDetailsDialog({
           } catch (e) {
             console.error(
               `Failed to fetch cost center ${alloc.costCenterId}`,
-              e
+              e,
             );
           }
         }
@@ -164,7 +164,7 @@ export function TransactionDetailsDialog({
         transaction.id,
         newStatus,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       // ... (Email logic omitted for brevity, keeping existing notification logic implies just calling updateStatus is enough if service handles it, but service doesn't send emails for status updates fully yet? Keeping existing logic)
       // Email Notifications (Re-implementing simplified for brevity as it was lengthy in original)
@@ -176,7 +176,7 @@ export function TransactionDetailsDialog({
         if (newStatus === "pending_approval") {
           const q = query(
             collection(db, "users"),
-            where("role", "in", ["admin", "approver", "financial_manager"])
+            where("role", "in", ["admin", "approver", "financial_manager"]),
           );
           const querySnapshot = await getDocs(q);
           const approverEmails = querySnapshot.docs
@@ -185,7 +185,7 @@ export function TransactionDetailsDialog({
           if (approverEmails.length > 0) {
             await emailService.sendApprovalRequest(
               updatedTransaction,
-              approverEmails[0]
+              approverEmails[0],
             );
           }
           toast.success("Solicitação enviada para aprovação!");
@@ -196,7 +196,7 @@ export function TransactionDetailsDialog({
             await emailService.sendStatusUpdate(
               transaction,
               creatorEmail,
-              user.displayName
+              user.displayName,
             );
           }
           if (newStatus === "approved")
@@ -237,7 +237,7 @@ export function TransactionDetailsDialog({
         transaction.id,
         data,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Transação atualizada com sucesso!");
       onUpdate();
@@ -262,7 +262,7 @@ export function TransactionDetailsDialog({
         pendingUpdateData,
         scope,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Transações atualizadas com sucesso!");
       onUpdate();
@@ -312,7 +312,7 @@ export function TransactionDetailsDialog({
         transaction.id,
         data,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Pagamento/Recebimento registrado com sucesso!");
       onUpdate();
@@ -344,7 +344,7 @@ export function TransactionDetailsDialog({
               <TransactionForm
                 type={transaction.type}
                 defaultValues={{
-                  ...transaction,
+                  ...(transaction as unknown as Partial<TransactionFormData>),
                   // Ensure dates are Dates
                   dueDate: transaction.dueDate
                     ? new Date(transaction.dueDate)

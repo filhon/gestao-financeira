@@ -98,10 +98,7 @@ export function ReconciliationDashboard() {
           new Date(Math.min(...dates.map((d) => d.getTime()))),
           15,
         );
-        end = addDays(
-          new Date(Math.max(...dates.map((d) => d.getTime()))),
-          15,
-        );
+        end = addDays(new Date(Math.max(...dates.map((d) => d.getTime()))), 15);
       }
 
       try {
@@ -129,6 +126,7 @@ export function ReconciliationDashboard() {
     // Better yet: We check if dates changed significantly? No, simpler:
     // We only run this useEffect if transactions.length > 0.
     // If we want to support 'refresh', we can add a manual refresh button for stats or link it to 'Processar Matches'.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany?.id]);
 
   // Calculate stats using memo to avoid recalc on every render

@@ -200,6 +200,10 @@ export function BatchDetailsDialog({
       // 2. Prepare Data
       const data = transactions.map((t) => ({
         ...t,
+        // Use the batch-adjusted amount when an approver modified it; fall back to original
+        effectiveAmount:
+          (t as Transaction & { batchAdjustedAmount?: number })
+            .batchAdjustedAmount ?? t.amount,
         costCenterName: getCostCenterName(t),
         installmentText: t.recurrence?.isRecurring
           ? "Contínua"
@@ -314,7 +318,7 @@ export function BatchDetailsDialog({
           costCenter: item.costCenterName,
           dueDate: format(new Date(item.dueDate), "dd/MM/yyyy"),
           installment: item.installmentText,
-          amount: item.amount,
+          amount: item.effectiveAmount,
         };
 
         // Format Currency
@@ -363,9 +367,11 @@ export function BatchDetailsDialog({
       };
 
       const currentBalance = metrics?.balance || 0;
-      const balanceAfter = currentBalance - batch.totalAmount;
+      // Compute total from live transaction data to reflect any edits made after batch creation
+      const liveTotal = data.reduce((sum, t) => sum + t.effectiveAmount, 0);
+      const balanceAfter = currentBalance - liveTotal;
 
-      addFooterRow("Valor total do lote:", batch.totalAmount);
+      addFooterRow("Valor total do lote:", liveTotal);
       addFooterRow("Saldo atual:", currentBalance);
       addFooterRow(
         "Saldo após pagamentos:",
@@ -395,7 +401,7 @@ export function BatchDetailsDialog({
         };
         costCenterSummary.set(ccName, {
           count: ccCurrent.count + 1,
-          total: ccCurrent.total + t.amount,
+          total: ccCurrent.total + t.effectiveAmount,
         });
 
         // Supplier
@@ -406,7 +412,7 @@ export function BatchDetailsDialog({
         };
         supplierSummary.set(supplierName, {
           count: supCurrent.count + 1,
-          total: supCurrent.total + t.amount,
+          total: supCurrent.total + t.effectiveAmount,
         });
       });
 
@@ -524,8 +530,19 @@ export function BatchDetailsDialog({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex gap-4 text-sm text-muted-foreground">
-              <span>Total: {formatCurrency(batch.totalAmount)}</span>
-              <span>Itens: {batch.transactionIds.length}</span>
+              <span>
+                Total:{" "}
+                {formatCurrency(
+                  transactions.reduce(
+                    (sum, t) =>
+                      sum +
+                      ((t as Transaction & { batchAdjustedAmount?: number })
+                        .batchAdjustedAmount ?? t.amount),
+                    0,
+                  ),
+                )}
+              </span>
+              <span>Itens: {transactions.length}</span>
             </div>
             <Button
               variant="outline"
@@ -742,21 +759,49 @@ export function BatchDetailsDialog({
                           {(() => {
                             switch (t.status) {
                               case "paid":
-                                return <Badge className="bg-emerald-500 hover:bg-emerald-600">Pago</Badge>;
+                                return (
+                                  <Badge className="bg-emerald-500 hover:bg-emerald-600">
+                                    Pago
+                                  </Badge>
+                                );
                               case "authorized":
-                                return <Badge className="bg-blue-500 hover:bg-blue-600">Autorizado</Badge>;
+                                return (
+                                  <Badge className="bg-blue-500 hover:bg-blue-600">
+                                    Autorizado
+                                  </Badge>
+                                );
                               case "approved":
-                                return <Badge className="bg-blue-400 hover:bg-blue-500">Aprovado</Badge>;
+                                return (
+                                  <Badge className="bg-blue-400 hover:bg-blue-500">
+                                    Aprovado
+                                  </Badge>
+                                );
                               case "pending_authorization":
-                                return <Badge className="bg-amber-500 hover:bg-amber-600">Aguardando Autorização</Badge>;
+                                return (
+                                  <Badge className="bg-amber-500 hover:bg-amber-600">
+                                    Aguardando Autorização
+                                  </Badge>
+                                );
                               case "pending_approval":
-                                return <Badge className="bg-amber-400 hover:bg-amber-500">Aguardando Aprovação</Badge>;
+                                return (
+                                  <Badge className="bg-amber-400 hover:bg-amber-500">
+                                    Aguardando Aprovação
+                                  </Badge>
+                                );
                               case "rejected":
-                                return <Badge variant="destructive">Rejeitado</Badge>;
+                                return (
+                                  <Badge variant="destructive">Rejeitado</Badge>
+                                );
                               case "draft":
-                                return <Badge variant="secondary">Rascunho</Badge>;
+                                return (
+                                  <Badge variant="secondary">Rascunho</Badge>
+                                );
                               default:
-                                return <Badge variant="outline">{t.status === 'open' ? 'Aberto' : t.status}</Badge>;
+                                return (
+                                  <Badge variant="outline">
+                                    {t.status === "open" ? "Aberto" : t.status}
+                                  </Badge>
+                                );
                             }
                           })()}
                         </TableCell>
@@ -791,6 +836,6 @@ export function BatchDetailsDialog({
           onConfirm={handleRemoveTransaction}
         />
       </DialogContent>
-    </Dialog >
+    </Dialog>
   );
 }

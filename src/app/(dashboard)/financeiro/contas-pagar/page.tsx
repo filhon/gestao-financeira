@@ -60,7 +60,6 @@ import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { PaymentBatch } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
-import { AnimatedCounter } from "@/components/ui/animated-counter";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -80,7 +79,58 @@ import { CostCenter } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { CurrencyInput } from "@/components/ui/currency-input";
 
-// AnimatedNumber uses shared AnimatedCounter component
+function useAnimatedValue(targetValue: number, duration: number = 800) {
+  const [currentValue, setCurrentValue] = useState(targetValue);
+  const startValueRef = useRef(targetValue);
+  const startTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    startValueRef.current = currentValue;
+    startTimeRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetValue]);
+
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const animate = (timestamp: number) => {
+      if (!startTimeRef.current) startTimeRef.current = timestamp;
+      const progress = Math.min(
+        (timestamp - startTimeRef.current) / duration,
+        1,
+      );
+      // Ease out quart
+      const ease = 1 - Math.pow(1 - progress, 4);
+
+      const nextValue =
+        startValueRef.current + (targetValue - startValueRef.current) * ease;
+
+      setCurrentValue(nextValue);
+
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [targetValue, duration]);
+
+  return currentValue;
+}
+
+const AnimatedNumber = ({
+  value,
+  formatter,
+}: {
+  value: number;
+  formatter?: (n: number) => string;
+}) => {
+  const animated = useAnimatedValue(value);
+  return <>{formatter ? formatter(animated) : Math.round(animated)}</>;
+};
+
+// ...
 
 export default function AccountsPayablePage() {
   const { user } = useAuth();
@@ -155,15 +205,15 @@ export default function AccountsPayablePage() {
         const batch = await paymentBatchService.getById(t.batchId);
         setIsConfirmingPayment(false);
         if (batch) {
-          // Allow payment only if Authorized (or already Paid/Partially Paid context)
-          // User requested to change logic from Approved to Authorized.
           const allowedStatuses = [
+            "approved",
             "authorized",
+            "pending_authorization",
             "paid",
           ];
           if (!allowedStatuses.includes(batch.status)) {
             toast.error(
-              "O lote desta transação precisa estar AUTORIZADO para confirmar o pagamento.",
+              "O lote desta transação precisa estar aprovado para confirmar o pagamento.",
             );
             return;
           }
@@ -196,21 +246,12 @@ export default function AccountsPayablePage() {
         selectedCompany.id,
       );
 
-      // Check if this completes a batch
-      if (transactionToConfirm.batchId) {
-        await paymentBatchService.checkAndFinalizeBatch(transactionToConfirm.batchId, user.uid);
-      }
-
-      toast.success("Pagamentos confirmados com sucesso!");
+      toast.success("Pagamento confirmado com sucesso!");
       fetchTransactions();
       setTransactionToConfirm(null);
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error confirming payment:", error);
-      if (error?.message?.includes("No document to update") || error?.code === "not-found" || error?.message?.includes("Transaction not found")) {
-        toast.error("Erro: Transação não encontrada ou já excluída.");
-      } else {
-        toast.error("Erro ao confirmar pagamento.");
-      }
+      toast.error("Erro ao confirmar pagamento.");
     } finally {
       setIsConfirmingPayment(false);
     }
@@ -318,10 +359,6 @@ export default function AccountsPayablePage() {
     }
   }, [selectedCompany]);
 
-  // Ref to access current transactions without adding to useEffect deps
-  const transactionsRef = useRef(transactions);
-  transactionsRef.current = transactions;
-
   useEffect(() => {
     if (!debouncedSearchTerm) {
       fetchTransactions();
@@ -330,12 +367,28 @@ export default function AccountsPayablePage() {
         if (!selectedCompany || !user) return;
         setIsLoading(true);
         try {
+          const filter: {
+            companyId: string;
+            type: string;
+            createdBy?: string;
+          } = {
+            companyId: selectedCompany.id,
+            type: "payable",
+          };
+
+          if (onlyOwnPayables) {
+            filter.createdBy = user.uid;
+          }
+
+          // Fetch all matching basic criteria
+          const all = await transactionService.getAll(filter);
+
           const search = debouncedSearchTerm
             .toLowerCase()
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "");
 
-          const matchLocal = (t: Transaction) => {
+          const filtered = all.filter((t) => {
             const description = t.description
               .toLowerCase()
               .normalize("NFD")
@@ -345,35 +398,10 @@ export default function AccountsPayablePage() {
               .normalize("NFD")
               .replace(/[\u0300-\u036f]/g, "");
             return description.includes(search) || supplier.includes(search);
-          };
+          });
 
-          // Try local filter on current dataset first (via ref — no dep cycle)
-          const localResults = transactionsRef.current.filter(matchLocal);
-
-          if (localResults.length > 0) {
-            setTransactions(localResults);
-            setHasMore(false);
-          } else {
-            // Fetch a limited set from server (max 100) to search
-            const filter: {
-              companyId: string;
-              type: string;
-              createdBy?: string;
-              limit?: number;
-            } = {
-              companyId: selectedCompany.id,
-              type: "payable",
-              limit: 100,
-            };
-
-            if (onlyOwnPayables) {
-              filter.createdBy = user.uid;
-            }
-
-            const all = await transactionService.getAll(filter);
-            setTransactions(all.filter(matchLocal));
-            setHasMore(false);
-          }
+          setTransactions(filtered);
+          setHasMore(false);
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
@@ -384,7 +412,7 @@ export default function AccountsPayablePage() {
       performSearch();
     }
 
-    setSelectedIds(new Set());
+    setSelectedIds(new Set()); // Clear selection on company change/search
   }, [
     fetchTransactions,
     selectedCompany,
@@ -415,8 +443,10 @@ export default function AccountsPayablePage() {
   const fetchOpenBatches = async () => {
     if (!selectedCompany) return;
     try {
-      const result = await paymentBatchService.getAll(selectedCompany.id);
-      setOpenBatches(result.batches.filter((b) => b.status === "open"));
+      const { batches: allBatches } = await paymentBatchService.getAll(
+        selectedCompany.id,
+      );
+      setOpenBatches(allBatches.filter((b) => b.status === "open"));
     } catch {
       toast.error("Erro ao carregar lotes");
     }
@@ -468,7 +498,7 @@ export default function AccountsPayablePage() {
 
     // Filter transactions that can be paid (not already paid)
     const transactionsToPay = transactions.filter(
-      (t) => selectedIds.has(t.id) && t.status !== "paid"
+      (t) => selectedIds.has(t.id) && t.status !== "paid",
     );
 
     if (transactionsToPay.length === 0) {
@@ -484,24 +514,17 @@ export default function AccountsPayablePage() {
           t.id,
           {
             status: "paid",
-            paymentDate: batchPaymentDate
+            paymentDate: batchPaymentDate,
           },
           { uid: user.uid, email: user.email },
-          selectedCompany.id
-        )
+          selectedCompany.id,
+        ),
       );
 
       await Promise.all(promises);
-
-      // Check batches involved
-      const batchIds = new Set(transactionsToPay.map(t => t.batchId).filter(Boolean));
-      for (const batchId of Array.from(batchIds)) {
-        if (batchId) {
-          await paymentBatchService.checkAndFinalizeBatch(batchId, user.uid);
-        }
-      }
-
-      toast.success(`${transactionsToPay.length} transações pagas com sucesso!`);
+      toast.success(
+        `${transactionsToPay.length} transações pagas com sucesso!`,
+      );
       setIsBatchPaymentOpen(false);
       setSelectedIds(new Set());
       fetchTransactions();
@@ -518,7 +541,7 @@ export default function AccountsPayablePage() {
 
     // Filter transactions that can be reverted (must be paid)
     const transactionsToRevert = transactions.filter(
-      (t) => selectedIds.has(t.id) && t.status === "paid"
+      (t) => selectedIds.has(t.id) && t.status === "paid",
     );
 
     if (transactionsToRevert.length === 0) {
@@ -529,7 +552,7 @@ export default function AccountsPayablePage() {
     try {
       setIsProcessingBatch(true);
 
-      // We explicitly set paymentDate to null (or we could use deleteField if needed, 
+      // We explicitly set paymentDate to null (or we could use deleteField if needed,
       // but null is often safer for types if we adjust the type definition or just cast)
       // For now, let's just change status to draft which seems to be the standard behavior in this app
       const promises = transactionsToRevert.map((t) =>
@@ -537,12 +560,14 @@ export default function AccountsPayablePage() {
           t.id,
           { status: "draft" }, // Reverting to draft effectively undoes payment
           { uid: user.uid, email: user.email },
-          selectedCompany.id
-        )
+          selectedCompany.id,
+        ),
       );
 
       await Promise.all(promises);
-      toast.success(`${transactionsToRevert.length} pagamentos revertidos com sucesso!`);
+      toast.success(
+        `${transactionsToRevert.length} pagamentos revertidos com sucesso!`,
+      );
       setIsBatchRevertOpen(false);
       setSelectedIds(new Set());
       fetchTransactions();
@@ -651,13 +676,10 @@ export default function AccountsPayablePage() {
 
   // Pagination logic removed (Server-side pagination used)
 
-  // Fix 8: Reset pagination state when "Ver Todas" is toggled
+  // Reset to first page when filters change
   useEffect(() => {
-    if (showAllTransactions) {
-      setHasMore(false);
-      lastDocRef.current = null;
-    }
-  }, [showAllTransactions]);
+    // setCurrentPage(1); // Removed
+  }, [showAllTransactions, itemsPerPage, statusFilter]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -691,7 +713,7 @@ export default function AccountsPayablePage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                <AnimatedCounter value={selectedIds.size} formatter={(v) => String(Math.round(v))} />
+                <AnimatedNumber value={selectedIds.size} />
               </div>
               <p className="text-xs text-muted-foreground">
                 Transações marcadas
@@ -705,7 +727,7 @@ export default function AccountsPayablePage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-primary">
-                <AnimatedCounter
+                <AnimatedNumber
                   value={selectedTotal}
                   formatter={formatCurrency}
                 />
@@ -783,73 +805,116 @@ export default function AccountsPayablePage() {
                 </DialogContent>
               </Dialog>
 
-              {(isAdmin || isFinancialManager) && (
-                <Dialog open={isBatchPaymentOpen} onOpenChange={setIsBatchPaymentOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="text-green-600 border-green-600 hover:bg-green-50">
-                      Pagar ({selectedIds.size})
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Pagamento em Lote</DialogTitle>
-                      <CardDescription>
-                        Serão pagos {transactions.filter(t => selectedIds.has(t.id) && t.status !== 'paid').length} itens selecionados.
-                        Itens já pagos serão ignorados.
-                      </CardDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="space-y-2">
-                        <Label>Data do Pagamento</Label>
-                        <Input
-                          type="date"
-                          value={format(batchPaymentDate, "yyyy-MM-dd")}
-                          onChange={(e) => {
-                            const date = e.target.valueAsDate;
-                            if (date) {
-                              const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-                              setBatchPaymentDate(new Date(date.getTime() + userTimezoneOffset));
-                            }
-                          }}
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2 pt-4">
-                        <Button variant="outline" onClick={() => setIsBatchPaymentOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleBatchPayment} disabled={isProcessingBatch}>
-                          {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          Confirmar Pagamento
-                        </Button>
-                      </div>
+              <Dialog
+                open={isBatchPaymentOpen}
+                onOpenChange={setIsBatchPaymentOpen}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="text-green-600 border-green-600 hover:bg-green-50"
+                  >
+                    Pagar ({selectedIds.size})
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Pagamento em Lote</DialogTitle>
+                    <CardDescription>
+                      Serão pagos{" "}
+                      {
+                        transactions.filter(
+                          (t) => selectedIds.has(t.id) && t.status !== "paid",
+                        ).length
+                      }{" "}
+                      itens selecionados. Itens já pagos serão ignorados.
+                    </CardDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Data do Pagamento</Label>
+                      <Input
+                        type="date"
+                        value={format(batchPaymentDate, "yyyy-MM-dd")}
+                        onChange={(e) => {
+                          const date = e.target.valueAsDate;
+                          if (date) {
+                            const userTimezoneOffset =
+                              date.getTimezoneOffset() * 60000;
+                            setBatchPaymentDate(
+                              new Date(date.getTime() + userTimezoneOffset),
+                            );
+                          }
+                        }}
+                      />
                     </div>
-                  </DialogContent>
-                </Dialog>
-              )}
-
-              {(isAdmin || isFinancialManager) && (
-                <Dialog open={isBatchRevertOpen} onOpenChange={setIsBatchRevertOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50">
-                      Reverter ({selectedIds.size})
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
-                      <CardDescription>
-                        Deseja reverter o pagamento de {transactions.filter(t => selectedIds.has(t.id) && t.status === 'paid').length} itens selecionados para Rascunho?
-                        Itens não pagos serão ignorados.
-                      </CardDescription>
-                    </DialogHeader>
                     <div className="flex justify-end gap-2 pt-4">
-                      <Button variant="outline" onClick={() => setIsBatchRevertOpen(false)}>Cancelar</Button>
-                      <Button variant="destructive" onClick={handleBatchRevert} disabled={isProcessingBatch}>
-                        {isProcessingBatch && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Confirmar Reversão
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsBatchPaymentOpen(false)}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        onClick={handleBatchPayment}
+                        disabled={isProcessingBatch}
+                      >
+                        {isProcessingBatch && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
+                        Confirmar Pagamento
                       </Button>
                     </div>
-                  </DialogContent>
-                </Dialog>
-              )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog
+                open={isBatchRevertOpen}
+                onOpenChange={setIsBatchRevertOpen}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="text-red-600 border-red-600 hover:bg-red-50"
+                  >
+                    Reverter ({selectedIds.size})
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
+                    <CardDescription>
+                      Deseja reverter o pagamento de{" "}
+                      {
+                        transactions.filter(
+                          (t) => selectedIds.has(t.id) && t.status === "paid",
+                        ).length
+                      }{" "}
+                      itens selecionados para Rascunho? Itens não pagos serão
+                      ignorados.
+                    </CardDescription>
+                  </DialogHeader>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsBatchRevertOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleBatchRevert}
+                      disabled={isProcessingBatch}
+                    >
+                      {isProcessingBatch && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Confirmar Reversão
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </>
           )}
           {canCreatePayables && (
@@ -1009,11 +1074,9 @@ export default function AccountsPayablePage() {
                       colSpan={7}
                       className="text-center text-muted-foreground"
                     >
-                      {debouncedSearchTerm
-                        ? "Nenhuma conta encontrada para esta busca."
-                        : showAllTransactions
-                          ? "Nenhuma conta a pagar encontrada."
-                          : "Nenhuma conta com vencimento nos próximos 7 dias."}
+                      {sortedTransactions.length === 0
+                        ? "Nenhuma conta a pagar encontrada."
+                        : "Nenhuma conta com vencimento nos próximos 7 dias."}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1071,7 +1134,10 @@ export default function AccountsPayablePage() {
                         </TableCell>
                         <TableCell>{t.supplierOrClient}</TableCell>
                         <TableCell>
-                          {formatCurrency(t.amount)}
+                          {new Intl.NumberFormat("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                          }).format(t.amount)}
                         </TableCell>
                         <TableCell>{getStatusBadge(t.status)}</TableCell>
                         <TableCell className="text-right">
@@ -1131,7 +1197,7 @@ export default function AccountsPayablePage() {
           )}
           {!isLoading && (
             <div className="mt-4 flex flex-col gap-4">
-              {!showAllTransactions ? (
+              {!showAllTransactions && (
                 <Button
                   variant="outline"
                   className="w-full"
@@ -1139,7 +1205,8 @@ export default function AccountsPayablePage() {
                 >
                   Ver Todas as Transações
                 </Button>
-              ) : hasMore ? (
+              )}
+              {hasMore && (
                 <Button
                   variant="outline"
                   className="w-full"
@@ -1151,7 +1218,7 @@ export default function AccountsPayablePage() {
                   ) : null}
                   Carregar Mais
                 </Button>
-              ) : null}
+              )}
             </div>
           )}
         </CardContent>

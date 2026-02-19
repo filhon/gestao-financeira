@@ -63,12 +63,14 @@ export const paymentBatchService = {
     // Check all transactions
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
-      where("batchId", "==", batchId)
+      where("batchId", "==", batchId),
     );
     const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Transaction));
+    const transactions = snapshot.docs.map(
+      (d) => ({ id: d.id, ...d.data() }) as Transaction,
+    );
 
-    const allPaid = transactions.every(t => t.status === "paid");
+    const allPaid = transactions.every((t) => t.status === "paid");
 
     if (allPaid && transactions.length > 0) {
       // Auto-close batch
@@ -268,7 +270,15 @@ export const paymentBatchService = {
     const newIds = batchData.transactionIds.filter(
       (id) => !idsToRemove.has(id),
     );
-    const amountToRemove = transactions.reduce((sum, t) => sum + t.amount, 0);
+    // Use batchAdjustedAmount when present so the subtracted value matches what
+    // was actually added to totalAmount (which was bumped by updateTransactionAmount).
+    const amountToRemove = transactions.reduce(
+      (sum, t) =>
+        sum +
+        ((t as Transaction & { batchAdjustedAmount?: number })
+          .batchAdjustedAmount ?? t.amount),
+      0,
+    );
 
     batch.update(batchRef, {
       transactionIds: newIds,
@@ -294,7 +304,6 @@ export const paymentBatchService = {
 
     const batchSnap = await getDoc(batchRef);
     if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: any = { status, updatedAt: serverTimestamp() };
@@ -317,7 +326,7 @@ export const paymentBatchService = {
       // Fetch all batch transactions first to ensure they exist
       const q = query(
         collection(db, TRANSACTIONS_COLLECTION),
-        where("batchId", "==", batchId)
+        where("batchId", "==", batchId),
       );
       const snapshot = await getDocs(q);
 
@@ -386,7 +395,6 @@ export const paymentBatchService = {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
     if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
 
     const batch = writeBatch(db);
 
@@ -423,15 +431,19 @@ export const paymentBatchService = {
         }
       }
     } else {
-      // Approve all transactions in batch
-      for (const tId of batchData.transactionIds) {
-        const tRef = doc(db, TRANSACTIONS_COLLECTION, tId);
-        batch.update(tRef, {
+      // Approve all transactions — query by batchId so orphan IDs in the array are ignored
+      const tQuery = query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where("batchId", "==", batchId),
+      );
+      const tSnap = await getDocs(tQuery);
+      tSnap.docs.forEach((tDoc) => {
+        batch.update(tDoc.ref, {
           status: "approved",
           approvedBy: userId,
           approvedAt: serverTimestamp(),
         });
-      }
+      });
     }
 
     await batch.commit();
@@ -544,7 +556,6 @@ export const paymentBatchService = {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
     const batchSnap = await getDoc(batchRef);
     if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
 
     const batch = writeBatch(db);
     batch.update(batchRef, {
@@ -554,15 +565,19 @@ export const paymentBatchService = {
       updatedAt: serverTimestamp(),
     });
 
-    // Mark all transactions as paid
-    for (const tId of batchData.transactionIds) {
-      const tRef = doc(db, TRANSACTIONS_COLLECTION, tId);
-      batch.update(tRef, {
+    // Mark all existing transactions as paid — query by batchId so orphan IDs are ignored
+    const tQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("batchId", "==", batchId),
+    );
+    const tSnap = await getDocs(tQuery);
+    tSnap.docs.forEach((tDoc) => {
+      batch.update(tDoc.ref, {
         status: "paid",
         releasedBy: userId,
         releasedAt: serverTimestamp(),
       });
-    }
+    });
 
     await batch.commit();
   },
@@ -695,15 +710,19 @@ export const paymentBatchService = {
         }
       }
     } else {
-      // Approve all transactions
-      for (const tId of paymentBatch.transactionIds) {
-        const tRef = doc(db, TRANSACTIONS_COLLECTION, tId);
-        batch.update(tRef, {
+      // Approve all transactions — query by batchId so orphan IDs in the array are ignored
+      const tQuery = query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where("batchId", "==", paymentBatch.id),
+      );
+      const tSnap = await getDocs(tQuery);
+      tSnap.docs.forEach((tDoc) => {
+        batch.update(tDoc.ref, {
           status: "approved",
           approvedBy: "magic-link",
           approvedAt: serverTimestamp(),
         });
-      }
+      });
     }
 
     await batch.commit();
