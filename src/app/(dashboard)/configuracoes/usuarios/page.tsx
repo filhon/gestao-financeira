@@ -61,6 +61,7 @@ export default function UsersPage() {
   const [approvalRole, setApprovalRole] =
     useState<UserRole>("financial_manager");
   const [rejectUserId, setRejectUserId] = useState<string | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
 
   // Pre-select the user's requested role when opening approval dialog
   useEffect(() => {
@@ -79,7 +80,9 @@ export default function UsersPage() {
 
   const fetchUsers = async () => {
     try {
-      const data = await userService.getAll();
+      setIsLoading(true);
+      // Filtra pelos usuários da empresa selecionada para não expor dados de outras empresas
+      const data = await userService.getAll(selectedCompany?.id);
       setUsers(data);
     } catch (error) {
       console.error("Error fetching users:", error);
@@ -91,19 +94,36 @@ export default function UsersPage() {
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany]);
 
   const handleRoleUpdate = async (uid: string, newRole: UserRole | "none") => {
     if (!selectedCompany) return;
+    if (!currentUser) return;
+    const admin = { uid: currentUser.uid, email: currentUser.email ?? "" };
     try {
-      if (newRole === "none") return;
-      if (!currentUser) return;
+      if (newRole === "none") {
+        // Remove o acesso do usuário à empresa
+        await userService.revokeAccess(uid, selectedCompany.id, admin);
+        setUsers(
+          users.map((u) => {
+            if (u.uid === uid) {
+              const updatedRoles = { ...u.companyRoles };
+              delete updatedRoles[selectedCompany.id];
+              return { ...u, companyRoles: updatedRoles };
+            }
+            return u;
+          }),
+        );
+        toast.success("Acesso revogado com sucesso!");
+        return;
+      }
 
       await userService.updateRole(
         uid,
         newRole as UserRole,
-        { uid: currentUser.uid, email: currentUser.email },
-        selectedCompany.id
+        admin,
+        selectedCompany.id,
       );
 
       setUsers(
@@ -118,7 +138,7 @@ export default function UsersPage() {
             };
           }
           return u;
-        })
+        }),
       );
 
       toast.success("Função do usuário atualizada!");
@@ -130,14 +150,17 @@ export default function UsersPage() {
 
   const handleApproveUser = async () => {
     if (!selectedUserToApprove || !selectedCompany) return;
+    if (!currentUser) return;
+    const admin = { uid: currentUser.uid, email: currentUser.email ?? "" };
     try {
-      if (!currentUser) return;
+      setIsApproving(true);
 
       // 1. Update Status
-      await userService.updateStatus(selectedUserToApprove.uid, "active", {
-        uid: currentUser.uid,
-        email: currentUser.email,
-      });
+      await userService.updateStatus(
+        selectedUserToApprove.uid,
+        "active",
+        admin,
+      );
 
       // 2. Assign Role - use the company that the user requested if it matches, otherwise current selected company
       const targetCompanyId =
@@ -145,32 +168,32 @@ export default function UsersPage() {
       await userService.updateRole(
         selectedUserToApprove.uid,
         approvalRole,
-        { uid: currentUser.uid, email: currentUser.email },
-        targetCompanyId
+        admin,
+        targetCompanyId,
       );
 
       // 3. Clear pending access fields
       await userService.clearPendingAccess(selectedUserToApprove.uid);
 
       toast.success(
-        `Usuário ${selectedUserToApprove.displayName} aprovado com sucesso!`
+        `Usuário ${selectedUserToApprove.displayName} aprovado com sucesso!`,
       );
       setSelectedUserToApprove(null);
       fetchUsers();
     } catch (error) {
       console.error("Error approving user:", error);
       toast.error("Erro ao aprovar usuário.");
+    } finally {
+      setIsApproving(false);
     }
   };
 
   const handleRejectUser = async () => {
     if (!rejectUserId) return;
     if (!currentUser) return;
+    const admin = { uid: currentUser.uid, email: currentUser.email ?? "" };
     try {
-      await userService.updateStatus(rejectUserId, "rejected", {
-        uid: currentUser.uid,
-        email: currentUser.email,
-      });
+      await userService.updateStatus(rejectUserId, "rejected", admin);
       toast.success("Usuário rejeitado.");
       fetchUsers();
     } catch (error) {
@@ -205,7 +228,7 @@ export default function UsersPage() {
   };
 
   const activeUsers = users.filter(
-    (u) => u.status === "active" || (!u.status && u.active)
+    (u) => u.status === "active" || (!u.status && u.active),
   ); // Backward compat
   // Filter pending users: those who requested access to the current company OR old 'pending' status users
   const pendingUsers = users.filter((u) => {
@@ -261,8 +284,13 @@ export default function UsersPage() {
           <TabsTrigger value="active">
             Ativos ({activeUsers.length})
           </TabsTrigger>
-          <TabsTrigger value="pending">
-            Pendentes ({pendingUsers.length})
+          <TabsTrigger value="pending" className="gap-2">
+            Pendentes
+            {pendingUsers.length > 0 && (
+              <Badge className="h-5 min-w-5 px-1.5 text-xs bg-red-500 text-white">
+                {pendingUsers.length}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -297,75 +325,92 @@ export default function UsersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedActiveUsers.map((user) => {
-                    const currentRole = getRoleForCompany(user);
-                    return (
-                      <TableRow key={user.uid}>
-                        <TableCell>
-                          <Link
-                            href={`/perfil/${user.uid}`}
-                            className="flex items-center gap-3 hover:underline"
-                          >
-                            <Avatar>
-                              <AvatarImage src={user.photoURL || ""} />
-                              <AvatarFallback>
-                                {user.displayName
-                                  ? getInitials(user.displayName)
-                                  : "U"}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="font-medium">
-                              {user.displayName}
-                            </span>
-                          </Link>
-                        </TableCell>
-                        <TableCell>{user.email}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              currentRole === "none" ? "secondary" : "outline"
-                            }
-                            className="capitalize"
-                          >
-                            {currentRole === "none"
-                              ? "Sem Acesso"
-                              : roleLabels[currentRole as UserRole] ||
-                                currentRole}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Select
-                            value={currentRole}
-                            onValueChange={(value) =>
-                              handleRoleUpdate(user.uid, value as UserRole)
-                            }
-                            disabled={currentUser?.uid === user.uid}
-                          >
-                            <SelectTrigger className="w-[180px] ml-auto">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Sem Acesso</SelectItem>
-                              <SelectItem value="admin">
-                                Administrador
-                              </SelectItem>
-                              <SelectItem value="financial_manager">
-                                Gerente Financeiro
-                              </SelectItem>
-                              <SelectItem value="approver">
-                                Aprovador
-                              </SelectItem>
-                              <SelectItem value="releaser">
-                                Pagador/Baixador
-                              </SelectItem>
-                              <SelectItem value="auditor">Auditor</SelectItem>
-                              <SelectItem value="user">Usuário</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {sortedActiveUsers.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center py-8 text-muted-foreground"
+                      >
+                        Nenhum usuário ativo nesta empresa.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sortedActiveUsers.map((user) => {
+                      const currentRole = getRoleForCompany(user);
+                      const isCurrentUser = currentUser?.uid === user.uid;
+                      return (
+                        <TableRow key={user.uid}>
+                          <TableCell>
+                            <Link
+                              href={`/perfil/${user.uid}`}
+                              className="flex items-center gap-3 hover:underline"
+                            >
+                              <Avatar>
+                                <AvatarImage src={user.photoURL || ""} />
+                                <AvatarFallback>
+                                  {user.displayName
+                                    ? getInitials(user.displayName)
+                                    : "U"}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="font-medium">
+                                {user.displayName}
+                              </span>
+                              {isCurrentUser && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Você
+                                </Badge>
+                              )}
+                            </Link>
+                          </TableCell>
+                          <TableCell>{user.email}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                currentRole === "none" ? "secondary" : "outline"
+                              }
+                              className="capitalize"
+                            >
+                              {currentRole === "none"
+                                ? "Sem Acesso"
+                                : roleLabels[currentRole as UserRole] ||
+                                  currentRole}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Select
+                              value={currentRole}
+                              onValueChange={(value) =>
+                                handleRoleUpdate(user.uid, value as UserRole)
+                              }
+                              disabled={isCurrentUser}
+                            >
+                              <SelectTrigger className="w-[180px] ml-auto">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Sem Acesso</SelectItem>
+                                <SelectItem value="admin">
+                                  Administrador
+                                </SelectItem>
+                                <SelectItem value="financial_manager">
+                                  Gerente Financeiro
+                                </SelectItem>
+                                <SelectItem value="approver">
+                                  Aprovador
+                                </SelectItem>
+                                <SelectItem value="releaser">
+                                  Pagador/Baixador
+                                </SelectItem>
+                                <SelectItem value="auditor">Auditor</SelectItem>
+                                <SelectItem value="user">Usuário</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
@@ -496,7 +541,13 @@ export default function UsersPage() {
                                   </Select>
                                 </div>
                                 <DialogFooter>
-                                  <Button onClick={handleApproveUser}>
+                                  <Button
+                                    onClick={handleApproveUser}
+                                    disabled={isApproving}
+                                  >
+                                    {isApproving && (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    )}
                                     Confirmar Aprovação
                                   </Button>
                                 </DialogFooter>
