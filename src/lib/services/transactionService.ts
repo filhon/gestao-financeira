@@ -15,6 +15,7 @@ import {
   startAfter,
   limit,
   QueryDocumentSnapshot,
+  getCountFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { Transaction, TransactionStatus } from "@/lib/types";
@@ -114,6 +115,46 @@ export const transactionService = {
     return snapshot.docs.map((doc) =>
       convertDates({ id: doc.id, ...doc.data() }),
     );
+  },
+
+  getCount: async (filter?: {
+    type?: string;
+    status?: string;
+    companyId?: string;
+    batchId?: string;
+    createdBy?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<number> => {
+    let q = query(collection(db, COLLECTION_NAME));
+
+    if (filter?.companyId) {
+      q = query(q, where("companyId", "==", filter.companyId));
+    }
+    if (filter?.type) {
+      q = query(q, where("type", "==", filter.type));
+    }
+    if (filter?.status) {
+      q = query(q, where("status", "==", filter.status));
+    }
+    if (filter?.batchId) {
+      q = query(q, where("batchId", "==", filter.batchId));
+    }
+    if (filter?.createdBy) {
+      q = query(q, where("createdBy", "==", filter.createdBy));
+    }
+    if (filter?.startDate) {
+      q = query(
+        q,
+        where("dueDate", ">=", Timestamp.fromDate(filter.startDate)),
+      );
+    }
+    if (filter?.endDate) {
+      q = query(q, where("dueDate", "<=", Timestamp.fromDate(filter.endDate)));
+    }
+
+    const snapshot = await getCountFromServer(q);
+    return snapshot.data().count;
   },
 
   getPaginated: async (

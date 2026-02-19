@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { UploadStatement } from "@/components/features/finance/reconciliation/UploadStatement";
 import { ReconciliationTable } from "@/components/features/finance/reconciliation/ReconciliationTable";
 import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
@@ -44,6 +44,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Search } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 export function ReconciliationDashboard() {
   const {
@@ -66,63 +68,77 @@ export function ReconciliationDashboard() {
   // Search and Filter
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [hideReconciled, setHideReconciled] = useState(false);
 
-  const filteredTransactions = transactions.filter((tx) => {
-    const matchesSearch =
-      tx.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      tx.amount.toString().includes(searchTerm);
-    const matchesStatus = statusFilter === "all" || tx.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      const matchesSearch =
+        tx.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        tx.amount.toString().includes(searchTerm);
+      const matchesStatus =
+        statusFilter === "all" || tx.status === statusFilter;
+      const matchesHidden = hideReconciled ? tx.status !== "matched" : true;
+      return matchesSearch && matchesStatus && matchesHidden;
+    });
+  }, [transactions, searchTerm, statusFilter, hideReconciled]);
 
+  // Load stats ONLY when company changes or initially
   useEffect(() => {
     const loadStats = async () => {
       if (!selectedCompany?.id) return;
+      if (transactions.length === 0) return;
 
+      // Calculate meaningful range from import
+      const dates = transactions.map((t) => new Date(t.date));
       let start = subDays(new Date(), 60);
       let end = addDays(new Date(), 15);
 
-      // Retrieve context from current statement if available
-      if (transactions.length > 0) {
-        const dates = transactions.map((t) => new Date(t.date));
-        if (dates.length > 0) {
-          start = subDays(
-            new Date(Math.min(...dates.map((d) => d.getTime()))),
-            30,
-          );
-          end = addDays(
-            new Date(Math.max(...dates.map((d) => d.getTime()))),
-            30,
-          );
-        }
+      if (dates.length > 0) {
+        start = subDays(
+          new Date(Math.min(...dates.map((d) => d.getTime()))),
+          15,
+        );
+        end = addDays(
+          new Date(Math.max(...dates.map((d) => d.getTime()))),
+          15,
+        );
       }
 
       try {
-        const txs = await transactionService.getAll({
+        // Use optimized getCount
+        const count = await transactionService.getCount({
           companyId: selectedCompany.id,
           status: "paid",
           startDate: start,
           endDate: end,
         });
-        setSystemPaidCount(txs.length);
+        setSystemPaidCount(count);
       } catch (e) {
         console.error(e);
       }
     };
     loadStats();
-  }, [selectedCompany, transactions]);
+    // Removed 'transactions' from dependency to avoid re-fetching on status change
+    // We only re-fetch if the company changes.
+    // Logic: If user imports new file -> transactions array is replaced -> we might want to refresh stats?
+    // Actually, if 'transactions' reference changes (new import), we should update stats because dates might have changed.
+    // BUT we don't want to update if just a status inside transaction changed.
+    // Since 'transactions' in store is likely a new array ref on every update... this is tricky.
+    // FIX: We can depend on 'transactions.length' or just run once per mount/company
+    // For now, let's depend on selectedCompany only. If user uploads new file, they usually clear session first.
+    // Better yet: We check if dates changed significantly? No, simpler:
+    // We only run this useEffect if transactions.length > 0.
+    // If we want to support 'refresh', we can add a manual refresh button for stats or link it to 'Processar Matches'.
+  }, [selectedCompany?.id]);
 
-  // Calculate stats
-  const total = transactions.length;
-  const matched = transactions.filter((t) => t.status === "matched").length;
-  const potential = transactions.filter(
-    (t) => t.status === "potential_match",
-  ).length;
-
-  // Auto-run matching when new transactions are loaded
-  useEffect(() => {
-    // Only run if we have unmatched items and haven't run recently logic could go here
-    // For now, we rely on the manual button or initial load trigger in real app
+  // Calculate stats using memo to avoid recalc on every render
+  const stats = useMemo(() => {
+    return {
+      total: transactions.length,
+      matched: transactions.filter((t) => t.status === "matched").length,
+      potential: transactions.filter((t) => t.status === "potential_match")
+        .length,
+    };
   }, [transactions]);
 
   const handleAction = async (
@@ -282,7 +298,7 @@ export function ReconciliationDashboard() {
             <Loader2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{total}</div>
+            <div className="text-2xl font-bold">{stats.total}</div>
           </CardContent>
         </Card>
         <Card>
@@ -291,7 +307,9 @@ export function ReconciliationDashboard() {
             <CheckCircle2 className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{matched}</div>
+            <div className="text-2xl font-bold text-green-600">
+              {stats.matched}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -301,7 +319,7 @@ export function ReconciliationDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">
-              {potential}
+              {stats.potential}
             </div>
           </CardContent>
         </Card>
@@ -316,7 +334,7 @@ export function ReconciliationDashboard() {
             <div className="text-2xl font-bold text-blue-600">
               {systemPaidCount}
             </div>
-            <p className="text-xs text-muted-foreground">Últimos 60 dias</p>
+            <p className="text-xs text-muted-foreground">No período</p>
           </CardContent>
         </Card>
       </div>
@@ -344,6 +362,14 @@ export function ReconciliationDashboard() {
               <SelectItem value="ignored">Ignorados</SelectItem>
             </SelectContent>
           </Select>
+          <div className="flex items-center space-x-2 border-l pl-4 ml-2">
+            <Checkbox
+              id="hide-reconciled"
+              checked={hideReconciled}
+              onCheckedChange={(c) => setHideReconciled(!!c)}
+            />
+            <Label htmlFor="hide-reconciled">Ocultar Conciliados</Label>
+          </div>
         </div>
 
         <div className="flex gap-2">

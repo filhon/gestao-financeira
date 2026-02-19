@@ -76,7 +76,16 @@ export function ReconciliationTable({
         </TableHeader>
         <TableBody>
           {transactions.map((tx) => (
-            <TableRow key={tx.id}>
+            <TableRow
+              key={tx.id}
+              className={cn(
+                "transition-all duration-500",
+                tx.status === "matched"
+                  ? "bg-green-50/50 dark:bg-green-900/10 opacity-70 border-l-4 border-l-green-500"
+                  : "",
+                tx.status === "ignored" ? "opacity-50 grayscale" : "",
+              )}
+            >
               <TableCell>{format(new Date(tx.date), "dd/MM/yyyy")}</TableCell>
 
               <TableCell>
@@ -98,7 +107,7 @@ export function ReconciliationTable({
               <TableCell>{getStatusBadge(tx.status)}</TableCell>
               <TableCell>
                 {tx.matchedTransactionIds &&
-                tx.matchedTransactionIds.length > 0 ? (
+                  tx.matchedTransactionIds.length > 0 ? (
                   <div className="flex flex-col gap-1 text-sm bg-muted/50 p-2 rounded">
                     <span className="font-medium text-green-700">
                       Combo ({tx.matchedTransactionIds.length} itens)
