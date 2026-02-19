@@ -211,7 +211,6 @@ export default function AuditLogsPage() {
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const filter: Record<string, string | Date | undefined> = {};
         if (filters.action !== "all") filter.action = filters.action;
         if (filters.entity !== "all") filter.entity = filters.entity;

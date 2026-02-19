@@ -12,7 +12,6 @@ import {
   DragStartEvent,
   DragOverEvent,
   DragEndEvent,
-  DragCancelEvent,
   defaultDropAnimationSideEffects,
   DropAnimation,
 } from "@dnd-kit/core";
@@ -164,7 +163,7 @@ export function RoadmapBoard() {
     setActiveOriginalStatus(null);
   };
 
-  const handleDragCancel = (_event: DragCancelEvent) => {
+  const handleDragCancel = () => {
     // Reverte o estado optimista ao cancelar o drag (ex: tecla Escape)
     if (activeId && activeOriginalStatus) {
       setItems((prev) =>

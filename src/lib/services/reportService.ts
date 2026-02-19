@@ -499,7 +499,7 @@ export const reportService = {
     companyName: string,
   ) => {
     const doc = new jsPDF();
-    await ensureReportFont(doc);
+    const reportFont = await ensureReportFont(doc);
 
     // Header
     doc.setFontSize(18);
