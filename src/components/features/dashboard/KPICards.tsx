@@ -1,7 +1,10 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { ArrowDownIcon, ArrowUpIcon, DollarSign, Wallet } from "lucide-react";
 import { DashboardMetrics } from "@/lib/services/dashboardService";
+import { AnimatedCounter } from "@/components/ui/animated-counter";
 
 interface KPICardsProps {
     metrics: DashboardMetrics;
@@ -19,10 +22,10 @@ export function KPICards({ metrics }: KPICardsProps) {
                 </CardHeader>
                 <CardContent>
                     <div className="text-2xl font-bold text-green-600">
-                        {formatCurrency(metrics.totalRevenue)}
+                        <AnimatedCounter value={metrics.totalRevenue} formatter={formatCurrency} />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        + {formatCurrency(metrics.pendingReceivables)} a receber
+                        + <AnimatedCounter value={metrics.pendingReceivables} formatter={formatCurrency} /> a receber
                     </p>
                 </CardContent>
             </Card>
@@ -35,10 +38,10 @@ export function KPICards({ metrics }: KPICardsProps) {
                 </CardHeader>
                 <CardContent>
                     <div className="text-2xl font-bold text-red-600">
-                        {formatCurrency(metrics.totalExpenses)}
+                        <AnimatedCounter value={metrics.totalExpenses} formatter={formatCurrency} />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        + {formatCurrency(metrics.pendingPayables)} a pagar
+                        + <AnimatedCounter value={metrics.pendingPayables} formatter={formatCurrency} /> a pagar
                     </p>
                 </CardContent>
             </Card>
@@ -51,7 +54,7 @@ export function KPICards({ metrics }: KPICardsProps) {
                 </CardHeader>
                 <CardContent>
                     <div className={`text-2xl font-bold ${metrics.balance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                        {formatCurrency(metrics.balance)}
+                        <AnimatedCounter value={metrics.balance} formatter={formatCurrency} />
                     </div>
                     <p className="text-xs text-muted-foreground">
                         Receitas - Despesas (Pagas)
@@ -67,7 +70,10 @@ export function KPICards({ metrics }: KPICardsProps) {
                 </CardHeader>
                 <CardContent>
                     <div className="text-2xl font-bold">
-                        {formatCurrency(metrics.balance + metrics.pendingReceivables - metrics.pendingPayables)}
+                        <AnimatedCounter
+                            value={metrics.balance + metrics.pendingReceivables - metrics.pendingPayables}
+                            formatter={formatCurrency}
+                        />
                     </div>
                     <p className="text-xs text-muted-foreground">
                         Considerando pendências

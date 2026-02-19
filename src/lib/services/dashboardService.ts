@@ -17,7 +17,6 @@ import { Transaction } from "@/lib/types";
 import {
   startOfMonth,
   endOfMonth,
-  subMonths,
   format,
   addDays,
   startOfYear,
@@ -29,7 +28,6 @@ import {
   addMonths,
   addYears,
 } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { recurrenceService } from "./recurrenceService";
 
 const TRANSACTIONS_COLLECTION = "transactions";
@@ -43,12 +41,7 @@ export interface DashboardMetrics {
   balance: number;
   pendingPayables: number;
   pendingReceivables: number;
-}
-
-export interface CashFlowData {
-  name: string;
-  income: number;
-  expense: number;
+  year: number;
 }
 
 export interface ProjectedCashFlowData {
@@ -56,6 +49,11 @@ export interface ProjectedCashFlowData {
   balance: number;
   income: number;
   expense: number;
+}
+
+export interface ProjectedCashFlowResult {
+  data: ProjectedCashFlowData[];
+  hasCompanyStats: boolean;
 }
 
 export interface CostCenterData {
@@ -73,11 +71,11 @@ export interface BudgetProgressData {
 }
 
 export const dashboardService = {
-  getOverdueTransactions: async (companyId: string): Promise<Transaction[]> => {
+  getOverdueTransactions: async (companyId: string, userId?: string): Promise<Transaction[]> => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const q = query(
+    let q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
       where("type", "==", "payable"),
@@ -86,6 +84,10 @@ export const dashboardService = {
       orderBy("dueDate", "asc"),
       limit(5),
     );
+
+    if (userId) {
+      q = query(q, where("createdBy", "==", userId));
+    }
 
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) => {
@@ -101,128 +103,14 @@ export const dashboardService = {
 
   getPendingApprovals: async (
     companyId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _userId?: string,
+    userId?: string,
   ): Promise<Transaction[]> => {
-    // Base query for pending items
-    const q = query(
+    let q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
       where("status", "==", "pending_approval"),
       orderBy("dueDate", "asc"),
-      limit(20),
-    );
-
-    const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
-        id: doc.id,
-        dueDate: (data.dueDate as Timestamp).toDate(),
-        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
-      } as Transaction;
-    });
-
-    // If userId is provided, we could filter by cost center responsibility here
-    // For now, returning the top 5 pending items for the company
-    return transactions.slice(0, 5);
-  },
-
-  getFinancialMetrics: async (
-    companyId: string,
-    userId?: string,
-  ): Promise<DashboardMetrics> => {
-    // Optimization: Use Firestore Aggregation Queries to avoid fetching all documents.
-    // This reduces reads from N (thousands) to 4 (one per query).
-
-    const baseQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-    );
-
-    // Helper to apply user filter
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const applyUserFilter = (q: any) =>
-      userId ? query(q, where("createdBy", "==", userId)) : q;
-
-    // 1. Total Revenue (Paid Receivables)
-    // Note: Using 'amount' as per original code. If 'finalAmount' is needed,
-    // we would need a separate field or ensure finalAmount is always populated.
-    const revenueQuery = applyUserFilter(
-      query(
-        baseQuery,
-        where("status", "==", "paid"),
-        where("type", "==", "receivable"),
-      ),
-    );
-
-    // 2. Total Expenses (Paid Payables)
-    const expensesQuery = applyUserFilter(
-      query(
-        baseQuery,
-        where("status", "==", "paid"),
-        where("type", "==", "payable"),
-      ),
-    );
-
-    // 3. Pending Receivables (Not Paid, Not Rejected)
-    const pendingStatuses = ["draft", "pending_approval", "approved"];
-    const pendingReceivablesQuery = applyUserFilter(
-      query(
-        baseQuery,
-        where("status", "in", pendingStatuses),
-        where("type", "==", "receivable"),
-      ),
-    );
-
-    // 4. Pending Payables
-    const pendingPayablesQuery = applyUserFilter(
-      query(
-        baseQuery,
-        where("status", "in", pendingStatuses),
-        where("type", "==", "payable"),
-      ),
-    );
-
-    const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap] =
-      await Promise.all([
-        getAggregateFromServer(revenueQuery, { total: sum("amount") }),
-        getAggregateFromServer(expensesQuery, { total: sum("amount") }),
-        getAggregateFromServer(pendingReceivablesQuery, {
-          total: sum("amount"),
-        }),
-        getAggregateFromServer(pendingPayablesQuery, { total: sum("amount") }),
-      ]);
-
-    const totalRevenue = revenueSnap.data().total || 0;
-    const totalExpenses = expensesSnap.data().total || 0;
-    const pendingReceivables = pendingRecSnap.data().total || 0;
-    const pendingPayables = pendingPaySnap.data().total || 0;
-
-    return {
-      totalRevenue,
-      totalExpenses,
-      balance: totalRevenue - totalExpenses,
-      pendingPayables,
-      pendingReceivables,
-    };
-  },
-
-  getUpcomingTransactions: async (
-    companyId: string,
-    userId?: string,
-  ): Promise<Transaction[]> => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    let q = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("dueDate", ">=", Timestamp.fromDate(today)),
-      where("status", "not-in", ["paid", "rejected"]),
-      orderBy("dueDate", "asc"),
-      limit(10),
+      limit(5),
     );
 
     if (userId) {
@@ -230,7 +118,7 @@ export const dashboardService = {
     }
 
     const snapshot = await getDocs(q);
-    const realTransactions = snapshot.docs.map((doc) => {
+    return snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
         ...data,
@@ -239,105 +127,115 @@ export const dashboardService = {
         paymentDate: (data.paymentDate as Timestamp)?.toDate(),
       } as Transaction;
     });
-
-    // Fetch active recurring templates
-    const recurringTemplates = await recurrenceService.getTemplates(companyId);
-    const activeTemplates = recurringTemplates.filter((t) => t.active);
-
-    const projectedTransactions: Transaction[] = [];
-
-    // We only care about the *next* occurrence for the "Upcoming" list
-    activeTemplates.forEach((template) => {
-      if (
-        isAfter(template.nextDueDate, today) ||
-        isSameDay(template.nextDueDate, today)
-      ) {
-        // Check if expired
-        if (template.endDate && isAfter(template.nextDueDate, template.endDate))
-          return;
-
-        projectedTransactions.push({
-          id: `projected-${template.id}`,
-          companyId: template.companyId,
-          description: `${template.description} (Recorrência)`,
-          amount: template.amount,
-          type: template.type,
-          status: "draft",
-          dueDate: template.nextDueDate,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          createdBy: "system",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any as Transaction);
-      }
-    });
-
-    // Merge and Sort
-    const all = [...realTransactions, ...projectedTransactions];
-    all.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-
-    return all.slice(0, 5);
   },
 
-  getCashFlowData: async (
+  getFinancialMetrics: async (
     companyId: string,
-    months: number = 6,
-  ): Promise<CashFlowData[]> => {
-    const q = query(
+    userId?: string,
+    year?: number,
+  ): Promise<DashboardMetrics> => {
+    const targetYear = year || new Date().getFullYear();
+    const yearStart = Timestamp.fromDate(startOfYear(new Date(targetYear, 0, 1)));
+    const yearEnd = Timestamp.fromDate(endOfYear(new Date(targetYear, 0, 1)));
+
+    const baseQuery = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
-      orderBy("dueDate", "asc"),
+      where("dueDate", ">=", yearStart),
+      where("dueDate", "<=", yearEnd),
     );
 
-    const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map((doc) => {
-      const data = doc.data();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const applyUserFilter = (q: any) =>
+      userId ? query(q, where("createdBy", "==", userId)) : q;
+
+    const pendingStatuses = ["draft", "pending_approval", "approved"];
+
+    // Strategy: try aggregation queries (4 reads), fallback to getDocs if indexes not ready
+    try {
+      const revenueQuery = applyUserFilter(
+        query(baseQuery, where("status", "==", "paid"), where("type", "==", "receivable")),
+      );
+      const expensesQuery = applyUserFilter(
+        query(baseQuery, where("status", "==", "paid"), where("type", "==", "payable")),
+      );
+      const pendingReceivablesQuery = applyUserFilter(
+        query(baseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
+      );
+      const pendingPayablesQuery = applyUserFilter(
+        query(baseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
+      );
+
+      const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap] =
+        await Promise.all([
+          getAggregateFromServer(revenueQuery, { total: sum("amount") }),
+          getAggregateFromServer(expensesQuery, { total: sum("amount") }),
+          getAggregateFromServer(pendingReceivablesQuery, { total: sum("amount") }),
+          getAggregateFromServer(pendingPayablesQuery, { total: sum("amount") }),
+        ]);
+
       return {
-        ...data,
-        dueDate: (data.dueDate as Timestamp).toDate(),
-        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
-      } as Transaction;
-    });
+        totalRevenue: revenueSnap.data().total || 0,
+        totalExpenses: expensesSnap.data().total || 0,
+        balance: (revenueSnap.data().total || 0) - (expensesSnap.data().total || 0),
+        pendingPayables: pendingPaySnap.data().total || 0,
+        pendingReceivables: pendingRecSnap.data().total || 0,
+        year: targetYear,
+      };
+    } catch {
+      // Fallback: indexes may still be building. Use getDocs + client-side sum.
+      console.warn("Aggregation query failed (indexes may be building). Using fallback getDocs approach.");
 
-    // Initialize map with all months
-    const monthlyData = new Map<string, CashFlowData>();
-    for (let i = 0; i < months; i++) {
-      const date = subMonths(new Date(), months - 1 - i);
-      const key = format(date, "yyyy-MM");
-      monthlyData.set(key, {
-        name: format(date, "MMM", { locale: ptBR }),
-        income: 0,
-        expense: 0,
-      });
-    }
+      let fallbackQuery = query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where("companyId", "==", companyId),
+        where("dueDate", ">=", yearStart),
+        where("dueDate", "<=", yearEnd),
+      );
 
-    transactions.forEach((t) => {
-      if (t.status === "rejected") return;
-
-      // For paid transactions, use paymentDate; for others use dueDate
-      const dateToUse =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      const key = format(dateToUse, "yyyy-MM");
-      const entry = monthlyData.get(key);
-
-      if (entry) {
-        const amountToUse =
-          t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-        if (t.type === "receivable") {
-          entry.income += Number(amountToUse);
-        } else {
-          entry.expense += Number(amountToUse);
-        }
+      if (userId) {
+        fallbackQuery = query(fallbackQuery, where("createdBy", "==", userId));
       }
-    });
 
-    return Array.from(monthlyData.values());
+      const snapshot = await getDocs(fallbackQuery);
+
+      let totalRevenue = 0;
+      let totalExpenses = 0;
+      let pendingReceivables = 0;
+      let pendingPayables = 0;
+
+      snapshot.docs.forEach((d) => {
+        const data = d.data();
+        const amount = Number(data.amount) || 0;
+        const status = data.status as string;
+        const type = data.type as string;
+
+        if (status === "paid") {
+          if (type === "receivable") totalRevenue += amount;
+          else if (type === "payable") totalExpenses += amount;
+        } else if (pendingStatuses.includes(status)) {
+          if (type === "receivable") pendingReceivables += amount;
+          else if (type === "payable") pendingPayables += amount;
+        }
+      });
+
+      return {
+        totalRevenue,
+        totalExpenses,
+        balance: totalRevenue - totalExpenses,
+        pendingPayables,
+        pendingReceivables,
+        year: targetYear,
+      };
+    }
   },
+
+  // getUpcomingTransactions and getCashFlowData removed (dead code)
 
   getProjectedCashFlow: async (
     companyId: string,
     mode: "30days" | "year" = "30days",
-  ): Promise<ProjectedCashFlowData[]> => {
+  ): Promise<ProjectedCashFlowResult> => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -434,27 +332,28 @@ export const dashboardService = {
     // PERFORMANCE FIX: Snapshot + Delta approach
     // Instead of aggregating all history, we read the current balance from company_stats
     let startingBalance = 0;
+    let hasCompanyStats = false;
     try {
       const statsRef = doc(db, COMPANY_STATS_COLLECTION, companyId);
       const statsSnap = await getDoc(statsRef);
       if (statsSnap.exists()) {
         startingBalance = statsSnap.data().currentBalance || 0;
-      } else {
-        // If stats don't exist, we could trigger a recalc or just default to 0
-        // For now, let's default to 0 and maybe log a warning or trigger recalc in background
-        console.warn(
-          "Company stats not found, defaulting starting balance to 0",
-        );
-        // startingBalance = (await getDoc(statsRef)).data()?.currentBalance || 0;
+        hasCompanyStats = true;
       }
     } catch (error) {
       console.error("Error fetching company stats for balance:", error);
     }
 
-    // Generate daily or weekly data points
+    // PERFORMANCE: Pre-group transactions by date key for O(n+m) instead of O(n*m)
+    const dateKeyFormat = mode === "year" ? "yyyy-MM-dd" : "yyyy-MM-dd";
+    const txByDateKey = new Map<string, Transaction[]>();
+    combinedTransactions.forEach((t) => {
+      const key = format(t.dueDate, dateKeyFormat);
+      if (!txByDateKey.has(key)) txByDateKey.set(key, []);
+      txByDateKey.get(key)!.push(t);
+    });
+
     const result: ProjectedCashFlowData[] = [];
-    // const today = new Date(); -- Removed duplicate declaration
-    // today.setHours(0, 0, 0, 0); -- Removed duplicate
 
     let currentBalance = startingBalance;
 
@@ -464,17 +363,11 @@ export const dashboardService = {
     // To find the balance at Jan 1st, we must subtract all net changes that occurred between Jan 1st and Today.
     if (mode === "year") {
       const pastTransactions = combinedTransactions.filter((t) => {
-        // We consider 'paid' transactions as having affected the balance
-        // We use dueDate as a proxy for paymentDate in this projection view
         return t.status === "paid" && isBefore(t.dueDate, today);
       });
 
       const netChangeBeforeToday = pastTransactions.reduce((acc, t) => {
         const amount = Number(t.amount) || 0;
-        // If receivable (income): it added to balance, so we subtract to go back.
-        // If payable (expense): it removed from balance, so we add to go back.
-        // Wait, simpler: calculate Net Change, then subtract Net Change from Current.
-        // Net Change = Income - Expense.
         if (t.type === "receivable") {
           return acc + amount;
         } else {
@@ -495,47 +388,36 @@ export const dashboardService = {
       let dayIncome = 0;
       let dayExpense = 0;
 
-      // Find transactions for this day/period
-      combinedTransactions.forEach((t) => {
-        const dateToUse = t.dueDate;
+      // Collect transactions for this period using pre-grouped map
+      let daysToCheck = new Date(currentDate);
+      while (isBefore(daysToCheck, nextDate) || (mode !== "year" && isSameDay(daysToCheck, currentDate))) {
+        const key = format(daysToCheck, dateKeyFormat);
+        const dayTxns = txByDateKey.get(key);
+        if (dayTxns) {
+          dayTxns.forEach((t) => {
+            // In '30days' mode: skip paid transactions on or before today
+            if (mode === "30days") {
+              const isPastOrToday = !isAfter(t.dueDate, today);
+              if (t.status === "paid" && isPastOrToday) return;
+            }
 
-        // Filter for period
-        const isInPeriod =
-          mode === "year"
-            ? !isBefore(dateToUse, currentDate) && isBefore(dateToUse, nextDate)
-            : isSameDay(dateToUse, currentDate);
-
-        if (!isInPeriod) return;
-
-        // Handling 'paid' vs 'unpaid'
-        // In 'year' mode (Historical + Projection):
-        // - We reconstruct history, so we INCLUDE paid transactions (they build the curve up to today).
-        // - We INCLUDE unpaid/projected (they build the curve after today).
-
-        // In '30days' mode (Forecast):
-        // - We start from Today's Balance.
-        // - We SKIP paid transactions that are before or on today (already in balance).
-        // - We INCLUDE future items.
-
-        if (mode === "30days") {
-          const isPastOrToday = !isAfter(dateToUse, today); // <= today
-          if (t.status === "paid" && isPastOrToday) {
-            return;
-          }
+            const amount = Number(t.amount) || 0;
+            if (t.type === "receivable") {
+              dayIncome += amount;
+              currentBalance += amount;
+            } else {
+              dayExpense += amount;
+              currentBalance -= amount;
+            }
+          });
         }
 
-        const amount = Number(t.amount) || 0;
-        if (t.type === "receivable") {
-          dayIncome += amount;
-          currentBalance += amount;
-        } else {
-          dayExpense += amount;
-          currentBalance -= amount;
-        }
-      });
+        if (mode !== "year") break; // For 30days mode, only check the single day
+        daysToCheck = addDays(daysToCheck, 1);
+      }
 
       result.push({
-        date: format(currentDate, mode === "year" ? "dd/MM" : "dd/MM"),
+        date: format(currentDate, "dd/MM"),
         balance: Math.round(currentBalance * 100) / 100,
         income: Math.round(dayIncome * 100) / 100,
         expense: Math.round(dayExpense * 100) / 100,
@@ -544,7 +426,7 @@ export const dashboardService = {
       currentDate = nextDate;
     }
 
-    return result;
+    return { data: result, hasCompanyStats };
   },
 
   getExpensesByCostCenter: async (
@@ -623,16 +505,31 @@ export const dashboardService = {
     }));
 
     // Get all budgets for current year (annual amounts)
-    const budgetQuery = query(
-      collection(db, BUDGETS_COLLECTION),
-      where("year", "==", currentYear),
-    );
-    const budgetSnapshot = await getDocs(budgetQuery);
+    // Budget docs don't store companyId — security is ensured by scoping
+    // to costCenterIds already filtered by companyId above.
     const annualBudgets = new Map<string, number>();
-    budgetSnapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      annualBudgets.set(data.costCenterId, data.amount);
-    });
+    const ccIds = costCenters.map((cc) => cc.id);
+
+    // Firestore 'in' supports max 30 values, batch if needed
+    const batches: string[][] = [];
+    for (let i = 0; i < ccIds.length; i += 30) {
+      batches.push(ccIds.slice(i, i + 30));
+    }
+
+    await Promise.all(
+      batches.map(async (batch) => {
+        const budgetQuery = query(
+          collection(db, BUDGETS_COLLECTION),
+          where("year", "==", currentYear),
+          where("costCenterId", "in", batch),
+        );
+        const budgetSnapshot = await getDocs(budgetQuery);
+        budgetSnapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          annualBudgets.set(data.costCenterId, data.amount);
+        });
+      }),
+    );
 
     // Optimization: Use Cost Center Usage collection instead of fetching all transactions
     const usageQuery = query(

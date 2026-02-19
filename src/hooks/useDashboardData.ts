@@ -4,7 +4,7 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 
-export function useDashboardMetrics() {
+export function useDashboardMetrics(year?: number) {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
   const { onlyOwnPayables } = usePermissions();
@@ -15,35 +15,14 @@ export function useDashboardMetrics() {
       selectedCompany?.id,
       user?.uid,
       onlyOwnPayables,
+      year,
     ],
     queryFn: async () => {
       if (!selectedCompany || !user) return null;
       return dashboardService.getFinancialMetrics(
         selectedCompany.id,
-        onlyOwnPayables ? user.uid : undefined
-      );
-    },
-    enabled: !!selectedCompany && !!user,
-  });
-}
-
-export function useUpcomingTransactions() {
-  const { selectedCompany } = useCompany();
-  const { user } = useAuth();
-  const { onlyOwnPayables } = usePermissions();
-
-  return useQuery({
-    queryKey: [
-      "upcoming-transactions",
-      selectedCompany?.id,
-      user?.uid,
-      onlyOwnPayables,
-    ],
-    queryFn: async () => {
-      if (!selectedCompany || !user) return [];
-      return dashboardService.getUpcomingTransactions(
-        selectedCompany.id,
-        onlyOwnPayables ? user.uid : undefined
+        onlyOwnPayables ? user.uid : undefined,
+        year,
       );
     },
     enabled: !!selectedCompany && !!user,
@@ -56,7 +35,7 @@ export function useProjectedCashFlow(mode: "30days" | "year") {
   return useQuery({
     queryKey: ["projected-cash-flow", selectedCompany?.id, mode],
     queryFn: async () => {
-      if (!selectedCompany) return [];
+      if (!selectedCompany) return null;
       return dashboardService.getProjectedCashFlow(selectedCompany.id, mode);
     },
     enabled: !!selectedCompany,
@@ -78,12 +57,22 @@ export function useBudgetProgress() {
 
 export function useOverdueTransactions() {
   const { selectedCompany } = useCompany();
+  const { user } = useAuth();
+  const { onlyOwnPayables } = usePermissions();
 
   return useQuery({
-    queryKey: ["overdue-transactions", selectedCompany?.id],
+    queryKey: [
+      "overdue-transactions",
+      selectedCompany?.id,
+      user?.uid,
+      onlyOwnPayables,
+    ],
     queryFn: async () => {
       if (!selectedCompany) return [];
-      return dashboardService.getOverdueTransactions(selectedCompany.id);
+      return dashboardService.getOverdueTransactions(
+        selectedCompany.id,
+        onlyOwnPayables ? user?.uid : undefined,
+      );
     },
     enabled: !!selectedCompany,
   });
@@ -92,14 +81,20 @@ export function useOverdueTransactions() {
 export function usePendingApprovals() {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
+  const { onlyOwnPayables } = usePermissions();
 
   return useQuery({
-    queryKey: ["pending-approvals", selectedCompany?.id, user?.uid],
+    queryKey: [
+      "pending-approvals",
+      selectedCompany?.id,
+      user?.uid,
+      onlyOwnPayables,
+    ],
     queryFn: async () => {
       if (!selectedCompany) return [];
       return dashboardService.getPendingApprovals(
         selectedCompany.id,
-        user?.uid
+        onlyOwnPayables ? user?.uid : undefined,
       );
     },
     enabled: !!selectedCompany,
