@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -107,7 +107,7 @@ export function CostCenterForm({
         try {
           const budget = await budgetService.getByCostCenterAndYear(
             editingId,
-            watchedYear
+            watchedYear,
           );
           if (budget) {
             form.setValue("budget", budget.amount);
@@ -144,7 +144,7 @@ export function CostCenterForm({
           const balance = await costCenterService.getEffectiveBalance(
             editingId,
             selectedCompany.id,
-            watchedYear
+            watchedYear,
           );
           setBalanceInfo(balance);
         } catch (error) {
@@ -169,7 +169,7 @@ export function CostCenterForm({
           const balance = await costCenterService.getEffectiveBalance(
             watchedParentId,
             selectedCompany.id,
-            watchedYear
+            watchedYear,
           );
           setParentBalanceInfo({ available: balance.available });
         } catch (error) {
@@ -183,9 +183,26 @@ export function CostCenterForm({
     loadParentBalance();
   }, [watchedParentId, selectedCompany, watchedYear]);
 
-  // Filter out self and potential children (simple circular check: just self for now)
+  // Compute all descendant IDs of the CC being edited to prevent circular hierarchy (BUG-02)
+  const descendantIds = useMemo(() => {
+    if (!editingId) return new Set<string>();
+    const result = new Set<string>();
+    const queue = [editingId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      availableCostCenters.forEach((cc) => {
+        if (cc.parentId === current && !result.has(cc.id)) {
+          result.add(cc.id);
+          queue.push(cc.id);
+        }
+      });
+    }
+    return result;
+  }, [editingId, availableCostCenters]);
+
+  // Filter out self and all descendants to prevent circular references
   const potentialParents = availableCostCenters.filter(
-    (cc) => cc.id !== editingId
+    (cc) => cc.id !== editingId && !descendantIds.has(cc.id),
   );
 
   return (
@@ -280,15 +297,26 @@ export function CostCenterForm({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Ano</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        {...field}
-                        onChange={(e) =>
-                          field.onChange(parseInt(e.target.value))
-                        }
-                      />
-                    </FormControl>
+                    <Select
+                      onValueChange={(v) => field.onChange(parseInt(v))}
+                      value={field.value?.toString()}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Ano" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {Array.from(
+                          { length: 6 },
+                          (_, i) => new Date().getFullYear() - 2 + i,
+                        ).map((y) => (
+                          <SelectItem key={y} value={y.toString()}>
+                            {y}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -492,8 +520,8 @@ export function CostCenterForm({
                                       ])
                                     : field.onChange(
                                         field.value?.filter(
-                                          (value) => value !== user.uid
-                                        )
+                                          (value) => value !== user.uid,
+                                        ),
                                       );
                                 }}
                               />

@@ -1,5 +1,14 @@
 import { db } from "@/lib/firebase/client";
-import { doc, setDoc, increment, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  setDoc,
+  increment,
+  serverTimestamp,
+  getDocs,
+  query,
+  collection,
+  where,
+} from "firebase/firestore";
 import { Transaction } from "@/lib/types";
 
 const COLLECTION_NAME = "cost_center_usage";
@@ -39,7 +48,7 @@ export const usageService = {
           transaction.companyId,
           alloc.costCenterId,
           monthKey,
-          allocAmount
+          allocAmount,
         );
       });
       await Promise.all(promises);
@@ -49,7 +58,7 @@ export const usageService = {
         transaction.companyId,
         transaction.costCenterId,
         monthKey,
-        signedAmount
+        signedAmount,
       );
     }
   },
@@ -58,7 +67,7 @@ export const usageService = {
     companyId: string,
     costCenterId: string,
     monthKey: string,
-    amount: number
+    amount: number,
   ) => {
     const id = `${companyId}_${costCenterId}_${monthKey}`;
     const ref = doc(db, COLLECTION_NAME, id);
@@ -73,42 +82,34 @@ export const usageService = {
         amount: increment(amount),
         updatedAt: serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
   },
 
   getUsageByCostCenter: async (
     companyId: string,
     costCenterId: string,
-    year: number
+    year: number,
   ) => {
-    const { getDocs, query, collection, where } =
-      await import("firebase/firestore");
-    const { db } = await import("@/lib/firebase/client");
-
     const q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
       where("costCenterId", "==", costCenterId),
       where("monthKey", ">=", `${year}-01`),
-      where("monthKey", "<=", `${year}-12`)
+      where("monthKey", "<=", `${year}-12`),
     );
 
     const snapshot = await getDocs(q);
     return snapshot.docs.map(
-      (doc) => doc.data() as { monthKey: string; amount: number }
+      (doc) => doc.data() as { monthKey: string; amount: number },
     );
   },
 
   recalculateAll: async (companyId: string) => {
     // This function should be called once to migrate existing data
-    const { getDocs, query, collection, where } =
-      await import("firebase/firestore");
-    const { db } = await import("@/lib/firebase/client");
-
     const q = query(
       collection(db, "transactions"),
-      where("companyId", "==", companyId)
+      where("companyId", "==", companyId),
     );
     const snapshot = await getDocs(q);
 

@@ -22,7 +22,7 @@ const COLLECTION_NAME = "cost_centers";
 export const costCenterService = {
   getAll: async (
     companyId?: string,
-    forUserId?: string
+    forUserId?: string,
   ): Promise<CostCenter[]> => {
     let q = query(collection(db, COLLECTION_NAME), orderBy("name"));
 
@@ -89,7 +89,7 @@ export const costCenterService = {
   getChildren: async (parentId: string): Promise<CostCenter[]> => {
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("parentId", "==", parentId)
+      where("parentId", "==", parentId),
     );
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) => {
@@ -112,7 +112,7 @@ export const costCenterService = {
     costCenterId: string,
     companyId: string,
     year?: number,
-    userId?: string
+    userId?: string,
   ): Promise<{
     fromReceivables: number;
     fromParent: number;
@@ -145,13 +145,13 @@ export const costCenterService = {
       where("type", "==", "receivable"),
       where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
       where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd)
+      where("dueDate", "<=", yearEnd),
     );
 
     if (userId) {
       receivablesQuery = query(
         receivablesQuery,
-        where("createdBy", "==", userId)
+        where("createdBy", "==", userId),
       );
     }
     const receivablesSnapshot = await getDocs(receivablesQuery);
@@ -174,7 +174,7 @@ export const costCenterService = {
       where("type", "==", "payable"),
       where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
       where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd)
+      where("dueDate", "<=", yearEnd),
     );
 
     if (userId) {
@@ -198,7 +198,7 @@ export const costCenterService = {
     // Fetch budget for the year
     const budget = await budgetService.getByCostCenterAndYear(
       costCenterId,
-      targetYear
+      targetYear,
     );
     const budgetAmount = budget?.amount || 0;
 
@@ -217,7 +217,7 @@ export const costCenterService = {
       fromParent,
       allocatedToChildren,
       spentOnPayables,
-      available: Math.max(0, available),
+      available,
     };
   },
 
@@ -229,7 +229,7 @@ export const costCenterService = {
     companyId: string,
     costCenters: CostCenter[],
     year?: number,
-    userId?: string
+    userId?: string,
   ): Promise<Record<string, number>> => {
     const targetYear = year || new Date().getFullYear();
     const yearStart = new Date(targetYear, 0, 1);
@@ -241,13 +241,13 @@ export const costCenterService = {
       where("companyId", "==", companyId),
       where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
       where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd)
+      where("dueDate", "<=", yearEnd),
     );
 
     if (userId) {
       transactionsQuery = query(
         transactionsQuery,
-        where("createdBy", "==", userId)
+        where("createdBy", "==", userId),
       );
     }
 
@@ -258,11 +258,13 @@ export const costCenterService = {
     // Note: Ideally we would query budgets by companyId, but schema doesn't have it yet
     const budgets = await Promise.all(
       costCenters.map((cc) =>
-        budgetService.getByCostCenterAndYear(cc.id, targetYear)
-      )
+        budgetService.getByCostCenterAndYear(cc.id, targetYear),
+      ),
     );
     const budgetMap = new Map(
-      budgets.filter((b) => b !== null).map((b) => [b!.costCenterId, b!.amount])
+      budgets
+        .filter((b) => b !== null)
+        .map((b) => [b!.costCenterId, b!.amount]),
     );
 
     // 3. Calculate balances in memory
@@ -311,7 +313,7 @@ export const costCenterService = {
   allocateToChild: async (
     parentId: string,
     childId: string,
-    amount: number
+    amount: number,
   ) => {
     const parentRef = doc(db, COLLECTION_NAME, parentId);
     const childRef = doc(db, COLLECTION_NAME, childId);

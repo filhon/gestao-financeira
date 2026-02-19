@@ -42,6 +42,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { toast } from "sonner";
 
 type CostCenterNode = CostCenter & { children: CostCenterNode[] };
 
@@ -63,6 +64,13 @@ function buildTree(items: CostCenter[]): CostCenterNode[] {
       roots.push(node);
     }
   });
+
+  // Sort children alphabetically by code at every level
+  const sortNodeChildren = (node: CostCenterNode) => {
+    node.children.sort((a, b) => a.code.localeCompare(b.code));
+    node.children.forEach(sortNodeChildren);
+  };
+  roots.forEach(sortNodeChildren);
 
   return roots;
 }
@@ -199,13 +207,16 @@ export default function CostCentersPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const fetchCostCenters = useCallback(async () => {
-    if (!selectedCompany) return;
+    if (!selectedCompany) {
+      setIsLoading(false);
+      return;
+    }
     try {
       // For 'user' role, pass forUserId to filter only their allowed cost centers
       const forUserId = onlyOwnPayables ? user?.uid : undefined;
       const data = await costCenterService.getAll(
         selectedCompany.id,
-        forUserId
+        forUserId,
       );
       setCostCenters(data);
     } catch (error) {
@@ -234,7 +245,12 @@ export default function CostCentersPage() {
 
       // Save Annual Budget
       if (ccId && data.budget !== undefined && data.budgetYear) {
-        await budgetService.setBudget(ccId, data.budgetYear, data.budget);
+        await budgetService.setBudget(
+          ccId,
+          data.budgetYear,
+          data.budget,
+          selectedCompany.id,
+        );
       }
 
       await fetchCostCenters();
@@ -250,10 +266,19 @@ export default function CostCentersPage() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
+      const children = await costCenterService.getChildren(deleteId);
+      if (children.length > 0) {
+        toast.error(
+          "Não é possível excluir: este centro de custo possui filhos. Remova-os primeiro.",
+        );
+        return;
+      }
       await costCenterService.delete(deleteId);
       await fetchCostCenters();
+      toast.success("Centro de custo excluído com sucesso.");
     } catch (error) {
       console.error("Error deleting cost center:", error);
+      toast.error("Erro ao excluir o centro de custo. Tente novamente.");
     } finally {
       setDeleteId(null);
     }
@@ -312,7 +337,7 @@ export default function CostCentersPage() {
                           description: cc.description,
                           parentId: cc.parentId,
                           budget: cc.budget,
-                          budgetYear: new Date().getFullYear(),
+                          budgetYear: cc.budgetYear || new Date().getFullYear(),
                           allowedUserIds: cc.allowedUserIds,
                           approverEmail: cc.approverEmail,
                           releaserEmail: cc.releaserEmail,

@@ -17,6 +17,7 @@ import {
   Wallet,
   PieChart as PieChartIcon,
   Calendar,
+  Loader2,
 } from "lucide-react";
 import {
   Table,
@@ -65,6 +66,7 @@ export default function CostCenterDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [budgetAmount, setBudgetAmount] = useState(0);
+  const [childrenBudgetTotal, setChildrenBudgetTotal] = useState(0);
 
   const id = params.id as string;
 
@@ -79,7 +81,7 @@ export default function CostCenterDashboard() {
             usageService.getUsageByCostCenter(
               selectedCompany.id,
               id,
-              selectedYear
+              selectedYear,
             ),
             budgetService.getByCostCenterAndYear(id, selectedYear),
           ]);
@@ -88,6 +90,16 @@ export default function CostCenterDashboard() {
           setChildren(kids);
           setUsageData(usage);
           setBudgetAmount(budget?.amount || 0);
+
+          // Fetch children's budgets for the selected year (BUG-05)
+          const kidsBudgets = await Promise.all(
+            kids.map((k) =>
+              budgetService.getByCostCenterAndYear(k.id, selectedYear),
+            ),
+          );
+          setChildrenBudgetTotal(
+            kidsBudgets.reduce((acc, b) => acc + (b?.amount || 0), 0),
+          );
         } catch (error) {
           console.error("Error loading dashboard data:", error);
         } finally {
@@ -102,30 +114,36 @@ export default function CostCenterDashboard() {
     const loadTransactions = async () => {
       if (selectedCompany && id && user) {
         const now = new Date();
-        // Only fetch if selected year is current or future
-        if (selectedYear < now.getFullYear()) {
-          setTransactions([]);
-          return;
-        }
+        const isPast = selectedYear < now.getFullYear();
 
         try {
           const userId = onlyOwnPayables ? user.uid : undefined;
-          // Optimization: Fetch only upcoming payables instead of all history
+
+          // For past years: fetch the full year range (including paid) for history
+          // For current/future: fetch upcoming payables from today
+          const startDate = isPast ? new Date(selectedYear, 0, 1) : now;
+          const endDate = isPast
+            ? new Date(selectedYear, 11, 31, 23, 59, 59)
+            : undefined;
+
           const { transactions: txs } = await transactionService.getPaginated(
             selectedCompany.id,
-            100, // Fetch enough to likely find items for this cost center
+            100,
             null,
             {
-              startDate: now,
+              startDate,
+              ...(endDate && { endDate }),
               type: "payable",
-              excludeStatus: ["paid", "rejected"],
+              // Past years: include all statuses for historical view
+              // Current/future: exclude paid and rejected
+              ...(!isPast && { excludeStatus: ["paid", "rejected"] }),
               createdBy: userId,
-            }
+            },
           );
 
           // Filter by cost center in memory
           const filtered = txs.filter((t) =>
-            t.costCenterAllocation?.some((a) => a.costCenterId === id)
+            t.costCenterAllocation?.some((a) => a.costCenterId === id),
           );
 
           setTransactions(filtered);
@@ -140,7 +158,7 @@ export default function CostCenterDashboard() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        Carregando...
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -155,12 +173,8 @@ export default function CostCenterDashboard() {
 
   // Calculations
   const totalBudget = budgetAmount;
-  // Note: Children allocation is still using the legacy budget field.
-  // Ideally we should fetch children's budgets for the selected year.
-  const allocatedToChildren = children.reduce(
-    (acc, child) => acc + (child.budget || 0),
-    0
-  );
+  // Use year-specific budgets fetched for children (BUG-05)
+  const allocatedToChildren = childrenBudgetTotal;
 
   // Calculate direct expenses from usage data
   const directExpenses = usageData.reduce((acc, curr) => acc + curr.amount, 0);
@@ -168,6 +182,7 @@ export default function CostCenterDashboard() {
   const remainingBalance = totalBudget - allocatedToChildren - directExpenses;
 
   const now = new Date();
+  const isPastYear = selectedYear < now.getFullYear();
   const isCurrentYear = selectedYear === now.getFullYear();
   const monthsRemaining = isCurrentYear
     ? 12 - now.getMonth()
@@ -208,7 +223,7 @@ export default function CostCenterDashboard() {
         }
         return acc;
       },
-      [] as { name: string; amount: number; monthIndex: number }[]
+      [] as { name: string; amount: number; monthIndex: number }[],
     )
     .sort((a, b) => a.monthIndex - b.monthIndex);
 
@@ -223,16 +238,15 @@ export default function CostCenterDashboard() {
     .filter(
       (t) =>
         t.type === "payable" &&
-        t.status !== "paid" &&
         t.status !== "rejected" &&
-        t.dueDate >= new Date()
+        (isPastYear || (t.status !== "paid" && t.dueDate >= now)),
     )
     .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
     .slice(0, 5);
 
   const years = Array.from(
     { length: 5 },
-    (_, i) => new Date().getFullYear() - 2 + i
+    (_, i) => new Date().getFullYear() - 2 + i,
   ); // Current year - 2 to + 2
 
   return (
@@ -438,55 +452,62 @@ export default function CostCenterDashboard() {
             <CardTitle>Distribuição do Orçamento</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col h-[300px]">
-              <div className="flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={budgetDistributionData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={70}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {budgetDistributionData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(
-                        value:
-                          | number
-                          | string
-                          | Array<number | string>
-                          | readonly (number | string)[]
-                          | undefined
-                      ) => formatCurrency(Number(value) || 0)}
-                      contentStyle={{
-                        borderRadius: "8px",
-                        border: "1px solid #e5e7eb",
-                        boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+            {budgetDistributionData.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px] text-sm text-muted-foreground text-center px-4">
+                Sem dados para exibir. Configure um orçamento para ver a
+                distribuição.
               </div>
-              <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
-                {budgetDistributionData.map((entry, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: entry.color }}
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      {entry.name}
-                    </span>
-                  </div>
-                ))}
+            ) : (
+              <div className="flex flex-col h-[300px]">
+                <div className="flex-1 min-h-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={budgetDistributionData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={70}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {budgetDistributionData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(
+                          value:
+                            | number
+                            | string
+                            | Array<number | string>
+                            | readonly (number | string)[]
+                            | undefined,
+                        ) => formatCurrency(Number(value) || 0)}
+                        contentStyle={{
+                          borderRadius: "8px",
+                          border: "1px solid #e5e7eb",
+                          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
+                  {budgetDistributionData.map((entry, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: entry.color }}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {entry.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -532,7 +553,9 @@ export default function CostCenterDashboard() {
         {/* Upcoming Expenses */}
         <Card>
           <CardHeader>
-            <CardTitle>Próximas Despesas</CardTitle>
+            <CardTitle>
+              {isPastYear ? "Despesas do Período" : "Próximas Despesas"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {upcomingExpenses.length > 0 ? (
@@ -552,8 +575,8 @@ export default function CostCenterDashboard() {
                       {formatCurrency(
                         // Display the allocated amount for this CC, not total tx amount
                         tx.costCenterAllocation?.find(
-                          (a) => a.costCenterId === id
-                        )?.amount || 0
+                          (a) => a.costCenterId === id,
+                        )?.amount || 0,
                       )}
                     </div>
                   </div>
