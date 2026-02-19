@@ -32,27 +32,28 @@ import { CompanyForm } from "@/components/features/companies/CompanyForm";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export default function CompaniesPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { canManageCompanies } = usePermissions();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Redirect if not admin
   useEffect(() => {
-    if (!user) return;
-    // Check if user is admin in AT LEAST ONE company or globally?
-    // For now, let's assume only global admins or those with 'admin' role in the current context can see this.
-    // But this is a global configuration page.
-    // Let's rely on the sidebar link visibility for now, but strictly we should check permissions.
-  }, [user, router]);
+    if (user && !canManageCompanies) {
+      router.push("/dashboard");
+    }
+  }, [user, canManageCompanies, router]);
 
   const fetchCompanies = async () => {
     try {
+      setIsLoading(true);
       const data = await companyService.getAll();
       setCompanies(data);
     } catch (error) {
@@ -69,27 +70,29 @@ export default function CompaniesPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCreate = async (data: any) => {
+    if (!user) return;
+    const admin = { uid: user.uid, email: user.email ?? "" };
     try {
-      if (!user) return;
-      await companyService.create(data, { uid: user.uid, email: user.email });
+      setIsSubmitting(true);
+      await companyService.create(data, admin);
       toast.success("Empresa criada com sucesso!");
       setIsDialogOpen(false);
       fetchCompanies();
     } catch (error) {
       console.error("Error creating company:", error);
       toast.error("Erro ao criar empresa.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleUpdate = async (data: any) => {
-    if (!selectedCompany) return;
+    if (!selectedCompany || !user) return;
+    const admin = { uid: user.uid, email: user.email ?? "" };
     try {
-      if (!user) return;
-      await companyService.update(selectedCompany.id, data, {
-        uid: user.uid,
-        email: user.email,
-      });
+      setIsSubmitting(true);
+      await companyService.update(selectedCompany.id, data, admin);
       toast.success("Empresa atualizada com sucesso!");
       setIsDialogOpen(false);
       setSelectedCompany(null);
@@ -97,17 +100,16 @@ export default function CompaniesPage() {
     } catch (error) {
       console.error("Error updating company:", error);
       toast.error("Erro ao atualizar empresa.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || !user) return;
+    const admin = { uid: user.uid, email: user.email ?? "" };
     try {
-      if (!user) return;
-      await companyService.delete(deleteId, {
-        uid: user.uid,
-        email: user.email,
-      });
+      await companyService.delete(deleteId, admin);
       toast.success("Empresa excluída com sucesso!");
       fetchCompanies();
     } catch (error) {
@@ -135,6 +137,8 @@ export default function CompaniesPage() {
       </div>
     );
   }
+
+  if (!canManageCompanies) return null;
 
   return (
     <div className="space-y-6">
@@ -170,35 +174,46 @@ export default function CompaniesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {companies.map((company) => (
-                <TableRow key={company.id}>
-                  <TableCell className="font-medium flex items-center gap-2">
-                    <Building2 className="h-4 w-4 text-muted-foreground" />
-                    {company.name}
-                  </TableCell>
-                  <TableCell>{company.cnpj || "-"}</TableCell>
-                  <TableCell>{company.phone || "-"}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => openEditDialog(company)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-red-500 hover:text-red-700"
-                        onClick={() => setDeleteId(company.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+              {companies.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={4}
+                    className="text-center py-8 text-muted-foreground"
+                  >
+                    Nenhuma empresa cadastrada.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                companies.map((company) => (
+                  <TableRow key={company.id}>
+                    <TableCell className="font-medium flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      {company.name}
+                    </TableCell>
+                    <TableCell>{company.cnpj || "-"}</TableCell>
+                    <TableCell>{company.phone || "-"}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditDialog(company)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-red-500 hover:text-red-700"
+                          onClick={() => setDeleteId(company.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -219,6 +234,7 @@ export default function CompaniesPage() {
           <CompanyForm
             defaultValues={selectedCompany || {}}
             onSubmit={selectedCompany ? handleUpdate : handleCreate}
+            isLoading={isSubmitting}
           />
         </DialogContent>
       </Dialog>
