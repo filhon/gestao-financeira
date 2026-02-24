@@ -21,6 +21,13 @@ import { generateChanges } from "@/lib/auditFormatter";
 
 const COLLECTION_NAME = "entities";
 
+// Normalizes text: lowercase + remove diacritics (accents)
+const normalizeText = (text: string): string =>
+  text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
 // Simple in-memory cache
 const cache: Record<string, { data: Entity[]; timestamp: number }> = {};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -80,41 +87,80 @@ export const entityService = {
     entities: Entity[];
     lastDoc: DocumentData | null;
   }> => {
+    const search = filters?.search?.trim();
+
+    // When a search term is provided, fetch all matching entities from Firestore
+    // and filter client-side so we support: case-insensitive, accent-insensitive
+    // and substring matching — things Firestore prefix queries cannot handle.
+    if (search) {
+      let q = query(
+        collection(db, COLLECTION_NAME),
+        where("companyId", "==", companyId),
+        orderBy("name", "asc"),
+      );
+
+      if (filters?.category) {
+        q = query(q, where("category", "in", [filters.category, "both"]));
+      }
+
+      const snapshot = await getDocs(q);
+      const allEntities = snapshot.docs.map((doc) =>
+        convertDates({ id: doc.id, ...doc.data() }),
+      );
+
+      const cleanSearch = search.replace(/\D/g, "");
+      const isNumeric = cleanSearch.length > 0 && /^\d+$/.test(cleanSearch);
+      const normalizedSearch = normalizeText(search);
+
+      const filtered = allEntities.filter((entity) => {
+        // Match against document number (digits only)
+        if (isNumeric && entity.document) {
+          const cleanDoc = entity.document.replace(/\D/g, "");
+          if (cleanDoc.includes(cleanSearch)) return true;
+        }
+        // Match against normalized name (substring, case + accent insensitive)
+        const normalizedName = normalizeText(entity.name || "");
+        if (normalizedName.includes(normalizedSearch)) return true;
+        // Also try matching against document as typed (e.g. formatted CPF/CNPJ)
+        if (!isNumeric && entity.document) {
+          const normalizedDoc = normalizeText(entity.document);
+          if (normalizedDoc.includes(normalizedSearch)) return true;
+        }
+        return false;
+      });
+
+      // Apply client-side "pagination" offset based on lastDoc
+      let startIndex = 0;
+      if (lastDoc) {
+        const lastId = (lastDoc as { id?: string }).id;
+        const idx = filtered.findIndex((e) => e.id === lastId);
+        if (idx !== -1) startIndex = idx + 1;
+      }
+      const page = filtered.slice(startIndex, startIndex + pageSize);
+      const newLastDoc =
+        page.length > 0
+          ? snapshot.docs.find((d) => d.id === page[page.length - 1].id) || null
+          : null;
+
+      return { entities: page, lastDoc: newLastDoc };
+    }
+
+    // --- Normal paginated query (no search) ---
     let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
+      orderBy("name", "asc"),
+      limit(pageSize),
     );
 
     if (filters?.category) {
-      q = query(q, where("category", "in", [filters.category, "both"]));
-    }
-
-    if (filters?.search) {
-      const cleanSearch = filters.search.replace(/\D/g, "");
-      const isNumeric = cleanSearch.length > 0 && /^\d+$/.test(cleanSearch);
-
-      if (isNumeric) {
-        // BUG-05: orderBy must match the inequality field
-        q = query(
-          q,
-          where("document", ">=", cleanSearch),
-          where("document", "<=", cleanSearch + "\uf8ff"),
-          orderBy("document", "asc"),
-          limit(pageSize),
-        );
-      } else {
-        // BUG-06: query against nameLower for case-insensitive prefix search
-        const searchLower = filters.search.toLowerCase();
-        q = query(
-          q,
-          where("nameLower", ">=", searchLower),
-          where("nameLower", "<=", searchLower + "\uf8ff"),
-          orderBy("nameLower", "asc"),
-          limit(pageSize),
-        );
-      }
-    } else {
-      q = query(q, orderBy("name", "asc"), limit(pageSize));
+      q = query(
+        collection(db, COLLECTION_NAME),
+        where("companyId", "==", companyId),
+        where("category", "in", [filters.category, "both"]),
+        orderBy("name", "asc"),
+        limit(pageSize),
+      );
     }
 
     if (lastDoc) {
@@ -202,6 +248,8 @@ export const entityService = {
       ...cleanData,
       nameLower:
         typeof cleanData.name === "string" ? cleanData.name.toLowerCase() : "",
+      nameNormalized:
+        typeof cleanData.name === "string" ? normalizeText(cleanData.name) : "",
       createdAt: Timestamp.fromDate(now),
       updatedAt: Timestamp.fromDate(now),
     });
@@ -252,6 +300,7 @@ export const entityService = {
       ...cleanData,
       ...(cleanData.name && {
         nameLower: (cleanData.name as string).toLowerCase(),
+        nameNormalized: normalizeText(cleanData.name as string),
       }),
       updatedAt: Timestamp.fromDate(now),
     });

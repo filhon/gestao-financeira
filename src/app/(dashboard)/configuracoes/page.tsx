@@ -9,6 +9,7 @@ import {
   MessageSquare,
   FileText,
   Wrench,
+  Key,
 } from "lucide-react";
 import {
   Card,
@@ -81,6 +82,13 @@ export default function SettingsPage() {
       description: "Ferramentas de manutenção e recalibração de dados.",
       href: "/configuracoes/sistema",
       icon: Wrench,
+      show: canManageCompanies,
+    },
+    {
+      title: "Chaves de API",
+      description: "Gerencie as chaves de acesso à API externa do sistema.",
+      href: "/configuracoes/api-keys",
+      icon: Key,
       show: canManageCompanies,
     },
   ];

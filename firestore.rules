@@ -239,6 +239,43 @@ service cloud.firestore {
        allow write: if isAuthenticated() && isManager(companyId);
     }
     
+    // ── API Externa ──────────────────────────────────────────────────────────
+
+    // 14. API Keys (gerenciamento das chaves de integração externa)
+    // Apenas admins globais ou admins da empresa podem criar/revogar keys.
+    // O conteúdo real (hashedKey, encryptedSecretKey) nunca deve ser exibido
+    // ao client — as leituras aqui são protegidas intencionalmente.
+    match /api_keys/{keyId} {
+      // Leitura: Admin global ou admin da empresa vinculada à key
+      allow read: if isAuthenticated() && (
+        isGlobalAdmin() ||
+        (resource != null &&
+         hasCompanyRole(resource.data.companyId, ['financial_manager']))
+      );
+      // Criação e revogação: Admin global ou admin da empresa
+      allow create: if isAuthenticated() && isGlobalAdmin();
+      allow update: if isAuthenticated() && (
+        isGlobalAdmin() ||
+        (resource != null &&
+         hasCompanyRole(resource.data.companyId, ['financial_manager']))
+      );
+      // Deleção física não permitida — usar revogar (update active: false)
+      allow delete: if false;
+    }
+
+    // 15. API Audit Logs (log de chamadas da API externa)
+    // Escrita apenas via Admin SDK (Cloud Functions / API Routes server-side).
+    // Leitura: admins e auditores da empresa.
+    match /api_audit_logs/{logId} {
+      allow read: if isAuthenticated() && (
+        isGlobalAdmin() ||
+        (resource != null &&
+         hasCompanyRole(resource.data.companyId, ['financial_manager', 'auditor']))
+      );
+      // Escrita bloqueada pelo client — somente Admin SDK pode escrever
+      allow write: if false;
+    }
+
     // Default Deny
     match /{document=**} {
       allow read, write: if false;
