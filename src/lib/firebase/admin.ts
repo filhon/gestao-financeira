@@ -37,7 +37,30 @@ function getAdminApp(): admin.app.App {
   return admin.initializeApp({ credential });
 }
 
-const adminApp = getAdminApp();
-export const adminDb = adminApp.firestore();
-export const adminAuth = adminApp.auth();
+// Lazy getters — the Admin SDK is only initialised on the first actual
+// server-side request, never during Next.js build-time static analysis.
+// This prevents the build from failing when serviceAccountKey.json is absent
+// (e.g. on Vercel) and FIREBASE_SERVICE_ACCOUNT_KEY is not yet set.
+let _app: admin.app.App | null = null;
+function getApp(): admin.app.App {
+  if (!_app) _app = getAdminApp();
+  return _app;
+}
+
+export const adminDb = new Proxy({} as admin.firestore.Firestore, {
+  get(_target, prop) {
+    return (
+      getApp().firestore() as unknown as Record<string | symbol, unknown>
+    )[prop];
+  },
+});
+
+export const adminAuth = new Proxy({} as admin.auth.Auth, {
+  get(_target, prop) {
+    return (getApp().auth() as unknown as Record<string | symbol, unknown>)[
+      prop
+    ];
+  },
+});
+
 export { admin };
