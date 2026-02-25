@@ -5,9 +5,16 @@
  * Todos os resultados são sanitizados (campos sensíveis removidos).
  *
  * Query params:
- *   page, limit, type, status, startDate, endDate,
+ *   page, limit, type, status, startDate, endDate, allDates,
  *   costCenterId, entityId, minAmount, maxAmount,
  *   sortBy, sortOrder
+ *
+ * Intervalo padrão de datas:
+ *   Quando startDate e endDate são omitidos (e allDates não é true),
+ *   o endpoint retorna apenas transações com vencimento entre
+ *   hoje (00:00) e hoje + 30 dias (23:59:59).
+ *   Passe allDates=true para desabilitar esse filtro e retornar
+ *   transações de qualquer período.
  */
 import type { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
@@ -58,6 +65,8 @@ export async function GET(request: NextRequest) {
   const statusParam = searchParams.get("status");
   const startDateParam = searchParams.get("startDate");
   const endDateParam = searchParams.get("endDate");
+  const allDatesParam = searchParams.get("allDates");
+  const allDates = allDatesParam === "true";
   const costCenterIdParam = searchParams.get("costCenterId");
   const entityIdParam = searchParams.get("entityId");
   const minAmountParam = searchParams.get("minAmount");
@@ -85,6 +94,40 @@ export async function GET(request: NextRequest) {
     return ApiErrors.badRequest("Invalid 'sortOrder'. Must be: asc, desc");
   }
 
+  // Validação explícita das datas, quando informadas
+  if (startDateParam && isNaN(new Date(startDateParam).getTime())) {
+    return ApiErrors.badRequest(
+      "Parâmetro 'startDate' inválido. Use o formato ISO 8601 (ex: 2026-01-01).",
+    );
+  }
+  if (endDateParam && isNaN(new Date(endDateParam).getTime())) {
+    return ApiErrors.badRequest(
+      "Parâmetro 'endDate' inválido. Use o formato ISO 8601 (ex: 2026-12-31).",
+    );
+  }
+
+  // ── Intervalo de datas efetivo ───────────────────────────────────────────
+  // Padrão: hoje → hoje + 30 dias.
+  // Desativado quando allDates=true ou quando o consumidor informa datas explícitas.
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayPlus30 = new Date(todayStart);
+  todayPlus30.setDate(todayStart.getDate() + 30);
+  todayPlus30.setHours(23, 59, 59, 999);
+
+  const effectiveStartDate: Date | null = allDates
+    ? null
+    : startDateParam
+      ? new Date(startDateParam)
+      : todayStart;
+  const effectiveEndDate: Date | null = allDates
+    ? null
+    : endDateParam
+      ? new Date(endDateParam)
+      : todayPlus30;
+
+  const isDefaultDateRange = !allDates && !startDateParam && !endDateParam;
+
   const sortOrder = sortOrderParam as "asc" | "desc";
 
   try {
@@ -106,27 +149,21 @@ export async function GET(request: NextRequest) {
     if (entityIdParam) {
       baseQuery = baseQuery.where("entityId", "==", entityIdParam);
     }
-    if (startDateParam) {
-      const startDate = new Date(startDateParam);
-      if (!isNaN(startDate.getTime())) {
-        startDate.setHours(0, 0, 0, 0);
-        baseQuery = baseQuery.where(
-          "dueDate",
-          ">=",
-          Timestamp.fromDate(startDate),
-        );
-      }
+    if (effectiveStartDate) {
+      effectiveStartDate.setHours(0, 0, 0, 0);
+      baseQuery = baseQuery.where(
+        "dueDate",
+        ">=",
+        Timestamp.fromDate(effectiveStartDate),
+      );
     }
-    if (endDateParam) {
-      const endDate = new Date(endDateParam);
-      if (!isNaN(endDate.getTime())) {
-        endDate.setHours(23, 59, 59, 999);
-        baseQuery = baseQuery.where(
-          "dueDate",
-          "<=",
-          Timestamp.fromDate(endDate),
-        );
-      }
+    if (effectiveEndDate) {
+      effectiveEndDate.setHours(23, 59, 59, 999);
+      baseQuery = baseQuery.where(
+        "dueDate",
+        "<=",
+        Timestamp.fromDate(effectiveEndDate),
+      );
     }
 
     // Filtro por valor (client-side — Firestore não faz range em campos distintos sem índice composto)
@@ -206,6 +243,14 @@ export async function GET(request: NextRequest) {
     });
 
     // ── Resposta ─────────────────────────────────────────────────────────
+    const dateRangeMeta = allDates
+      ? { startDate: null, endDate: null, isDefault: false }
+      : {
+          startDate: effectiveStartDate!.toISOString().split("T")[0],
+          endDate: effectiveEndDate!.toISOString().split("T")[0],
+          isDefault: isDefaultDateRange,
+        };
+
     return apiSuccessPaginated(
       sanitized,
       {
@@ -216,7 +261,7 @@ export async function GET(request: NextRequest) {
         hasNext: page < totalPages,
         hasPrev: page > 1,
       },
-      { companyId, requestId },
+      { companyId, requestId, extra: { dateRange: dateRangeMeta } },
     );
   } catch (error) {
     logger.error("GET /api/v1/transactions failed", {

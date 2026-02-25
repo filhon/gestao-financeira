@@ -131,6 +131,8 @@ export async function GET(request: NextRequest) {
     logger.error("API financial-summary error", {
       requestId,
       companyId,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
       error,
     });
     return ApiErrors.internalError(requestId);

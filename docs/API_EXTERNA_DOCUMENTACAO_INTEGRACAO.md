@@ -150,22 +150,25 @@ GET /api/v1/transactions
 
 Retorna as transações da empresa com paginação e filtros.
 
+> **Intervalo padrão de datas:** quando `startDate` e `endDate` são omitidos (e `allDates` não é `true`), o endpoint retorna apenas transações com vencimento entre **hoje** e **hoje + 30 dias**. Esse comportamento melhora a performance e reflete a visualização padrão de dashboards. Para outros períodos, envie `startDate` e/ou `endDate` explicitamente. Para remover o filtro de data por completo, use `allDates=true`.
+
 **Parâmetros de query:**
 
-| Param          | Tipo     | Default   | Descrição                                                                                                              |
-| -------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `page`         | integer  | `1`       | Número da página                                                                                                       |
-| `limit`        | integer  | `25`      | Itens por página (máximo: 100)                                                                                         |
-| `type`         | string   | —         | Filtrar por tipo: `payable` (a pagar) ou `receivable` (a receber)                                                      |
-| `status`       | string   | —         | Filtrar por status: `draft`, `pending_approval`, `approved`, `pending_authorization`, `authorized`, `paid`, `rejected` |
-| `startDate`    | ISO 8601 | —         | Data de vencimento mínima (ex: `2026-01-01`)                                                                           |
-| `endDate`      | ISO 8601 | —         | Data de vencimento máxima (ex: `2026-12-31`)                                                                           |
-| `costCenterId` | string   | —         | Filtrar por centro de custo                                                                                            |
-| `entityId`     | string   | —         | Filtrar por fornecedor/cliente                                                                                         |
-| `minAmount`    | number   | —         | Valor mínimo                                                                                                           |
-| `maxAmount`    | number   | —         | Valor máximo                                                                                                           |
-| `sortBy`       | string   | `dueDate` | Ordenar por: `dueDate`, `amount`, `createdAt`                                                                          |
-| `sortOrder`    | string   | `desc`    | Direção: `asc` ou `desc`                                                                                               |
+| Param          | Tipo     | Default        | Descrição                                                                                                              |
+| -------------- | -------- | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `page`         | integer  | `1`            | Número da página                                                                                                       |
+| `limit`        | integer  | `25`           | Itens por página (máximo: 100)                                                                                         |
+| `type`         | string   | —              | Filtrar por tipo: `payable` (a pagar) ou `receivable` (a receber)                                                      |
+| `status`       | string   | —              | Filtrar por status: `draft`, `pending_approval`, `approved`, `pending_authorization`, `authorized`, `paid`, `rejected` |
+| `startDate`    | ISO 8601 | hoje           | Data de vencimento mínima (ex: `2026-01-01`). Padrão: data atual                                                       |
+| `endDate`      | ISO 8601 | hoje + 30 dias | Data de vencimento máxima (ex: `2026-12-31`). Padrão: 30 dias à frente da data atual                                   |
+| `allDates`     | boolean  | `false`        | Quando `true`, desativa o filtro de datas e retorna transações de qualquer período                                     |
+| `costCenterId` | string   | —              | Filtrar por centro de custo                                                                                            |
+| `entityId`     | string   | —              | Filtrar por fornecedor/cliente                                                                                         |
+| `minAmount`    | number   | —              | Valor mínimo                                                                                                           |
+| `maxAmount`    | number   | —              | Valor máximo                                                                                                           |
+| `sortBy`       | string   | `dueDate`      | Ordenar por: `dueDate`, `amount`, `createdAt`                                                                          |
+| `sortOrder`    | string   | `desc`         | Direção: `asc` ou `desc`                                                                                               |
 
 **Resposta:**
 
@@ -234,7 +237,12 @@ Retorna as transações da empresa com paginação e filtros.
   },
   "meta": {
     "companyId": "abc123",
-    "requestId": "req_a1b2c3d4"
+    "requestId": "req_a1b2c3d4",
+    "dateRange": {
+      "startDate": "2026-02-25",
+      "endDate": "2026-03-27",
+      "isDefault": true
+    }
   }
 }
 ```

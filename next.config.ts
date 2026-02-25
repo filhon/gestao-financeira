@@ -9,6 +9,32 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
+      // ── CORS para a API externa ──────────────────────────────────────────
+      // Permite que aplicações externas chamem /api/v1/* a partir do browser.
+      // Métodos restritos ao necessário; requests com credentials não são
+      // permitidos (a autenticação é feita por headers HMAC, não cookies).
+      {
+        source: "/api/v1/:path*",
+        headers: [
+          {
+            key: "Access-Control-Allow-Origin",
+            value: "*",
+          },
+          {
+            key: "Access-Control-Allow-Methods",
+            value: "GET, POST, OPTIONS",
+          },
+          {
+            key: "Access-Control-Allow-Headers",
+            value: "x-api-key, x-timestamp, x-signature, content-type",
+          },
+          {
+            key: "Access-Control-Max-Age",
+            value: "86400",
+          },
+        ],
+      },
+      // ── Segurança geral ──────────────────────────────────────────────────
       {
         source: "/:path*",
         headers: [
