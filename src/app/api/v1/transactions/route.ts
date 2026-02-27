@@ -6,8 +6,14 @@
  *
  * Query params:
  *   page, limit, type, status, startDate, endDate, allDates,
- *   costCenterId, entityId, minAmount, maxAmount,
+ *   costCenterId, costCenterIds, entityId, minAmount, maxAmount,
  *   sortBy, sortOrder
+ *
+ * Filtro por centro de custo:
+ *   - costCenterId: filtra por um único centro de custo (retrocompatível)
+ *   - costCenterIds: filtra por um ou mais centros de custo, separados por vírgula
+ *     (ex: costCenterIds=cc1,cc2,cc3). Máximo: 10 IDs.
+ *   Se ambos forem informados, costCenterIds tem prioridade.
  *
  * Intervalo padrão de datas:
  *   Quando startDate e endDate são omitidos (e allDates não é true),
@@ -68,6 +74,7 @@ export async function GET(request: NextRequest) {
   const allDatesParam = searchParams.get("allDates");
   const allDates = allDatesParam === "true";
   const costCenterIdParam = searchParams.get("costCenterId");
+  const costCenterIdsParam = searchParams.get("costCenterIds");
   const entityIdParam = searchParams.get("entityId");
   const minAmountParam = searchParams.get("minAmount");
   const maxAmountParam = searchParams.get("maxAmount");
@@ -92,6 +99,26 @@ export async function GET(request: NextRequest) {
   }
   if (!VALID_SORT_ORDERS.has(sortOrderParam)) {
     return ApiErrors.badRequest("Invalid 'sortOrder'. Must be: asc, desc");
+  }
+
+  // Resolve lista de IDs de centros de custo (costCenterIds tem prioridade)
+  const costCenterIds: string[] = (() => {
+    if (costCenterIdsParam) {
+      return costCenterIdsParam
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+    }
+    if (costCenterIdParam) {
+      return [costCenterIdParam];
+    }
+    return [];
+  })();
+
+  if (costCenterIds.length > 10) {
+    return ApiErrors.badRequest(
+      "Too many cost center IDs. Maximum allowed: 10.",
+    );
   }
 
   // Validação explícita das datas, quando informadas
@@ -143,11 +170,17 @@ export async function GET(request: NextRequest) {
     if (statusParam) {
       baseQuery = baseQuery.where("status", "==", statusParam);
     }
-    if (costCenterIdParam) {
+    if (costCenterIds.length === 1) {
       baseQuery = baseQuery.where(
         "costCenterIds",
         "array-contains",
-        costCenterIdParam,
+        costCenterIds[0],
+      );
+    } else if (costCenterIds.length > 1) {
+      baseQuery = baseQuery.where(
+        "costCenterIds",
+        "array-contains-any",
+        costCenterIds,
       );
     }
     if (entityIdParam) {
