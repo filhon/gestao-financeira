@@ -144,7 +144,11 @@ export async function GET(request: NextRequest) {
       baseQuery = baseQuery.where("status", "==", statusParam);
     }
     if (costCenterIdParam) {
-      baseQuery = baseQuery.where("costCenterId", "==", costCenterIdParam);
+      baseQuery = baseQuery.where(
+        "costCenterIds",
+        "array-contains",
+        costCenterIdParam,
+      );
     }
     if (entityIdParam) {
       baseQuery = baseQuery.where("entityId", "==", entityIdParam);

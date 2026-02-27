@@ -663,6 +663,15 @@ export const transactionService = {
           updatedAt: serverTimestamp(),
         };
 
+        // Update costCenterIds when costCenterAllocation changes
+        if (cleanData.costCenterAllocation) {
+          const costCenterIds = cleanData.costCenterAllocation.map(
+            (a: { costCenterId: string }) => a.costCenterId,
+          );
+          updateData.costCenterIds = costCenterIds;
+          updateData.costCenterId = costCenterIds[0];
+        }
+
         // If shifting dates, calculate for this instance
         if (daysDiff !== 0) {
           const currentDocData = docSnapshot.data();
@@ -1161,5 +1170,67 @@ export const transactionService = {
     });
 
     return transactions;
+  },
+
+  /**
+   * Migração: Preenche o campo `costCenterIds` em todas as transações
+   * que possuem `costCenterAllocation` mas não possuem `costCenterIds`
+   * (ou o array está vazio). Isso corrige o filtro por centro de custo.
+   */
+  backfillCostCenterIds: async (
+    companyId: string,
+  ): Promise<{ updated: number; total: number }> => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", companyId),
+    );
+
+    const snapshot = await getDocs(q);
+    let updated = 0;
+
+    let batch = writeBatch(db);
+    let batchCount = 0;
+    const MAX_BATCH = 500; // Firestore batch limit
+
+    for (const docSnapshot of snapshot.docs) {
+      const data = docSnapshot.data();
+      const allocation = data.costCenterAllocation as
+        | { costCenterId: string }[]
+        | undefined;
+
+      if (!allocation || allocation.length === 0) continue;
+
+      const expectedIds = allocation.map((a) => a.costCenterId);
+      const currentIds = (data.costCenterIds as string[] | undefined) ?? [];
+
+      // Check if costCenterIds is missing or doesn't match the allocation
+      const isMissing =
+        currentIds.length === 0 ||
+        expectedIds.length !== currentIds.length ||
+        expectedIds.some((id) => !currentIds.includes(id));
+
+      if (isMissing) {
+        batch.update(docSnapshot.ref, {
+          costCenterIds: expectedIds,
+          costCenterId: expectedIds[0],
+        });
+        updated++;
+        batchCount++;
+
+        // Commit in chunks of 500 and create a new batch
+        if (batchCount >= MAX_BATCH) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchCount = 0;
+        }
+      }
+    }
+
+    // Commit remaining
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+
+    return { updated, total: snapshot.size };
   },
 };
