@@ -8,42 +8,78 @@
 
 ## Resumo
 
-Adicionado suporte para filtrar transações por **múltiplos centros de custo** em uma única requisição, através do novo parâmetro `costCenterIds`.
+Adicionado suporte para filtrar transações por **múltiplos centros de custo** em uma única requisição, através dos novos parâmetros `costCenterIds` e `costCenterCodes`.
 
 ---
 
 ## O que mudou
 
-### Novo parâmetro: `costCenterIds`
+### Novos parâmetros
 
-| Parâmetro       | Tipo   | Descrição                                                                   |
-| --------------- | ------ | --------------------------------------------------------------------------- |
-| `costCenterIds` | string | Lista de IDs de centros de custo separados por vírgula. Máximo: **10 IDs**. |
+| Parâmetro         | Tipo   | Descrição                                                                       |
+| ----------------- | ------ | ------------------------------------------------------------------------------- |
+| `costCenterIds`   | string | Lista de **IDs** de centros de custo separados por vírgula. Máximo: **10**.     |
+| `costCenterCodes` | string | Lista de **códigos** de centros de custo separados por vírgula. Máximo: **10**. |
 
-- Quando informado, tem **prioridade** sobre o parâmetro `costCenterId` (singular).
-- O parâmetro `costCenterId` (singular) continua funcionando normalmente para filtrar por um único centro de custo.
+### Ordem de prioridade
+
+`costCenterCodes` > `costCenterIds` > `costCenterId`
+
+Se `costCenterCodes` for informado, os demais parâmetros de centro de custo são ignorados.
+
+### Quando usar cada parâmetro
+
+| Parâmetro         | Use quando…                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `costCenterId`    | Você já tem o ID interno e quer filtrar por **um** centro de custo                                                  |
+| `costCenterIds`   | Você já tem os IDs internos e quer filtrar por **vários** centros de custo                                          |
+| `costCenterCodes` | Você tem os **códigos** dos centros de custo (ex: `CC-OFERTAS`, `MKT-001`) — o mais comum para integrações externas |
 
 ---
 
 ## Exemplos de uso
 
-### Filtrar por um único centro de custo (comportamento existente)
+### Filtrar por um único centro de custo via ID (comportamento existente)
 
 ```
-GET /api/v1/transactions?costCenterId=cc_001
+GET /api/v1/transactions?costCenterId=abc123
 ```
 
-### Filtrar por múltiplos centros de custo (novo)
+### Filtrar por múltiplos centros de custo via ID
 
 ```
-GET /api/v1/transactions?costCenterIds=cc_001,cc_002,cc_003
+GET /api/v1/transactions?costCenterIds=abc123,def456,ghi789
+```
+
+### Filtrar por código do centro de custo (recomendado para integrações)
+
+```
+GET /api/v1/transactions?costCenterCodes=CC-OFERTAS,CC-EDUC,CC-SAUDE
 ```
 
 ### Combinar com outros filtros
 
 ```
-GET /api/v1/transactions?costCenterIds=cc_001,cc_002&type=payable&status=approved&allDates=true
+GET /api/v1/transactions?costCenterCodes=CC-OFERTAS,CC-EDUC&type=payable&status=approved&allDates=true
 ```
+
+---
+
+## Como obter os códigos dos centros de custo
+
+Use o endpoint `GET /api/v1/cost-centers` para listar todos os centros de custo da sua empresa. Cada item retorna `id`, `name` e `code`:
+
+```json
+{
+  "data": [
+    { "id": "abc123", "name": "Ofertas", "code": "CC-OFERTAS" },
+    { "id": "def456", "name": "Educação", "code": "CC-EDUC" },
+    { "id": "ghi789", "name": "Saúde", "code": "CC-SAUDE" }
+  ]
+}
+```
+
+Use os valores do campo `code` no parâmetro `costCenterCodes`.
 
 ---
 
@@ -52,9 +88,9 @@ GET /api/v1/transactions?costCenterIds=cc_001,cc_002&type=payable&status=approve
 ### JavaScript / TypeScript
 
 ```javascript
-// Filtrar por múltiplos centros de custo
+// Filtrar por códigos de centros de custo (recomendado)
 const response = await client.getTransactions({
-  costCenterIds: "cc_001,cc_002,cc_003",
+  costCenterCodes: "CC-OFERTAS,CC-EDUC,CC-SAUDE",
   type: "payable",
   allDates: true,
 });
@@ -63,9 +99,9 @@ const response = await client.getTransactions({
 Ou montando a URL manualmente:
 
 ```javascript
-const costCenters = ["cc_001", "cc_002", "cc_003"];
+const codes = ["CC-OFERTAS", "CC-EDUC", "CC-SAUDE"];
 const params = new URLSearchParams({
-  costCenterIds: costCenters.join(","),
+  costCenterCodes: codes.join(","),
   type: "payable",
 });
 
@@ -82,10 +118,10 @@ const response = await fetch(`${BASE_URL}/api/v1/transactions?${params}`, {
 ### Python
 
 ```python
-# Filtrar por múltiplos centros de custo
-cost_centers = ["cc_001", "cc_002", "cc_003"]
+# Filtrar por códigos de centros de custo (recomendado)
+codes = ["CC-OFERTAS", "CC-EDUC", "CC-SAUDE"]
 transactions = client.get_transactions(
-    costCenterIds=",".join(cost_centers),
+    costCenterCodes=",".join(codes),
     type="payable",
     allDates="true",
 )
@@ -95,19 +131,39 @@ transactions = client.get_transactions(
 
 ## Validações e limites
 
-| Regra                            | Detalhe                                                       |
-| -------------------------------- | ------------------------------------------------------------- |
-| Máximo de IDs                    | **10** por requisição                                         |
-| IDs inválidos/inexistentes       | São aceitos, mas não retornam resultados correspondentes      |
-| `costCenterIds` + `costCenterId` | `costCenterIds` tem **prioridade**; `costCenterId` é ignorado |
+| Regra                       | Detalhe                                                           |
+| --------------------------- | ----------------------------------------------------------------- |
+| Máximo de IDs / códigos     | **10** por requisição                                             |
+| Códigos inexistentes        | Retorna lista vazia com campo `costCenterCodesNotFound` no `meta` |
+| IDs inválidos/inexistentes  | São aceitos, mas não retornam resultados correspondentes          |
+| Prioridade entre parâmetros | `costCenterCodes` > `costCenterIds` > `costCenterId`              |
 
-### Resposta de erro (mais de 10 IDs)
+### Resposta de erro (mais de 10 itens)
 
 ```json
 {
   "error": {
     "code": "BAD_REQUEST",
-    "message": "Too many cost center IDs. Maximum allowed: 10."
+    "message": "Too many cost center codes. Maximum allowed: 10."
+  }
+}
+```
+
+### Resposta quando nenhum código é encontrado
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "limit": 25,
+    "totalItems": 0,
+    "totalPages": 0,
+    "hasNext": false,
+    "hasPrev": false
+  },
+  "meta": {
+    "costCenterCodesNotFound": ["CC-INEXISTENTE"]
   }
 }
 ```

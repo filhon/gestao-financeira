@@ -7,13 +7,21 @@
  * Query params:
  *   page, limit, type, status, startDate, endDate, allDates,
  *   costCenterId, costCenterIds, entityId, minAmount, maxAmount,
- *   sortBy, sortOrder
+ *   search, sortBy, sortOrder
+ *
+ * Busca textual:
+ *   - search: termo de busca textual (mín. 2 caracteres, máx. 100).
+ *     Pesquisa case-insensitive nos campos description, notes e supplier.
+ *     Quando presente, a filtragem é feita em memória após a query base,
+ *     garantindo contagens e paginação precisas.
  *
  * Filtro por centro de custo:
- *   - costCenterId: filtra por um único centro de custo (retrocompatível)
- *   - costCenterIds: filtra por um ou mais centros de custo, separados por vírgula
- *     (ex: costCenterIds=cc1,cc2,cc3). Máximo: 10 IDs.
- *   Se ambos forem informados, costCenterIds tem prioridade.
+ *   - costCenterId: filtra por um único centro de custo pelo ID (retrocompatível)
+ *   - costCenterIds: filtra por um ou mais centros de custo pelo ID, separados por vírgula
+ *     (ex: costCenterIds=id1,id2,id3). Máximo: 10.
+ *   - costCenterCodes: filtra por um ou mais centros de custo pelo código (code),
+ *     separados por vírgula (ex: costCenterCodes=MKT-001,VND-002). Máximo: 10.
+ *   Prioridade: costCenterCodes > costCenterIds > costCenterId.
  *
  * Intervalo padrão de datas:
  *   Quando startDate e endDate são omitidos (e allDates não é true),
@@ -34,6 +42,9 @@ import type { Transaction, CostCenter } from "@/lib/types";
 
 const TRANSACTIONS_COLLECTION = "transactions";
 const COST_CENTERS_COLLECTION = "cost_centers";
+
+/** Máximo de documentos escaneados em memória para filtros client-side */
+const MAX_CLIENT_SIDE_SCAN = 5_000;
 
 const VALID_SORT_FIELDS = new Set(["dueDate", "amount", "createdAt"]);
 const VALID_SORT_ORDERS = new Set(["asc", "desc"]);
@@ -75,7 +86,9 @@ export async function GET(request: NextRequest) {
   const allDates = allDatesParam === "true";
   const costCenterIdParam = searchParams.get("costCenterId");
   const costCenterIdsParam = searchParams.get("costCenterIds");
+  const costCenterCodesParam = searchParams.get("costCenterCodes");
   const entityIdParam = searchParams.get("entityId");
+  const searchParam = searchParams.get("search");
   const minAmountParam = searchParams.get("minAmount");
   const maxAmountParam = searchParams.get("maxAmount");
   const sortByParam = searchParams.get("sortBy") ?? "dueDate";
@@ -92,6 +105,16 @@ export async function GET(request: NextRequest) {
       `Invalid 'status'. Must be: ${[...VALID_STATUSES].join(", ")}`,
     );
   }
+  if (searchParam !== null && searchParam.length < 2) {
+    return ApiErrors.badRequest(
+      "Parameter 'search' must be at least 2 characters long.",
+    );
+  }
+  if (searchParam !== null && searchParam.length > 100) {
+    return ApiErrors.badRequest(
+      "Parameter 'search' must be at most 100 characters long.",
+    );
+  }
   if (!VALID_SORT_FIELDS.has(sortByParam)) {
     return ApiErrors.badRequest(
       `Invalid 'sortBy'. Must be: ${[...VALID_SORT_FIELDS].join(", ")}`,
@@ -101,8 +124,16 @@ export async function GET(request: NextRequest) {
     return ApiErrors.badRequest("Invalid 'sortOrder'. Must be: asc, desc");
   }
 
-  // Resolve lista de IDs de centros de custo (costCenterIds tem prioridade)
-  const costCenterIds: string[] = (() => {
+  // Resolve lista de códigos de centro de custo
+  const costCenterCodes: string[] = costCenterCodesParam
+    ? costCenterCodesParam
+        .split(",")
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0)
+    : [];
+
+  // Resolve lista de IDs de centros de custo (costCenterIds tem prioridade sobre costCenterId)
+  const costCenterIdsDirect: string[] = (() => {
     if (costCenterIdsParam) {
       return costCenterIdsParam
         .split(",")
@@ -115,7 +146,12 @@ export async function GET(request: NextRequest) {
     return [];
   })();
 
-  if (costCenterIds.length > 10) {
+  if (costCenterCodes.length > 10) {
+    return ApiErrors.badRequest(
+      "Too many cost center codes. Maximum allowed: 10.",
+    );
+  }
+  if (costCenterIdsDirect.length > 10) {
     return ApiErrors.badRequest(
       "Too many cost center IDs. Maximum allowed: 10.",
     );
@@ -158,6 +194,49 @@ export async function GET(request: NextRequest) {
   const sortOrder = sortOrderParam as "asc" | "desc";
 
   try {
+    // ── Resolver costCenterCodes → IDs (se necessário) ─────────────────────
+    let costCenterIds: string[] = costCenterIdsDirect;
+
+    if (costCenterCodes.length > 0) {
+      // Busca centros de custo pelo code para resolver os IDs
+      const ccSnap = await adminDb
+        .collection(COST_CENTERS_COLLECTION)
+        .where("companyId", "==", companyId)
+        .where("code", "in", costCenterCodes)
+        .get();
+
+      costCenterIds = ccSnap.docs.map((doc) => doc.id);
+
+      if (costCenterIds.length === 0) {
+        // Nenhum código encontrado — retorna resultado vazio ao invés de ignorar o filtro
+        return apiSuccessPaginated(
+          [],
+          {
+            page,
+            limit,
+            totalItems: 0,
+            totalPages: 0,
+            hasNext: false,
+            hasPrev: false,
+          },
+          {
+            companyId,
+            requestId,
+            extra: {
+              dateRange: allDates
+                ? { startDate: null, endDate: null, isDefault: false }
+                : {
+                    startDate: effectiveStartDate!.toISOString().split("T")[0],
+                    endDate: effectiveEndDate!.toISOString().split("T")[0],
+                    isDefault: isDefaultDateRange,
+                  },
+              costCenterCodesNotFound: costCenterCodes,
+            },
+          },
+        );
+      }
+    }
+
     // ── Construir query base ─────────────────────────────────────────────────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let baseQuery: any = adminDb
@@ -207,24 +286,16 @@ export async function GET(request: NextRequest) {
     const minAmount = minAmountParam ? parseFloat(minAmountParam) : null;
     const maxAmount = maxAmountParam ? parseFloat(maxAmountParam) : null;
 
-    // ── Contagem total ────────────────────────────────────────────────────
-    const countSnap = await baseQuery.count().get();
-    const totalItems: number = countSnap.data().count ?? 0;
+    // Normaliza o termo de busca para comparação case-insensitive
+    const searchTerm = searchParam?.trim().toLowerCase() ?? null;
+    const hasClientSideFilters =
+      searchTerm !== null || minAmount !== null || maxAmount !== null;
 
-    // ── Dados paginados ──────────────────────────────────────────────────
-    const dataQuery = baseQuery
-      .orderBy(sortByParam, sortOrder)
-      .offset(offset)
-      .limit(limit);
-
-    const [dataSnap, costCentersSnap] = await Promise.all([
-      dataQuery.get(),
-      // Busca todos os centros de custo da empresa para enriquecer os dados
-      adminDb
-        .collection(COST_CENTERS_COLLECTION)
-        .where("companyId", "==", companyId)
-        .get(),
-    ]);
+    // ── Busca de centros de custo (sempre necessária para enriquecer dados)
+    const costCentersSnap = await adminDb
+      .collection(COST_CENTERS_COLLECTION)
+      .where("companyId", "==", companyId)
+      .get();
 
     // Mapa id → CostCenter para lookup eficiente
     const costCenterMap = new Map<string, CostCenter>();
@@ -233,41 +304,93 @@ export async function GET(request: NextRequest) {
       costCenterMap.set(doc.id, { ...data, id: doc.id });
     });
 
-    // Converte e sanitiza transações
-    let transactions = dataSnap.docs.map(
-      (doc: import("firebase-admin/firestore").QueryDocumentSnapshot) => {
-        const data = doc.data();
-        const txn: Transaction = {
-          id: doc.id,
-          ...data,
-          dueDate: (data.dueDate as Timestamp)?.toDate() ?? new Date(),
-          paymentDate: (data.paymentDate as Timestamp)?.toDate(),
-          approvedAt: (data.approvedAt as Timestamp)?.toDate(),
-          releasedAt: (data.releasedAt as Timestamp)?.toDate(),
-          createdAt: (data.createdAt as Timestamp)?.toDate() ?? new Date(),
-          updatedAt: (data.updatedAt as Timestamp)?.toDate() ?? new Date(),
-        } as Transaction;
-        return txn;
-      },
-    );
+    // Helper para converter doc → Transaction
+    const docToTransaction = (
+      doc: import("firebase-admin/firestore").QueryDocumentSnapshot,
+    ): Transaction => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        dueDate: (data.dueDate as Timestamp)?.toDate() ?? new Date(),
+        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
+        approvedAt: (data.approvedAt as Timestamp)?.toDate(),
+        releasedAt: (data.releasedAt as Timestamp)?.toDate(),
+        createdAt: (data.createdAt as Timestamp)?.toDate() ?? new Date(),
+        updatedAt: (data.updatedAt as Timestamp)?.toDate() ?? new Date(),
+      } as Transaction;
+    };
 
-    // Filtros client-side (para os que não têm suporte eficiente no Firestore)
-    if (minAmount !== null) {
-      transactions = transactions.filter(
-        (t: Transaction) => t.amount >= minAmount!,
+    // Helper para verificar se uma transação contém o termo de busca
+    const matchesSearch = (txn: Transaction): boolean => {
+      if (!searchTerm) return true;
+      const fields = [txn.description, txn.notes, txn.supplierOrClient];
+      return fields.some(
+        (field) => field && field.toLowerCase().includes(searchTerm),
+      );
+    };
+
+    let sanitized;
+    let totalItems: number;
+    let totalPages: number;
+
+    if (hasClientSideFilters) {
+      // ── Caminho com filtros client-side (search, minAmount, maxAmount) ──
+      // Precisamos buscar TODOS os docs da query base, filtrar em memória,
+      // e então aplicar paginação manualmente para garantir contagens corretas.
+      // Cap de segurança: limita documentos escaneados para evitar sobrecarga.
+      const allDocsQuery = baseQuery
+        .orderBy(sortByParam, sortOrder)
+        .limit(MAX_CLIENT_SIDE_SCAN);
+      const allDocsSnap = await allDocsQuery.get();
+
+      let transactions = allDocsSnap.docs.map(docToTransaction);
+
+      // Aplica filtros client-side
+      if (searchTerm) {
+        transactions = transactions.filter(matchesSearch);
+      }
+      if (minAmount !== null) {
+        transactions = transactions.filter(
+          (t: Transaction) => t.amount >= minAmount!,
+        );
+      }
+      if (maxAmount !== null) {
+        transactions = transactions.filter(
+          (t: Transaction) => t.amount <= maxAmount!,
+        );
+      }
+
+      totalItems = transactions.length;
+      totalPages = Math.ceil(totalItems / limit);
+
+      // Aplica paginação em memória
+      const paginatedTransactions = transactions.slice(offset, offset + limit);
+
+      sanitized = paginatedTransactions.map((txn: Transaction) =>
+        sanitizeTransaction(txn, costCenterMap),
+      );
+    } else {
+      // ── Caminho padrão (sem filtros client-side) ─────────────────────────
+      // Usa paginação nativa do Firestore para máxima performance.
+      const [countSnap, dataSnap] = await Promise.all([
+        baseQuery.count().get(),
+        baseQuery
+          .orderBy(sortByParam, sortOrder)
+          .offset(offset)
+          .limit(limit)
+          .get(),
+      ]);
+
+      totalItems = countSnap.data().count ?? 0;
+      totalPages = Math.ceil(totalItems / limit);
+
+      const transactions = dataSnap.docs.map(docToTransaction);
+
+      sanitized = transactions.map((txn: Transaction) =>
+        sanitizeTransaction(txn, costCenterMap),
       );
     }
-    if (maxAmount !== null) {
-      transactions = transactions.filter(
-        (t: Transaction) => t.amount <= maxAmount!,
-      );
-    }
-
-    const sanitized = transactions.map((txn: Transaction) =>
-      sanitizeTransaction(txn, costCenterMap),
-    );
-
-    const totalPages = Math.ceil(totalItems / limit);
 
     // ── Audit log ─────────────────────────────────────────────────────────
     await writeApiAuditLog(context, {

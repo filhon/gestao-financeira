@@ -65,6 +65,7 @@ function check(
 const ENDPOINT_LIMITS: Record<string, number> = {
   "/api/v1/balance": 60,
   "/api/v1/transactions": 30,
+  "/api/v1/transactions/search": 60,
   "/api/v1/budgets": 30,
   "/api/v1/cost-centers": 30,
   "/api/v1/financial-summary": 30,
