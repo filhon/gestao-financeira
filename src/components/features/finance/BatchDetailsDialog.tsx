@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Workbook, Style } from "exceljs";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { costCenterService } from "@/lib/services/costCenterService";
@@ -61,6 +62,8 @@ export function BatchDetailsDialog({
   const { canManageBatches } = usePermissions();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [addingId, setAddingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
 
   const {
     items: sortedTransactions,
@@ -74,6 +77,7 @@ export function BatchDetailsDialog({
       try {
         const data = await transactionService.getAll({ batchId: batch.id });
         setTransactions(data);
+        setSelectedIds(new Set()); // Reset selection on reload
       } catch (error) {
         console.error("Error loading batch transactions", error);
       } finally {
@@ -143,6 +147,40 @@ export function BatchDetailsDialog({
     } catch (error) {
       console.error("Error removing transaction", error);
       toast.error("Erro ao remover transação");
+    }
+  };
+
+  const handleBulkRemove = async () => {
+    if (!batch || selectedIds.size === 0) return;
+    try {
+      const txToRemove = transactions.filter((t) => selectedIds.has(t.id));
+      await paymentBatchService.removeTransactions(batch.id, txToRemove);
+      toast.success(`${txToRemove.length} transações removidas do lote`);
+      setIsBulkDeleteOpen(false);
+      setSelectedIds(new Set());
+      loadTransactions();
+      loadMissingTransactions();
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      console.error("Error bulk removing transactions", error);
+      toast.error("Erro ao remover transações");
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === sortedTransactions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(sortedTransactions.map((t) => t.id)));
     }
   };
 
@@ -628,201 +666,251 @@ export function BatchDetailsDialog({
               <Loader2 className="h-8 w-8 animate-spin" />
             </div>
           ) : (
-            <div className="border rounded-md">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => requestSort("dueDate")}
+            <>
+              {/* Bulk selection toolbar */}
+              {batch.status === "open" &&
+                canManageBatches &&
+                selectedIds.size > 0 && (
+                  <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md px-4 py-2">
+                    <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                      {selectedIds.size} transação(es) selecionada(s)
+                    </span>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setIsBulkDeleteOpen(true)}
                     >
-                      <div className="flex items-center gap-2">
-                        Vencimento
-                        {sortConfig?.key === "dueDate" ? (
-                          sortConfig.direction === "asc" ? (
-                            <ArrowUp className="h-4 w-4" />
-                          ) : (
-                            <ArrowDown className="h-4 w-4" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => requestSort("description")}
-                    >
-                      <div className="flex items-center gap-2">
-                        Descrição
-                        {sortConfig?.key === "description" ? (
-                          sortConfig.direction === "asc" ? (
-                            <ArrowUp className="h-4 w-4" />
-                          ) : (
-                            <ArrowDown className="h-4 w-4" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => requestSort("supplierOrClient")}
-                    >
-                      <div className="flex items-center gap-2">
-                        Fornecedor
-                        {sortConfig?.key === "supplierOrClient" ? (
-                          sortConfig.direction === "asc" ? (
-                            <ArrowUp className="h-4 w-4" />
-                          ) : (
-                            <ArrowDown className="h-4 w-4" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    </TableHead>
-                    <TableHead
-                      className="text-right cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => requestSort("amount")}
-                    >
-                      <div className="flex items-center justify-end gap-2">
-                        Valor
-                        {sortConfig?.key === "amount" ? (
-                          sortConfig.direction === "asc" ? (
-                            <ArrowUp className="h-4 w-4" />
-                          ) : (
-                            <ArrowDown className="h-4 w-4" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50 transition-colors w-[100px]"
-                      onClick={() => requestSort("status")}
-                    >
-                      <div className="flex items-center gap-2">
-                        Status
-                        {sortConfig?.key === "status" ? (
-                          sortConfig.direction === "asc" ? (
-                            <ArrowUp className="h-4 w-4" />
-                          ) : (
-                            <ArrowDown className="h-4 w-4" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    </TableHead>
-                    {batch.status === "open" && canManageBatches && (
-                      <TableHead className="w-[50px]"></TableHead>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedTransactions.length === 0 ? (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remover selecionadas
+                    </Button>
+                  </div>
+                )}
+              <div className="border rounded-md">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell
-                        colSpan={
-                          batch.status === "open" && canManageBatches ? 5 : 4
-                        }
-                        className="text-center py-4 text-muted-foreground"
-                      >
-                        Nenhuma transação encontrada neste lote.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    sortedTransactions.map((t) => (
-                      <TableRow key={t.id}>
-                        <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
-                        <TableCell className="max-w-[300px]">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate" title={t.description}>
-                              {t.description}
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className="shrink-0 text-[10px]"
-                            >
-                              Em Lote
-                            </Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell>{t.supplierOrClient}</TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(t.amount)}
-                        </TableCell>
-                        <TableCell>
-                          {(() => {
-                            switch (t.status) {
-                              case "paid":
-                                return (
-                                  <Badge className="bg-emerald-500 hover:bg-emerald-600">
-                                    Pago
-                                  </Badge>
-                                );
-                              case "authorized":
-                                return (
-                                  <Badge className="bg-blue-500 hover:bg-blue-600">
-                                    Autorizado
-                                  </Badge>
-                                );
-                              case "approved":
-                                return (
-                                  <Badge className="bg-blue-400 hover:bg-blue-500">
-                                    Aprovado
-                                  </Badge>
-                                );
-                              case "pending_authorization":
-                                return (
-                                  <Badge className="bg-amber-500 hover:bg-amber-600">
-                                    Aguardando Autorização
-                                  </Badge>
-                                );
-                              case "pending_approval":
-                                return (
-                                  <Badge className="bg-amber-400 hover:bg-amber-500">
-                                    Aguardando Aprovação
-                                  </Badge>
-                                );
-                              case "rejected":
-                                return (
-                                  <Badge variant="destructive">Rejeitado</Badge>
-                                );
-                              case "draft":
-                                return (
-                                  <Badge variant="secondary">Rascunho</Badge>
-                                );
-                              default:
-                                return (
-                                  <Badge variant="outline">
-                                    {t.status === "open" ? "Aberto" : t.status}
-                                  </Badge>
-                                );
+                      {batch.status === "open" && canManageBatches && (
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={
+                              sortedTransactions.length > 0 &&
+                              selectedIds.size === sortedTransactions.length
                             }
-                          })()}
+                            onCheckedChange={toggleSelectAll}
+                            aria-label="Selecionar todas"
+                          />
+                        </TableHead>
+                      )}
+                      <TableHead
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => requestSort("dueDate")}
+                      >
+                        <div className="flex items-center gap-2">
+                          Vencimento
+                          {sortConfig?.key === "dueDate" ? (
+                            sortConfig.direction === "asc" ? (
+                              <ArrowUp className="h-4 w-4" />
+                            ) : (
+                              <ArrowDown className="h-4 w-4" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => requestSort("description")}
+                      >
+                        <div className="flex items-center gap-2">
+                          Descrição
+                          {sortConfig?.key === "description" ? (
+                            sortConfig.direction === "asc" ? (
+                              <ArrowUp className="h-4 w-4" />
+                            ) : (
+                              <ArrowDown className="h-4 w-4" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => requestSort("supplierOrClient")}
+                      >
+                        <div className="flex items-center gap-2">
+                          Fornecedor
+                          {sortConfig?.key === "supplierOrClient" ? (
+                            sortConfig.direction === "asc" ? (
+                              <ArrowUp className="h-4 w-4" />
+                            ) : (
+                              <ArrowDown className="h-4 w-4" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="text-right cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => requestSort("amount")}
+                      >
+                        <div className="flex items-center justify-end gap-2">
+                          Valor
+                          {sortConfig?.key === "amount" ? (
+                            sortConfig.direction === "asc" ? (
+                              <ArrowUp className="h-4 w-4" />
+                            ) : (
+                              <ArrowDown className="h-4 w-4" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="cursor-pointer hover:bg-muted/50 transition-colors w-[100px]"
+                        onClick={() => requestSort("status")}
+                      >
+                        <div className="flex items-center gap-2">
+                          Status
+                          {sortConfig?.key === "status" ? (
+                            sortConfig.direction === "asc" ? (
+                              <ArrowUp className="h-4 w-4" />
+                            ) : (
+                              <ArrowDown className="h-4 w-4" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground/50" />
+                          )}
+                        </div>
+                      </TableHead>
+                      {batch.status === "open" && canManageBatches && (
+                        <TableHead className="w-[50px]"></TableHead>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedTransactions.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={
+                            batch.status === "open" && canManageBatches ? 7 : 5
+                          }
+                          className="text-center py-4 text-muted-foreground"
+                        >
+                          Nenhuma transação encontrada neste lote.
                         </TableCell>
-                        {batch.status === "open" && canManageBatches && (
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              onClick={() => setDeleteId(t.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        )}
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    ) : (
+                      sortedTransactions.map((t) => (
+                        <TableRow
+                          key={t.id}
+                          data-selected={selectedIds.has(t.id)}
+                        >
+                          {batch.status === "open" && canManageBatches && (
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedIds.has(t.id)}
+                                onCheckedChange={() => toggleSelect(t.id)}
+                                aria-label={`Selecionar ${t.description}`}
+                              />
+                            </TableCell>
+                          )}
+                          <TableCell>
+                            {format(t.dueDate, "dd/MM/yyyy")}
+                          </TableCell>
+                          <TableCell className="max-w-[300px]">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate" title={t.description}>
+                                {t.description}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 text-[10px]"
+                              >
+                                Em Lote
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell>{t.supplierOrClient}</TableCell>
+                          <TableCell className="text-right">
+                            {formatCurrency(t.amount)}
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              switch (t.status) {
+                                case "paid":
+                                  return (
+                                    <Badge className="bg-emerald-500 hover:bg-emerald-600">
+                                      Pago
+                                    </Badge>
+                                  );
+                                case "authorized":
+                                  return (
+                                    <Badge className="bg-blue-500 hover:bg-blue-600">
+                                      Autorizado
+                                    </Badge>
+                                  );
+                                case "approved":
+                                  return (
+                                    <Badge className="bg-blue-400 hover:bg-blue-500">
+                                      Aprovado
+                                    </Badge>
+                                  );
+                                case "pending_authorization":
+                                  return (
+                                    <Badge className="bg-amber-500 hover:bg-amber-600">
+                                      Aguardando Autorização
+                                    </Badge>
+                                  );
+                                case "pending_approval":
+                                  return (
+                                    <Badge className="bg-amber-400 hover:bg-amber-500">
+                                      Aguardando Aprovação
+                                    </Badge>
+                                  );
+                                case "rejected":
+                                  return (
+                                    <Badge variant="destructive">
+                                      Rejeitado
+                                    </Badge>
+                                  );
+                                case "draft":
+                                  return (
+                                    <Badge variant="secondary">Rascunho</Badge>
+                                  );
+                                default:
+                                  return (
+                                    <Badge variant="outline">
+                                      {t.status === "open"
+                                        ? "Aberto"
+                                        : t.status}
+                                    </Badge>
+                                  );
+                              }
+                            })()}
+                          </TableCell>
+                          {batch.status === "open" && canManageBatches && (
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => setDeleteId(t.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </div>
 
@@ -834,6 +922,15 @@ export function BatchDetailsDialog({
           confirmText="Remover"
           variant="destructive"
           onConfirm={handleRemoveTransaction}
+        />
+        <ConfirmDialog
+          open={isBulkDeleteOpen}
+          onOpenChange={(open) => !open && setIsBulkDeleteOpen(false)}
+          title="Remover transações selecionadas"
+          description={`Tem certeza que deseja remover ${selectedIds.size} transação(es) do lote? Elas voltarão para a lista de contas a pagar disponíveis.`}
+          confirmText="Remover"
+          variant="destructive"
+          onConfirm={handleBulkRemove}
         />
       </DialogContent>
     </Dialog>

@@ -270,6 +270,10 @@ export interface PaymentBatch {
   paidAt?: Date;
   paidBy?: string;
 
+  // Revert (paid → open)
+  revertedBy?: string;
+  revertedAt?: Date;
+
   // Rejected transaction IDs (for audit)
   rejectedTransactionIds?: string[];
 

@@ -96,6 +96,7 @@ export default function PaymentBatchesPage() {
   const [selectedBatch, setSelectedBatch] = useState<PaymentBatch | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [deleteBatchId, setDeleteBatchId] = useState<string | null>(null);
+  const [revertBatchId, setRevertBatchId] = useState<string | null>(null);
 
   // New workflow dialogs
   const [isSendForApprovalOpen, setIsSendForApprovalOpen] = useState(false);
@@ -367,6 +368,23 @@ export default function PaymentBatchesPage() {
     }
   };
 
+  // Revert paid batch back to open
+  const handleRevertToOpen = async () => {
+    if (!revertBatchId || !user) return;
+    try {
+      await paymentBatchService.revertToOpen(revertBatchId, user.uid);
+      toast.success("Lote revertido para Aberto com sucesso");
+      setRevertBatchId(null);
+      fetchBatches();
+    } catch (error) {
+      console.error("Error reverting batch:", error);
+      toast.error(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (error as any)?.message || "Erro ao reverter lote",
+      );
+    }
+  };
+
   const handleDeleteBatch = async () => {
     if (!deleteBatchId) return;
     try {
@@ -541,7 +559,9 @@ export default function PaymentBatchesPage() {
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
               <SelectItem value="open">Aberto</SelectItem>
-              <SelectItem value="pending_approval">Aguardando Aprovação</SelectItem>
+              <SelectItem value="pending_approval">
+                Aguardando Aprovação
+              </SelectItem>
               <SelectItem value="approved">Aprovado</SelectItem>
               <SelectItem value="pending_authorization">
                 Aguardando Autorização
@@ -585,7 +605,9 @@ export default function PaymentBatchesPage() {
                 ) : (
                   batches.map((batch) => (
                     <TableRow key={batch.id}>
-                      <TableCell className="font-medium">{batch.name}</TableCell>
+                      <TableCell className="font-medium">
+                        {batch.name}
+                      </TableCell>
                       <TableCell>{getStatusBadge(batch.status)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {getResponsiblePerson(batch)}
@@ -593,7 +615,9 @@ export default function PaymentBatchesPage() {
                       <TableCell>{batch.transactionIds.length}</TableCell>
                       <TableCell>{formatCurrency(batch.totalAmount)}</TableCell>
                       <TableCell>
-                        {format(batch.createdAt, "dd/MM/yyyy", { locale: ptBR })}
+                        {format(batch.createdAt, "dd/MM/yyyy", {
+                          locale: ptBR,
+                        })}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
@@ -640,15 +664,16 @@ export default function PaymentBatchesPage() {
                               )}
 
                             {/* Status: Approved - Manager can send for authorization */}
-                            {batch.status === "approved" && canManageBatches && (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  handleOpenSendForAuthorization(batch)
-                                }
-                              >
-                                Enviar para Autorização
-                              </DropdownMenuItem>
-                            )}
+                            {batch.status === "approved" &&
+                              canManageBatches && (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    handleOpenSendForAuthorization(batch)
+                                  }
+                                >
+                                  Enviar para Autorização
+                                </DropdownMenuItem>
+                              )}
 
                             {/* Status: Pending Authorization - Releaser can confirm */}
                             {batch.status === "pending_authorization" &&
@@ -671,6 +696,16 @@ export default function PaymentBatchesPage() {
                                   Confirmar Pagamentos
                                 </DropdownMenuItem>
                               )}
+
+                            {/* Status: Paid - Manager can revert to open */}
+                            {batch.status === "paid" && canManageBatches && (
+                              <DropdownMenuItem
+                                className="text-amber-600 focus:text-amber-700"
+                                onClick={() => setRevertBatchId(batch.id)}
+                              >
+                                Reverter para Aberto
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             {batch.status === "open" && canManageBatches && (
                               <DropdownMenuItem
@@ -797,6 +832,16 @@ export default function PaymentBatchesPage() {
         confirmText="Excluir"
         variant="destructive"
         onConfirm={handleDeleteBatch}
+      />
+
+      <ConfirmDialog
+        open={!!revertBatchId}
+        onOpenChange={(open) => !open && setRevertBatchId(null)}
+        title="Reverter Lote para Aberto"
+        description="Esta ação irá reverter o status do lote de 'Pago' para 'Aberto' e todas as transações voltarão para o status 'Rascunho'. Use esta opção apenas se o pagamento foi confirmado incorretamente. Deseja continuar?"
+        confirmText="Reverter Lote"
+        variant="destructive"
+        onConfirm={handleRevertToOpen}
       />
     </div>
   );

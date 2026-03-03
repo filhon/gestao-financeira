@@ -35,6 +35,7 @@ const convertDates = (data: DocumentData): PaymentBatch => {
     )?.toDate(),
     authorizedAt: (data.authorizedAt as Timestamp)?.toDate(),
     paidAt: (data.paidAt as Timestamp)?.toDate(),
+    revertedAt: (data.revertedAt as Timestamp)?.toDate(),
     approvalTokenExpiresAt: (
       data.approvalTokenExpiresAt as Timestamp
     )?.toDate(),
@@ -754,6 +755,50 @@ export const paymentBatchService = {
       approvalToken: null,
       approvalTokenExpiresAt: null,
       updatedAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+  },
+
+  /**
+   * Revert paid batch back to open status
+   * Reverts batch status from 'paid' to 'open' and all transactions from 'paid' to 'draft'
+   */
+  revertToOpen: async (batchId: string, userId: string): Promise<void> => {
+    const batchRef = doc(db, COLLECTION_NAME, batchId);
+    const batchSnap = await getDoc(batchRef);
+    if (!batchSnap.exists()) throw new Error("Batch not found");
+    const batchData = batchSnap.data() as PaymentBatch;
+
+    if (batchData.status !== "paid") {
+      throw new Error(
+        "Apenas lotes com status 'Pago' podem ser revertidos para Aberto.",
+      );
+    }
+
+    const batch = writeBatch(db);
+
+    batch.update(batchRef, {
+      status: "open",
+      paidBy: deleteField(),
+      paidAt: deleteField(),
+      revertedBy: userId,
+      revertedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Revert all transactions back to draft
+    const tQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("batchId", "==", batchId),
+    );
+    const tSnap = await getDocs(tQuery);
+    tSnap.docs.forEach((tDoc) => {
+      batch.update(tDoc.ref, {
+        status: "draft",
+        releasedBy: deleteField(),
+        releasedAt: deleteField(),
+      });
     });
 
     await batch.commit();
