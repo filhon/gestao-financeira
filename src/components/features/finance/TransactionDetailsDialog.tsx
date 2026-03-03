@@ -50,7 +50,7 @@ interface TransactionDetailsDialogProps {
   transaction: Transaction | null;
   isOpen: boolean;
   onClose: () => void;
-  onUpdate: () => void;
+  onUpdate: (updatedTransaction?: Transaction) => void;
 }
 
 export function TransactionDetailsDialog({
@@ -210,7 +210,7 @@ export function TransactionDetailsDialog({
         toast.warning("Status atualizado, mas houve erro ao enviar e-mail.");
       }
 
-      onUpdate();
+      onUpdate(updatedTransaction);
       onClose();
     } catch (error) {
       console.error("Error updating status:", error);
@@ -240,7 +240,12 @@ export function TransactionDetailsDialog({
         selectedCompany.id,
       );
       toast.success("Transação atualizada com sucesso!");
-      onUpdate();
+      const mergedTransaction: Transaction = {
+        ...transaction,
+        ...(data as unknown as Partial<Transaction>),
+        updatedAt: new Date(),
+      };
+      onUpdate(mergedTransaction);
       setIsEditing(false); // Exit edit mode
       // Don't close dialog, let user see changes? Or close? Original req doesn't specify.
       // Behaving like "Save" -> usually keeps context or goes back. Let's keep dialog open in View mode.

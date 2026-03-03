@@ -637,6 +637,24 @@ export default function AccountsPayablePage() {
     setIsDetailsOpen(true);
   };
 
+  const handleTransactionUpdate = useCallback(
+    (updatedTransaction?: Transaction) => {
+      if (updatedTransaction) {
+        // Atualiza o item na lista local sem nova leitura no banco
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === updatedTransaction.id ? updatedTransaction : t,
+          ),
+        );
+        setSelectedTransaction(updatedTransaction);
+      } else {
+        // Para acões complexas (pagamento, serie de recorrências) faz re-fetch
+        fetchTransactions();
+      }
+    },
+    [fetchTransactions],
+  );
+
   const handleRevertToDraft = async (transaction: Transaction) => {
     if (!user || !selectedCompany) return;
     try {
@@ -1228,7 +1246,7 @@ export default function AccountsPayablePage() {
         transaction={selectedTransaction}
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
-        onUpdate={fetchTransactions}
+        onUpdate={handleTransactionUpdate}
       />
 
       <Dialog

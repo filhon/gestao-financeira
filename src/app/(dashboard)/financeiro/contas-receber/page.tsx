@@ -108,7 +108,7 @@ export default function AccountsReceivablePage() {
             selectedCompany.id,
             itemsPerPage,
             currentLastDoc,
-            filter
+            filter,
           );
 
         if (isLoadMore) {
@@ -126,7 +126,7 @@ export default function AccountsReceivablePage() {
         setIsLoading(false);
       }
     },
-    [selectedCompany, user, statusFilter, showAllTransactions, itemsPerPage]
+    [selectedCompany, user, statusFilter, showAllTransactions, itemsPerPage],
   );
 
   useEffect(() => {
@@ -171,7 +171,7 @@ export default function AccountsReceivablePage() {
         await transactionService.create(
           data,
           { uid: user.uid, email: user.email },
-          selectedCompany.id
+          selectedCompany.id,
         );
         toast.success("Conta a receber criada com sucesso!");
       }
@@ -191,13 +191,31 @@ export default function AccountsReceivablePage() {
     setIsDetailsOpen(true);
   };
 
+  const handleTransactionUpdate = useCallback(
+    (updatedTransaction?: Transaction) => {
+      if (updatedTransaction) {
+        // Atualiza o item na lista local sem nova leitura no banco
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === updatedTransaction.id ? updatedTransaction : t,
+          ),
+        );
+        setSelectedTransaction(updatedTransaction);
+      } else {
+        // Para ações complexas (pagamento, série de recorrências) faz re-fetch
+        fetchTransactions();
+      }
+    },
+    [fetchTransactions],
+  );
+
   const handleDelete = async () => {
     if (!deleteId || !user || !selectedCompany) return;
     try {
       await transactionService.delete(
         deleteId,
         { uid: user.uid, email: user.email },
-        selectedCompany.id
+        selectedCompany.id,
       );
       toast.success("Transação excluída com sucesso!");
       fetchTransactions();
@@ -383,9 +401,7 @@ export default function AccountsReceivablePage() {
                       <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
                       <TableCell>{t.description}</TableCell>
                       <TableCell>{t.supplierOrClient}</TableCell>
-                      <TableCell>
-                        {formatCurrency(t.amount)}
-                      </TableCell>
+                      <TableCell>{formatCurrency(t.amount)}</TableCell>
                       <TableCell>{getStatusBadge(t.status)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
@@ -447,7 +463,7 @@ export default function AccountsReceivablePage() {
         transaction={selectedTransaction}
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
-        onUpdate={fetchTransactions}
+        onUpdate={handleTransactionUpdate}
       />
 
       <ConfirmDialog
