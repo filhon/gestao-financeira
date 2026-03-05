@@ -74,10 +74,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 import { CostCenter } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { CurrencyInput } from "@/components/ui/currency-input";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 function useAnimatedValue(targetValue: number, duration: number = 800) {
   const [currentValue, setCurrentValue] = useState(targetValue);
@@ -135,9 +135,6 @@ const AnimatedNumber = ({
 export default function AccountsPayablePage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [hasMore, setHasMore] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
@@ -145,18 +142,6 @@ export default function AccountsPayablePage() {
   const [selectedCostCenterId, setSelectedCostCenterId] =
     useState<string>("all");
 
-  // Filter existing transactions locally (preserved for smooth UI while typing before debounce triggers if needed, but simplistic approach first)
-  // Actually, we will replace the transactions list based on search mode vs pagination mode.
-
-  const {
-    items: sortedTransactions,
-    requestSort,
-    sortConfig,
-  } = useSortableData(transactions, {
-    key: "dueDate",
-    direction: "asc",
-  });
-  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -181,7 +166,7 @@ export default function AccountsPayablePage() {
     useState<Transaction | null>(null);
   const [paymentDate, setPaymentDate] = useState<Date>(new Date());
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false); // Validating batch/opening dialog
+  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
 
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [itemsPerPage] = useState(25);
@@ -196,6 +181,96 @@ export default function AccountsPayablePage() {
     isAdmin,
     isFinancialManager,
   } = usePermissions();
+
+  // --- Search mode (client-side) ---
+  const [searchResults, setSearchResults] = useState<Transaction[] | null>(
+    null,
+  );
+  const [isSearching, setIsSearching] = useState(false);
+
+  const {
+    items: paginatedTransactions,
+    hasMore,
+    loadMore,
+    isLoading: isPaginatedLoading,
+    isFetchingNextPage,
+    refresh: refreshTransactions,
+    updateItem,
+  } = usePaginatedQuery<Transaction>({
+    queryKey: [
+      "payable-transactions",
+      selectedCompany?.id,
+      statusFilter,
+      showAllTransactions,
+      selectedCostCenterId,
+      onlyOwnPayables ? user?.uid : "all",
+    ],
+    queryFn: async (pageSize, lastDoc) => {
+      const getDescendantIds = (
+        rootId: string,
+        all: CostCenter[],
+      ): string[] => {
+        const children = all.filter((c) => c.parentId === rootId);
+        let ids = [rootId];
+        for (const child of children) {
+          ids = [...ids, ...getDescendantIds(child.id, all)];
+        }
+        return ids;
+      };
+
+      const targetCostCenterIds =
+        selectedCostCenterId !== "all" && costCenters.length > 0
+          ? getDescendantIds(selectedCostCenterId, costCenters)
+          : undefined;
+
+      const filter: {
+        type: string;
+        excludeStatus?: string[];
+        status?: string;
+        endDate?: Date;
+        createdBy?: string;
+        costCenterIds?: string[];
+      } = {
+        type: "payable",
+        excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
+        status:
+          statusFilter !== "all" && statusFilter !== "exclude-paid"
+            ? statusFilter
+            : undefined,
+        endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
+        costCenterIds: targetCostCenterIds,
+      };
+
+      if (onlyOwnPayables) {
+        filter.createdBy = user!.uid;
+      }
+
+      const { transactions: items, lastDoc: newLastDoc } =
+        await transactionService.getPaginated(
+          selectedCompany!.id,
+          pageSize,
+          lastDoc,
+          filter,
+        );
+
+      return { items, lastDoc: newLastDoc };
+    },
+    pageSize: itemsPerPage,
+    enabled: !!selectedCompany && !!user && !debouncedSearchTerm,
+  });
+
+  // Decide entre resultados de busca e resultados paginados
+  const transactions = searchResults ?? paginatedTransactions;
+  const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
+
+  const {
+    items: sortedTransactions,
+    requestSort,
+    sortConfig,
+  } = useSortableData(transactions, {
+    key: "dueDate",
+    direction: "asc",
+  });
 
   const handleOpenPaymentConfirmation = async (t: Transaction) => {
     if (!user || !selectedCompany) return;
@@ -247,7 +322,7 @@ export default function AccountsPayablePage() {
       );
 
       toast.success("Pagamento confirmado com sucesso!");
-      fetchTransactions();
+      refreshTransactions();
       setTransactionToConfirm(null);
     } catch (error) {
       console.error("Error confirming payment:", error);
@@ -257,96 +332,7 @@ export default function AccountsPayablePage() {
     }
   };
 
-  const fetchTransactions = useCallback(
-    async (isLoadMore = false) => {
-      if (!selectedCompany || !user) return;
-
-      // If searching, prevent standard fetch (handled by effect)
-      if (debouncedSearchTerm) return;
-
-      try {
-        setIsLoading(true);
-
-        const getDescendantIds = (
-          rootId: string,
-          all: CostCenter[],
-        ): string[] => {
-          const children = all.filter((c) => c.parentId === rootId);
-          let ids = [rootId];
-          for (const child of children) {
-            ids = [...ids, ...getDescendantIds(child.id, all)];
-          }
-          return ids;
-        };
-
-        const targetCostCenterIds =
-          selectedCostCenterId !== "all" && costCenters.length > 0
-            ? getDescendantIds(selectedCostCenterId, costCenters)
-            : undefined;
-
-        // For 'user' role, pass createdBy filter directly to Firestore query
-        // This matches the Firestore rules and prevents permission errors
-        const filter: {
-          type: string;
-          excludeStatus?: string[];
-          status?: string;
-          endDate?: Date;
-          createdBy?: string;
-          costCenterIds?: string[];
-        } = {
-          type: "payable",
-          excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
-          status:
-            statusFilter !== "all" && statusFilter !== "exclude-paid"
-              ? statusFilter
-              : undefined,
-          endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
-          // Only apply cost center filter if we have resolved IDs and it's not "all"
-          // If the list is empty (because root has no children and is selected), we still pass [rootId]
-          costCenterIds: targetCostCenterIds,
-        };
-
-        if (onlyOwnPayables) {
-          filter.createdBy = user.uid;
-        }
-
-        const currentLastDoc = isLoadMore ? lastDocRef.current : null;
-
-        const { transactions: newTransactions, lastDoc: newLastDoc } =
-          await transactionService.getPaginated(
-            selectedCompany.id,
-            itemsPerPage,
-            currentLastDoc,
-            filter,
-          );
-
-        if (isLoadMore) {
-          setTransactions((prev) => [...prev, ...newTransactions]);
-        } else {
-          setTransactions(newTransactions);
-        }
-
-        lastDocRef.current = newLastDoc;
-        setHasMore(newTransactions.length === itemsPerPage);
-      } catch (error) {
-        console.error("Error fetching transactions:", error);
-        toast.error("Erro ao carregar transações.");
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [
-      selectedCompany,
-      user,
-      onlyOwnPayables,
-      statusFilter,
-      showAllTransactions,
-      itemsPerPage,
-      debouncedSearchTerm,
-      selectedCostCenterId,
-      costCenters,
-    ],
-  );
+  const fetchTransactions = refreshTransactions;
 
   useEffect(() => {
     if (selectedCompany) {
@@ -359,13 +345,11 @@ export default function AccountsPayablePage() {
     }
   }, [selectedCompany]);
 
+  // Client-side search
   useEffect(() => {
-    if (!debouncedSearchTerm) {
-      fetchTransactions();
-    } else {
+    if (debouncedSearchTerm && selectedCompany && user) {
       const performSearch = async () => {
-        if (!selectedCompany || !user) return;
-        setIsLoading(true);
+        setIsSearching(true);
         try {
           const filter: {
             companyId: string;
@@ -380,7 +364,6 @@ export default function AccountsPayablePage() {
             filter.createdBy = user.uid;
           }
 
-          // Fetch all matching basic criteria
           const all = await transactionService.getAll(filter);
 
           const search = debouncedSearchTerm
@@ -400,26 +383,21 @@ export default function AccountsPayablePage() {
             return description.includes(search) || supplier.includes(search);
           });
 
-          setTransactions(filtered);
-          setHasMore(false);
+          setSearchResults(filtered);
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
         } finally {
-          setIsLoading(false);
+          setIsSearching(false);
         }
       };
       performSearch();
+    } else {
+      setSearchResults(null);
     }
 
-    setSelectedIds(new Set()); // Clear selection on company change/search
-  }, [
-    fetchTransactions,
-    selectedCompany,
-    debouncedSearchTerm,
-    user,
-    onlyOwnPayables,
-  ]);
+    setSelectedIds(new Set());
+  }, [debouncedSearchTerm, selectedCompany, user, onlyOwnPayables]);
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -471,7 +449,7 @@ export default function AccountsPayablePage() {
       toast.success("Transações adicionadas ao lote");
       setIsBatchDialogOpen(false);
       setSelectedIds(new Set());
-      fetchTransactions();
+      refreshTransactions();
     } catch (error) {
       console.error(error);
       toast.error("Erro ao adicionar ao lote");
@@ -527,7 +505,7 @@ export default function AccountsPayablePage() {
       );
       setIsBatchPaymentOpen(false);
       setSelectedIds(new Set());
-      fetchTransactions();
+      refreshTransactions();
     } catch (error) {
       console.error(error);
       toast.error("Erro ao realizar pagamento em lote.");
@@ -570,7 +548,7 @@ export default function AccountsPayablePage() {
       );
       setIsBatchRevertOpen(false);
       setSelectedIds(new Set());
-      fetchTransactions();
+      refreshTransactions();
     } catch (error) {
       console.error(error);
       toast.error("Erro ao reverter pagamentos em lote.");
@@ -641,18 +619,14 @@ export default function AccountsPayablePage() {
     (updatedTransaction?: Transaction) => {
       if (updatedTransaction) {
         // Atualiza o item na lista local sem nova leitura no banco
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.id === updatedTransaction.id ? updatedTransaction : t,
-          ),
-        );
+        updateItem(updatedTransaction.id, () => updatedTransaction);
         setSelectedTransaction(updatedTransaction);
       } else {
         // Para acões complexas (pagamento, serie de recorrências) faz re-fetch
-        fetchTransactions();
+        refreshTransactions();
       }
     },
-    [fetchTransactions],
+    [refreshTransactions, updateItem],
   );
 
   const handleRevertToDraft = async (transaction: Transaction) => {
@@ -690,14 +664,7 @@ export default function AccountsPayablePage() {
     }
   };
 
-  // Filter logic moved to server-side fetchTransactions
-
-  // Pagination logic removed (Server-side pagination used)
-
-  // Reset to first page when filters change
-  useEffect(() => {
-    // setCurrentPage(1); // Removed
-  }, [showAllTransactions, itemsPerPage, statusFilter]);
+  // Filter logic moved to server-side via usePaginatedQuery
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -1224,14 +1191,14 @@ export default function AccountsPayablePage() {
                   Ver Todas as Transações
                 </Button>
               )}
-              {hasMore && (
+              {hasMore && !debouncedSearchTerm && (
                 <Button
                   variant="outline"
                   className="w-full"
-                  onClick={() => fetchTransactions(true)}
-                  disabled={isLoading}
+                  onClick={loadMore}
+                  disabled={isFetchingNextPage}
                 >
-                  {isLoading ? (
+                  {isFetchingNextPage ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Carregar Mais

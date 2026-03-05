@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
@@ -48,7 +48,7 @@ import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurren
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 import { useDebounce } from "@/hooks/useDebounce";
-import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 export default function RecorrenciasPage() {
   const { user } = useAuth();
@@ -56,22 +56,10 @@ export default function RecorrenciasPage() {
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
 
-  const [templates, setTemplates] = useState<RecurringTransactionTemplate[]>(
-    [],
-  );
-  // Ref to access current templates without adding to useEffect deps
-  const templatesRef = useRef(templates);
-  templatesRef.current = templates;
-
-  const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [itemsPerPage] = useState(25);
-
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  const [isLoading, setIsLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editTemplate, setEditTemplate] =
     useState<RecurringTransactionTemplate | null>(null);
@@ -83,71 +71,52 @@ export default function RecorrenciasPage() {
     }
   }, [canViewRecurrences, router]);
 
-  const fetchTemplates = useCallback(
-    async (isLoadMore = false) => {
-      if (!selectedCompany || !canViewRecurrences) return;
+  // --- Search mode (client-side) ---
+  const [searchResults, setSearchResults] = useState<
+    RecurringTransactionTemplate[] | null
+  >(null);
+  const [isSearching, setIsSearching] = useState(false);
 
-      // If searching, prevent standard fetch
-      if (debouncedSearchTerm) return;
+  const {
+    items: paginatedTemplates,
+    hasMore,
+    loadMore,
+    isLoading: isPaginatedLoading,
+    isFetchingNextPage,
+    refresh: refreshTemplates,
+  } = usePaginatedQuery<RecurringTransactionTemplate>({
+    queryKey: ["recurrences", selectedCompany?.id, statusFilter],
+    queryFn: async (pageSize, lastDoc) => {
+      const filter = {
+        active: statusFilter === "all" ? undefined : statusFilter === "active",
+      };
 
-      try {
-        setIsLoading(true);
+      const { templates: items, lastDoc: newLastDoc } =
+        await recurrenceService.getPaginated(
+          selectedCompany!.id,
+          pageSize,
+          lastDoc,
+          filter,
+        );
 
-        const filter = {
-          active:
-            statusFilter === "all" ? undefined : statusFilter === "active",
-        };
-
-        const currentLastDoc = isLoadMore ? lastDocRef.current : null;
-
-        const { templates: newTemplates, lastDoc: newLastDoc } =
-          await recurrenceService.getPaginated(
-            selectedCompany.id,
-            itemsPerPage,
-            currentLastDoc,
-            filter,
-          );
-
-        if (isLoadMore) {
-          setTemplates((prev) => [...prev, ...newTemplates]);
-        } else {
-          setTemplates(newTemplates);
-        }
-
-        lastDocRef.current = newLastDoc;
-        setHasMore(newTemplates.length === itemsPerPage);
-      } catch (error) {
-        console.error("Error fetching templates:", error);
-        toast.error("Erro ao carregar recorrências.");
-      } finally {
-        setIsLoading(false);
-      }
+      return { items, lastDoc: newLastDoc };
     },
-    [
-      selectedCompany,
-      canViewRecurrences,
-      statusFilter,
-      itemsPerPage,
-      debouncedSearchTerm,
-    ],
-  );
+    pageSize: 25,
+    enabled: !!selectedCompany && canViewRecurrences && !debouncedSearchTerm,
+  });
 
-  // Initial load and filter changes
-  useEffect(() => {
-    if (!debouncedSearchTerm) {
-      // Reset pagination when filters change (except load more)
-      lastDocRef.current = null;
-      fetchTemplates();
-    }
-  }, [fetchTemplates, debouncedSearchTerm, statusFilter]);
+  const templates = searchResults ?? paginatedTemplates;
+  const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
+
+  // Alias for compatibility with handlers below
+  const fetchTemplates = refreshTemplates;
 
   // Client-side search logic
   useEffect(() => {
     if (debouncedSearchTerm && selectedCompany) {
       const performSearch = async () => {
-        setIsLoading(true);
+        setIsSearching(true);
         try {
-          // Try local filter first
           const search = debouncedSearchTerm
             .toLowerCase()
             .normalize("NFD")
@@ -161,11 +130,11 @@ export default function RecorrenciasPage() {
             return description.includes(search);
           };
 
-          const localResults = templatesRef.current.filter(matchLocal);
+          // Try filtering loaded templates first
+          const localResults = paginatedTemplates.filter(matchLocal);
 
           if (localResults.length > 0) {
-            setTemplates(localResults);
-            setHasMore(false);
+            setSearchResults(localResults);
           } else {
             // Fetch limited set from server if no local results
             const filter = {
@@ -179,19 +148,20 @@ export default function RecorrenciasPage() {
               filter,
             );
 
-            setTemplates(all.filter(matchLocal));
-            setHasMore(false);
+            setSearchResults(all.filter(matchLocal));
           }
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
         } finally {
-          setIsLoading(false);
+          setIsSearching(false);
         }
       };
       performSearch();
+    } else {
+      setSearchResults(null);
     }
-  }, [debouncedSearchTerm, selectedCompany, statusFilter]);
+  }, [debouncedSearchTerm, selectedCompany, statusFilter, paginatedTemplates]);
 
   if (!canViewRecurrences) return null;
 
@@ -414,10 +384,10 @@ export default function RecorrenciasPage() {
             <div className="flex justify-center py-4">
               <Button
                 variant="outline"
-                onClick={() => fetchTemplates(true)}
-                disabled={isLoading}
+                onClick={loadMore}
+                disabled={isFetchingNextPage}
               >
-                {isLoading ? (
+                {isFetchingNextPage ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Carregando...

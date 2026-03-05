@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import { entityService } from "@/lib/services/entityService";
 import { Entity } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -47,25 +47,18 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
-import { DocumentData } from "firebase/firestore";
+import { useDebounce } from "@/hooks/useDebounce";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 export default function EntitiesPage() {
   const { user } = useAuth();
   const router = useRouter();
   const { selectedCompany } = useCompany();
   const { canManageEntities, canViewEntities } = usePermissions();
-  const [entities, setEntities] = useState<Entity[]>([]);
-  const lastDocRef = useRef<DocumentData | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [itemsPerPage] = useState(25);
-  const [searchTerm, setSearchTerm] = useState("");
 
-  const {
-    items: sortedEntities,
-    requestSort,
-    sortConfig,
-  } = useSortableData(entities);
-  const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
@@ -78,57 +71,41 @@ export default function EntitiesPage() {
     }
   }, [canViewEntities, router]);
 
-  const fetchEntities = useCallback(
-    async (isLoadMore = false) => {
-      if (!selectedCompany || !canViewEntities) {
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const category =
-          activeTab === "all"
-            ? undefined
-            : (activeTab as "supplier" | "client");
+  const {
+    items: entities,
+    hasMore,
+    loadMore,
+    isLoading,
+    isFetchingNextPage,
+    refresh: fetchEntities,
+  } = usePaginatedQuery<Entity>({
+    queryKey: ["entities", selectedCompany?.id, activeTab, debouncedSearchTerm],
+    queryFn: async (pageSize, lastDoc) => {
+      const category =
+        activeTab === "all" ? undefined : (activeTab as "supplier" | "client");
 
-        const currentLastDoc = isLoadMore ? lastDocRef.current : null;
+      const { entities: items, lastDoc: newLastDoc } =
+        await entityService.getPaginated(
+          selectedCompany!.id,
+          pageSize,
+          lastDoc,
+          {
+            category,
+            search: debouncedSearchTerm || undefined,
+          },
+        );
 
-        const { entities: newEntities, lastDoc: newLastDoc } =
-          await entityService.getPaginated(
-            selectedCompany.id,
-            itemsPerPage,
-            currentLastDoc,
-            {
-              category,
-              search: searchTerm || undefined,
-            },
-          );
-
-        if (isLoadMore) {
-          setEntities((prev) => [...prev, ...newEntities]);
-        } else {
-          setEntities(newEntities);
-        }
-
-        lastDocRef.current = newLastDoc;
-        setHasMore(newEntities.length === itemsPerPage);
-      } catch (error) {
-        console.error("Error fetching entities:", error);
-        toast.error("Erro ao carregar entidades.");
-      } finally {
-        setIsLoading(false);
-      }
+      return { items, lastDoc: newLastDoc };
     },
-    [selectedCompany, canViewEntities, activeTab, itemsPerPage, searchTerm],
-  );
+    pageSize: 25,
+    enabled: !!selectedCompany && canViewEntities,
+  });
 
-  useEffect(() => {
-    // Debounce search
-    const timer = setTimeout(() => {
-      fetchEntities();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [fetchEntities]);
+  const {
+    items: sortedEntities,
+    requestSort,
+    sortConfig,
+  } = useSortableData(entities);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCreate = async (data: any) => {
@@ -390,10 +367,10 @@ export default function EntitiesPage() {
               <div className="flex justify-center mt-4">
                 <Button
                   variant="outline"
-                  onClick={() => fetchEntities(true)}
-                  disabled={isLoading}
+                  onClick={loadMore}
+                  disabled={isFetchingNextPage}
                 >
-                  {isLoading ? (
+                  {isFetchingNextPage ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Carregando...

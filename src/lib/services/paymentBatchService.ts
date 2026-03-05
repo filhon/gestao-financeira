@@ -13,6 +13,7 @@ import {
   addDoc,
   Timestamp,
   DocumentData,
+  QueryDocumentSnapshot,
   deleteField,
   startAfter,
   limit,
@@ -89,9 +90,12 @@ export const paymentBatchService = {
   getAll: async (
     companyId: string,
     pageSize: number = 20,
-    lastDoc: DocumentData | null = null,
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null = null,
     filterStatus?: string,
-  ): Promise<{ batches: PaymentBatch[]; lastDoc: DocumentData | null }> => {
+  ): Promise<{
+    batches: PaymentBatch[];
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null;
+  }> => {
     let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),

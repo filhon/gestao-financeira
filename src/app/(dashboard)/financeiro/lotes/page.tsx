@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { notificationService } from "@/lib/services/notificationService";
@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/select";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 export default function PaymentBatchesPage() {
   const { selectedCompany } = useCompany();
@@ -75,17 +76,13 @@ export default function PaymentBatchesPage() {
   const { canViewBatches, canManageBatches, canApproveBatches, canPayBatches } =
     usePermissions();
 
-  const [batches, setBatches] = useState<PaymentBatch[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newBatchName, setNewBatchName] = useState("");
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
 
   // Pagination & Filtering
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [lastDoc, setLastDoc] = useState<any>(null);
-  const [hasMore, setHasMore] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
   const pageSize = 20;
 
@@ -112,42 +109,29 @@ export default function PaymentBatchesPage() {
     }
   }, [canViewBatches, router]);
 
-  const fetchBatches = useCallback(
-    async (isLoadMore = false) => {
-      if (!selectedCompany || !canViewBatches) return;
-      try {
-        setIsLoading(true);
-        const currentLastDoc = isLoadMore ? lastDoc : null;
+  const {
+    items: batches,
+    hasMore,
+    loadMore,
+    isLoading: isPaginatedLoading,
+    isFetchingNextPage,
+    refresh: fetchBatches,
+  } = usePaginatedQuery<PaymentBatch>({
+    queryKey: ["payment-batches", selectedCompany?.id, filterStatus],
+    queryFn: async (pgSize, lastDoc) => {
+      const { batches: items, lastDoc: newLastDoc } =
+        await paymentBatchService.getAll(
+          selectedCompany!.id,
+          pgSize,
+          lastDoc,
+          filterStatus,
+        );
 
-        const { batches: newBatches, lastDoc: newLastDoc } =
-          await paymentBatchService.getAll(
-            selectedCompany.id,
-            pageSize,
-            currentLastDoc,
-            filterStatus,
-          );
-
-        if (isLoadMore) {
-          setBatches((prev) => [...prev, ...newBatches]);
-        } else {
-          setBatches(newBatches);
-        }
-
-        setLastDoc(newLastDoc);
-        setHasMore(newBatches.length === pageSize);
-      } catch (error) {
-        console.error("Error fetching batches:", error);
-        toast.error("Erro ao carregar lotes");
-      } finally {
-        setIsLoading(false);
-      }
+      return { items, lastDoc: newLastDoc };
     },
-    [selectedCompany, canViewBatches, lastDoc, filterStatus],
-  );
-
-  useEffect(() => {
-    fetchBatches();
-  }, [fetchBatches]);
+    pageSize,
+    enabled: !!selectedCompany && canViewBatches,
+  });
 
   if (!canViewBatches) return null;
 
@@ -548,9 +532,6 @@ export default function PaymentBatchesPage() {
             value={filterStatus}
             onValueChange={(value) => {
               setFilterStatus(value);
-              setBatches([]); // Clear to show loading state better or just reset
-              setLastDoc(null);
-              // The useEffect below will trigger fetch
             }}
           >
             <SelectTrigger className="w-[180px]">
@@ -574,7 +555,7 @@ export default function PaymentBatchesPage() {
       </div>
 
       <div className="border rounded-lg">
-        {isLoading && batches.length === 0 ? (
+        {isLoading || (isPaginatedLoading && batches.length === 0) ? (
           <div className="flex justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
@@ -728,10 +709,10 @@ export default function PaymentBatchesPage() {
               <div className="flex justify-center p-4 border-t">
                 <Button
                   variant="outline"
-                  onClick={() => fetchBatches(true)}
-                  disabled={isLoading}
+                  onClick={loadMore}
+                  disabled={isFetchingNextPage}
                 >
-                  {isLoading ? (
+                  {isFetchingNextPage ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Carregar Mais

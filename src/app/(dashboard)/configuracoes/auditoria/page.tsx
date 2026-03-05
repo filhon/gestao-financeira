@@ -60,8 +60,8 @@ import {
   FieldChange,
 } from "@/lib/auditFormatter";
 import { formatTextWithBold } from "@/lib/sanitizer";
-import { logger } from "@/lib/logger";
-import { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 // Component to render a single change item
 function ChangeItem({ change }: { change: FieldChange }) {
@@ -149,16 +149,13 @@ export default function AuditLogsPage() {
   const { selectedCompany, isLoading: isCompanyLoading } = useCompany();
   const router = useRouter();
   const { canViewAuditLogs } = usePermissions();
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [lastDoc, setLastDoc] =
-    useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [stats, setStats] = useState<{
-    users: { id: string; name: string; count: number }[];
-    entities: { name: string; count: number }[];
-    actions: { name: string; count: number }[];
-  }>({ users: [], entities: [], actions: [] });
+  const statsQueryClient = useQueryClient();
+
+  const { data: stats = { users: [], entities: [], actions: [] } } = useQuery({
+    queryKey: ["audit-stats", selectedCompany?.id],
+    queryFn: () => auditService.getAggregatedStats(selectedCompany!.id),
+    enabled: !!selectedCompany && canViewAuditLogs,
+  });
 
   const [filters, setFilters] = useState({
     action: "all",
@@ -175,88 +172,62 @@ export default function AuditLogsPage() {
     }
   }, [canViewAuditLogs, router, isCompanyLoading]);
 
-  // Load stats for filters
-  const loadStats = useCallback(async () => {
-    if (selectedCompany && canViewAuditLogs) {
-      try {
-        const data = await auditService.getAggregatedStats(selectedCompany.id);
-        setStats(data);
-      } catch (error) {
-        console.error("Error loading stats:", error);
-      }
-    }
-  }, [selectedCompany, canViewAuditLogs]);
+  const refreshStats = useCallback(() => {
+    statsQueryClient.invalidateQueries({
+      queryKey: ["audit-stats", selectedCompany?.id],
+    });
+  }, [statsQueryClient, selectedCompany?.id]);
 
-  useEffect(() => {
-    loadStats();
-  }, [loadStats]);
+  // Calculate date range based on time filter
+  const getStartDate = useCallback(() => {
+    const now = new Date();
+    if (filters.timeRange === "1h")
+      return new Date(now.getTime() - 60 * 60 * 1000);
+    if (filters.timeRange === "24h")
+      return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    if (filters.timeRange === "7d")
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    if (filters.timeRange === "30d")
+      return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return undefined;
+  }, [filters.timeRange]);
 
-  const fetchLogs = useCallback(
-    async (isLoadMore = false) => {
-      if (!selectedCompany || !canViewAuditLogs) return;
-      try {
-        setIsLoading(true);
+  const {
+    items: logs,
+    hasMore,
+    loadMore,
+    isLoading,
+    isFetchingNextPage,
+  } = usePaginatedQuery<AuditLog>({
+    queryKey: [
+      "audit-logs",
+      selectedCompany?.id,
+      filters.action,
+      filters.entity,
+      filters.userId,
+      filters.timeRange,
+    ],
+    queryFn: async (pageSize, lastDoc) => {
+      const filter: Record<string, string | Date | undefined> = {};
+      if (filters.action !== "all") filter.action = filters.action;
+      if (filters.entity !== "all") filter.entity = filters.entity;
+      if (filters.userId !== "all") filter.userId = filters.userId;
+      const startDate = getStartDate();
+      if (startDate) filter.startDate = startDate;
 
-        // Calculate date range based on time filter
-        let startDate: Date | undefined;
-        const now = new Date();
+      const { logs: items, lastDoc: newLastDoc } =
+        await auditService.getPaginated(
+          selectedCompany!.id,
+          pageSize,
+          lastDoc,
+          filter,
+        );
 
-        if (filters.timeRange === "1h") {
-          startDate = new Date(now.getTime() - 60 * 60 * 1000);
-        } else if (filters.timeRange === "24h") {
-          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        } else if (filters.timeRange === "7d") {
-          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        } else if (filters.timeRange === "30d") {
-          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        }
-
-        const filter: Record<string, string | Date | undefined> = {};
-        if (filters.action !== "all") filter.action = filters.action;
-        if (filters.entity !== "all") filter.entity = filters.entity;
-        if (filters.userId !== "all") filter.userId = filters.userId;
-        if (startDate) filter.startDate = startDate;
-
-        const currentLastDoc = isLoadMore ? lastDoc : null;
-        const { logs: newLogs, lastDoc: newLastDoc } =
-          await auditService.getPaginated(
-            selectedCompany.id,
-            20,
-            currentLastDoc,
-            filter,
-          );
-
-        if (isLoadMore) {
-          setLogs((prev) => [...prev, ...newLogs]);
-        } else {
-          setLogs(newLogs);
-        }
-
-        setLastDoc(newLastDoc);
-        setHasMore(newLogs.length === 20); // If we got less than limit, no more pages
-      } catch (error) {
-        logger.error("Error fetching logs:", error);
-        toast.error("Erro ao carregar logs de auditoria.");
-      } finally {
-        setIsLoading(false);
-      }
+      return { items, lastDoc: newLastDoc };
     },
-    [selectedCompany, filters, canViewAuditLogs, lastDoc],
-  );
-
-  // Reset pagination when filters change
-  useEffect(() => {
-    setLastDoc(null);
-    setLogs([]);
-    fetchLogs(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    filters.action,
-    filters.entity,
-    filters.userId,
-    filters.timeRange,
-    selectedCompany,
-  ]);
+    pageSize: 20,
+    enabled: !!selectedCompany && canViewAuditLogs,
+  });
 
   if (!canViewAuditLogs) return null;
 
@@ -343,7 +314,7 @@ export default function AuditLogsPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={loadStats}
+              onClick={refreshStats}
               title="Atualizar opções dos filtros"
             >
               <RefreshCw className="h-4 w-4" />
@@ -520,10 +491,10 @@ export default function AuditLogsPage() {
           <div className="flex justify-center p-4 border-t">
             <Button
               variant="outline"
-              onClick={() => fetchLogs(true)}
-              disabled={isLoading}
+              onClick={loadMore}
+              disabled={isFetchingNextPage}
             >
-              {isLoading ? (
+              {isFetchingNextPage ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Carregando...

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { Plus, Loader2, Trash2, Eye, Upload } from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
@@ -49,23 +49,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 // ...
 
 export default function AccountsReceivablePage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [hasMore, setHasMore] = useState(true);
 
-  const {
-    items: sortedTransactions,
-    requestSort,
-    sortConfig,
-  } = useSortableData(transactions, { key: "dueDate", direction: "asc" });
-  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -81,57 +72,51 @@ export default function AccountsReceivablePage() {
   // Use centralized permissions
   const { canDeleteReceivables, canCreateReceivables } = usePermissions();
 
-  const fetchTransactions = useCallback(
-    async (isLoadMore = false) => {
-      if (!selectedCompany || !user) return;
-      try {
-        setIsLoading(true);
-        const filter: {
-          type: string;
-          excludeStatus?: string[];
-          status?: string;
-          endDate?: Date;
-        } = {
-          type: "receivable",
-          excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
-          status:
-            statusFilter !== "all" && statusFilter !== "exclude-paid"
-              ? statusFilter
-              : undefined,
-          endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
-        };
+  const {
+    items: transactions,
+    hasMore,
+    loadMore,
+    isLoading,
+    isFetchingNextPage,
+    refresh: fetchTransactions,
+    updateItem,
+  } = usePaginatedQuery<Transaction>({
+    queryKey: [
+      "receivable-transactions",
+      selectedCompany?.id,
+      statusFilter,
+      showAllTransactions,
+    ],
+    queryFn: async (pageSize, lastDoc) => {
+      const filter = {
+        type: "receivable" as const,
+        excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
+        status:
+          statusFilter !== "all" && statusFilter !== "exclude-paid"
+            ? statusFilter
+            : undefined,
+        endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
+      };
 
-        const currentLastDoc = isLoadMore ? lastDocRef.current : null;
+      const { transactions: items, lastDoc: newLastDoc } =
+        await transactionService.getPaginated(
+          selectedCompany!.id,
+          pageSize,
+          lastDoc,
+          filter,
+        );
 
-        const { transactions: newTransactions, lastDoc: newLastDoc } =
-          await transactionService.getPaginated(
-            selectedCompany.id,
-            itemsPerPage,
-            currentLastDoc,
-            filter,
-          );
-
-        if (isLoadMore) {
-          setTransactions((prev) => [...prev, ...newTransactions]);
-        } else {
-          setTransactions(newTransactions);
-        }
-
-        lastDocRef.current = newLastDoc;
-        setHasMore(newTransactions.length === itemsPerPage);
-      } catch (error) {
-        console.error("Error fetching transactions:", error);
-        toast.error("Erro ao carregar transações.");
-      } finally {
-        setIsLoading(false);
-      }
+      return { items, lastDoc: newLastDoc };
     },
-    [selectedCompany, user, statusFilter, showAllTransactions, itemsPerPage],
-  );
+    pageSize: itemsPerPage,
+    enabled: !!selectedCompany && !!user,
+  });
 
-  useEffect(() => {
-    fetchTransactions();
-  }, [fetchTransactions, selectedCompany]);
+  const {
+    items: sortedTransactions,
+    requestSort,
+    sortConfig,
+  } = useSortableData(transactions, { key: "dueDate", direction: "asc" });
 
   const handleSubmit = async (data: TransactionFormData) => {
     if (!user || !selectedCompany) return;
@@ -195,18 +180,14 @@ export default function AccountsReceivablePage() {
     (updatedTransaction?: Transaction) => {
       if (updatedTransaction) {
         // Atualiza o item na lista local sem nova leitura no banco
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.id === updatedTransaction.id ? updatedTransaction : t,
-          ),
-        );
+        updateItem(updatedTransaction.id, () => updatedTransaction);
         setSelectedTransaction(updatedTransaction);
       } else {
         // Para ações complexas (pagamento, série de recorrências) faz re-fetch
         fetchTransactions();
       }
     },
-    [fetchTransactions],
+    [fetchTransactions, updateItem],
   );
 
   const handleDelete = async () => {
@@ -226,18 +207,6 @@ export default function AccountsReceivablePage() {
       setDeleteId(null);
     }
   };
-
-  // Filter logic moved to server-side fetchTransactions
-
-  // Pagination logic removed (Server-side pagination used)
-
-  // Reset pagination state when "Ver Todas" is toggled
-  useEffect(() => {
-    if (showAllTransactions) {
-      setHasMore(false);
-      lastDocRef.current = null;
-    }
-  }, [showAllTransactions]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -445,10 +414,10 @@ export default function AccountsReceivablePage() {
                 <Button
                   variant="outline"
                   className="w-full"
-                  onClick={() => fetchTransactions(true)}
-                  disabled={isLoading}
+                  onClick={loadMore}
+                  disabled={isFetchingNextPage}
                 >
-                  {isLoading ? (
+                  {isFetchingNextPage ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
                   Carregar Mais

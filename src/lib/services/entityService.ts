@@ -13,6 +13,7 @@ import {
   startAfter,
   Timestamp,
   DocumentData,
+  QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { Entity } from "@/lib/types";
@@ -78,14 +79,14 @@ export const entityService = {
   getPaginated: async (
     companyId: string,
     pageSize: number,
-    lastDoc: DocumentData | null,
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null,
     filters?: {
       category?: "supplier" | "client";
       search?: string;
     },
   ): Promise<{
     entities: Entity[];
-    lastDoc: DocumentData | null;
+    lastDoc: QueryDocumentSnapshot<DocumentData> | null;
   }> => {
     const search = filters?.search?.trim();
 
