@@ -28,6 +28,8 @@ import {
   Send,
   CalendarIcon,
   Edit2,
+  Copy,
+  Barcode,
 } from "lucide-react";
 import { PaymentDialog } from "./PaymentDialog";
 import { formatCurrency } from "@/lib/utils";
@@ -401,7 +403,7 @@ export function TransactionDetailsDialog({
                     </h4>
                     <p className="text-base">{transaction.supplierOrClient}</p>
                   </div>
-                  <div>
+                  <div className="text-right">
                     <h4 className="text-sm font-medium text-muted-foreground">
                       Vencimento
                     </h4>
@@ -537,6 +539,37 @@ export function TransactionDetailsDialog({
                       </div>
                     </>
                   )}
+
+                {transaction.barcode && (
+                  <>
+                    <Separator />
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-1">
+                        Linha Digitável
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-1 bg-muted/50 border rounded-md px-3 py-2">
+                          <Barcode className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm font-mono select-all">
+                            {transaction.barcode}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={() => {
+                            navigator.clipboard.writeText(transaction.barcode!);
+                            toast.success("Linha digitável copiada!");
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {transaction.notes && (
                   <>

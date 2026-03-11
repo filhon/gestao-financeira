@@ -43,6 +43,8 @@ import {
   Upload,
   Check,
   ChevronsUpDown,
+  FolderTree,
+  ChevronRight,
 } from "lucide-react";
 import { CostCenter } from "@/lib/types";
 import { storageService } from "@/lib/services/storageService";
@@ -67,7 +69,9 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Sparkles } from "lucide-react";
+import { useDocumentExtraction } from "@/hooks/useDocumentExtraction";
+import { toast } from "sonner";
 
 interface TransactionFormProps {
   defaultValues?: Partial<TransactionFormData>;
@@ -94,6 +98,11 @@ export function TransactionForm({
   const [useEntity, setUseEntity] = useState(true);
   const [openEntityCombobox, setOpenEntityCombobox] = useState(false);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
+  const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
+  const [openCostCenterCombobox, setOpenCostCenterCombobox] = useState<
+    number | null
+  >(null);
+  const { extractFromFile, isExtracting } = useDocumentExtraction();
 
   useEffect(() => {
     const loadEntities = async () => {
@@ -163,7 +172,7 @@ export function TransactionForm({
         const forUserId = onlyOwnPayables ? user.uid : undefined;
         const data = await costCenterService.getAll(
           selectedCompany.id,
-          forUserId
+          forUserId,
         );
         setCostCenters(data);
 
@@ -175,7 +184,7 @@ export function TransactionForm({
             selectedCompany.id,
             data,
             balanceYear,
-            forUserId
+            forUserId,
           );
           setCostCenterBalances(balances);
         }
@@ -229,18 +238,89 @@ export function TransactionForm({
 
         if (!selectedCompany) return;
 
-        const uploadedFile = await storageService.uploadFile(
+        // Iniciar upload e extração IA em paralelo
+        const isFirstAttachment = attachmentFields.length === 0;
+        const canExtract =
+          isFirstAttachment &&
+          !form.getValues("description") &&
+          !form.getValues("amount") &&
+          type === "payable";
+
+        const uploadPromise = storageService.uploadFile(
           file,
-          `transactions/${selectedCompany.id}`
+          `transactions/${selectedCompany.id}`,
         );
+
+        const extractPromise = canExtract
+          ? extractFromFile(file, selectedCompany.id)
+          : Promise.resolve(null);
+
+        const [uploadedFile, extractionResult] = await Promise.all([
+          uploadPromise,
+          extractPromise,
+        ]);
 
         appendAttachment({
           id: uploadedFile.id,
           url: uploadedFile.url,
           name: uploadedFile.name,
           type: uploadedFile.type,
-          category: "invoice", // Default
+          category: "invoice",
         });
+
+        // Preencher campos com dados extraídos pela IA
+        if (extractionResult?.data) {
+          const { data, matchedEntity } = extractionResult;
+          const filled = new Set<string>();
+
+          if (data.description) {
+            form.setValue("description", data.description);
+            filled.add("description");
+          }
+          if (data.amount) {
+            form.setValue("amount", data.amount);
+            filled.add("amount");
+          }
+          if (data.dueDate) {
+            form.setValue("dueDate", new Date(data.dueDate + "T12:00:00"));
+            filled.add("dueDate");
+          }
+          if (data.paymentMethod) {
+            form.setValue("paymentMethod", data.paymentMethod);
+            filled.add("paymentMethod");
+          }
+
+          if (matchedEntity) {
+            setUseEntity(true);
+            form.setValue("entityId", matchedEntity.id);
+            form.setValue("supplierOrClient", matchedEntity.name as string);
+            filled.add("supplierOrClient");
+          } else if (data.supplierName) {
+            setUseEntity(false);
+            form.setValue("supplierOrClient", data.supplierName);
+            filled.add("supplierOrClient");
+          }
+
+          if (data.notes) {
+            form.setValue("notes", data.notes);
+          }
+          if (data.barcode) {
+            form.setValue("barcode", data.barcode);
+          }
+
+          setAiFilledFields(filled);
+          setTimeout(() => setAiFilledFields(new Set()), 5000);
+
+          if (data.confidence >= 50) {
+            toast.success("Dados extraídos do documento com IA", {
+              description: `Confiança: ${data.confidence}% — Confira os campos preenchidos.`,
+            });
+          } else {
+            toast.warning("Extração com baixa confiança", {
+              description: `Confiança: ${data.confidence}% — Verifique todos os campos manualmente.`,
+            });
+          }
+        }
       } catch (error) {
         console.error("Upload failed", error);
       } finally {
@@ -255,7 +335,7 @@ export function TransactionForm({
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit, (errors) =>
-          console.error("Validation Errors:", errors)
+          console.error("Validation Errors:", errors),
         )}
         className="space-y-6"
       >
@@ -271,7 +351,12 @@ export function TransactionForm({
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descrição</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5">
+                      Descrição
+                      {aiFilledFields.has("description") && (
+                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                      )}
+                    </FormLabel>
                     <FormControl>
                       <Input placeholder="Ex: Pagamento AWS" {...field} />
                     </FormControl>
@@ -287,7 +372,12 @@ export function TransactionForm({
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Valor Total (R$)</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5">
+                      Valor Total (R$)
+                      {aiFilledFields.has("amount") && (
+                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                      )}
+                    </FormLabel>
                     <FormControl>
                       <CurrencyInput
                         value={field.value}
@@ -306,7 +396,12 @@ export function TransactionForm({
                 name="paymentMethod"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Forma de Pagamento</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5">
+                      Forma de Pagamento
+                      {aiFilledFields.has("paymentMethod") && (
+                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                      )}
+                    </FormLabel>
                     <Select
                       onValueChange={field.onChange}
                       defaultValue={field.value}
@@ -335,8 +430,11 @@ export function TransactionForm({
             <div className="col-span-12 md:col-span-6">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <FormLabel>
+                  <FormLabel className="flex items-center gap-1.5">
                     {type === "payable" ? "Fornecedor" : "Cliente"}
+                    {aiFilledFields.has("supplierOrClient") && (
+                      <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                    )}
                   </FormLabel>
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -377,13 +475,13 @@ export function TransactionForm({
                                 role="combobox"
                                 className={cn(
                                   "w-full justify-between",
-                                  !field.value && "text-muted-foreground"
+                                  !field.value && "text-muted-foreground",
                                 )}
                               >
                                 <span className="truncate">
                                   {field.value
                                     ? entities.find(
-                                        (entity) => entity.id === field.value
+                                        (entity) => entity.id === field.value,
                                       )?.name
                                     : "Selecione..."}
                                 </span>
@@ -394,7 +492,13 @@ export function TransactionForm({
                           <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
                             <Command>
                               <CommandInput placeholder="Buscar..." />
-                              <CommandList>
+                              <CommandList
+                                onWheel={(e) => {
+                                  e.stopPropagation();
+                                  const target = e.currentTarget;
+                                  target.scrollTop += e.deltaY;
+                                }}
+                              >
                                 <CommandEmpty>
                                   Nenhuma entidade encontrada.
                                 </CommandEmpty>
@@ -407,7 +511,7 @@ export function TransactionForm({
                                         form.setValue("entityId", entity.id);
                                         form.setValue(
                                           "supplierOrClient",
-                                          entity.name
+                                          entity.name,
                                         );
                                         setOpenEntityCombobox(false);
                                       }}
@@ -417,7 +521,7 @@ export function TransactionForm({
                                           "mr-2 h-4 w-4",
                                           entity.id === field.value
                                             ? "opacity-100"
-                                            : "opacity-0"
+                                            : "opacity-0",
                                         )}
                                       />
                                       {entity.name}
@@ -458,7 +562,12 @@ export function TransactionForm({
                 name="dueDate"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel>Vencimento</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5">
+                      Vencimento
+                      {aiFilledFields.has("dueDate") && (
+                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                      )}
+                    </FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
@@ -466,7 +575,7 @@ export function TransactionForm({
                             variant={"outline"}
                             className={cn(
                               "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground"
+                              !field.value && "text-muted-foreground",
                             )}
                           >
                             {field.value ? (
@@ -662,22 +771,32 @@ export function TransactionForm({
                   onClick={() =>
                     document.getElementById("file-upload")?.click()
                   }
-                  disabled={isUploading}
+                  disabled={isUploading || isExtracting}
                 >
-                  {isUploading ? (
+                  {isUploading || isExtracting ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  Upload
+                  {isExtracting ? "Analisando..." : "Upload"}
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="flex-1">
               <div className="space-y-2">
-                {attachmentFields.length === 0 && (
+                {attachmentFields.length === 0 && !isExtracting && (
                   <div className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-md h-full flex items-center justify-center">
-                    Nenhum anexo.
+                    {type === "payable"
+                      ? "Anexe um boleto ou fatura para preencher os campos automaticamente com IA."
+                      : "Nenhum anexo."}
+                  </div>
+                )}
+                {isExtracting && (
+                  <div className="text-sm text-center py-4 border border-dashed rounded-md h-full flex flex-col items-center justify-center gap-2 border-violet-300 bg-violet-50 dark:bg-violet-950/20">
+                    <Sparkles className="h-5 w-5 text-violet-500 animate-pulse" />
+                    <span className="text-violet-600 dark:text-violet-400 font-medium">
+                      Analisando documento com IA...
+                    </span>
                   </div>
                 )}
                 {attachmentFields.map((field, index) => (
@@ -733,45 +852,117 @@ export function TransactionForm({
                     control={form.control}
                     name={`costCenterAllocation.${index}.costCenterId`}
                     render={({ field }) => (
-                      <FormItem>
+                      <FormItem className="flex flex-col">
                         <FormLabel className={index !== 0 ? "sr-only" : ""}>
                           Centro de Custo
                         </FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          defaultValue={field.value}
+                        <Popover
+                          open={openCostCenterCombobox === index}
+                          onOpenChange={(open) =>
+                            setOpenCostCenterCombobox(open ? index : null)
+                          }
                         >
-                          <FormControl>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Selecione..." />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {hierarchicalCostCenters.map((cc) => (
-                              <SelectItem key={cc.id} value={cc.id}>
-                                <span
-                                  style={{ paddingLeft: `${cc.level * 10}px` }}
-                                  className="flex items-center gap-2"
-                                >
-                                  {cc.level > 0 && "↳ "}
-                                  {cc.name}
-                                  {type === "payable" &&
-                                    costCenterBalances[cc.id] !== undefined && (
-                                      <span
-                                        className={`text-xs ${costCenterBalances[cc.id] > 0 ? "text-green-600" : "text-muted-foreground"}`}
-                                      >
-                                        (
-                                        {formatCurrency(
-                                          costCenterBalances[cc.id]
-                                        )}
-                                        )
-                                      </span>
-                                    )}
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                className={cn(
+                                  "w-full justify-between font-normal",
+                                  !field.value && "text-muted-foreground",
+                                )}
+                              >
+                                <span className="truncate">
+                                  {field.value
+                                    ? (() => {
+                                        const cc = hierarchicalCostCenters.find(
+                                          (c) => c.id === field.value,
+                                        );
+                                        if (!cc) return "Selecione...";
+                                        const balance =
+                                          costCenterBalances[cc.id];
+                                        return `${cc.level > 0 ? "↳ " : ""}${cc.name}${type === "payable" && balance !== undefined ? ` (${formatCurrency(balance)})` : ""}`;
+                                      })()
+                                    : "Selecione..."}
                                 </span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[--radix-popover-trigger-width] p-0"
+                            align="start"
+                          >
+                            <Command>
+                              <CommandInput placeholder="Buscar centro de custo..." />
+                              <CommandList
+                                onWheel={(e) => {
+                                  e.stopPropagation();
+                                  const target = e.currentTarget;
+                                  target.scrollTop += e.deltaY;
+                                }}
+                              >
+                                <CommandEmpty>
+                                  Nenhum centro de custo encontrado.
+                                </CommandEmpty>
+                                <CommandGroup>
+                                  {hierarchicalCostCenters.map((cc) => {
+                                    const balance = costCenterBalances[cc.id];
+                                    const isSelected = field.value === cc.id;
+                                    return (
+                                      <CommandItem
+                                        key={cc.id}
+                                        value={`${cc.name} ${cc.code}`}
+                                        onSelect={() => {
+                                          field.onChange(cc.id);
+                                          setOpenCostCenterCombobox(null);
+                                        }}
+                                        className="flex items-center gap-0"
+                                      >
+                                        <div
+                                          className="flex items-center gap-1.5 w-full"
+                                          style={{
+                                            paddingLeft: `${cc.level * 16}px`,
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "h-4 w-4 shrink-0",
+                                              isSelected
+                                                ? "opacity-100"
+                                                : "opacity-0",
+                                            )}
+                                          />
+                                          {cc.level > 0 ? (
+                                            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                          ) : (
+                                            <FolderTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                          )}
+                                          <span className="truncate">
+                                            {cc.name}
+                                          </span>
+                                          {type === "payable" &&
+                                            balance !== undefined && (
+                                              <span
+                                                className={cn(
+                                                  "ml-auto text-xs shrink-0",
+                                                  balance > 0
+                                                    ? "text-green-600"
+                                                    : "text-muted-foreground",
+                                                )}
+                                              >
+                                                {formatCurrency(balance)}
+                                              </span>
+                                            )}
+                                        </div>
+                                      </CommandItem>
+                                    );
+                                  })}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       </FormItem>
                     )}
                   />

@@ -67,6 +67,7 @@ export const transactionSchema = z.object({
     .enum(["pix", "boleto", "transfer", "credit_card", "cash"])
     .optional(),
   notes: z.string().optional(),
+  barcode: z.string().optional(),
 });
 
 export type TransactionFormData = z.infer<typeof transactionSchema>;

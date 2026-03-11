@@ -10,7 +10,7 @@ import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 // Use useSyncExternalStore to detect client-side hydration
 // This avoids the "setState in useEffect" warning
@@ -33,13 +33,25 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const { canViewDashboard } = usePermissions();
 
+  // Track if the user was ever loaded, to distinguish between
+  // "never authenticated" vs "transient null after token refresh"
+  const wasAuthenticatedRef = useRef(false);
+  useEffect(() => {
+    if (user) {
+      wasAuthenticatedRef.current = true;
+    }
+  }, [user]);
+
   // Security: Block pending/rejected users from accessing dashboard
   // Backward compatibility: if status is missing but active is true, treat as 'active'
   const effectiveStatus = user?.status || (user?.active ? "active" : "pending");
 
   useEffect(() => {
     if (!loading) {
-      if (!user) {
+      if (!user && !wasAuthenticatedRef.current) {
+        // Only redirect to login if the user was never authenticated in
+        // this session. This prevents a redirect when user is temporarily
+        // null during a background token refresh.
         router.push("/login");
       } else if (user) {
         if (effectiveStatus !== "active") {

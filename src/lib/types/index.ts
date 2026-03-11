@@ -194,8 +194,8 @@ export interface Transaction {
   requestOrigin?: RequestOrigin;
   paymentMethod?: PaymentMethod;
   notes?: string;
+  barcode?: string; // Linha digitável do boleto
 
-  // Attachments
   // Attachments
   attachments?: Attachment[];
 

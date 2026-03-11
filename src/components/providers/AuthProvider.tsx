@@ -1,11 +1,11 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useRef } from "react";
 import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
-  onAuthStateChanged,
+  onIdTokenChanged,
   signInWithEmailAndPassword,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -33,14 +33,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const profileLoadedRef = useRef(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    // Use onIdTokenChanged instead of onAuthStateChanged so the cookie
+    // is refreshed every time the Firebase SDK silently renews the token
+    // (~every 55 minutes). onAuthStateChanged only fires on sign-in/out.
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          // Get ID token and set cookie
+          // Refresh the auth cookie on every token change
           const token = await firebaseUser.getIdToken();
-          Cookies.set("auth_token", token, { expires: 1 / 24 }); // 1 hour
+          Cookies.set("auth_token", token, { expires: 7 }); // 7 days
+
+          // Only fetch the full profile on the first load (sign-in).
+          // Subsequent token refreshes just update the cookie above.
+          if (profileLoadedRef.current) {
+            setLoading(false);
+            return;
+          }
 
           // Fetch user profile from Firestore
           const userDocRef = doc(db, "users", firebaseUser.uid);
@@ -49,7 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (userDoc.exists()) {
             const userData = userDoc.data() as UserProfile;
             setUser(userData);
-            Cookies.set("user_role", userData.role, { expires: 1 / 24 });
+            profileLoadedRef.current = true;
+            Cookies.set("user_role", userData.role, { expires: 7 });
 
             // Backward compatibility: if status is missing but active is true, treat as 'active'
             // Old 'pending' status maps to 'pending_company_setup'
@@ -59,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if ((effectiveStatus as string) === "pending") {
               effectiveStatus = "pending_company_setup";
             }
-            Cookies.set("user_status", effectiveStatus, { expires: 1 / 24 });
+            Cookies.set("user_status", effectiveStatus, { expires: 7 });
 
             // Redirect based on status
             if (
@@ -101,21 +113,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
 
             setUser(newUser);
-            Cookies.set("user_role", newUser.role, { expires: 1 / 24 });
+            profileLoadedRef.current = true;
+            Cookies.set("user_role", newUser.role, { expires: 7 });
             Cookies.set("user_status", "pending_company_setup", {
-              expires: 1 / 24,
+              expires: 7,
             });
             router.push("/company-setup");
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
-          setUser(null);
-          Cookies.remove("auth_token");
-          Cookies.remove("user_role");
-          Cookies.remove("user_status");
+          // Don't destroy the session on transient errors (e.g. network
+          // hiccups when the tab was in the background). If a user was
+          // already loaded, keep it — the Firebase Auth session is still
+          // valid and a page refresh will recover automatically.
+          if (!profileLoadedRef.current) {
+            // Only clear state if we never successfully loaded a profile
+            setUser(null);
+            Cookies.remove("auth_token");
+            Cookies.remove("user_role");
+            Cookies.remove("user_status");
+          }
         }
       } else {
+        // User truly signed out
         setUser(null);
+        profileLoadedRef.current = false;
         Cookies.remove("auth_token");
         Cookies.remove("user_role");
         Cookies.remove("user_status");
