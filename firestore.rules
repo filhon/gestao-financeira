@@ -155,31 +155,26 @@ service cloud.firestore {
 
     // 6. Cost Centers
     match /cost_centers/{costCenterId} {
-       // All users in the company usually need to see cost centers to categorize transactions
-       // Simplification: Allow all authenticated users to read.
-       allow read: if isAuthenticated();
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
        
-       // Write: Manager only
-       allow write: if isAuthenticated() && isManager(resource != null ? resource.data.companyId : request.resource.data.companyId);
+       allow write: if isAuthenticated() && isManager(getCompanyId());
     }
 
     // 7. Entities (Participants/Contacts)
     match /entities/{entityId} {
-       // Read: All authenticated users (Simplification)
-       allow read: if isAuthenticated();
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
        
-       // Write: Manager, Approver, Releaser (Maybe? Spec says View Entities for Approver/Releaser. Write is Admin/Manager.)
-       // Keeping strict write:
-       allow write: if isAuthenticated() && isManager(resource != null ? resource.data.companyId : request.resource.data.companyId);
+       allow write: if isAuthenticated() && isManager(getCompanyId());
     }
     
     // 8. Notifications
     match /notifications/{notificationId} {
-       // Owner only
        allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid);
-       // Allow write if it's for the user (system triggering not covered by rules unless using Admin SDK)
-       // Or users marking as read.
-       allow write: if isAuthenticated(); 
+       allow write: if isAuthenticated() && (resource != null ? resource.data.userId == request.auth.uid : request.resource.data.userId == request.auth.uid);
     }
 
     // 9. Audit Logs
@@ -199,10 +194,11 @@ service cloud.firestore {
     }
 
     // 10. Budgets
-    // Missing in initial pass. Linked to Cost Centers.
-    // Simple approach: Allow authenticated Read/Write to avoid errors as requested.
     match /budgets/{budgetId} {
-      allow read, write: if isAuthenticated();
+      function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+      allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+      allow write: if isAuthenticated() && isManager(getCompanyId());
     }
 
     // 11. Feedbacks

@@ -19,6 +19,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
+import currency from "currency.js";
 import { Transaction, TransactionStatus } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { format, addMonths, addDays, differenceInCalendarDays } from "date-fns";
@@ -318,16 +319,13 @@ export const transactionService = {
 
     if (useInstallments && installmentsCount && installmentsCount > 1) {
       const groupId = crypto.randomUUID();
-      const totalAmount = transactionData.amount;
-      const baseAmount =
-        Math.floor((totalAmount / installmentsCount) * 100) / 100;
-      const remainder =
-        Math.round((totalAmount - baseAmount * installmentsCount) * 100) / 100;
+      const totalAmountCurrency = currency(transactionData.amount);
+      const installmentAmounts =
+        totalAmountCurrency.distribute(installmentsCount);
 
       const promises = [];
       for (let i = 1; i <= installmentsCount; i++) {
-        const installmentAmount =
-          i === installmentsCount ? baseAmount + remainder : baseAmount;
+        const installmentAmount = installmentAmounts[i - 1].value;
         const dueDate =
           i === 1
             ? transactionData.dueDate
@@ -335,16 +333,33 @@ export const transactionService = {
         const description = `${transactionData.description} (${i}/${installmentsCount})`;
 
         // Recalculate costCenterAllocation amounts for this installment
+        const instAmountCurrency = currency(installmentAmount);
+        let rem = instAmountCurrency;
+
         const installmentAllocations =
           transactionData.costCenterAllocation?.map(
-            (alloc: {
-              costCenterId: string;
-              percentage: number;
-              amount: number;
-            }) => ({
-              ...alloc,
-              amount: (installmentAmount * alloc.percentage) / 100,
-            }),
+            (
+              alloc: {
+                costCenterId: string;
+                percentage: number;
+                amount: number;
+              },
+              index: number,
+              array: {
+                costCenterId: string;
+                percentage: number;
+                amount: number;
+              }[],
+            ) => {
+              if (index === array.length - 1) {
+                return { ...alloc, amount: rem.value };
+              }
+              const amt = instAmountCurrency
+                .multiply(alloc.percentage)
+                .divide(100);
+              rem = rem.subtract(amt);
+              return { ...alloc, amount: amt.value };
+            },
           );
 
         const costCenterIds =
@@ -651,7 +666,12 @@ export const transactionService = {
       }
 
       const snapshot = await getDocs(q);
-      const promises = snapshot.docs.map(async (docSnapshot) => {
+
+      let batch = writeBatch(db);
+      let operationCount = 0;
+      const batchPromises: Promise<void>[] = [];
+
+      for (const docSnapshot of snapshot.docs) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const payload = data as any;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -689,10 +709,21 @@ export const transactionService = {
           updateData.description = `${baseDescription} (${installments.current}/${installments.total})`;
         }
 
-        return updateDoc(docSnapshot.ref, updateData);
-      });
+        batch.update(docSnapshot.ref, updateData);
+        operationCount++;
 
-      await Promise.all(promises);
+        if (operationCount === 500) {
+          batchPromises.push(batch.commit());
+          batch = writeBatch(db);
+          operationCount = 0;
+        }
+      }
+
+      if (operationCount > 0) {
+        batchPromises.push(batch.commit());
+      }
+
+      await Promise.all(batchPromises);
 
       await auditService.log({
         companyId,

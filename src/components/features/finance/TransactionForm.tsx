@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import currency from "currency.js";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -220,12 +221,26 @@ export function TransactionForm({
   }, [allocations, totalAmount, costCenterBalances, costCenters, type]);
 
   useEffect(() => {
-    if (totalAmount) {
+    if (totalAmount !== undefined && totalAmount !== null) {
       const allocations = form.getValues("costCenterAllocation");
-      const updatedAllocations = allocations.map((a) => ({
-        ...a,
-        amount: (totalAmount * a.percentage) / 100,
-      }));
+      if (!allocations || allocations.length === 0) return;
+
+      const totalCurrency = currency(totalAmount);
+      let remaining = totalCurrency;
+
+      const updatedAllocations = allocations.map((a, index) => {
+        if (index === allocations.length - 1) {
+          // Last element takes whatever is remaining to avoid precision errors
+          return { ...a, amount: remaining.value };
+        }
+
+        // Calculate amount based on percentage
+        const amount = totalCurrency.multiply(a.percentage).divide(100);
+        remaining = remaining.subtract(amount);
+
+        return { ...a, amount: amount.value };
+      });
+
       form.setValue("costCenterAllocation", updatedAllocations);
     }
   }, [totalAmount, form]);
