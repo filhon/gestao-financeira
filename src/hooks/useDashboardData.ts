@@ -29,27 +29,27 @@ export function useDashboardMetrics(year?: number) {
   });
 }
 
-export function useProjectedCashFlow(mode: "30days" | "year") {
+export function useProjectedCashFlow(mode: "30days" | "year", year?: number) {
   const { selectedCompany } = useCompany();
 
   return useQuery({
-    queryKey: ["projected-cash-flow", selectedCompany?.id, mode],
+    queryKey: ["projected-cash-flow", selectedCompany?.id, mode, year],
     queryFn: async () => {
       if (!selectedCompany) return null;
-      return dashboardService.getProjectedCashFlow(selectedCompany.id, mode);
+      return dashboardService.getProjectedCashFlow(selectedCompany.id, mode, year);
     },
     enabled: !!selectedCompany,
   });
 }
 
-export function useBudgetProgress() {
+export function useBudgetProgress(year?: number) {
   const { selectedCompany } = useCompany();
 
   return useQuery({
-    queryKey: ["budget-progress", selectedCompany?.id],
+    queryKey: ["budget-progress", selectedCompany?.id, year],
     queryFn: async () => {
       if (!selectedCompany) return [];
-      return dashboardService.getBudgetProgressByCostCenter(selectedCompany.id);
+      return dashboardService.getBudgetProgressByCostCenter(selectedCompany.id, year);
     },
     enabled: !!selectedCompany,
   });

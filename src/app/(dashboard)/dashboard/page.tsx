@@ -134,8 +134,8 @@ export default function DashboardPage() {
       {metrics && <KPICards metrics={metrics} />}
 
       <div className="grid gap-4 md:grid-cols-7">
-        <CashFlowChart />
-        <CostCenterChart />
+        <CashFlowChart year={selectedYear} />
+        <CostCenterChart year={selectedYear} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">

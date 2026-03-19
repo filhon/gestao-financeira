@@ -30,8 +30,8 @@ import {
 } from "@/components/ui/popover";
 import { getDaysInMonth, getDate } from "date-fns";
 
-export function CostCenterChart() {
-  const { data, isLoading } = useBudgetProgress();
+export function CostCenterChart({ year }: { year?: number }) {
+  const { data, isLoading } = useBudgetProgress(year);
   const [view, setView] = useState("risk");
 
   const today = new Date();

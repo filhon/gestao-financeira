@@ -18,9 +18,9 @@ import { AlertTriangle, Calendar, Maximize2, Minimize2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { useProjectedCashFlow } from "@/hooks/useDashboardData";
 
-export function CashFlowChart() {
+export function CashFlowChart({ year }: { year?: number }) {
   const [mode, setMode] = useState<"30days" | "year">("30days");
-  const { data: result, isLoading } = useProjectedCashFlow(mode);
+  const { data: result, isLoading } = useProjectedCashFlow(mode, year);
 
   const data = result?.data;
   const hasCompanyStats = result?.hasCompanyStats ?? true;

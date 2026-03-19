@@ -41,6 +41,10 @@ export interface DashboardMetrics {
   balance: number;
   pendingPayables: number;
   pendingReceivables: number;
+  /** Recebíveis pendentes com vencimento nos próximos 30 dias */
+  shortTermReceivables: number;
+  /** Pagamentos pendentes com vencimento nos próximos 30 dias */
+  shortTermPayables: number;
   year: number;
 }
 
@@ -138,11 +142,25 @@ export const dashboardService = {
     const yearStart = Timestamp.fromDate(startOfYear(new Date(targetYear, 0, 1)));
     const yearEnd = Timestamp.fromDate(endOfYear(new Date(targetYear, 0, 1)));
 
+    // Short-term window: today → +30 days (always based on real today)
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    const in30Days = addDays(todayDate, 30);
+    const shortTermStart = Timestamp.fromDate(todayDate);
+    const shortTermEnd = Timestamp.fromDate(in30Days);
+
     const baseQuery = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
       where("dueDate", ">=", yearStart),
       where("dueDate", "<=", yearEnd),
+    );
+
+    const shortTermBaseQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("dueDate", ">=", shortTermStart),
+      where("dueDate", "<=", shortTermEnd),
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,7 +169,7 @@ export const dashboardService = {
 
     const pendingStatuses = ["draft", "pending_approval", "approved"];
 
-    // Strategy: try aggregation queries (4 reads), fallback to getDocs if indexes not ready
+    // Strategy: try aggregation queries, fallback to getDocs if indexes not ready
     try {
       const revenueQuery = applyUserFilter(
         query(baseQuery, where("status", "==", "paid"), where("type", "==", "receivable")),
@@ -165,13 +183,21 @@ export const dashboardService = {
       const pendingPayablesQuery = applyUserFilter(
         query(baseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
       );
+      const shortTermRecQuery = applyUserFilter(
+        query(shortTermBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
+      );
+      const shortTermPayQuery = applyUserFilter(
+        query(shortTermBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
+      );
 
-      const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap] =
+      const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap, stRecSnap, stPaySnap] =
         await Promise.all([
           getAggregateFromServer(revenueQuery, { total: sum("amount") }),
           getAggregateFromServer(expensesQuery, { total: sum("amount") }),
           getAggregateFromServer(pendingReceivablesQuery, { total: sum("amount") }),
           getAggregateFromServer(pendingPayablesQuery, { total: sum("amount") }),
+          getAggregateFromServer(shortTermRecQuery, { total: sum("amount") }),
+          getAggregateFromServer(shortTermPayQuery, { total: sum("amount") }),
         ]);
 
       return {
@@ -180,6 +206,8 @@ export const dashboardService = {
         balance: (revenueSnap.data().total || 0) - (expensesSnap.data().total || 0),
         pendingPayables: pendingPaySnap.data().total || 0,
         pendingReceivables: pendingRecSnap.data().total || 0,
+        shortTermReceivables: stRecSnap.data().total || 0,
+        shortTermPayables: stPaySnap.data().total || 0,
         year: targetYear,
       };
     } catch {
@@ -203,19 +231,28 @@ export const dashboardService = {
       let totalExpenses = 0;
       let pendingReceivables = 0;
       let pendingPayables = 0;
+      let shortTermReceivables = 0;
+      let shortTermPayables = 0;
 
       snapshot.docs.forEach((d) => {
         const data = d.data();
         const amount = Number(data.amount) || 0;
         const status = data.status as string;
         const type = data.type as string;
+        const dueDate: Date = (data.dueDate as Timestamp).toDate();
+        const isShortTerm = dueDate >= todayDate && dueDate <= in30Days;
 
         if (status === "paid") {
           if (type === "receivable") totalRevenue += amount;
           else if (type === "payable") totalExpenses += amount;
         } else if (pendingStatuses.includes(status)) {
-          if (type === "receivable") pendingReceivables += amount;
-          else if (type === "payable") pendingPayables += amount;
+          if (type === "receivable") {
+            pendingReceivables += amount;
+            if (isShortTerm) shortTermReceivables += amount;
+          } else if (type === "payable") {
+            pendingPayables += amount;
+            if (isShortTerm) shortTermPayables += amount;
+          }
         }
       });
 
@@ -225,6 +262,8 @@ export const dashboardService = {
         balance: totalRevenue - totalExpenses,
         pendingPayables,
         pendingReceivables,
+        shortTermReceivables,
+        shortTermPayables,
         year: targetYear,
       };
     }
@@ -235,16 +274,21 @@ export const dashboardService = {
   getProjectedCashFlow: async (
     companyId: string,
     mode: "30days" | "year" = "30days",
+    year?: number,
   ): Promise<ProjectedCashFlowResult> => {
+    const targetYear = year || new Date().getFullYear();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    // Reference date for year-scoped calculations
+    const refDate = new Date(targetYear, 0, 1);
 
     let startDate: Date;
     let endDate: Date;
 
     if (mode === "year") {
-      startDate = startOfYear(today);
-      endDate = endOfYear(today);
+      startDate = startOfYear(refDate);
+      endDate = endOfYear(refDate);
     } else {
       startDate = today;
       endDate = addDays(today, 30);
@@ -487,10 +531,14 @@ export const dashboardService = {
 
   getBudgetProgressByCostCenter: async (
     companyId: string,
+    year?: number,
   ): Promise<BudgetProgressData[]> => {
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed (0 = January)
+    const currentYear = year || now.getFullYear();
+    // For past/future years, use December as reference so full year is considered;
+    // for the current year, use the actual current month.
+    const isCurrentYear = currentYear === now.getFullYear();
+    const currentMonth = isCurrentYear ? now.getMonth() : 11; // 0-indexed
     const remainingMonths = 12 - currentMonth; // Includes current month
 
     // Get all cost centers for the company
@@ -531,36 +579,36 @@ export const dashboardService = {
       }),
     );
 
-    // Optimization: Use Cost Center Usage collection instead of fetching all transactions
-    const usageQuery = query(
-      collection(db, "cost_center_usage"),
-      where("companyId", "==", companyId),
-      where("monthKey", ">=", `${currentYear}-01`),
-      where("monthKey", "<=", `${currentYear}-12`),
-    );
-    const usageSnapshot = await getDocs(usageQuery);
+    // Reference month key for the target year
+    const refNow = isCurrentYear ? now : new Date(currentYear, 11, 1);
+    const currentMonthKey = format(refNow, "yyyy-MM");
+    const ytdStartKey = `${currentYear}-01`;
 
     const ytdExpensesByCC = new Map<string, number>();
     const currentMonthExpensesByCC = new Map<string, number>();
 
-    const currentMonthKey = format(now, "yyyy-MM");
+    // cost_center_usage has at most N_CCs × 12 docs per year (1 doc per CC per month).
+    // A single getDocs scoped by companyId + monthKey range is efficient and requires
+    // no extra composite indexes. getAggregateFromServer would need indexes for
+    // (companyId, costCenterId, monthKey) that don't exist.
+    const usageQuery = query(
+      collection(db, "cost_center_usage"),
+      where("companyId", "==", companyId),
+      where("monthKey", ">=", ytdStartKey),
+      where("monthKey", "<=", `${currentYear}-12`),
+    );
+    const usageSnapshot = await getDocs(usageQuery);
 
     usageSnapshot.docs.forEach((doc) => {
       const data = doc.data();
-      const ccId = data.costCenterId;
-      const amount = data.amount || 0;
-      const monthKey = data.monthKey;
+      const ccId = data.costCenterId as string;
+      const amount = (data.amount as number) || 0;
+      const monthKey = data.monthKey as string;
 
-      // YTD (before current month)
       if (monthKey < currentMonthKey) {
-        const current = ytdExpensesByCC.get(ccId) || 0;
-        ytdExpensesByCC.set(ccId, current + amount);
-      }
-
-      // Current Month
-      if (monthKey === currentMonthKey) {
-        const current = currentMonthExpensesByCC.get(ccId) || 0;
-        currentMonthExpensesByCC.set(ccId, current + amount);
+        ytdExpensesByCC.set(ccId, (ytdExpensesByCC.get(ccId) || 0) + amount);
+      } else if (monthKey === currentMonthKey) {
+        currentMonthExpensesByCC.set(ccId, (currentMonthExpensesByCC.get(ccId) || 0) + amount);
       }
     });
 
