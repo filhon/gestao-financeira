@@ -50,6 +50,7 @@ import { Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
+import { SmartBatchesCarousel } from "@/components/features/finance/SmartBatchesCarousel";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format, addDays, isBefore, startOfDay } from "date-fns";
@@ -946,6 +947,9 @@ export default function AccountsPayablePage() {
         onSuccess={fetchTransactions}
         type="payable"
       />
+
+      {/* Sugestões automáticas de lotes — geradas por CRON noturno */}
+      <SmartBatchesCarousel onBatchAccepted={refreshTransactions} />
 
       <Card>
         <CardHeader>

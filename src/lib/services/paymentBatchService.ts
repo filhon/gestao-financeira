@@ -830,4 +830,76 @@ export const paymentBatchService = {
 
     await batch.commit();
   },
+
+  /**
+   * Aceita uma sugestão automática de lote gerada pela Cloud Function noturna.
+   *
+   * Cria o PaymentBatch oficial e vincula as transações sugeridas
+   * de forma atômica (writeBatch), sem download individual de cada
+   * documento de transação.
+   *
+   * Retorna a referência do PaymentBatch criado para redirect.
+   */
+  acceptSuggested: async (
+    name: string,
+    companyId: string,
+    createdBy: string,
+    transactionIds: string[],
+  ): Promise<{ id: string }> => {
+    if (transactionIds.length === 0) {
+      throw new Error("A sugestão não contém transações.");
+    }
+
+    // 1 — Cria o PaymentBatch
+    const batchDocRef = await addDoc(collection(db, COLLECTION_NAME), {
+      name,
+      companyId,
+      createdBy,
+      status: "open",
+      transactionIds,
+      totalAmount: 0,          // será recalculado abaixo
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      startDate: null,
+      endDate: null,
+    });
+
+    // 2 — Vincula as transações e soma o totalAmount atomicamente
+    // Firestore writeBatch suporta até 500 ops; sugestões normalmente têm << 500 itens.
+    const CHUNK_SIZE = 499; // 1 slot reservado para a atualização do batch doc
+
+    let totalAmount = 0;
+
+    for (let i = 0; i < transactionIds.length; i += CHUNK_SIZE) {
+      const chunk = transactionIds.slice(i, i + CHUNK_SIZE);
+      const wb = writeBatch(db);
+
+      // Busca os amounts deste chunk em paralelo (leitura, não escrita)
+      const snapshots = await Promise.all(
+        chunk.map((id) => getDoc(doc(db, TRANSACTIONS_COLLECTION, id))),
+      );
+
+      let chunkAmount = 0;
+      snapshots.forEach((snap, idx) => {
+        if (!snap.exists()) return;
+        const amount = Number(snap.data().amount ?? 0);
+        chunkAmount += amount;
+        wb.update(doc(db, TRANSACTIONS_COLLECTION, chunk[idx]), {
+          batchId: batchDocRef.id,
+        });
+      });
+
+      totalAmount += chunkAmount;
+      await wb.commit();
+    }
+
+    // 3 — Atualiza o totalAmount real no batch doc
+    await updateDoc(batchDocRef, {
+      totalAmount,
+      updatedAt: serverTimestamp(),
+    });
+
+    return { id: batchDocRef.id };
+  },
 };
+

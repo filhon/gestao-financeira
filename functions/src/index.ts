@@ -405,3 +405,221 @@ export const updateCostCenterUsage = functions.firestore
 
     return null;
   });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// suggestPaymentBatches
+//
+// Roda toda noite às 02:00 horário de Brasília via Cloud Scheduler.
+//
+// Algoritmo heurístico:
+//   1. Busca todas as transações em status "draft" do tipo "payable".
+//   2. Agrupa por (companyId, supplierOrClient normalizado, dueDate truncada ao dia).
+//   3. Aplica regra extra de "impostos": agrupa também contas cujas descrições
+//      contenham palavras-chave fiscais (DARF, INSS, FGTS, GPS, COFINS, PIS,
+//      IRPJ, CSLL, ISS, ICMS) — independentemente do fornecedor.
+//   4. Descarta grupos com apenas 1 transação (sem ganho de agrupamento).
+//   5. Grava/sobrescreve as sugestões na subcoleção
+//      `companies/{companyId}/suggested_batches`.
+//
+// Estrutura do documento gravado:
+//   {
+//     reason: "same_supplier" | "same_due_date" | "tax_group",
+//     label: string,          // descrição legível do grupo
+//     transactionIds: string[],
+//     totalAmount: number,
+//     dueDate: Timestamp | null,
+//     supplierOrClient: string | null,
+//     generatedAt: Timestamp,
+//   }
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Palavras-chave que indicam obrigações tributárias/societárias. */
+const TAX_KEYWORDS = [
+  "darf", "inss", "fgts", "gps", "cofins",
+  "pis/pasep", "pis", "irpj", "csll", "iss",
+  "icms", "simples", "das", "contribuição",
+];
+
+/** Normaliza um string para comparação (minúsculas + sem acentos). */
+function normalizeStr(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+/** Verifica se a descrição ou fornecedor contém palavra-chave tributária. */
+function isTaxRelated(description: string, supplier: string): boolean {
+  const hay = normalizeStr(description) + " " + normalizeStr(supplier);
+  return TAX_KEYWORDS.some((kw) => hay.includes(kw));
+}
+
+/** Formata uma Date para chave no formato YYYY-MM-DD. */
+function toDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export const suggestPaymentBatches = functions
+  .runWith({ timeoutSeconds: 300, memory: "512MB" })
+  .pubsub.schedule("0 5 * * *") // 02:00 BRT = 05:00 UTC
+  .timeZone("America/Sao_Paulo")
+  .onRun(async () => {
+    console.log("suggestPaymentBatches: iniciando...");
+
+    // 1. Busca contas a pagar em rascunho (sem limite — é servidor, não cliente)
+    const snapshot = await db
+      .collection("transactions")
+      .where("type", "==", "payable")
+      .where("status", "==", "draft")
+      .get();
+
+    if (snapshot.empty) {
+      console.log("suggestPaymentBatches: nenhuma transação draft encontrada.");
+      return null;
+    }
+
+    // 2. Organiza os documentos por empresa
+    const byCompany = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
+    for (const doc of snapshot.docs) {
+      const companyId: string = doc.data().companyId;
+      if (!companyId) continue;
+      if (!byCompany.has(companyId)) byCompany.set(companyId, []);
+      byCompany.get(companyId)!.push(doc);
+    }
+
+    console.log(
+      `suggestPaymentBatches: ${snapshot.size} transações em ${byCompany.size} empresa(s).`
+    );
+
+    // 3. Processa empresa por empresa
+    for (const [companyId, docs] of byCompany) {
+      // Mapas de grupos heurísticos
+      // Chave → lista de IDs + metadados acumulados
+      type GroupAcc = {
+        ids: string[];
+        totalAmount: number;
+        dueDate: Date | null;
+        supplierOrClient: string | null;
+        reason: "same_supplier" | "same_due_date" | "tax_group";
+        label: string;
+      };
+
+      const supplierGroups = new Map<string, GroupAcc>();
+      const dueDateGroups  = new Map<string, GroupAcc>();
+      const taxGroup: GroupAcc = {
+        ids: [],
+        totalAmount: 0,
+        dueDate: null,
+        supplierOrClient: null,
+        reason: "tax_group",
+        label: "Obrigações tributárias/societárias",
+      };
+
+      for (const doc of docs) {
+        const d = doc.data();
+        const amount: number      = Number(d.amount || 0);
+        const supplier: string    = d.supplierOrClient || "";
+        const description: string = d.description || "";
+        const dueDate: Date | null = d.dueDate ? d.dueDate.toDate() : null;
+
+        // ── Grupo: mesmo fornecedor + mesma data ──────────────────────────
+        if (supplier && dueDate) {
+          const key = `${normalizeStr(supplier)}__${toDateKey(dueDate)}`;
+          if (!supplierGroups.has(key)) {
+            supplierGroups.set(key, {
+              ids: [],
+              totalAmount: 0,
+              dueDate,
+              supplierOrClient: supplier,
+              reason: "same_supplier",
+              label: `${supplier} — ${toDateKey(dueDate)}`,
+            });
+          }
+          const g = supplierGroups.get(key)!;
+          g.ids.push(doc.id);
+          g.totalAmount += amount;
+        }
+
+        // ── Grupo: mesma data de vencimento (qualquer fornecedor) ─────────
+        if (dueDate) {
+          const key = toDateKey(dueDate);
+          if (!dueDateGroups.has(key)) {
+            dueDateGroups.set(key, {
+              ids: [],
+              totalAmount: 0,
+              dueDate,
+              supplierOrClient: null,
+              reason: "same_due_date",
+              label: `Vencimento ${toDateKey(dueDate)}`,
+            });
+          }
+          const g = dueDateGroups.get(key)!;
+          g.ids.push(doc.id);
+          g.totalAmount += amount;
+        }
+
+        // ── Grupo: impostos ───────────────────────────────────────────────
+        if (isTaxRelated(description, supplier)) {
+          taxGroup.ids.push(doc.id);
+          taxGroup.totalAmount += amount;
+        }
+      }
+
+      // 4. Consolida todas as sugestões, descartando grupos unitários
+      const suggestions: GroupAcc[] = [];
+
+      for (const g of supplierGroups.values()) {
+        if (g.ids.length >= 2) suggestions.push(g);
+      }
+      for (const g of dueDateGroups.values()) {
+        if (g.ids.length >= 2) suggestions.push(g);
+      }
+      if (taxGroup.ids.length >= 2) suggestions.push(taxGroup);
+
+      // 5. Grava na subcoleção `companies/{companyId}/suggested_batches`
+      //    Estratégia: apaga as sugestões antigas e recria — garante idempotência.
+      const colRef = db
+        .collection("companies")
+        .doc(companyId)
+        .collection("suggested_batches");
+
+      // Apaga sugestões anteriores (até 500 por vez — Firestore limit)
+      const oldSnap = await colRef.get();
+      const deleteBatch = db.batch();
+      oldSnap.docs.forEach((d) => deleteBatch.delete(d.ref));
+      if (!oldSnap.empty) await deleteBatch.commit();
+
+      // Grava as novas sugestões
+      if (suggestions.length === 0) {
+        console.log(`suggestPaymentBatches [${companyId}]: sem sugestões.`);
+        continue;
+      }
+
+      const writeBatchFS = db.batch();
+      const now = admin.firestore.FieldValue.serverTimestamp();
+
+      for (const s of suggestions) {
+        const ref = colRef.doc(); // auto-ID
+        writeBatchFS.set(ref, {
+          reason: s.reason,
+          label: s.label,
+          transactionIds: s.ids,
+          totalAmount: s.totalAmount,
+          dueDate: s.dueDate
+            ? admin.firestore.Timestamp.fromDate(s.dueDate)
+            : null,
+          supplierOrClient: s.supplierOrClient,
+          generatedAt: now,
+        });
+      }
+
+      await writeBatchFS.commit();
+      console.log(
+        `suggestPaymentBatches [${companyId}]: ${suggestions.length} sugestão(ões) gravada(s).`
+      );
+    }
+
+    console.log("suggestPaymentBatches: concluído.");
+    return null;
+  });

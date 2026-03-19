@@ -86,6 +86,15 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update, delete: if isGlobalAdmin();
+
+      // Subcoleção: sugestões de lotes geradas pela Cloud Function noturna.
+      // Leitura: roles que gerenciam lotes de pagamento.
+      // Escrita: bloqueada no client — somente o Admin SDK (Cloud Function) escreve.
+      match /suggested_batches/{suggestionId} {
+        allow read: if isAuthenticated() &&
+          hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser']);
+        allow write: if false; // Cloud Function only (Admin SDK bypasses rules)
+      }
     }
 
     // 3. Transactions (Payables & Receivables)
