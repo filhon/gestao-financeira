@@ -426,7 +426,7 @@ export const transactionService = {
               {
                 id: refs[0].id,
                 ...transactionData,
-                amount: totalAmount, // Show total amount in email
+                amount: transactionData.amount, // Show total amount in email
                 approvalToken: token,
                 requestOrigin: transactionData.requestOrigin,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
