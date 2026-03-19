@@ -1264,4 +1264,63 @@ export const transactionService = {
 
     return { updated, total: snapshot.size };
   },
+
+  /**
+   * Atualiza múltiplas transações atomicamente usando writeBatch do Firestore.
+   *
+   * Garante que todos os documentos sejam processados juntos ou falhem juntos.
+   * Chunks de 500 operações respeitam o limite do Firestore por batch.
+   *
+   * Não realiza audit por documento individual (overhead desnecessário
+   * para operações em lote); um único registro de auditoria resume a operação.
+   */
+  updateBatch: async (
+    ids: string[],
+    data: Partial<TransactionFormData>,
+    user: { uid: string; email: string },
+    companyId: string,
+  ): Promise<void> => {
+    if (ids.length === 0) return;
+
+    const cleanData = stripUndefined(data) as Partial<TransactionFormData>;
+
+    const updatePayload: DocumentData = {
+      ...cleanData,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (cleanData.costCenterAllocation) {
+      const costCenterIds = cleanData.costCenterAllocation.map(
+        (a) => a.costCenterId,
+      );
+      updatePayload.costCenterIds = costCenterIds;
+      updatePayload.costCenterId = costCenterIds[0];
+    }
+
+    // Firestore suporta no máximo 500 operações por writeBatch
+    const CHUNK_SIZE = 500;
+
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+
+      for (const id of chunk) {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        batch.update(docRef, updatePayload);
+      }
+
+      await batch.commit();
+    }
+
+    // Audit único para toda a operação em lote
+    await auditService.log({
+      companyId,
+      userId: user.uid,
+      userEmail: user.email,
+      action: "update",
+      entity: "transaction",
+      entityId: `batch:${ids.length}`,
+      details: stripUndefined({ ...cleanData, count: ids.length }),
+    });
+  },
 };

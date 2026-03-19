@@ -371,6 +371,7 @@ export default function UserProfilePage({
         isOpen={!!selectedTransaction}
         onClose={() => setSelectedTransaction(null)}
         transaction={selectedTransaction}
+        costCenters={costCenters}
         onUpdate={() => {
           // Refresh upcoming
           if (userId && selectedCompany) {

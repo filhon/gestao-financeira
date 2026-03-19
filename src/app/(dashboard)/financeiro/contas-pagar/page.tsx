@@ -345,45 +345,65 @@ export default function AccountsPayablePage() {
     }
   }, [selectedCompany]);
 
-  // Client-side search
+  // Server-side search — delega ao servidor para evitar download da coleção inteira.
+  // O Firebase não suporta full-text search nativo; a filtragem é feita em memória
+  // no servidor (Firebase Admin SDK) com cap de segurança de 5.000 documentos.
   useEffect(() => {
     if (debouncedSearchTerm && selectedCompany && user) {
       const performSearch = async () => {
         setIsSearching(true);
         try {
-          const filter: {
-            companyId: string;
-            type: string;
-            createdBy?: string;
-          } = {
+          const params = new URLSearchParams({
+            q: debouncedSearchTerm,
             companyId: selectedCompany.id,
             type: "payable",
-          };
-
-          if (onlyOwnPayables) {
-            filter.createdBy = user.uid;
-          }
-
-          const all = await transactionService.getAll(filter);
-
-          const search = debouncedSearchTerm
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "");
-
-          const filtered = all.filter((t) => {
-            const description = t.description
-              .toLowerCase()
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "");
-            const supplier = (t.supplierOrClient || "")
-              .toLowerCase()
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "");
-            return description.includes(search) || supplier.includes(search);
+            allDates: "true",
+            limit: "50",
           });
 
-          setSearchResults(filtered);
+          if (onlyOwnPayables) {
+            params.set("createdBy", user.uid);
+          }
+
+          const response = await fetch(
+            `/api/internal/transactions/search?${params.toString()}`,
+            { credentials: "include" },
+          );
+
+          if (!response.ok) {
+            throw new Error(`Search failed: ${response.status}`);
+          }
+
+          const json = await response.json();
+
+          // Converte as datas serializadas como ISO string de volta para Date
+          // para compatibilidade com o tipo Transaction
+          const mapped = (json.data ?? []).map(
+            (t: Record<string, unknown>) => ({
+              ...t,
+              dueDate: t.dueDate ? new Date(t.dueDate as string) : new Date(),
+              paymentDate: t.paymentDate
+                ? new Date(t.paymentDate as string)
+                : undefined,
+              approvedAt: t.approvedAt
+                ? new Date(t.approvedAt as string)
+                : undefined,
+              releasedAt: t.releasedAt
+                ? new Date(t.releasedAt as string)
+                : undefined,
+              createdAt: t.createdAt
+                ? new Date(t.createdAt as string)
+                : undefined,
+              updatedAt: t.updatedAt
+                ? new Date(t.updatedAt as string)
+                : undefined,
+              approvalTokenExpiresAt: t.approvalTokenExpiresAt
+                ? new Date(t.approvalTokenExpiresAt as string)
+                : undefined,
+            }),
+          );
+
+          setSearchResults(mapped);
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
@@ -487,19 +507,13 @@ export default function AccountsPayablePage() {
     try {
       setIsProcessingBatch(true);
 
-      const promises = transactionsToPay.map((t) =>
-        transactionService.update(
-          t.id,
-          {
-            status: "paid",
-            paymentDate: batchPaymentDate,
-          },
-          { uid: user.uid, email: user.email },
-          selectedCompany.id,
-        ),
+      await transactionService.updateBatch(
+        transactionsToPay.map((t) => t.id),
+        { status: "paid", paymentDate: batchPaymentDate },
+        { uid: user.uid, email: user.email },
+        selectedCompany.id,
       );
 
-      await Promise.all(promises);
       toast.success(
         `${transactionsToPay.length} transações pagas com sucesso!`,
       );
@@ -530,19 +544,13 @@ export default function AccountsPayablePage() {
     try {
       setIsProcessingBatch(true);
 
-      // We explicitly set paymentDate to null (or we could use deleteField if needed,
-      // but null is often safer for types if we adjust the type definition or just cast)
-      // For now, let's just change status to draft which seems to be the standard behavior in this app
-      const promises = transactionsToRevert.map((t) =>
-        transactionService.update(
-          t.id,
-          { status: "draft" }, // Reverting to draft effectively undoes payment
-          { uid: user.uid, email: user.email },
-          selectedCompany.id,
-        ),
+      await transactionService.updateBatch(
+        transactionsToRevert.map((t) => t.id),
+        { status: "draft" },
+        { uid: user.uid, email: user.email },
+        selectedCompany.id,
       );
 
-      await Promise.all(promises);
       toast.success(
         `${transactionsToRevert.length} pagamentos revertidos com sucesso!`,
       );
@@ -1214,6 +1222,7 @@ export default function AccountsPayablePage() {
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
         onUpdate={handleTransactionUpdate}
+        costCenters={costCenters}
       />
 
       <Dialog

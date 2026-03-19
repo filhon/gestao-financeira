@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Transaction, TransactionStatus } from "@/lib/types";
+import { Transaction, TransactionStatus, CostCenter } from "@/lib/types";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,6 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { transactionService } from "@/lib/services/transactionService";
 import { emailService } from "@/lib/services/emailService";
-import { costCenterService } from "@/lib/services/costCenterService";
 import { useState, useEffect } from "react";
 import {
   Loader2,
@@ -43,7 +42,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { toast } from "sonner";
-import { TransactionForm } from "./TransactionForm"; // Import Form
+import { TransactionForm } from "./TransactionForm";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -53,6 +52,8 @@ interface TransactionDetailsDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onUpdate: (updatedTransaction?: Transaction) => void;
+  /** Lista de centros de custo da empresa já carregada pelo pai — evita reads adicionais no banco. */
+  costCenters?: CostCenter[];
 }
 
 export function TransactionDetailsDialog({
@@ -60,6 +61,7 @@ export function TransactionDetailsDialog({
   isOpen,
   onClose,
   onUpdate,
+  costCenters = [],
 }: TransactionDetailsDialogProps) {
   const isReceivable = transaction?.type === "receivable";
   const { user } = useAuth();
@@ -94,60 +96,52 @@ export function TransactionDetailsDialog({
     }
   }, [isOpen, transaction]);
 
+  // Resolve nomes dos centros de custo a partir da prop — zero reads extras no banco.
   useEffect(() => {
-    const fetchNames = async () => {
-      if (!transaction || !selectedCompany) return;
+    if (!transaction?.costCenterAllocation) return;
 
-      const newCostCenterNames: Record<string, string> = {};
-      const newUserNames: Record<string, string> = {};
-      let hasNewData = false;
+    const names: Record<string, string> = {};
+    for (const alloc of transaction.costCenterAllocation) {
+      const cc = costCenters.find((c) => c.id === alloc.costCenterId);
+      if (cc) names[alloc.costCenterId] = cc.name;
+    }
+    setCostCenterNames(names);
+  }, [transaction, costCenters]);
 
-      // Fetch Cost Center Names
-      if (transaction.costCenterAllocation) {
-        for (const alloc of transaction.costCenterAllocation) {
-          try {
-            const cc = await costCenterService.getById(alloc.costCenterId);
-            if (cc) {
-              newCostCenterNames[alloc.costCenterId] = cc.name;
-              hasNewData = true;
-            }
-          } catch (e) {
-            console.error(
-              `Failed to fetch cost center ${alloc.costCenterId}`,
-              e,
-            );
-          }
-        }
-      }
+  // Busca nomes dos usuários (aprovador/liberador) em uma única query batched.
+  // Usa `in` com até 10 UIDs — evita N getDoc sequenciais dentro de um laço.
+  useEffect(() => {
+    const fetchUserNames = async () => {
+      if (!transaction) return;
 
-      // Fetch User Names
-      const userIdsToFetch = [
+      const userIds = [
         transaction.approvedBy,
         transaction.releasedBy,
-      ].filter(Boolean) as string[];
-      for (const uid of userIdsToFetch) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", uid));
-          if (userDoc.exists()) {
-            newUserNames[uid] =
-              userDoc.data().displayName || userDoc.data().email || uid;
-            hasNewData = true;
-          }
-        } catch (e) {
-          console.error(`Failed to fetch user ${uid}`, e);
-        }
-      }
+      ].filter((id): id is string => Boolean(id));
 
-      if (hasNewData) {
-        setCostCenterNames(newCostCenterNames);
-        setUserNames(newUserNames);
+      if (userIds.length === 0) return;
+
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, "users"),
+            where("__name__", "in", userIds),
+          ),
+        );
+        const names: Record<string, string> = {};
+        snap.forEach((d) => {
+          names[d.id] = d.data().displayName || d.data().email || d.id;
+        });
+        setUserNames(names);
+      } catch (e) {
+        console.error("Failed to fetch user names", e);
       }
     };
 
     if (isOpen && transaction) {
-      fetchNames();
+      fetchUserNames();
     }
-  }, [transaction, isOpen, selectedCompany]);
+  }, [transaction, isOpen]);
 
   if (!transaction || !selectedCompany) return null;
 
