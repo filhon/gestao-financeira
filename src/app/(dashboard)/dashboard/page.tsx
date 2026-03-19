@@ -10,6 +10,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { KPICards } from "@/components/features/dashboard/KPICards";
+import { CfoInsights } from "@/components/features/dashboard/CfoInsights";
 import { CashFlowChart } from "@/components/features/dashboard/CashFlowChart";
 import { CostCenterChart } from "@/components/features/dashboard/CostCenterChart";
 import {
@@ -132,6 +133,13 @@ export default function DashboardPage() {
       </div>
 
       {metrics && <KPICards metrics={metrics} />}
+
+      {metrics && (
+        <CfoInsights
+          metrics={metrics}
+          overdueTransactions={overdueTransactions ?? []}
+        />
+      )}
 
       <div className="grid gap-4 md:grid-cols-7">
         <CashFlowChart year={selectedYear} />

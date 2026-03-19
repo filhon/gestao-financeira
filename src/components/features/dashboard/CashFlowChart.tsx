@@ -107,13 +107,14 @@ export function CashFlowChart({ year }: { year?: number }) {
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const [formDate, setFormDate] = useState(todayStr);
 
-  const rawData = result?.data ?? [];
   const hasCompanyStats = result?.hasCompanyStats ?? true;
 
-  // Annotate each point with `simulatedBalance` while keeping `balance` intact
+  // Annotate each point with `simulatedBalance` while keeping `balance` intact.
+  // Use result?.data as the stable dependency — the `?? []` fallback lives inside
+  // the callback so a new empty array is NOT created on every render.
   const data = useMemo(
-    () => annotateWithSimulations(rawData, simulatedTransactions),
-    [rawData, simulatedTransactions],
+    () => annotateWithSimulations(result?.data ?? [], simulatedTransactions),
+    [result?.data, simulatedTransactions],
   );
 
   const isSimulating = simulatedTransactions.length > 0;
