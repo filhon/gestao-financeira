@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { Plus, Loader2, Trash2, Eye, Upload } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { Plus, Loader2, Trash2, Eye, Upload, Search, X } from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,13 +33,13 @@ import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { format, addDays } from "date-fns";
+import { format, endOfMonth } from "date-fns";
 import { formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { useDebounce } from "@/hooks/useDebounce";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { useSortableData } from "@/hooks/useSortableData";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -69,14 +69,38 @@ export default function AccountsReceivablePage() {
   const [itemsPerPage] = useState(25);
   const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
 
+  // ── Search state ─────────────────────────────────────────────────────────
+  const [searchTerm, setSearchTerm] = useState("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+  const [searchResults, setSearchResults] = useState<Transaction[] | null>(
+    null,
+  );
+  const [isSearching, setIsSearching] = useState(false);
+
+  // ── Sort state — drives Firestore ordering directly ──────────────────────
+  const [sortField, setSortField] = useState<string>("dueDate");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleSort = useCallback(
+    (field: string) => {
+      if (field === sortField) {
+        setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      } else {
+        setSortField(field);
+        setSortDirection("asc");
+      }
+    },
+    [sortField],
+  );
+
   // Use centralized permissions
   const { canDeleteReceivables, canCreateReceivables } = usePermissions();
 
   const {
-    items: transactions,
+    items: paginatedTransactions,
     hasMore,
     loadMore,
-    isLoading,
+    isLoading: isPaginatedLoading,
     isFetchingNextPage,
     refresh: fetchTransactions,
     updateItem,
@@ -86,6 +110,8 @@ export default function AccountsReceivablePage() {
       selectedCompany?.id,
       statusFilter,
       showAllTransactions,
+      sortField,
+      sortDirection,
     ],
     queryFn: async (pageSize, lastDoc) => {
       const filter = {
@@ -95,7 +121,9 @@ export default function AccountsReceivablePage() {
           statusFilter !== "all" && statusFilter !== "exclude-paid"
             ? statusFilter
             : undefined,
-        endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
+        endDate: !showAllTransactions ? endOfMonth(new Date()) : undefined,
+        sortField,
+        sortDirection,
       };
 
       const { transactions: items, lastDoc: newLastDoc } =
@@ -109,14 +137,80 @@ export default function AccountsReceivablePage() {
       return { items, lastDoc: newLastDoc };
     },
     pageSize: itemsPerPage,
-    enabled: !!selectedCompany && !!user,
+    // Desabilita paginação quando o modo de busca está ativo
+    enabled: !!selectedCompany && !!user && !debouncedSearchTerm,
   });
 
-  const {
-    items: sortedTransactions,
-    requestSort,
-    sortConfig,
-  } = useSortableData(transactions, { key: "dueDate", direction: "asc" });
+  // ── Server-side search ───────────────────────────────────────────────────
+  // Delega ao servidor para evitar download da coleção inteira.
+  // Filtragem feita em memória no servidor com cap de 5.000 documentos.
+  useEffect(() => {
+    if (debouncedSearchTerm && selectedCompany && user) {
+      const performSearch = async () => {
+        setIsSearching(true);
+        try {
+          const params = new URLSearchParams({
+            q: debouncedSearchTerm,
+            companyId: selectedCompany.id,
+            type: "receivable",
+            allDates: "true",
+            limit: "50",
+          });
+
+          const response = await fetch(
+            `/api/internal/transactions/search?${params.toString()}`,
+            { credentials: "include" },
+          );
+
+          if (!response.ok) {
+            throw new Error(`Search failed: ${response.status}`);
+          }
+
+          const json = await response.json();
+
+          // Converte as datas serializadas como ISO string de volta para Date
+          const mapped = (json.data ?? []).map(
+            (t: Record<string, unknown>) => ({
+              ...t,
+              dueDate: t.dueDate ? new Date(t.dueDate as string) : new Date(),
+              paymentDate: t.paymentDate
+                ? new Date(t.paymentDate as string)
+                : undefined,
+              approvedAt: t.approvedAt
+                ? new Date(t.approvedAt as string)
+                : undefined,
+              releasedAt: t.releasedAt
+                ? new Date(t.releasedAt as string)
+                : undefined,
+              createdAt: t.createdAt
+                ? new Date(t.createdAt as string)
+                : undefined,
+              updatedAt: t.updatedAt
+                ? new Date(t.updatedAt as string)
+                : undefined,
+              approvalTokenExpiresAt: t.approvalTokenExpiresAt
+                ? new Date(t.approvalTokenExpiresAt as string)
+                : undefined,
+            }),
+          );
+
+          setSearchResults(mapped);
+        } catch (e) {
+          console.error(e);
+          toast.error("Erro na busca");
+        } finally {
+          setIsSearching(false);
+        }
+      };
+      performSearch();
+    } else {
+      setSearchResults(null);
+    }
+  }, [debouncedSearchTerm, selectedCompany, user]);
+
+  // Decide entre resultados de busca e resultados paginados
+  const transactions = searchResults ?? paginatedTransactions;
+  const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
 
   const handleSubmit = async (data: TransactionFormData) => {
     if (!user || !selectedCompany) return;
@@ -273,12 +367,27 @@ export default function AccountsReceivablePage() {
               <CardDescription>Gerencie suas contas a receber.</CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <Label
-                htmlFor="status-filter"
-                className="text-sm text-muted-foreground"
-              >
-                Filtrar:
-              </Label>
+              {/* Input de busca server-side */}
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="receivable-search"
+                  placeholder="Buscar transações..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-[250px] pl-8 pr-8"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger id="status-filter" className="w-[200px]">
                   <SelectValue />
@@ -311,61 +420,63 @@ export default function AccountsReceivablePage() {
                 <TableRow>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
-                    onClick={() => requestSort("dueDate")}
+                    onClick={() => handleSort("dueDate")}
                   >
                     Vencimento{" "}
-                    {sortConfig?.key === "dueDate" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    {sortField === "dueDate" &&
+                      (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
-                    onClick={() => requestSort("description")}
+                    onClick={() => handleSort("description")}
                   >
                     Descrição{" "}
-                    {sortConfig?.key === "description" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    {sortField === "description" &&
+                      (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
-                    onClick={() => requestSort("supplierOrClient")}
+                    onClick={() => handleSort("supplierOrClient")}
                   >
                     Cliente{" "}
-                    {sortConfig?.key === "supplierOrClient" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    {sortField === "supplierOrClient" &&
+                      (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
-                    onClick={() => requestSort("amount")}
+                    onClick={() => handleSort("amount")}
                   >
                     Valor{" "}
-                    {sortConfig?.key === "amount" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    {sortField === "amount" &&
+                      (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
-                    onClick={() => requestSort("status")}
+                    onClick={() => handleSort("status")}
                   >
                     Status{" "}
-                    {sortConfig?.key === "status" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    {sortField === "status" &&
+                      (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedTransactions.length === 0 ? (
+                {transactions.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
                       className="text-center text-muted-foreground"
                     >
-                      {showAllTransactions
-                        ? "Nenhuma conta a receber encontrada."
-                        : "Nenhuma conta com vencimento nos próximos 7 dias."}
+                      {debouncedSearchTerm
+                        ? `Nenhum resultado para "${debouncedSearchTerm}".`
+                        : showAllTransactions
+                          ? "Nenhuma conta a receber encontrada."
+                          : "Nenhuma conta com vencimento neste mês."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sortedTransactions.map((t) => (
+                  transactions.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
                       <TableCell>{t.description}</TableCell>
@@ -400,7 +511,7 @@ export default function AccountsReceivablePage() {
               </TableBody>
             </Table>
           )}
-          {!isLoading && (
+          {!isLoading && !debouncedSearchTerm && (
             <div className="mt-4 flex flex-col gap-4">
               {!showAllTransactions ? (
                 <Button
@@ -408,7 +519,7 @@ export default function AccountsReceivablePage() {
                   className="w-full"
                   onClick={() => setShowAllTransactions(true)}
                 >
-                  Ver Todas as Transações
+                  Ver Histórico Completo
                 </Button>
               ) : hasMore ? (
                 <Button

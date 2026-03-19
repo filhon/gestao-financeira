@@ -172,6 +172,8 @@ export const transactionService = {
       endDate?: Date;
       createdBy?: string;
       costCenterIds?: string[];
+      sortField?: string;
+      sortDirection?: "asc" | "desc";
     },
   ): Promise<{
     transactions: Transaction[];
@@ -248,8 +250,10 @@ export const transactionService = {
       q = query(q, where("dueDate", "<=", Timestamp.fromDate(filters.endDate)));
     }
 
-    // Default sort by dueDate
-    q = query(q, orderBy("dueDate", "asc"));
+    // Dynamic sort — uses sortField/sortDirection when provided, else defaults to dueDate asc
+    const sortField = filters?.sortField ?? "dueDate";
+    const sortDirection = filters?.sortDirection ?? "asc";
+    q = query(q, orderBy(sortField, sortDirection));
 
     if (lastDoc) {
       q = query(q, startAfter(lastDoc));
