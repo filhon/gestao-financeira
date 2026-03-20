@@ -659,62 +659,85 @@ export const processRecurringTemplates = functions
     today.setHours(0, 0, 0, 0);
 
     for (const docSnap of snapshot.docs) {
-      const templateId = docSnap.id;
-      const data = docSnap.data();
-      const nextDueDate = data.nextDueDate ? data.nextDueDate.toDate() : null;
-      const endDate = data.endDate ? data.endDate.toDate() : null;
+      const templateRef = docSnap.ref;
 
-      if (!nextDueDate) continue;
+      try {
+        const objGenerated = await db.runTransaction(async (t) => {
+          // 1) Leia o template e garanta dados atualizados
+          const templateSnap = await t.get(templateRef);
+          if (!templateSnap.exists) return false;
+          
+          const data = templateSnap.data() as any;
+          if (!data.active) return false;
+          
+          const nextDueDate = data.nextDueDate ? data.nextDueDate.toDate() : null;
+          const endDate = data.endDate ? data.endDate.toDate() : null;
 
-      const thresholdDate = data.type === "payable" ? addDays(today, 7) : today;
+          if (!nextDueDate) return false;
 
-      if (isBefore(nextDueDate, thresholdDate) || isSameDay(nextDueDate, thresholdDate)) {
-        if (endDate && isBefore(endDate, today)) {
-          await db.collection("recurring_templates").doc(templateId).update({ active: false });
-          continue;
-        }
+          const thresholdDate = data.type === "payable" ? addDays(today, 7) : today;
 
-        const costCenterIds = data.baseTransactionData?.costCenterAllocation?.map((a: any) => a.costCenterId) || [];
-        const costCenterId = costCenterIds[0] || null;
+          // 2) Verifique se a data ainda está dentro da janela
+          if (isBefore(nextDueDate, thresholdDate) || isSameDay(nextDueDate, thresholdDate)) {
+            if (endDate && isBefore(endDate, today)) {
+              t.update(templateRef, { active: false });
+              return false;
+            }
 
-        const newTransactionData = {
-          ...data.baseTransactionData,
-          description: `${data.description} (Recorrência)`,
-          amount: data.amount,
-          type: data.type,
-          dueDate: admin.firestore.Timestamp.fromDate(nextDueDate),
-          status: "draft",
-          recurrence: {
-            isRecurring: true,
-            frequency: data.frequency,
-            currentInstallment: 0,
-          },
-          companyId: data.companyId,
-          createdBy: "system", // representa geração pelo sistema
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          costCenterIds,
-          costCenterId
-        };
+            const costCenterIds = data.baseTransactionData?.costCenterAllocation?.map((a: any) => a.costCenterId) || [];
+            const costCenterId = costCenterIds[0] || null;
 
-        await db.collection("transactions").add(newTransactionData);
+            const newTransactionData = {
+              ...data.baseTransactionData,
+              description: `${data.description} (Recorrência)`,
+              amount: data.amount,
+              type: data.type,
+              dueDate: admin.firestore.Timestamp.fromDate(nextDueDate),
+              status: "draft",
+              recurrence: {
+                isRecurring: true,
+                frequency: data.frequency,
+                currentInstallment: 0,
+              },
+              companyId: data.companyId,
+              createdBy: "system",
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              costCenterIds,
+              costCenterId
+            };
 
-        let nextDate = nextDueDate;
-        const interval = data.interval || 1;
+            // 3) Cria o documento na coleção `transactions` em lote transacional
+            const newTransactionRef = db.collection("transactions").doc();
+            t.set(newTransactionRef, newTransactionData);
 
-        switch (data.frequency) {
-          case "daily": nextDate = addDays(nextDate, interval); break;
-          case "weekly": nextDate = addWeeks(nextDate, interval); break;
-          case "monthly": nextDate = addMonths(nextDate, interval); break;
-          case "yearly": nextDate = addYears(nextDate, interval); break;
-        }
+            let nextDate = nextDueDate;
+            const interval = data.interval || 1;
 
-        await db.collection("recurring_templates").doc(templateId).update({
-          nextDueDate: admin.firestore.Timestamp.fromDate(nextDate),
-          lastGeneratedAt: admin.firestore.FieldValue.serverTimestamp(),
+            switch (data.frequency) {
+              case "daily": nextDate = addDays(nextDate, interval); break;
+              case "weekly": nextDate = addWeeks(nextDate, interval); break;
+              case "monthly": nextDate = addMonths(nextDate, interval); break;
+              case "yearly": nextDate = addYears(nextDate, interval); break;
+            }
+
+            // 4) Atualiza o nextDueDate do template
+            t.update(templateRef, {
+              nextDueDate: admin.firestore.Timestamp.fromDate(nextDate),
+              lastGeneratedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            return true;
+          }
+
+          return false;
         });
 
-        generatedCount++;
+        if (objGenerated) {
+          generatedCount++;
+        }
+      } catch (error) {
+        console.error(`Erro processando template ${templateRef.id}:`, error);
       }
     }
 
