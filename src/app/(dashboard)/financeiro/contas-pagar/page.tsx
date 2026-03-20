@@ -594,11 +594,6 @@ export default function AccountsPayablePage() {
         });
         toast.success("Recorrência criada com sucesso!");
 
-        // Trigger processing immediately to generate the first one if due
-        await recurrenceService.processDueTemplates(selectedCompany.id, {
-          uid: user.uid,
-          email: user.email,
-        });
       } else {
         // Normal Transaction
         await transactionService.create(

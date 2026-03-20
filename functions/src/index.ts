@@ -1,5 +1,13 @@
 import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
+import {
+  addDays,
+  addWeeks,
+  addMonths,
+  addYears,
+  isBefore,
+  isSameDay,
+} from "date-fns";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -621,5 +629,95 @@ export const suggestPaymentBatches = functions
     }
 
     console.log("suggestPaymentBatches: concluído.");
+    return null;
+  });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// processRecurringTemplates
+//
+// Roda todos os dias às 02:00 horário de Brasília via Cloud Scheduler.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const processRecurringTemplates = functions
+  .runWith({ timeoutSeconds: 300, memory: "512MB" })
+  .pubsub.schedule("0 2 * * *")
+  .timeZone("America/Sao_Paulo")
+  .onRun(async () => {
+    console.log("processRecurringTemplates: iniciando...");
+
+    const q = db.collection("recurring_templates").where("active", "==", true);
+    const snapshot = await q.get();
+
+    if (snapshot.empty) {
+      console.log("processRecurringTemplates: nenhuma recorrência ativa.");
+      return null;
+    }
+
+    let generatedCount = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (const docSnap of snapshot.docs) {
+      const templateId = docSnap.id;
+      const data = docSnap.data();
+      const nextDueDate = data.nextDueDate ? data.nextDueDate.toDate() : null;
+      const endDate = data.endDate ? data.endDate.toDate() : null;
+
+      if (!nextDueDate) continue;
+
+      const thresholdDate = data.type === "payable" ? addDays(today, 7) : today;
+
+      if (isBefore(nextDueDate, thresholdDate) || isSameDay(nextDueDate, thresholdDate)) {
+        if (endDate && isBefore(endDate, today)) {
+          await db.collection("recurring_templates").doc(templateId).update({ active: false });
+          continue;
+        }
+
+        const costCenterIds = data.baseTransactionData?.costCenterAllocation?.map((a: any) => a.costCenterId) || [];
+        const costCenterId = costCenterIds[0] || null;
+
+        const newTransactionData = {
+          ...data.baseTransactionData,
+          description: `${data.description} (Recorrência)`,
+          amount: data.amount,
+          type: data.type,
+          dueDate: admin.firestore.Timestamp.fromDate(nextDueDate),
+          status: "draft",
+          recurrence: {
+            isRecurring: true,
+            frequency: data.frequency,
+            currentInstallment: 0,
+          },
+          companyId: data.companyId,
+          createdBy: "system", // representa geração pelo sistema
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          costCenterIds,
+          costCenterId
+        };
+
+        await db.collection("transactions").add(newTransactionData);
+
+        let nextDate = nextDueDate;
+        const interval = data.interval || 1;
+
+        switch (data.frequency) {
+          case "daily": nextDate = addDays(nextDate, interval); break;
+          case "weekly": nextDate = addWeeks(nextDate, interval); break;
+          case "monthly": nextDate = addMonths(nextDate, interval); break;
+          case "yearly": nextDate = addYears(nextDate, interval); break;
+        }
+
+        await db.collection("recurring_templates").doc(templateId).update({
+          nextDueDate: admin.firestore.Timestamp.fromDate(nextDate),
+          lastGeneratedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        generatedCount++;
+      }
+    }
+
+    console.log(`processRecurringTemplates: concluído. ${generatedCount} transação(ões) gerada(s).`);
     return null;
   });

@@ -120,41 +120,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Lazy Trigger for Recurring Transactions
-  useEffect(() => {
-    const checkRecurrences = async () => {
-      if (selectedCompany && user) {
-        // Only process recurrences for users with permission to view them
-        // Firestore rules: recurring_templates can only be read by financial_manager, approver, releaser
-        const globalRole = user.role;
-        const companyRole = user.companyRoles?.[selectedCompany.id];
-        const effectiveRole = globalRole === "admin" ? "admin" : companyRole;
 
-        // Skip recurrence processing for 'user' and 'auditor' roles
-        if (
-          effectiveRole === "user" ||
-          effectiveRole === "auditor" ||
-          !effectiveRole
-        ) {
-          return;
-        }
-
-        try {
-          // Dynamically import to avoid circular dependencies if any, though service layer should be fine
-          const { recurrenceService } = await import(
-            "@/lib/services/recurrenceService"
-          );
-          await recurrenceService.processDueTemplates(selectedCompany.id, {
-            uid: user.uid,
-            email: user.email,
-          });
-        } catch (error) {
-          console.error("Failed to process recurrences:", error);
-        }
-      }
-    };
-    checkRecurrences();
-  }, [selectedCompany, user]);
 
   return (
     <CompanyContext.Provider

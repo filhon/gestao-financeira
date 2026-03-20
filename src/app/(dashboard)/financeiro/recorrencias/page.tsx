@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { RecurringTransactionTemplate } from "@/lib/types";
@@ -26,7 +25,6 @@ import {
   Trash2,
   PauseCircle,
   PlayCircle,
-  RefreshCw,
   Pencil,
   Search,
 } from "lucide-react";
@@ -51,7 +49,6 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 export default function RecorrenciasPage() {
-  const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
@@ -192,24 +189,6 @@ export default function RecorrenciasPage() {
     }
   };
 
-  const handleProcessNow = async () => {
-    if (!selectedCompany || !user) return;
-    try {
-      const count = await recurrenceService.processDueTemplates(
-        selectedCompany.id,
-        { uid: user.uid, email: user.email },
-      );
-      if (count > 0) {
-        toast.success(`${count} transações geradas com sucesso!`);
-        fetchTemplates();
-      } else {
-        toast.info("Nenhuma recorrência pendente para hoje.");
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error("Erro ao processar recorrências.");
-    }
-  };
 
   const getFrequencyLabel = (freq: string, interval: number) => {
     const intervalLabel = interval > 1 ? `A cada ${interval} ` : "";
@@ -244,12 +223,6 @@ export default function RecorrenciasPage() {
             Gerencie suas assinaturas e transações recorrentes.
           </p>
         </div>
-        {canManageRecurrences && (
-          <Button onClick={handleProcessNow} variant="outline">
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Verificar Pendências
-          </Button>
-        )}
       </div>
 
       <Card>

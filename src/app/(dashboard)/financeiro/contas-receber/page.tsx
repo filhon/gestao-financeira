@@ -241,11 +241,6 @@ export default function AccountsReceivablePage() {
         });
         toast.success("Recorrência criada com sucesso!");
 
-        // Trigger processing immediately
-        await recurrenceService.processDueTemplates(selectedCompany.id, {
-          uid: user.uid,
-          email: user.email,
-        });
       } else {
         // Normal Transaction
         await transactionService.create(
