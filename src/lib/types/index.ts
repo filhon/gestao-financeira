@@ -327,6 +327,11 @@ export interface RecurringTransactionTemplate {
   endDate?: Date;
   active: boolean;
   lastGeneratedAt?: Date;
+  adjustmentRule?: {
+    type: "IPCA" | "IGPM" | "FIXED";
+    percentage?: number;
+    monthToApply: number; // 1-12
+  };
   baseTransactionData: Partial<Transaction>; // Stores cost centers, category, etc.
   createdAt: Date;
   updatedAt: Date;

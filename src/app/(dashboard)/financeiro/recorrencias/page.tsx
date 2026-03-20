@@ -68,25 +68,23 @@ export default function RecorrenciasPage() {
     }
   }, [canViewRecurrences, router]);
 
-  // --- Search mode (client-side) ---
-  const [searchResults, setSearchResults] = useState<
-    RecurringTransactionTemplate[] | null
-  >(null);
-  const [isSearching, setIsSearching] = useState(false);
-
   const {
-    items: paginatedTemplates,
+    items: templates,
     hasMore,
     loadMore,
-    isLoading: isPaginatedLoading,
+    isLoading,
     isFetchingNextPage,
-    refresh: refreshTemplates,
+    refresh: fetchTemplates,
   } = usePaginatedQuery<RecurringTransactionTemplate>({
-    queryKey: ["recurrences", selectedCompany?.id, statusFilter],
+    queryKey: ["recurrences", selectedCompany?.id, statusFilter, debouncedSearchTerm],
     queryFn: async (pageSize, lastDoc) => {
-      const filter = {
+      const filter: { active?: boolean; searchTerm?: string } = {
         active: statusFilter === "all" ? undefined : statusFilter === "active",
       };
+
+      if (debouncedSearchTerm) {
+        filter.searchTerm = debouncedSearchTerm;
+      }
 
       const { templates: items, lastDoc: newLastDoc } =
         await recurrenceService.getPaginated(
@@ -99,66 +97,8 @@ export default function RecorrenciasPage() {
       return { items, lastDoc: newLastDoc };
     },
     pageSize: 25,
-    enabled: !!selectedCompany && canViewRecurrences && !debouncedSearchTerm,
+    enabled: !!selectedCompany && canViewRecurrences,
   });
-
-  const templates = searchResults ?? paginatedTemplates;
-  const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
-
-  // Alias for compatibility with handlers below
-  const fetchTemplates = refreshTemplates;
-
-  // Client-side search logic
-  useEffect(() => {
-    if (debouncedSearchTerm && selectedCompany) {
-      const performSearch = async () => {
-        setIsSearching(true);
-        try {
-          const search = debouncedSearchTerm
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "");
-
-          const matchLocal = (t: RecurringTransactionTemplate) => {
-            const description = t.description
-              .toLowerCase()
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "");
-            return description.includes(search);
-          };
-
-          // Try filtering loaded templates first
-          const localResults = paginatedTemplates.filter(matchLocal);
-
-          if (localResults.length > 0) {
-            setSearchResults(localResults);
-          } else {
-            // Fetch limited set from server if no local results
-            const filter = {
-              active:
-                statusFilter === "all" ? undefined : statusFilter === "active",
-              limit: 100,
-            };
-
-            const all = await recurrenceService.getTemplates(
-              selectedCompany.id,
-              filter,
-            );
-
-            setSearchResults(all.filter(matchLocal));
-          }
-        } catch (e) {
-          console.error(e);
-          toast.error("Erro na busca");
-        } finally {
-          setIsSearching(false);
-        }
-      };
-      performSearch();
-    } else {
-      setSearchResults(null);
-    }
-  }, [debouncedSearchTerm, selectedCompany, statusFilter, paginatedTemplates]);
 
   if (!canViewRecurrences) return null;
 
@@ -225,6 +165,31 @@ export default function RecorrenciasPage() {
         </div>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">MRR Atual</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">--</div>
+            <p className="text-xs text-muted-foreground">
+              Em desenvolvimento
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Compromisso Fixo</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">--</div>
+            <p className="text-xs text-muted-foreground">
+              Em desenvolvimento
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-4 md:flex-row md:items-center justify-between">
@@ -238,7 +203,7 @@ export default function RecorrenciasPage() {
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por descrição..."
+                  placeholder="Buscar por descrição exata..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-8 w-[250px]"
@@ -353,7 +318,7 @@ export default function RecorrenciasPage() {
             </TableBody>
           </Table>
 
-          {hasMore && !debouncedSearchTerm && (
+          {hasMore && (
             <div className="flex justify-center py-4">
               <Button
                 variant="outline"

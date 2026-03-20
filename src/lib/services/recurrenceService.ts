@@ -73,6 +73,7 @@ export const recurrenceService = {
     lastDoc: QueryDocumentSnapshot<DocumentData> | null,
     filters?: {
       active?: boolean;
+      searchTerm?: string;
     },
   ): Promise<{
     templates: RecurringTransactionTemplate[];
@@ -85,6 +86,10 @@ export const recurrenceService = {
 
     if (filters?.active !== undefined) {
       q = query(q, where("active", "==", filters.active));
+    }
+
+    if (filters?.searchTerm) {
+      q = query(q, where("description", "==", filters.searchTerm));
     }
 
     q = query(q, orderBy("nextDueDate", "asc"));

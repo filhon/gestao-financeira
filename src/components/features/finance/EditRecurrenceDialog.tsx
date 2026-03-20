@@ -50,6 +50,13 @@ const recurrenceSchema = z.object({
   interval: z.number().min(1, "Intervalo deve ser pelo menos 1"),
   nextDueDate: z.date({ message: "Data de vencimento é obrigatória" }),
   endDate: z.date().optional().nullable(),
+  adjustmentRule: z
+    .object({
+      type: z.enum(["IPCA", "IGPM", "FIXED"]),
+      percentage: z.number().optional(),
+      monthToApply: z.number(),
+    })
+    .optional(),
 });
 
 type RecurrenceFormData = z.infer<typeof recurrenceSchema>;
@@ -90,6 +97,7 @@ export function EditRecurrenceDialog({
         interval: template.interval || 1,
         nextDueDate: template.nextDueDate,
         endDate: template.endDate || null,
+        adjustmentRule: template.adjustmentRule,
       });
     }
   }, [template, form]);
@@ -106,6 +114,7 @@ export function EditRecurrenceDialog({
         interval: data.interval,
         nextDueDate: data.nextDueDate,
         endDate: data.endDate || undefined,
+        adjustmentRule: data.adjustmentRule,
       });
       toast.success("Recorrência atualizada com sucesso!");
       onSuccess();
