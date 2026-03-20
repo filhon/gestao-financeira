@@ -35,6 +35,7 @@ import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format, endOfMonth } from "date-fns";
 import { formatCurrency } from "@/lib/utils";
+import { DunningStatus } from "@/components/features/finance/DunningStatus";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -458,6 +459,7 @@ export default function AccountsReceivablePage() {
                     {sortField === "status" &&
                       (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
+                  <TableHead>Cobrança</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -483,6 +485,9 @@ export default function AccountsReceivablePage() {
                       <TableCell>{t.supplierOrClient}</TableCell>
                       <TableCell>{formatCurrency(t.amount)}</TableCell>
                       <TableCell>{getStatusBadge(t.status)}</TableCell>
+                      <TableCell>
+                        <DunningStatus status={t.dunningStatus} />
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button

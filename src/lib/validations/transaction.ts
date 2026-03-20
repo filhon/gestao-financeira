@@ -68,6 +68,12 @@ export const transactionSchema = z.object({
     .optional(),
   notes: z.string().optional(),
   barcode: z.string().optional(),
+  dunningStatus: z
+    .object({
+      emailSent: z.boolean(),
+      whatsappSent: z.boolean(),
+    })
+    .optional(),
 });
 
 export type TransactionFormData = z.infer<typeof transactionSchema>;

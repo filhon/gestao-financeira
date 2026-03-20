@@ -223,6 +223,12 @@ export interface Transaction {
   reconciledAt?: Date;
   externalId?: string; // ID from bank statement
   reconciledBy?: string;
+
+  // Dunning (Cobrança)
+  dunningStatus?: {
+    emailSent: boolean;
+    whatsappSent: boolean;
+  };
 }
 
 export type PaymentBatchStatus =
