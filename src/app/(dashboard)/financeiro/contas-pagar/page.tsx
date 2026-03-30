@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   Plus,
   Loader2,
@@ -13,6 +13,14 @@ import {
   CheckCircle2,
   DollarSign,
   MoreHorizontal,
+  ChevronsUpDown,
+  ChevronUp,
+  ChevronDown,
+  X,
+  AlertTriangle,
+  Clock,
+  TrendingDown,
+  FileText,
 } from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
@@ -46,6 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
@@ -53,7 +62,14 @@ import { TransactionDetailsDialog } from "@/components/features/finance/Transact
 import { SmartBatchesCarousel } from "@/components/features/finance/SmartBatchesCarousel";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { format, addDays, isBefore, startOfDay } from "date-fns";
+import {
+  format,
+  addDays,
+  isBefore,
+  startOfDay,
+  isToday,
+  isTomorrow,
+} from "date-fns";
 import { DateRange } from "react-day-picker";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -103,7 +119,6 @@ function useAnimatedValue(targetValue: number, duration: number = 800) {
         (timestamp - startTimeRef.current) / duration,
         1,
       );
-      // Ease out quart
       const ease = 1 - Math.pow(1 - progress, 4);
 
       const nextValue =
@@ -133,6 +148,101 @@ const AnimatedNumber = ({
   const animated = useAnimatedValue(value);
   return <>{formatter ? formatter(animated) : Math.round(animated)}</>;
 };
+
+function SortIcon({
+  field,
+  sortConfig,
+}: {
+  field: string;
+  sortConfig: { key: string; direction: "asc" | "desc" } | null;
+}) {
+  if (sortConfig?.key !== field) {
+    return (
+      <ChevronsUpDown className="inline ml-1 h-3.5 w-3.5 text-muted-foreground/50" />
+    );
+  }
+  return sortConfig.direction === "asc" ? (
+    <ChevronUp className="inline ml-1 h-3.5 w-3.5 text-primary" />
+  ) : (
+    <ChevronDown className="inline ml-1 h-3.5 w-3.5 text-primary" />
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-1 py-2">
+          <Skeleton className="h-4 w-4 rounded" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-5 w-20 rounded-full" />
+          <Skeleton className="h-8 w-8 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case "draft":
+      return (
+        <Badge variant="secondary" className="font-medium">
+          Rascunho
+        </Badge>
+      );
+    case "pending_approval":
+      return (
+        <Badge className="bg-amber-500 hover:bg-amber-500/90 font-medium">
+          Pendente
+        </Badge>
+      );
+    case "approved":
+      return (
+        <Badge className="bg-emerald-500 hover:bg-emerald-500/90 font-medium">
+          Aprovado
+        </Badge>
+      );
+    case "pending_authorization":
+      return (
+        <Badge className="bg-violet-500 hover:bg-violet-500/90 font-medium">
+          Ag. Autorização
+        </Badge>
+      );
+    case "authorized":
+      return (
+        <Badge className="bg-indigo-500 hover:bg-indigo-500/90 font-medium">
+          Autorizado
+        </Badge>
+      );
+    case "paid":
+      return (
+        <Badge className="bg-blue-500 hover:bg-blue-500/90 font-medium">
+          Pago
+        </Badge>
+      );
+    case "rejected":
+      return (
+        <Badge className="bg-red-500 hover:bg-red-500/90 font-medium">
+          Rejeitado
+        </Badge>
+      );
+    default:
+      return <Badge variant="secondary">{status}</Badge>;
+  }
+}
+
+const UNPAID_STATUSES = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "pending_authorization",
+  "authorized",
+  "rejected",
+];
 
 // ...
 
@@ -185,7 +295,6 @@ export default function AccountsPayablePage() {
 
   const [itemsPerPage] = useState(25);
 
-  // Use centralized permissions
   const {
     canDeletePayables,
     canCreatePayables,
@@ -195,7 +304,6 @@ export default function AccountsPayablePage() {
     isFinancialManager,
   } = usePermissions();
 
-  // --- Search mode (client-side) ---
   const [searchResults, setSearchResults] = useState<Transaction[] | null>(
     null,
   );
@@ -276,7 +384,6 @@ export default function AccountsPayablePage() {
     enabled: !!selectedCompany && !!user && !debouncedSearchTerm && !searchTerm,
   });
 
-  // Decide entre resultados de busca e resultados paginados
   const transactions = searchResults ?? paginatedTransactions;
   const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
 
@@ -288,6 +395,36 @@ export default function AccountsPayablePage() {
     key: "dueDate",
     direction: "asc",
   });
+
+  // KPI calculations
+  const kpis = useMemo(() => {
+    const today = startOfDay(new Date());
+
+    const overdue = transactions.filter(
+      (t) => UNPAID_STATUSES.includes(t.status) && isBefore(t.dueDate, today),
+    );
+
+    const dueSoon = transactions.filter(
+      (t) =>
+        UNPAID_STATUSES.includes(t.status) &&
+        (isToday(t.dueDate) || isTomorrow(t.dueDate)),
+    );
+
+    const totalPending = transactions.filter((t) =>
+      UNPAID_STATUSES.includes(t.status),
+    );
+
+    const totalPaid = transactions.filter((t) => t.status === "paid");
+
+    return {
+      overdueCount: overdue.length,
+      overdueAmount: overdue.reduce((acc, t) => acc + t.amount, 0),
+      dueSoonCount: dueSoon.length,
+      dueSoonAmount: dueSoon.reduce((acc, t) => acc + t.amount, 0),
+      pendingAmount: totalPending.reduce((acc, t) => acc + t.amount, 0),
+      paidAmount: totalPaid.reduce((acc, t) => acc + t.amount, 0),
+    };
+  }, [transactions]);
 
   const handleOpenPaymentConfirmation = async (t: Transaction) => {
     if (!user || !selectedCompany) return;
@@ -314,7 +451,7 @@ export default function AccountsPayablePage() {
 
       setTransactionToConfirm(t);
       setPaymentDate(new Date());
-      setPaymentAmount(t.amount); // Default to full amount
+      setPaymentAmount(t.amount);
     } catch (error) {
       console.error("Error validating batch:", error);
       toast.error("Erro ao validar lote.");
@@ -332,7 +469,7 @@ export default function AccountsPayablePage() {
         {
           status: "paid",
           paymentDate: paymentDate,
-          finalAmount: paymentAmount, // Store actual paid amount
+          finalAmount: paymentAmount,
         },
         { uid: user.uid, email: user.email },
         selectedCompany.id,
@@ -388,9 +525,6 @@ export default function AccountsPayablePage() {
     }
   }, [selectedCompany]);
 
-  // Server-side search — delega ao servidor para evitar download da coleção inteira.
-  // O Firebase não suporta full-text search nativo; a filtragem é feita em memória
-  // no servidor (Firebase Admin SDK) com cap de segurança de 5.000 documentos.
   useEffect(() => {
     if (debouncedSearchTerm && selectedCompany && user) {
       const performSearch = async () => {
@@ -419,8 +553,6 @@ export default function AccountsPayablePage() {
 
           const json = await response.json();
 
-          // Converte as datas serializadas como ISO string de volta para Date
-          // para compatibilidade com o tipo Transaction
           const mapped = (json.data ?? []).map(
             (t: Record<string, unknown>) => ({
               ...t,
@@ -512,7 +644,6 @@ export default function AccountsPayablePage() {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      // Select all visible transactions
       setSelectedIds(new Set(sortedTransactions.map((t) => t.id)));
     } else {
       setSelectedIds(new Set());
@@ -545,7 +676,6 @@ export default function AccountsPayablePage() {
     try {
       const selectedTx = transactions.filter((t) => selectedIds.has(t.id));
 
-      // Validate that only draft transactions can be added to batch
       const nonDraftTransactions = selectedTx.filter(
         (t) => t.status !== "draft",
       );
@@ -585,7 +715,6 @@ export default function AccountsPayablePage() {
   const handleBatchPayment = async () => {
     if (!user || !selectedCompany) return;
 
-    // Filter transactions that can be paid (not already paid)
     const transactionsToPay = transactions.filter(
       (t) => selectedIds.has(t.id) && t.status !== "paid",
     );
@@ -622,7 +751,6 @@ export default function AccountsPayablePage() {
   const handleBatchRevert = async () => {
     if (!user || !selectedCompany) return;
 
-    // Filter transactions that can be reverted (must be paid)
     const transactionsToRevert = transactions.filter(
       (t) => selectedIds.has(t.id) && t.status === "paid",
     );
@@ -662,7 +790,6 @@ export default function AccountsPayablePage() {
       setIsSubmitting(true);
 
       if (data.recurrence?.isRecurring) {
-        // Create Recurring Template
         await recurrenceService.createTemplate({
           companyId: selectedCompany.id,
           description: data.description,
@@ -684,7 +811,6 @@ export default function AccountsPayablePage() {
         });
         toast.success("Recorrência criada com sucesso!");
       } else {
-        // Normal Transaction
         await transactionService.create(
           data,
           { uid: user.uid, email: user.email },
@@ -711,11 +837,9 @@ export default function AccountsPayablePage() {
   const handleTransactionUpdate = useCallback(
     (updatedTransaction?: Transaction) => {
       if (updatedTransaction) {
-        // Atualiza o item na lista local sem nova leitura no banco
         updateItem(updatedTransaction.id, () => updatedTransaction);
         setSelectedTransaction(updatedTransaction);
       } else {
-        // Para acões complexas (pagamento, serie de recorrências) faz re-fetch
         refreshTransactions();
       }
     },
@@ -757,244 +881,21 @@ export default function AccountsPayablePage() {
     }
   };
 
-  // Filter logic moved to server-side via usePaginatedQuery
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "approved":
-        return <Badge className="bg-emerald-500">Aprovado</Badge>;
-      case "pending_approval":
-        return <Badge className="bg-amber-500">Pendente</Badge>;
-      case "paid":
-        return <Badge className="bg-blue-500">Pago</Badge>;
-      case "rejected":
-        return <Badge className="bg-red-500">Rejeitado</Badge>;
-      default:
-        return <Badge variant="secondary">Rascunho</Badge>;
-    }
-  };
-
   const selectedTotal = transactions
     .filter((t) => selectedIds.has(t.id))
     .reduce((acc, t) => acc + t.amount, 0);
 
+  const hasActiveFilters =
+    filterOptions.status !== "exclude-paid" ||
+    filterOptions.costCenterId !== "all";
+
   return (
     <div className="space-y-6">
-      {selectedIds.size > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 animate-in fade-in slide-in-from-top-4 duration-500">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Selecionadas
-              </CardTitle>
-              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                <AnimatedNumber value={selectedIds.size} />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Transações marcadas
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Valor Total</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-primary">
-                <AnimatedNumber
-                  value={selectedTotal}
-                  formatter={formatCurrency}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Soma dos valores originais
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Contas a Pagar</h1>
 
         <div className="flex gap-2">
-          {selectedIds.size > 0 && (
-            <>
-              <Dialog
-                open={isBatchDialogOpen}
-                onOpenChange={setIsBatchDialogOpen}
-              >
-                <DialogTrigger asChild>
-                  <Button variant="secondary" onClick={fetchOpenBatches}>
-                    Adicionar ao Lote ({selectedIds.size})
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Adicionar ao Lote de Pagamento</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label>Selecione um Lote Aberto</Label>
-                      {openBatches.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          Nenhum lote aberto encontrado.
-                        </p>
-                      ) : (
-                        <div className="grid gap-2">
-                          {openBatches.map((batch) => (
-                            <Button
-                              key={batch.id}
-                              variant="outline"
-                              className="justify-start"
-                              onClick={() => handleAddToBatch(batch.id)}
-                            >
-                              {batch.name} ({formatCurrency(batch.totalAmount)})
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
-                      </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-background px-2 text-muted-foreground">
-                          Ou crie um novo
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Nome do novo lote"
-                        value={newBatchName}
-                        onChange={(e) => setNewBatchName(e.target.value)}
-                      />
-                      <Button onClick={handleCreateAndAddToBatch}>
-                        Criar e Adicionar
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              <Dialog
-                open={isBatchPaymentOpen}
-                onOpenChange={setIsBatchPaymentOpen}
-              >
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="text-green-600 border-green-600 hover:bg-green-50"
-                  >
-                    Pagar ({selectedIds.size})
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Pagamento em Lote</DialogTitle>
-                    <CardDescription>
-                      Serão pagos{" "}
-                      {
-                        transactions.filter(
-                          (t) => selectedIds.has(t.id) && t.status !== "paid",
-                        ).length
-                      }{" "}
-                      itens selecionados. Itens já pagos serão ignorados.
-                    </CardDescription>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label>Data do Pagamento</Label>
-                      <Input
-                        type="date"
-                        value={format(batchPaymentDate, "yyyy-MM-dd")}
-                        onChange={(e) => {
-                          const date = e.target.valueAsDate;
-                          if (date) {
-                            const userTimezoneOffset =
-                              date.getTimezoneOffset() * 60000;
-                            setBatchPaymentDate(
-                              new Date(date.getTime() + userTimezoneOffset),
-                            );
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2 pt-4">
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsBatchPaymentOpen(false)}
-                      >
-                        Cancelar
-                      </Button>
-                      <Button
-                        onClick={handleBatchPayment}
-                        disabled={isProcessingBatch}
-                      >
-                        {isProcessingBatch && (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        )}
-                        Confirmar Pagamento
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              <Dialog
-                open={isBatchRevertOpen}
-                onOpenChange={setIsBatchRevertOpen}
-              >
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="text-red-600 border-red-600 hover:bg-red-50"
-                  >
-                    Reverter ({selectedIds.size})
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
-                    <CardDescription>
-                      Deseja reverter o pagamento de{" "}
-                      {
-                        transactions.filter(
-                          (t) => selectedIds.has(t.id) && t.status === "paid",
-                        ).length
-                      }{" "}
-                      itens selecionados para Rascunho? Itens não pagos serão
-                      ignorados.
-                    </CardDescription>
-                  </DialogHeader>
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsBatchRevertOpen(false)}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={handleBatchRevert}
-                      disabled={isProcessingBatch}
-                    >
-                      {isProcessingBatch && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      Confirmar Reversão
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </>
-          )}
           {canCreatePayables && (
             <>
               <Button variant="outline" onClick={() => setIsImportOpen(true)}>
@@ -1032,12 +933,122 @@ export default function AccountsPayablePage() {
         type="payable"
       />
 
-      {/* Sugestões automáticas de lotes — geradas por CRON noturno */}
+      {/* KPI cards — always visible */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total a Pagar</CardTitle>
+            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {isLoading ? (
+                <Skeleton className="h-7 w-32" />
+              ) : (
+                <AnimatedNumber
+                  value={kpis.pendingAmount}
+                  formatter={formatCurrency}
+                />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">No período filtrado</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={
+            kpis.overdueCount > 0 ? "border-red-200 dark:border-red-900" : ""
+          }
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Vencidas</CardTitle>
+            <AlertTriangle
+              className={`h-4 w-4 ${kpis.overdueCount > 0 ? "text-red-500" : "text-muted-foreground"}`}
+            />
+          </CardHeader>
+          <CardContent>
+            <div
+              className={`text-2xl font-bold ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+            >
+              {isLoading ? (
+                <Skeleton className="h-7 w-16" />
+              ) : (
+                <AnimatedNumber value={kpis.overdueCount} />
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {isLoading ? (
+                <Skeleton className="h-3 w-24 mt-1" />
+              ) : (
+                formatCurrency(kpis.overdueAmount)
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={
+            kpis.dueSoonCount > 0
+              ? "border-amber-200 dark:border-amber-900"
+              : ""
+          }
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Vencem Hoje/Amanhã
+            </CardTitle>
+            <Clock
+              className={`h-4 w-4 ${kpis.dueSoonCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
+            />
+          </CardHeader>
+          <CardContent>
+            <div
+              className={`text-2xl font-bold ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+            >
+              {isLoading ? (
+                <Skeleton className="h-7 w-16" />
+              ) : (
+                <AnimatedNumber value={kpis.dueSoonCount} />
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {isLoading ? (
+                <Skeleton className="h-3 w-24 mt-1" />
+              ) : (
+                formatCurrency(kpis.dueSoonAmount)
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pagas</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {isLoading ? (
+                <Skeleton className="h-7 w-32" />
+              ) : (
+                <AnimatedNumber
+                  value={kpis.paidAmount}
+                  formatter={formatCurrency}
+                />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">No período filtrado</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sugestões automáticas de lotes */}
       <SmartBatchesCarousel onBatchAccepted={refreshTransactions} />
 
+      {/* Main table card */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <CardTitle>Transações</CardTitle>
               <CardDescription>
@@ -1057,8 +1068,18 @@ export default function AccountsPayablePage() {
                   placeholder="Buscar transações..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-[200px] pl-8"
+                  className="w-[200px] pl-8 pr-8"
                 />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
               <Select
                 value={filterOptions.costCenterId}
@@ -1070,7 +1091,7 @@ export default function AccountsPayablePage() {
                   <SelectValue placeholder="Centro de Custo" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="all">Todos os centros</SelectItem>
                   {costCenters.map((cc) => (
                     <SelectItem key={cc.id} value={cc.id}>
                       {cc.name}
@@ -1093,18 +1114,40 @@ export default function AccountsPayablePage() {
                   <SelectItem value="draft">Rascunho</SelectItem>
                   <SelectItem value="pending_approval">Pendente</SelectItem>
                   <SelectItem value="approved">Aprovado</SelectItem>
+                  <SelectItem value="pending_authorization">
+                    Ag. Autorização
+                  </SelectItem>
+                  <SelectItem value="authorized">Autorizado</SelectItem>
                   <SelectItem value="paid">Pago</SelectItem>
                   <SelectItem value="rejected">Rejeitado</SelectItem>
                 </SelectContent>
               </Select>
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() =>
+                    setFilterOptions({
+                      status: "exclude-paid",
+                      costCenterId: "all",
+                      dateRange: {
+                        from: startOfDay(new Date()),
+                        to: addDays(startOfDay(new Date()), 7),
+                      },
+                    })
+                  }
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Limpar filtros
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
+            <TableSkeleton />
           ) : (
             <Table>
               <TableHeader>
@@ -1119,44 +1162,42 @@ export default function AccountsPayablePage() {
                     />
                   </TableHead>
                   <TableHead
-                    className="cursor-pointer hover:text-primary"
+                    className="cursor-pointer hover:text-primary w-[120px]"
                     onClick={() => requestSort("dueDate")}
                   >
-                    Vencimento{" "}
-                    {sortConfig?.key === "dueDate" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    Vencimento
+                    <SortIcon field="dueDate" sortConfig={sortConfig} />
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
                     onClick={() => requestSort("description")}
                   >
-                    Descrição{" "}
-                    {sortConfig?.key === "description" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    Descrição
+                    <SortIcon field="description" sortConfig={sortConfig} />
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
                     onClick={() => requestSort("supplierOrClient")}
                   >
-                    Fornecedor{" "}
-                    {sortConfig?.key === "supplierOrClient" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    Fornecedor
+                    <SortIcon
+                      field="supplierOrClient"
+                      sortConfig={sortConfig}
+                    />
                   </TableHead>
                   <TableHead
-                    className="cursor-pointer hover:text-primary"
+                    className="cursor-pointer hover:text-primary text-right"
                     onClick={() => requestSort("amount")}
                   >
-                    Valor{" "}
-                    {sortConfig?.key === "amount" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    Valor
+                    <SortIcon field="amount" sortConfig={sortConfig} />
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
                     onClick={() => requestSort("status")}
                   >
-                    Status{" "}
-                    {sortConfig?.key === "status" &&
-                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                    Status
+                    <SortIcon field="status" sortConfig={sortConfig} />
                   </TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
@@ -1164,21 +1205,55 @@ export default function AccountsPayablePage() {
               <TableBody>
                 {sortedTransactions.length === 0 ? (
                   <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      Nenhuma conta a pagar encontrada com os filtros
-                      selecionados.
+                    <TableCell colSpan={7} className="h-36 text-center">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <FileText className="h-8 w-8 opacity-40" />
+                        <p className="text-sm font-medium">
+                          {debouncedSearchTerm
+                            ? `Nenhum resultado para "${debouncedSearchTerm}"`
+                            : hasActiveFilters
+                              ? "Nenhuma conta encontrada com os filtros selecionados"
+                              : "Nenhuma conta a pagar cadastrada"}
+                        </p>
+                        {(debouncedSearchTerm || hasActiveFilters) && (
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0 text-xs"
+                            onClick={() => {
+                              setSearchTerm("");
+                              setFilterOptions({
+                                status: "exclude-paid",
+                                costCenterId: "all",
+                                dateRange: {
+                                  from: startOfDay(new Date()),
+                                  to: addDays(startOfDay(new Date()), 7),
+                                },
+                              });
+                            }}
+                          >
+                            Limpar filtros
+                          </Button>
+                        )}
+                        {!debouncedSearchTerm &&
+                          !hasActiveFilters &&
+                          canCreatePayables && (
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => setIsDialogOpen(true)}
+                            >
+                              Criar primeira conta
+                            </Button>
+                          )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
                   sortedTransactions.map((t) => {
                     const isOverdue =
-                      (t.status === "draft" ||
-                        t.status === "pending_approval" ||
-                        t.status === "approved" ||
-                        t.status === "rejected") &&
+                      UNPAID_STATUSES.includes(t.status) &&
                       isBefore(t.dueDate, startOfDay(new Date()));
 
                     return (
@@ -1202,7 +1277,7 @@ export default function AccountsPayablePage() {
                                 : ""
                             }
                           >
-                            {format(t.dueDate, "dd/MM/yyyy")}
+                            {format(t.dueDate, "dd MMM yyyy")}
                             {isOverdue && (
                               <div className="text-[10px] font-bold uppercase text-red-600 dark:text-red-400">
                                 Vencida
@@ -1225,8 +1300,10 @@ export default function AccountsPayablePage() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>{t.supplierOrClient}</TableCell>
-                        <TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {t.supplierOrClient}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
                           {new Intl.NumberFormat("pt-BR", {
                             style: "currency",
                             currency: "BRL",
@@ -1305,6 +1382,213 @@ export default function AccountsPayablePage() {
         </CardContent>
       </Card>
 
+      {/* Bulk action bar — floats at bottom when rows are selected */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="flex items-center gap-3 rounded-xl border bg-background/95 backdrop-blur-sm px-4 py-3 shadow-lg">
+            <div className="flex items-center gap-2 pr-3 border-r">
+              <CheckCircle2 className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium">
+                {selectedIds.size} selecionada
+                {selectedIds.size !== 1 ? "s" : ""}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                —{" "}
+                <AnimatedNumber
+                  value={selectedTotal}
+                  formatter={formatCurrency}
+                />
+              </span>
+            </div>
+
+            <Dialog
+              open={isBatchDialogOpen}
+              onOpenChange={setIsBatchDialogOpen}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={fetchOpenBatches}
+                >
+                  Adicionar ao Lote
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Adicionar ao Lote de Pagamento</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Selecione um Lote Aberto</Label>
+                    {openBatches.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Nenhum lote aberto encontrado.
+                      </p>
+                    ) : (
+                      <div className="grid gap-2">
+                        {openBatches.map((batch) => (
+                          <Button
+                            key={batch.id}
+                            variant="outline"
+                            className="justify-start"
+                            onClick={() => handleAddToBatch(batch.id)}
+                          >
+                            {batch.name} ({formatCurrency(batch.totalAmount)})
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">
+                        Ou crie um novo
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Nome do novo lote"
+                      value={newBatchName}
+                      onChange={(e) => setNewBatchName(e.target.value)}
+                    />
+                    <Button onClick={handleCreateAndAddToBatch}>
+                      Criar e Adicionar
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={isBatchPaymentOpen}
+              onOpenChange={setIsBatchPaymentOpen}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                >
+                  Pagar
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Pagamento em Lote</DialogTitle>
+                  <CardDescription>
+                    Serão pagos{" "}
+                    {
+                      transactions.filter(
+                        (t) => selectedIds.has(t.id) && t.status !== "paid",
+                      ).length
+                    }{" "}
+                    itens selecionados. Itens já pagos serão ignorados.
+                  </CardDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Data do Pagamento</Label>
+                    <Input
+                      type="date"
+                      value={format(batchPaymentDate, "yyyy-MM-dd")}
+                      onChange={(e) => {
+                        const date = e.target.valueAsDate;
+                        if (date) {
+                          const userTimezoneOffset =
+                            date.getTimezoneOffset() * 60000;
+                          setBatchPaymentDate(
+                            new Date(date.getTime() + userTimezoneOffset),
+                          );
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsBatchPaymentOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={handleBatchPayment}
+                      disabled={isProcessingBatch}
+                    >
+                      {isProcessingBatch && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Confirmar Pagamento
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={isBatchRevertOpen}
+              onOpenChange={setIsBatchRevertOpen}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                >
+                  Reverter
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Reverter Pagamento em Lote</DialogTitle>
+                  <CardDescription>
+                    Deseja reverter o pagamento de{" "}
+                    {
+                      transactions.filter(
+                        (t) => selectedIds.has(t.id) && t.status === "paid",
+                      ).length
+                    }{" "}
+                    itens selecionados para Rascunho? Itens não pagos serão
+                    ignorados.
+                  </CardDescription>
+                </DialogHeader>
+                <div className="flex justify-end gap-2 pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsBatchRevertOpen(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleBatchRevert}
+                    disabled={isProcessingBatch}
+                  >
+                    {isProcessingBatch && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Confirmar Reversão
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <TransactionDetailsDialog
         transaction={selectedTransaction}
         isOpen={isDetailsOpen}
@@ -1313,6 +1597,7 @@ export default function AccountsPayablePage() {
         costCenters={costCenters}
       />
 
+      {/* Payment confirmation dialog — with transaction context */}
       <Dialog
         open={!!transactionToConfirm}
         onOpenChange={(open) => {
@@ -1323,51 +1608,78 @@ export default function AccountsPayablePage() {
           <DialogHeader>
             <DialogTitle>Confirmar Pagamento</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Data do Pagamento</Label>
-              <Input
-                type="date"
-                value={format(paymentDate, "yyyy-MM-dd")}
-                onChange={(e) => {
-                  const date = e.target.valueAsDate;
-                  if (date) {
-                    // Fix timezone offset issue with input type=date
-                    const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-                    setPaymentDate(
-                      new Date(date.getTime() + userTimezoneOffset),
-                    );
-                  }
-                }}
-              />
+          {transactionToConfirm && (
+            <div className="space-y-4 py-4">
+              {/* Transaction summary */}
+              <div className="rounded-lg border bg-muted/50 p-3 space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Fornecedor</span>
+                  <span className="font-medium">
+                    {transactionToConfirm.supplierOrClient}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Descrição</span>
+                  <span
+                    className="font-medium truncate max-w-[200px]"
+                    title={transactionToConfirm.description}
+                  >
+                    {transactionToConfirm.description}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Valor original</span>
+                  <span className="font-semibold">
+                    {formatCurrency(transactionToConfirm.amount)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Data do Pagamento</Label>
+                <Input
+                  type="date"
+                  value={format(paymentDate, "yyyy-MM-dd")}
+                  onChange={(e) => {
+                    const date = e.target.valueAsDate;
+                    if (date) {
+                      const userTimezoneOffset =
+                        date.getTimezoneOffset() * 60000;
+                      setPaymentDate(
+                        new Date(date.getTime() + userTimezoneOffset),
+                      );
+                    }
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Valor Pago</Label>
+                <CurrencyInput
+                  value={paymentAmount}
+                  onChange={(val) => setPaymentAmount(val)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setTransactionToConfirm(null)}
+                  disabled={isConfirmingPayment}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleExecutePayment}
+                  disabled={isConfirmingPayment}
+                >
+                  {isConfirmingPayment && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Confirmar
+                </Button>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Valor Pago</Label>
-              <CurrencyInput
-                value={paymentAmount}
-                onChange={(val) => setPaymentAmount(val)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => setTransactionToConfirm(null)}
-                disabled={isConfirmingPayment}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleExecutePayment}
-                disabled={isConfirmingPayment}
-              >
-                {isConfirmingPayment && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                Confirmar
-              </Button>
-            </div>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 

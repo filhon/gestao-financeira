@@ -1,7 +1,23 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { Plus, Loader2, Trash2, Eye, Upload, Search, X } from "lucide-react";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import {
+  Plus,
+  Loader2,
+  Trash2,
+  Eye,
+  Upload,
+  Search,
+  X,
+  ChevronsUpDown,
+  ChevronUp,
+  ChevronDown,
+  AlertTriangle,
+  Clock,
+  TrendingUp,
+  DollarSign,
+  FileText,
+} from "lucide-react";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
 import { recurrenceService } from "@/lib/services/recurrenceService";
@@ -33,7 +50,14 @@ import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { format, addDays, startOfDay } from "date-fns";
+import {
+  format,
+  addDays,
+  startOfDay,
+  isBefore,
+  isToday,
+  isTomorrow,
+} from "date-fns";
 import { DateRange } from "react-day-picker";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { formatCurrency } from "@/lib/utils";
@@ -54,6 +78,103 @@ import {
 } from "@/components/ui/select";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+
+function SortIcon({
+  field,
+  sortField,
+  sortDirection,
+}: {
+  field: string;
+  sortField: string;
+  sortDirection: "asc" | "desc";
+}) {
+  if (sortField !== field) {
+    return (
+      <ChevronsUpDown className="inline ml-1 h-3.5 w-3.5 text-muted-foreground/50" />
+    );
+  }
+  return sortDirection === "asc" ? (
+    <ChevronUp className="inline ml-1 h-3.5 w-3.5 text-primary" />
+  ) : (
+    <ChevronDown className="inline ml-1 h-3.5 w-3.5 text-primary" />
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-1 py-2">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-5 w-24 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-8 w-16 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case "draft":
+      return (
+        <Badge variant="secondary" className="font-medium">
+          Rascunho
+        </Badge>
+      );
+    case "pending_approval":
+      return (
+        <Badge className="bg-amber-500 hover:bg-amber-500/90 font-medium">
+          Pendente
+        </Badge>
+      );
+    case "approved":
+      return (
+        <Badge className="bg-emerald-500 hover:bg-emerald-500/90 font-medium">
+          Ag. Recebimento
+        </Badge>
+      );
+    case "pending_authorization":
+      return (
+        <Badge className="bg-violet-500 hover:bg-violet-500/90 font-medium">
+          Ag. Autorização
+        </Badge>
+      );
+    case "authorized":
+      return (
+        <Badge className="bg-indigo-500 hover:bg-indigo-500/90 font-medium">
+          Autorizado
+        </Badge>
+      );
+    case "paid":
+      return (
+        <Badge className="bg-blue-500 hover:bg-blue-500/90 font-medium">
+          Recebido
+        </Badge>
+      );
+    case "rejected":
+      return (
+        <Badge className="bg-red-500 hover:bg-red-500/90 font-medium">
+          Rejeitado
+        </Badge>
+      );
+    default:
+      return <Badge variant="secondary">{status}</Badge>;
+  }
+}
+
+const UNRECEIVED_STATUSES = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "pending_authorization",
+  "authorized",
+  "rejected",
+];
 
 // ...
 
@@ -106,7 +227,6 @@ export default function AccountsReceivablePage() {
     [sortField],
   );
 
-  // Use centralized permissions
   const { canDeleteReceivables, canCreateReceivables } = usePermissions();
 
   const {
@@ -153,7 +273,6 @@ export default function AccountsReceivablePage() {
       return { items, lastDoc: newLastDoc };
     },
     pageSize: itemsPerPage,
-    // Desabilita paginação quando o modo de busca está ativo
     enabled: !!selectedCompany && !!user && !debouncedSearchTerm && !searchTerm,
   });
 
@@ -184,8 +303,6 @@ export default function AccountsReceivablePage() {
   ]);
 
   // ── Server-side search ───────────────────────────────────────────────────
-  // Delega ao servidor para evitar download da coleção inteira.
-  // Filtragem feita em memória no servidor com cap de 5.000 documentos.
   useEffect(() => {
     if (debouncedSearchTerm && selectedCompany && user) {
       const performSearch = async () => {
@@ -210,7 +327,6 @@ export default function AccountsReceivablePage() {
 
           const json = await response.json();
 
-          // Converte as datas serializadas como ISO string de volta para Date
           const mapped = (json.data ?? []).map(
             (t: Record<string, unknown>) => ({
               ...t,
@@ -273,9 +389,39 @@ export default function AccountsReceivablePage() {
     }
   }, [debouncedSearchTerm, selectedCompany, user, filterOptions]);
 
-  // Decide entre resultados de busca e resultados paginados
   const transactions = searchResults ?? paginatedTransactions;
   const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
+
+  // KPI calculations
+  const kpis = useMemo(() => {
+    const today = startOfDay(new Date());
+
+    const overdue = transactions.filter(
+      (t) =>
+        UNRECEIVED_STATUSES.includes(t.status) && isBefore(t.dueDate, today),
+    );
+
+    const dueSoon = transactions.filter(
+      (t) =>
+        UNRECEIVED_STATUSES.includes(t.status) &&
+        (isToday(t.dueDate) || isTomorrow(t.dueDate)),
+    );
+
+    const totalPending = transactions.filter((t) =>
+      UNRECEIVED_STATUSES.includes(t.status),
+    );
+
+    const totalReceived = transactions.filter((t) => t.status === "paid");
+
+    return {
+      overdueCount: overdue.length,
+      overdueAmount: overdue.reduce((acc, t) => acc + t.amount, 0),
+      dueSoonCount: dueSoon.length,
+      dueSoonAmount: dueSoon.reduce((acc, t) => acc + t.amount, 0),
+      pendingAmount: totalPending.reduce((acc, t) => acc + t.amount, 0),
+      receivedAmount: totalReceived.reduce((acc, t) => acc + t.amount, 0),
+    };
+  }, [transactions]);
 
   const handleSubmit = async (data: TransactionFormData) => {
     if (!user || !selectedCompany) return;
@@ -283,7 +429,6 @@ export default function AccountsReceivablePage() {
       setIsSubmitting(true);
 
       if (data.recurrence?.isRecurring) {
-        // Create Recurring Template
         await recurrenceService.createTemplate({
           companyId: selectedCompany.id,
           description: data.description,
@@ -305,7 +450,6 @@ export default function AccountsReceivablePage() {
         });
         toast.success("Recorrência criada com sucesso!");
       } else {
-        // Normal Transaction
         await transactionService.create(
           data,
           { uid: user.uid, email: user.email },
@@ -332,11 +476,9 @@ export default function AccountsReceivablePage() {
   const handleTransactionUpdate = useCallback(
     (updatedTransaction?: Transaction) => {
       if (updatedTransaction) {
-        // Atualiza o item na lista local sem nova leitura no banco
         updateItem(updatedTransaction.id, () => updatedTransaction);
         setSelectedTransaction(updatedTransaction);
       } else {
-        // Para ações complexas (pagamento, série de recorrências) faz re-fetch
         fetchTransactions();
       }
     },
@@ -361,23 +503,11 @@ export default function AccountsReceivablePage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "approved":
-        return <Badge className="bg-emerald-500">Aguardando Recebimento</Badge>;
-      case "pending_approval":
-        return <Badge className="bg-amber-500">Pendente</Badge>;
-      case "paid":
-        return <Badge className="bg-blue-500">Recebido</Badge>;
-      case "rejected":
-        return <Badge className="bg-red-500">Rejeitado</Badge>;
-      default:
-        return <Badge variant="secondary">Rascunho</Badge>;
-    }
-  };
+  const hasActiveFilters = filterOptions.status !== "exclude-paid";
 
   return (
     <div className="space-y-6">
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Contas a Receber</h1>
         <div className="flex gap-2">
@@ -418,9 +548,115 @@ export default function AccountsReceivablePage() {
         type="receivable"
       />
 
+      {/* KPI cards — always visible */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Total a Receber
+            </CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {isLoading ? (
+                <Skeleton className="h-7 w-32" />
+              ) : (
+                formatCurrency(kpis.pendingAmount)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">No período filtrado</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={
+            kpis.overdueCount > 0 ? "border-red-200 dark:border-red-900" : ""
+          }
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Em Atraso</CardTitle>
+            <AlertTriangle
+              className={`h-4 w-4 ${kpis.overdueCount > 0 ? "text-red-500" : "text-muted-foreground"}`}
+            />
+          </CardHeader>
+          <CardContent>
+            <div
+              className={`text-2xl font-bold ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+            >
+              {isLoading ? (
+                <Skeleton className="h-7 w-16" />
+              ) : (
+                kpis.overdueCount
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {isLoading ? (
+                <Skeleton className="h-3 w-24 mt-1" />
+              ) : (
+                formatCurrency(kpis.overdueAmount)
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={
+            kpis.dueSoonCount > 0
+              ? "border-amber-200 dark:border-amber-900"
+              : ""
+          }
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Vencem Hoje/Amanhã
+            </CardTitle>
+            <Clock
+              className={`h-4 w-4 ${kpis.dueSoonCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
+            />
+          </CardHeader>
+          <CardContent>
+            <div
+              className={`text-2xl font-bold ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+            >
+              {isLoading ? (
+                <Skeleton className="h-7 w-16" />
+              ) : (
+                kpis.dueSoonCount
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {isLoading ? (
+                <Skeleton className="h-3 w-24 mt-1" />
+              ) : (
+                formatCurrency(kpis.dueSoonAmount)
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Recebido</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {isLoading ? (
+                <Skeleton className="h-7 w-32" />
+              ) : (
+                formatCurrency(kpis.receivedAmount)
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">No período filtrado</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main table card */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <CardTitle>Transações</CardTitle>
               <CardDescription>Gerencie suas contas a receber.</CardDescription>
@@ -432,7 +668,6 @@ export default function AccountsReceivablePage() {
                   setFilterOptions((prev) => ({ ...prev, dateRange }))
                 }
               />
-              {/* Input de busca server-side */}
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -469,64 +704,98 @@ export default function AccountsReceivablePage() {
                   <SelectItem value="all">Todas</SelectItem>
                   <SelectItem value="draft">Rascunho</SelectItem>
                   <SelectItem value="pending_approval">Pendente</SelectItem>
-                  <SelectItem value="approved">
-                    Aguardando Recebimento
+                  <SelectItem value="approved">Ag. Recebimento</SelectItem>
+                  <SelectItem value="pending_authorization">
+                    Ag. Autorização
                   </SelectItem>
+                  <SelectItem value="authorized">Autorizado</SelectItem>
                   <SelectItem value="paid">Recebido</SelectItem>
                   <SelectItem value="rejected">Rejeitado</SelectItem>
                 </SelectContent>
               </Select>
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() =>
+                    setFilterOptions({
+                      status: "exclude-paid",
+                      dateRange: {
+                        from: startOfDay(new Date()),
+                        to: addDays(startOfDay(new Date()), 7),
+                      },
+                    })
+                  }
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Limpar filtros
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
+            <TableSkeleton />
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead
-                    className="cursor-pointer hover:text-primary"
+                    className="cursor-pointer hover:text-primary w-[120px]"
                     onClick={() => handleSort("dueDate")}
                   >
-                    Vencimento{" "}
-                    {sortField === "dueDate" &&
-                      (sortDirection === "asc" ? "↑" : "↓")}
+                    Vencimento
+                    <SortIcon
+                      field="dueDate"
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                    />
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
                     onClick={() => handleSort("description")}
                   >
-                    Descrição{" "}
-                    {sortField === "description" &&
-                      (sortDirection === "asc" ? "↑" : "↓")}
+                    Descrição
+                    <SortIcon
+                      field="description"
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                    />
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
                     onClick={() => handleSort("supplierOrClient")}
                   >
-                    Cliente{" "}
-                    {sortField === "supplierOrClient" &&
-                      (sortDirection === "asc" ? "↑" : "↓")}
+                    Cliente
+                    <SortIcon
+                      field="supplierOrClient"
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                    />
                   </TableHead>
                   <TableHead
-                    className="cursor-pointer hover:text-primary"
+                    className="cursor-pointer hover:text-primary text-right"
                     onClick={() => handleSort("amount")}
                   >
-                    Valor{" "}
-                    {sortField === "amount" &&
-                      (sortDirection === "asc" ? "↑" : "↓")}
+                    Valor
+                    <SortIcon
+                      field="amount"
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                    />
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:text-primary"
                     onClick={() => handleSort("status")}
                   >
-                    Status{" "}
-                    {sortField === "status" &&
-                      (sortDirection === "asc" ? "↑" : "↓")}
+                    Status
+                    <SortIcon
+                      field="status"
+                      sortField={sortField}
+                      sortDirection={sortDirection}
+                    />
                   </TableHead>
                   <TableHead>Cobrança</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
@@ -535,50 +804,115 @@ export default function AccountsReceivablePage() {
               <TableBody>
                 {transactions.length === 0 ? (
                   <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      {debouncedSearchTerm
-                        ? `Nenhum resultado para "${debouncedSearchTerm}".`
-                        : "Nenhuma conta a receber encontrada com os filtros selecionados."}
+                    <TableCell colSpan={7} className="h-36 text-center">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <FileText className="h-8 w-8 opacity-40" />
+                        <p className="text-sm font-medium">
+                          {debouncedSearchTerm
+                            ? `Nenhum resultado para "${debouncedSearchTerm}"`
+                            : hasActiveFilters
+                              ? "Nenhuma conta encontrada com os filtros selecionados"
+                              : "Nenhuma conta a receber cadastrada"}
+                        </p>
+                        {(debouncedSearchTerm || hasActiveFilters) && (
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0 text-xs"
+                            onClick={() => {
+                              setSearchTerm("");
+                              setFilterOptions({
+                                status: "exclude-paid",
+                                dateRange: {
+                                  from: startOfDay(new Date()),
+                                  to: addDays(startOfDay(new Date()), 7),
+                                },
+                              });
+                            }}
+                          >
+                            Limpar filtros
+                          </Button>
+                        )}
+                        {!debouncedSearchTerm &&
+                          !hasActiveFilters &&
+                          canCreateReceivables && (
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => setIsDialogOpen(true)}
+                            >
+                              Criar primeira receita
+                            </Button>
+                          )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  transactions.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
-                      <TableCell>{t.description}</TableCell>
-                      <TableCell>{t.supplierOrClient}</TableCell>
-                      <TableCell>{formatCurrency(t.amount)}</TableCell>
-                      <TableCell>{getStatusBadge(t.status)}</TableCell>
-                      <TableCell>
-                        <DunningStatus status={t.dunningStatus} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleViewDetails(t)}
-                            title="Ver detalhes"
+                  transactions.map((t) => {
+                    const isOverdue =
+                      UNRECEIVED_STATUSES.includes(t.status) &&
+                      isBefore(t.dueDate, startOfDay(new Date()));
+
+                    return (
+                      <TableRow
+                        key={t.id}
+                        className={
+                          isOverdue ? "bg-red-50 dark:bg-red-900/10" : ""
+                        }
+                      >
+                        <TableCell>
+                          <div
+                            className={
+                              isOverdue
+                                ? "font-medium text-red-600 dark:text-red-400"
+                                : ""
+                            }
                           >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {canDeleteReceivables && (
+                            {format(t.dueDate, "dd MMM yyyy")}
+                            {isOverdue && (
+                              <div className="text-[10px] font-bold uppercase text-red-600 dark:text-red-400">
+                                Em atraso
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{t.description}</TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {t.supplierOrClient}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {formatCurrency(t.amount)}
+                        </TableCell>
+                        <TableCell>{getStatusBadge(t.status)}</TableCell>
+                        <TableCell>
+                          <DunningStatus status={t.dunningStatus} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-red-500 hover:text-red-700"
-                              onClick={() => setDeleteId(t.id)}
+                              onClick={() => handleViewDetails(t)}
+                              title="Ver detalhes"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Eye className="h-4 w-4" />
                             </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                            {canDeleteReceivables && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-red-500 hover:text-red-700"
+                                onClick={() => setDeleteId(t.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
                 {hasMore && !debouncedSearchTerm && (
                   <TableRow ref={targetRef}>

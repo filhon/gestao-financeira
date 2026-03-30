@@ -18,6 +18,9 @@ export function useIntersectionObserver<T extends HTMLElement = HTMLElement>({
 
   useEffect(() => {
     if (!enabled || !targetRef.current) {
+      if (!enabled) {
+        queueMicrotask(() => setIsIntersecting(false));
+      }
       return;
     }
 
