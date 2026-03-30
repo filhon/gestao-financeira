@@ -81,6 +81,7 @@ import { CostCenter } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 
 function useAnimatedValue(targetValue: number, duration: number = 800) {
   const [currentValue, setCurrentValue] = useState(targetValue);
@@ -349,6 +350,29 @@ export default function AccountsPayablePage() {
   };
 
   const fetchTransactions = refreshTransactions;
+
+  const { targetRef, isIntersecting } =
+    useIntersectionObserver<HTMLTableRowElement>({
+      threshold: 0.1,
+      enabled: hasMore && !isFetchingNextPage && !debouncedSearchTerm,
+    });
+
+  useEffect(() => {
+    if (
+      isIntersecting &&
+      hasMore &&
+      !debouncedSearchTerm &&
+      !isFetchingNextPage
+    ) {
+      loadMore();
+    }
+  }, [
+    isIntersecting,
+    hasMore,
+    debouncedSearchTerm,
+    isFetchingNextPage,
+    loadMore,
+  ]);
 
   useEffect(() => {
     if (selectedCompany) {
@@ -1259,25 +1283,22 @@ export default function AccountsPayablePage() {
                     );
                   })
                 )}
+                {hasMore && !debouncedSearchTerm && (
+                  <TableRow ref={targetRef}>
+                    <TableCell colSpan={8} className="h-14 text-center">
+                      <div className="flex justify-center items-center h-full text-muted-foreground gap-2">
+                        {isFetchingNextPage ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Carregando mais...
+                          </>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
-          )}
-          {!isLoading && (
-            <div className="mt-4 flex flex-col gap-4">
-              {hasMore && !debouncedSearchTerm && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={loadMore}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : null}
-                  Carregar Mais
-                </Button>
-              )}
-            </div>
           )}
         </CardContent>
       </Card>

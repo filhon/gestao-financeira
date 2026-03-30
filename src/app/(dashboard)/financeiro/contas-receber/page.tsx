@@ -53,6 +53,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 
 // ...
 
@@ -155,6 +156,29 @@ export default function AccountsReceivablePage() {
     // Desabilita paginação quando o modo de busca está ativo
     enabled: !!selectedCompany && !!user && !debouncedSearchTerm,
   });
+
+  const { targetRef, isIntersecting } =
+    useIntersectionObserver<HTMLTableRowElement>({
+      threshold: 0.1,
+      enabled: hasMore && !isFetchingNextPage && !debouncedSearchTerm,
+    });
+
+  useEffect(() => {
+    if (
+      isIntersecting &&
+      hasMore &&
+      !debouncedSearchTerm &&
+      !isFetchingNextPage
+    ) {
+      loadMore();
+    }
+  }, [
+    isIntersecting,
+    hasMore,
+    debouncedSearchTerm,
+    isFetchingNextPage,
+    loadMore,
+  ]);
 
   // ── Server-side search ───────────────────────────────────────────────────
   // Delega ao servidor para evitar download da coleção inteira.
@@ -553,25 +577,22 @@ export default function AccountsReceivablePage() {
                     </TableRow>
                   ))
                 )}
+                {hasMore && !debouncedSearchTerm && (
+                  <TableRow ref={targetRef}>
+                    <TableCell colSpan={7} className="h-14 text-center">
+                      <div className="flex justify-center items-center h-full text-muted-foreground gap-2">
+                        {isFetchingNextPage ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Carregando mais...
+                          </>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
-          )}
-          {!isLoading && !debouncedSearchTerm && (
-            <div className="mt-4 flex flex-col gap-4">
-              {hasMore ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={loadMore}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : null}
-                  Carregar Mais
-                </Button>
-              ) : null}
-            </div>
           )}
         </CardContent>
       </Card>
