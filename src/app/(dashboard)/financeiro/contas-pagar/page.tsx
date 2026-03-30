@@ -55,6 +55,7 @@ import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format, addDays, isBefore, startOfDay } from "date-fns";
 import { DateRange } from "react-day-picker";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -1016,14 +1017,20 @@ export default function AccountsPayablePage() {
                 Gerencie suas contas a pagar e fluxo de aprovação.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <DatePickerWithRange
+                date={filterOptions.dateRange}
+                setDate={(dateRange) =>
+                  setFilterOptions((prev) => ({ ...prev, dateRange }))
+                }
+              />
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Buscar transações..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-[250px] pl-8"
+                  className="w-[200px] pl-8"
                 />
               </div>
               <Select

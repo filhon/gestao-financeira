@@ -35,6 +35,7 @@ import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format, addDays, startOfDay } from "date-fns";
 import { DateRange } from "react-day-picker";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { formatCurrency } from "@/lib/utils";
 import { DunningStatus } from "@/components/features/finance/DunningStatus";
 import { Badge } from "@/components/ui/badge";
@@ -397,7 +398,13 @@ export default function AccountsReceivablePage() {
               <CardTitle>Transações</CardTitle>
               <CardDescription>Gerencie suas contas a receber.</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <DatePickerWithRange
+                date={filterOptions.dateRange}
+                setDate={(dateRange) =>
+                  setFilterOptions((prev) => ({ ...prev, dateRange }))
+                }
+              />
               {/* Input de busca server-side */}
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -406,7 +413,7 @@ export default function AccountsReceivablePage() {
                   placeholder="Buscar transações..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-[250px] pl-8 pr-8"
+                  className="w-[200px] pl-8 pr-8"
                 />
                 {searchTerm && (
                   <button
