@@ -16,8 +16,14 @@ import { useState } from "react";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner"; // Assuming sonner is installed/used, based on previous files
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export default function LoginPage() {
+function LoginContent() {
+  const searchParams = useSearchParams();
+  const defaultTab =
+    searchParams.get("tab") === "register" ? "register" : "login";
+
   const { loginWithGoogle, loginWithEmail, registerWithEmail } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -110,7 +116,7 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="login" className="w-full">
+          <Tabs defaultValue={defaultTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-4">
               <TabsTrigger value="login">Entrar</TabsTrigger>
               <TabsTrigger value="register">Criar Conta</TabsTrigger>
@@ -307,5 +313,19 @@ export default function LoginPage() {
         </CardFooter>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
+          <Loader2 className="animate-spin h-8 w-8" />
+        </div>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }
