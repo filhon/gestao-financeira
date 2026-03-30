@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 interface CurrencyInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value"> {
     value: number | undefined;
@@ -54,7 +55,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
                 ref={ref}
                 value={displayValue}
                 onChange={handleChange}
-                className={className}
+                className={cn("tabular-nums", className)}
                 placeholder="R$ 0,00"
             />
         );

@@ -21,10 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Entity } from "@/lib/types";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { entityService } from "@/lib/services/entityService";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ChevronDown, Loader2 } from "lucide-react";
 
 const BRAZILIAN_BANKS = [
   { code: "001", name: "Banco do Brasil" },
@@ -69,6 +71,14 @@ const entitySchema = z.object({
 
 type EntityFormData = z.infer<typeof entitySchema>;
 
+const pixPlaceholders: Record<string, string> = {
+  cpf: "000.000.000-00",
+  cnpj: "00.000.000/0000-00",
+  email: "chave@exemplo.com",
+  phone: "+55 (00) 00000-0000",
+  random: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+};
+
 interface EntityFormProps {
   defaultValues?: Partial<Entity>;
   onSubmit: (data: EntityFormData) => Promise<void>;
@@ -83,6 +93,8 @@ export function EntityForm({
   onCancel,
 }: EntityFormProps) {
   const { selectedCompany } = useCompany();
+  const [isCheckingDocument, setIsCheckingDocument] = useState(false);
+  const [isBankOpen, setIsBankOpen] = useState(false);
   const form = useForm<EntityFormData>({
     resolver: zodResolver(entitySchema),
     defaultValues: {
@@ -115,17 +127,22 @@ export function EntityForm({
       return;
     }
 
-    const exists = await entityService.checkCnpjExists(
-      selectedCompany.id,
-      document,
-    );
-    if (exists) {
-      form.setError("document", {
-        type: "manual",
-        message: "Este documento já está cadastrado.",
-      });
-    } else {
-      form.clearErrors("document");
+    setIsCheckingDocument(true);
+    try {
+      const exists = await entityService.checkCnpjExists(
+        selectedCompany.id,
+        document,
+      );
+      if (exists) {
+        form.setError("document", {
+          type: "manual",
+          message: "Este documento já está cadastrado.",
+        });
+      } else {
+        form.clearErrors("document");
+      }
+    } finally {
+      setIsCheckingDocument(false);
     }
   };
 
@@ -232,14 +249,19 @@ export function EntityForm({
                 <FormItem>
                   <FormLabel>CPF / CNPJ</FormLabel>
                   <FormControl>
-                    <Input
-                      placeholder="000.000.000-00"
-                      {...field}
-                      onBlur={(e) => {
-                        field.onBlur();
-                        handleDocumentBlur(e);
-                      }}
-                    />
+                    <div className="relative">
+                      <Input
+                        placeholder="000.000.000-00"
+                        {...field}
+                        onBlur={(e) => {
+                          field.onBlur();
+                          handleDocumentBlur(e);
+                        }}
+                      />
+                      {isCheckingDocument && (
+                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                      )}
+                    </div>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -296,8 +318,19 @@ export function EntityForm({
           </div>
         </div>
 
-        <Card>
-          <CardHeader>
+        <Collapsible open={isBankOpen} onOpenChange={setIsBankOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center justify-between w-full px-4 py-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors text-left"
+          >
+            <span className="text-sm font-medium">Dados Bancários (Opcional)</span>
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isBankOpen ? "rotate-180" : ""}`} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+        <Card className="mt-2 border-t-0 rounded-t-none">
+          <CardHeader className="sr-only">
             <CardTitle className="text-base">
               Dados Bancários (Opcional)
             </CardTitle>
@@ -432,20 +465,32 @@ export function EntityForm({
                 <FormField
                   control={form.control}
                   name="pixKey"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Chave PIX</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Chave PIX" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                  render={({ field }) => {
+                    const pixKeyType = form.watch("pixKeyType");
+                    const placeholder = pixKeyType
+                      ? pixPlaceholders[pixKeyType] ?? "Chave PIX"
+                      : "Selecione o tipo primeiro";
+                    return (
+                      <FormItem>
+                        <FormLabel>Chave PIX</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder={placeholder}
+                            disabled={!pixKeyType}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
                 />
               </div>
             </div>
           </CardContent>
         </Card>
+        </CollapsibleContent>
+        </Collapsible>
 
         <div className="flex justify-end gap-2 pt-4">
           {onCancel && (
@@ -458,8 +503,8 @@ export function EntityForm({
               Cancelar
             </Button>
           )}
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? "Salvando..." : "Salvar Entidade"}
+          <Button type="submit" loading={isLoading}>
+            Salvar Entidade
           </Button>
         </div>
       </form>

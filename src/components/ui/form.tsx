@@ -80,7 +80,7 @@ function FormItem({ className, ...props }: React.ComponentProps<"div">) {
     <FormItemContext.Provider value={{ id }}>
       <div
         data-slot="form-item"
-        className={cn("grid gap-2", className)}
+        className={cn("flex flex-col gap-1.5", className)}
         {...props}
       />
     </FormItemContext.Provider>
@@ -89,8 +89,10 @@ function FormItem({ className, ...props }: React.ComponentProps<"div">) {
 
 function FormLabel({
   className,
+  children,
+  required,
   ...props
-}: React.ComponentProps<typeof LabelPrimitive.Root>) {
+}: React.ComponentProps<typeof LabelPrimitive.Root> & { required?: boolean }) {
   const { error, formItemId } = useFormField()
 
   return (
@@ -100,7 +102,12 @@ function FormLabel({
       className={cn("data-[error=true]:text-destructive", className)}
       htmlFor={formItemId}
       {...props}
-    />
+    >
+      {children}
+      {required && (
+        <span className="text-destructive ml-0.5" aria-hidden="true">*</span>
+      )}
+    </Label>
   )
 }
 
@@ -147,7 +154,10 @@ function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="form-message"
       id={formMessageId}
-      className={cn("text-destructive text-sm", className)}
+      className={cn(
+        "text-destructive text-xs animate-in fade-in-0 slide-in-from-top-1 duration-200",
+        className
+      )}
       {...props}
     >
       {body}

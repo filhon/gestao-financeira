@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import currency from "currency.js";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -103,6 +103,11 @@ export function TransactionForm({
   const [openCostCenterCombobox, setOpenCostCenterCombobox] = useState<
     number | null
   >(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
+  const section0Ref = useRef<HTMLDivElement>(null);
+  const section1Ref = useRef<HTMLDivElement>(null);
+  const section2Ref = useRef<HTMLDivElement>(null);
   const { extractFromFile, isExtracting } = useDocumentExtraction();
 
   useEffect(() => {
@@ -346,6 +351,28 @@ export function TransactionForm({
 
   const hierarchicalCostCenters = getHierarchicalCostCenters(costCenters);
 
+  // Track active section via IntersectionObserver
+  useEffect(() => {
+    const refs = [section0Ref, section1Ref, section2Ref];
+    const observers = refs.map((ref, index) => {
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.isIntersecting) setActiveStep(index);
+        },
+        { threshold: 0.4 },
+      );
+      if (ref.current) observer.observe(ref.current);
+      return observer;
+    });
+    return () => observers.forEach((o) => o.disconnect());
+  }, []);
+
+  const steps = [
+    { label: "Identificação" },
+    { label: "Repetição e Anexos" },
+    { label: "Centro de Custo" },
+  ];
+
   return (
     <Form {...form}>
       <form
@@ -354,10 +381,65 @@ export function TransactionForm({
         )}
         className="space-y-6"
       >
+        {/* Step indicator */}
+        <div className="flex items-center gap-0">
+          {steps.map((step, i) => (
+            <div key={i} className="flex items-center flex-1 last:flex-none">
+              <button
+                type="button"
+                onClick={() => {
+                  const refs = [section0Ref, section1Ref, section2Ref];
+                  refs[i].current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className="flex items-center gap-2 group"
+              >
+                <div
+                  className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold border-2 transition-all duration-200 shrink-0 ${
+                    i < activeStep
+                      ? "bg-primary border-primary text-primary-foreground"
+                      : i === activeStep
+                        ? "bg-primary/10 border-primary text-primary"
+                        : "bg-transparent border-muted-foreground/30 text-muted-foreground/50"
+                  }`}
+                >
+                  {i < activeStep ? (
+                    <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none">
+                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    i + 1
+                  )}
+                </div>
+                <span
+                  className={`text-xs font-medium transition-colors duration-200 hidden sm:block ${
+                    i === activeStep ? "text-foreground" : "text-muted-foreground/60"
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </button>
+              {i < steps.length - 1 && (
+                <div className={`flex-1 h-px mx-2 transition-colors duration-300 ${i < activeStep ? "bg-primary" : "bg-border"}`} />
+              )}
+            </div>
+          ))}
+        </div>
+
         {/* Main Info Card */}
+        <div ref={section0Ref}>
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle>Informações Principais</CardTitle>
+            {type === "payable" && (
+              <button
+                type="button"
+                onClick={() => document.getElementById("file-upload")?.click()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/25 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-500/20 transition-all duration-150"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Preencher com IA
+              </button>
+            )}
           </CardHeader>
           <CardContent className="grid grid-cols-12 gap-6">
             <div className="col-span-12 md:col-span-8">
@@ -658,8 +740,9 @@ export function TransactionForm({
             </div>
           </CardContent>
         </Card>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div ref={section1Ref} className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Repetition / Installments */}
           <Card className="flex flex-col h-full">
             <CardHeader>
@@ -769,77 +852,116 @@ export function TransactionForm({
 
           {/* Attachments */}
           <Card className="flex flex-col h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="space-y-0 pb-3">
               <CardTitle className="text-base">Anexos</CardTitle>
-              <div>
-                <Input
-                  type="file"
-                  id="file-upload"
-                  className="hidden"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                />
+            </CardHeader>
+            <CardContent className="flex-1 space-y-2">
+              <Input
+                type="file"
+                id="file-upload"
+                className="hidden"
+                onChange={handleFileUpload}
+                disabled={isUploading || isExtracting}
+              />
+
+              {/* Drag & drop zone */}
+              {attachmentFields.length === 0 && (
+                <div
+                  onClick={() => !isUploading && !isExtracting && document.getElementById("file-upload")?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    const file = e.dataTransfer.files[0];
+                    if (file) {
+                      const dt = new DataTransfer();
+                      dt.items.add(file);
+                      const input = document.getElementById("file-upload") as HTMLInputElement;
+                      if (input) {
+                        Object.defineProperty(input, "files", { value: dt.files });
+                        input.dispatchEvent(new Event("change", { bubbles: true }));
+                      }
+                    }
+                  }}
+                  className={`relative border-2 border-dashed rounded-lg p-6 flex flex-col items-center gap-2 transition-all duration-200 cursor-pointer ${
+                    isExtracting
+                      ? "border-violet-300 bg-violet-50 dark:bg-violet-950/20 cursor-default"
+                      : isDragOver
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/40 hover:bg-muted/30"
+                  }`}
+                >
+                  {isExtracting ? (
+                    <>
+                      <Sparkles className="h-6 w-6 text-violet-500 animate-pulse" />
+                      <span className="text-sm font-medium text-violet-600 dark:text-violet-400">
+                        Analisando com IA...
+                      </span>
+                    </>
+                  ) : isUploading ? (
+                    <>
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Enviando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-6 w-6 text-muted-foreground" />
+                      <span className="text-sm font-medium text-muted-foreground">
+                        {isDragOver ? "Solte para enviar" : "Arraste ou clique para anexar"}
+                      </span>
+                      {type === "payable" && (
+                        <span className="text-xs text-muted-foreground/70 text-center">
+                          Boleto ou NF — campos preenchidos automaticamente com IA
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Botão adicionar mais após primeiro anexo */}
+              {attachmentFields.length > 0 && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    document.getElementById("file-upload")?.click()
-                  }
+                  className="w-full"
+                  onClick={() => document.getElementById("file-upload")?.click()}
                   disabled={isUploading || isExtracting}
+                  loading={isUploading}
                 >
-                  {isUploading || isExtracting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="mr-2 h-4 w-4" />
-                  )}
-                  {isExtracting ? "Analisando..." : "Upload"}
+                  <Upload className="h-4 w-4" />
+                  Adicionar anexo
                 </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="flex-1">
-              <div className="space-y-2">
-                {attachmentFields.length === 0 && !isExtracting && (
-                  <div className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-md h-full flex items-center justify-center">
-                    {type === "payable"
-                      ? "Anexe um boleto ou fatura para preencher os campos automaticamente com IA."
-                      : "Nenhum anexo."}
-                  </div>
-                )}
-                {isExtracting && (
-                  <div className="text-sm text-center py-4 border border-dashed rounded-md h-full flex flex-col items-center justify-center gap-2 border-violet-300 bg-violet-50 dark:bg-violet-950/20">
-                    <Sparkles className="h-5 w-5 text-violet-500 animate-pulse" />
-                    <span className="text-violet-600 dark:text-violet-400 font-medium">
-                      Analisando documento com IA...
+              )}
+
+              {attachmentFields.map((field, index) => (
+                <div
+                  key={field.id}
+                  className="flex items-center justify-between p-2 border rounded-lg bg-muted/50"
+                >
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="text-sm font-medium truncate max-w-[150px]">
+                      {field.name}
                     </span>
                   </div>
-                )}
-                {attachmentFields.map((field, index) => (
-                  <div
-                    key={field.id}
-                    className="flex items-center justify-between p-2 border rounded bg-muted/50"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeAttachment(index)}
                   >
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <span className="text-sm font-medium truncate max-w-[150px]">
-                        {field.name}
-                      </span>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeAttachment(index)}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </div>
 
         {/* Cost Center Allocation */}
+        <div ref={section2Ref}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-base">
@@ -1013,6 +1135,37 @@ export function TransactionForm({
                   </div>
                 </div>
               ))}
+              {/* Barra proporcional de rateio */}
+              {fields.length > 1 && allocations.some(a => a.costCenterId) && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
+                    {allocations.map((alloc, i) => {
+                      const colors = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-violet-500", "bg-red-500"];
+                      return (
+                        <div
+                          key={i}
+                          className={`${colors[i % colors.length]} transition-all duration-300`}
+                          style={{ width: `${alloc.percentage || 0}%` }}
+                          title={`${costCenters.find(c => c.id === alloc.costCenterId)?.name ?? "—"}: ${alloc.percentage}%`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    {allocations.map((alloc, i) => {
+                      const colors = ["text-blue-500", "text-emerald-500", "text-amber-500", "text-violet-500", "text-red-500"];
+                      const name = costCenters.find(c => c.id === alloc.costCenterId)?.name;
+                      if (!name) return null;
+                      return (
+                        <span key={i} className={`text-xs ${colors[i % colors.length]} tabular-nums`}>
+                          {name}: {alloc.percentage}%
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <FormMessage>
                 {form.formState.errors.costCenterAllocation?.root?.message}
               </FormMessage>
@@ -1034,6 +1187,7 @@ export function TransactionForm({
             </div>
           </CardContent>
         </Card>
+        </div>
 
         <div className="flex justify-end gap-2 pt-4">
           <Button
@@ -1044,8 +1198,7 @@ export function TransactionForm({
           >
             Cancelar
           </Button>
-          <Button type="submit" disabled={isLoading}>
-            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <Button type="submit" loading={isLoading}>
             Salvar Transação
           </Button>
         </div>

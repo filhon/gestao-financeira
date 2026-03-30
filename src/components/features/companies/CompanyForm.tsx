@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Company } from "@/lib/types";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import Image from "next/image";
 
 const companySchema = z.object({
   name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
@@ -47,6 +48,7 @@ export function CompanyForm({
   onSubmit,
   isLoading,
 }: CompanyFormProps) {
+  const [logoError, setLogoError] = useState(false);
   const form = useForm<CompanyFormData>({
     resolver: zodResolver(companySchema),
     defaultValues: {
@@ -72,6 +74,8 @@ export function CompanyForm({
     // form é uma referência estável do react-hook-form, não precisa ser dependência
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultValues]);
+
+  const logoUrl = form.watch("logoUrl");
 
   return (
     <Form {...form}>
@@ -117,8 +121,31 @@ export function CompanyForm({
                 <FormItem>
                   <FormLabel>URL do Logo (Opcional)</FormLabel>
                   <FormControl>
-                    <Input placeholder="https://..." {...field} />
+                    <Input
+                      placeholder="https://..."
+                      {...field}
+                      onChange={(e) => {
+                        field.onChange(e);
+                        setLogoError(false);
+                      }}
+                    />
                   </FormControl>
+                  {logoUrl && !logoError && (
+                    <div className="flex items-center gap-3 p-2.5 rounded-lg border bg-muted/30 mt-1">
+                      <Image
+                        src={logoUrl}
+                        alt="Preview do logo"
+                        width={36}
+                        height={36}
+                        unoptimized
+                        className="h-9 w-9 rounded-md object-contain border bg-white"
+                        onError={() => setLogoError(true)}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        Preview do logo
+                      </span>
+                    </div>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -159,8 +186,8 @@ export function CompanyForm({
         </div>
 
         <div className="flex justify-end pt-4">
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? "Salvando..." : "Salvar Empresa"}
+          <Button type="submit" loading={isLoading}>
+            Salvar Empresa
           </Button>
         </div>
       </form>

@@ -19,7 +19,6 @@ import {
   FormMessage,
   FormDescription,
 } from "@/components/ui/form";
-import { Loader2 } from "lucide-react";
 
 import {
   Select,
@@ -28,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { CostCenter, UserProfile } from "@/lib/types";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -205,6 +205,24 @@ export function CostCenterForm({
     (cc) => cc.id !== editingId && !descendantIds.has(cc.id),
   );
 
+  // Build depth map for hierarchical display in parent selector
+  const depthMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const getDepth = (id: string): number => {
+      if (map.has(id)) return map.get(id)!;
+      const cc = availableCostCenters.find((c) => c.id === id);
+      if (!cc || !cc.parentId || cc.parentId === "none") {
+        map.set(id, 0);
+        return 0;
+      }
+      const depth = getDepth(cc.parentId) + 1;
+      map.set(id, depth);
+      return depth;
+    };
+    availableCostCenters.forEach((cc) => getDepth(cc.id));
+    return map;
+  }, [availableCostCenters]);
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -231,11 +249,24 @@ export function CostCenterForm({
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">Nenhum (Raiz)</SelectItem>
-                        {potentialParents.map((cc) => (
-                          <SelectItem key={cc.id} value={cc.id}>
-                            {cc.code} - {cc.name}
-                          </SelectItem>
-                        ))}
+                        {potentialParents.map((cc) => {
+                          const depth = depthMap.get(cc.id) ?? 0;
+                          return (
+                            <SelectItem key={cc.id} value={cc.id}>
+                              <span className="flex items-center gap-1">
+                                {depth > 0 && (
+                                  <span
+                                    className="text-muted-foreground/50"
+                                    style={{ paddingLeft: `${(depth - 1) * 12}px` }}
+                                  >
+                                    {"↳ "}
+                                  </span>
+                                )}
+                                <span>{cc.code} — {cc.name}</span>
+                              </span>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     {parentBalanceInfo && (
@@ -294,32 +325,41 @@ export function CostCenterForm({
               <FormField
                 control={form.control}
                 name="budgetYear"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Ano</FormLabel>
-                    <Select
-                      onValueChange={(v) => field.onChange(parseInt(v))}
-                      value={field.value?.toString()}
-                    >
+                render={({ field }) => {
+                  const minYear = new Date().getFullYear() - 2;
+                  const maxYear = new Date().getFullYear() + 3;
+                  return (
+                    <FormItem>
+                      <FormLabel>Ano</FormLabel>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Ano" />
-                        </SelectTrigger>
+                        <div className="flex items-center h-9 border border-input rounded-md bg-transparent shadow-xs">
+                          <button
+                            type="button"
+                            onClick={() => field.onChange(Math.max(minYear, (field.value ?? new Date().getFullYear()) - 1))}
+                            disabled={(field.value ?? new Date().getFullYear()) <= minYear}
+                            className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                            aria-label="Ano anterior"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                          <span className="flex-1 text-center text-sm font-medium tabular-nums select-none">
+                            {field.value ?? new Date().getFullYear()}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => field.onChange(Math.min(maxYear, (field.value ?? new Date().getFullYear()) + 1))}
+                            disabled={(field.value ?? new Date().getFullYear()) >= maxYear}
+                            className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                            aria-label="Próximo ano"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
                       </FormControl>
-                      <SelectContent>
-                        {Array.from(
-                          { length: 6 },
-                          (_, i) => new Date().getFullYear() - 2 + i,
-                        ).map((y) => (
-                          <SelectItem key={y} value={y.toString()}>
-                            {y}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
             </div>
 
@@ -368,50 +408,69 @@ export function CostCenterForm({
         {editingId && balanceInfo && (
           <div className="space-y-4 border-t pt-4">
             <h3 className="text-lg font-medium">Saldo Disponível</h3>
-            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Receitas Projetadas:
+            <div className="rounded-xl border bg-card p-4 space-y-3">
+              {/* Saldo principal em destaque */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+                  Saldo Líquido
                 </span>
-                <span className="font-medium text-green-600">
-                  +{formatCurrency(balanceInfo.fromReceivables)}
-                </span>
-              </div>
-              {balanceInfo.fromParent > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Recebido do Pai:
-                  </span>
-                  <span className="font-medium text-blue-600">
-                    +{formatCurrency(balanceInfo.fromParent)}
-                  </span>
-                </div>
-              )}
-              {balanceInfo.allocatedToChildren > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Alocado para Filhos:
-                  </span>
-                  <span className="font-medium text-orange-600">
-                    -{formatCurrency(balanceInfo.allocatedToChildren)}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Despesas Previstas:
-                </span>
-                <span className="font-medium text-red-600">
-                  -{formatCurrency(balanceInfo.spentOnPayables)}
-                </span>
-              </div>
-              <div className="border-t pt-2 mt-2 flex justify-between">
-                <span className="font-semibold">Saldo Líquido:</span>
                 <span
-                  className={`font-bold ${balanceInfo.available >= 0 ? "text-green-600" : "text-red-600"}`}
+                  className={`text-2xl font-bold tabular-nums ${balanceInfo.available >= 0 ? "text-emerald-600" : "text-red-600"}`}
                 >
                   {formatCurrency(balanceInfo.available)}
                 </span>
+              </div>
+
+              {/* Barra de utilização */}
+              {(() => {
+                const total = balanceInfo.fromReceivables + balanceInfo.fromParent;
+                const spent = balanceInfo.spentOnPayables + balanceInfo.allocatedToChildren;
+                const pct = total > 0 ? Math.min((spent / total) * 100, 100) : 0;
+                return (
+                  <div className="space-y-1">
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500"}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground text-right tabular-nums">
+                      {pct.toFixed(0)}% utilizado
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* Detalhes */}
+              <div className="border-t pt-3 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Receitas Projetadas</span>
+                  <span className="font-medium text-emerald-600 tabular-nums">
+                    +{formatCurrency(balanceInfo.fromReceivables)}
+                  </span>
+                </div>
+                {balanceInfo.fromParent > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Recebido do Pai</span>
+                    <span className="font-medium text-blue-600 tabular-nums">
+                      +{formatCurrency(balanceInfo.fromParent)}
+                    </span>
+                  </div>
+                )}
+                {balanceInfo.allocatedToChildren > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Alocado para Filhos</span>
+                    <span className="font-medium text-orange-600 tabular-nums">
+                      -{formatCurrency(balanceInfo.allocatedToChildren)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Despesas Previstas</span>
+                  <span className="font-medium text-red-600 tabular-nums">
+                    -{formatCurrency(balanceInfo.spentOnPayables)}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -553,8 +612,7 @@ export function CostCenterForm({
           >
             Cancelar
           </Button>
-          <Button type="submit" disabled={isLoading}>
-            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <Button type="submit" loading={isLoading}>
             Salvar
           </Button>
         </div>
