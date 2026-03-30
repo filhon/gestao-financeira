@@ -54,6 +54,7 @@ import { SmartBatchesCarousel } from "@/components/features/finance/SmartBatches
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { format, addDays, isBefore, startOfDay } from "date-fns";
+import { DateRange } from "react-day-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -140,8 +141,19 @@ export default function AccountsPayablePage() {
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
-  const [selectedCostCenterId, setSelectedCostCenterId] =
-    useState<string>("all");
+
+  const [filterOptions, setFilterOptions] = useState<{
+    status: string;
+    costCenterId: string;
+    dateRange: DateRange | undefined;
+  }>({
+    status: "exclude-paid",
+    costCenterId: "all",
+    dateRange: {
+      from: startOfDay(new Date()),
+      to: addDays(startOfDay(new Date()), 7),
+    },
+  });
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -169,9 +181,7 @@ export default function AccountsPayablePage() {
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
 
-  const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [itemsPerPage] = useState(25);
-  const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
 
   // Use centralized permissions
   const {
@@ -189,6 +199,18 @@ export default function AccountsPayablePage() {
   );
   const [isSearching, setIsSearching] = useState(false);
 
+  const getDescendantIds = useCallback(
+    (rootId: string, all: CostCenter[]): string[] => {
+      const children = all.filter((c) => c.parentId === rootId);
+      let ids = [rootId];
+      for (const child of children) {
+        ids = [...ids, ...getDescendantIds(child.id, all)];
+      }
+      return ids;
+    },
+    [],
+  );
+
   const {
     items: paginatedTransactions,
     hasMore,
@@ -201,44 +223,36 @@ export default function AccountsPayablePage() {
     queryKey: [
       "payable-transactions",
       selectedCompany?.id,
-      statusFilter,
-      showAllTransactions,
-      selectedCostCenterId,
+      filterOptions.status,
+      filterOptions.dateRange?.from?.toISOString(),
+      filterOptions.dateRange?.to?.toISOString(),
+      filterOptions.costCenterId,
       onlyOwnPayables ? user?.uid : "all",
     ],
     queryFn: async (pageSize, lastDoc) => {
-      const getDescendantIds = (
-        rootId: string,
-        all: CostCenter[],
-      ): string[] => {
-        const children = all.filter((c) => c.parentId === rootId);
-        let ids = [rootId];
-        for (const child of children) {
-          ids = [...ids, ...getDescendantIds(child.id, all)];
-        }
-        return ids;
-      };
-
       const targetCostCenterIds =
-        selectedCostCenterId !== "all" && costCenters.length > 0
-          ? getDescendantIds(selectedCostCenterId, costCenters)
+        filterOptions.costCenterId !== "all" && costCenters.length > 0
+          ? getDescendantIds(filterOptions.costCenterId, costCenters)
           : undefined;
 
       const filter: {
         type: string;
         excludeStatus?: string[];
         status?: string;
+        startDate?: Date;
         endDate?: Date;
         createdBy?: string;
         costCenterIds?: string[];
       } = {
         type: "payable",
-        excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
+        excludeStatus: filterOptions.status === "exclude-paid" ? ["paid"] : [],
         status:
-          statusFilter !== "all" && statusFilter !== "exclude-paid"
-            ? statusFilter
+          filterOptions.status !== "all" &&
+          filterOptions.status !== "exclude-paid"
+            ? filterOptions.status
             : undefined,
-        endDate: !showAllTransactions ? addDays(new Date(), 7) : undefined,
+        startDate: filterOptions.dateRange?.from,
+        endDate: filterOptions.dateRange?.to,
         costCenterIds: targetCostCenterIds,
       };
 
@@ -402,9 +416,49 @@ export default function AccountsPayablePage() {
                 ? new Date(t.approvalTokenExpiresAt as string)
                 : undefined,
             }),
-          );
+          ) as Transaction[];
 
-          setSearchResults(mapped);
+          let filteredResults = mapped;
+
+          if (filterOptions.status === "exclude-paid") {
+            filteredResults = filteredResults.filter(
+              (t) => t.status !== "paid",
+            );
+          } else if (filterOptions.status !== "all") {
+            filteredResults = filteredResults.filter(
+              (t) => t.status === filterOptions.status,
+            );
+          }
+
+          if (filterOptions.dateRange?.from) {
+            filteredResults = filteredResults.filter(
+              (t) => t.dueDate >= filterOptions.dateRange!.from!,
+            );
+          }
+          if (filterOptions.dateRange?.to) {
+            filteredResults = filteredResults.filter(
+              (t) => t.dueDate <= filterOptions.dateRange!.to!,
+            );
+          }
+
+          if (filterOptions.costCenterId !== "all" && costCenters.length > 0) {
+            const descendantIds = getDescendantIds(
+              filterOptions.costCenterId,
+              costCenters,
+            );
+            filteredResults = filteredResults.filter(
+              (t) =>
+                t.costCenterAllocation?.some((alloc) =>
+                  descendantIds.includes(alloc.costCenterId),
+                ) ||
+                descendantIds.includes(
+                  ((t as unknown as Record<string, unknown>)
+                    .costCenterId as string) ?? "",
+                ),
+            );
+          }
+
+          setSearchResults(filteredResults);
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
@@ -418,7 +472,15 @@ export default function AccountsPayablePage() {
     }
 
     setSelectedIds(new Set());
-  }, [debouncedSearchTerm, selectedCompany, user, onlyOwnPayables]);
+  }, [
+    debouncedSearchTerm,
+    selectedCompany,
+    user,
+    onlyOwnPayables,
+    filterOptions,
+    costCenters,
+    getDescendantIds,
+  ]);
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -593,7 +655,6 @@ export default function AccountsPayablePage() {
           },
         });
         toast.success("Recorrência criada com sucesso!");
-
       } else {
         // Normal Transaction
         await transactionService.create(
@@ -966,8 +1027,10 @@ export default function AccountsPayablePage() {
                 />
               </div>
               <Select
-                value={selectedCostCenterId}
-                onValueChange={setSelectedCostCenterId}
+                value={filterOptions.costCenterId}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, costCenterId: val }))
+                }
               >
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Centro de Custo" />
@@ -981,7 +1044,12 @@ export default function AccountsPayablePage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={filterOptions.status}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, status: val }))
+                }
+              >
                 <SelectTrigger id="status-filter" className="w-[200px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -1189,15 +1257,6 @@ export default function AccountsPayablePage() {
           )}
           {!isLoading && (
             <div className="mt-4 flex flex-col gap-4">
-              {!showAllTransactions && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setShowAllTransactions(true)}
-                >
-                  Ver Todas as Transações
-                </Button>
-              )}
               {hasMore && !debouncedSearchTerm && (
                 <Button
                   variant="outline"

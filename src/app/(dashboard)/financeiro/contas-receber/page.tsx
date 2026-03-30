@@ -33,7 +33,8 @@ import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { format, endOfMonth } from "date-fns";
+import { format, addDays, startOfDay } from "date-fns";
+import { DateRange } from "react-day-picker";
 import { formatCurrency } from "@/lib/utils";
 import { DunningStatus } from "@/components/features/finance/DunningStatus";
 import { Badge } from "@/components/ui/badge";
@@ -66,9 +67,18 @@ export default function AccountsReceivablePage() {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [itemsPerPage] = useState(25);
-  const [statusFilter, setStatusFilter] = useState<string>("exclude-paid");
+
+  const [filterOptions, setFilterOptions] = useState<{
+    status: string;
+    dateRange: DateRange | undefined;
+  }>({
+    status: "exclude-paid",
+    dateRange: {
+      from: startOfDay(new Date()),
+      to: addDays(startOfDay(new Date()), 7),
+    },
+  });
 
   // ── Search state ─────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState("");
@@ -109,20 +119,23 @@ export default function AccountsReceivablePage() {
     queryKey: [
       "receivable-transactions",
       selectedCompany?.id,
-      statusFilter,
-      showAllTransactions,
+      filterOptions.status,
+      filterOptions.dateRange?.from?.toISOString(),
+      filterOptions.dateRange?.to?.toISOString(),
       sortField,
       sortDirection,
     ],
     queryFn: async (pageSize, lastDoc) => {
       const filter = {
         type: "receivable" as const,
-        excludeStatus: statusFilter === "exclude-paid" ? ["paid"] : [],
+        excludeStatus: filterOptions.status === "exclude-paid" ? ["paid"] : [],
         status:
-          statusFilter !== "all" && statusFilter !== "exclude-paid"
-            ? statusFilter
+          filterOptions.status !== "all" &&
+          filterOptions.status !== "exclude-paid"
+            ? filterOptions.status
             : undefined,
-        endDate: !showAllTransactions ? endOfMonth(new Date()) : undefined,
+        startDate: filterOptions.dateRange?.from,
+        endDate: filterOptions.dateRange?.to,
         sortField,
         sortDirection,
       };
@@ -193,9 +206,32 @@ export default function AccountsReceivablePage() {
                 ? new Date(t.approvalTokenExpiresAt as string)
                 : undefined,
             }),
-          );
+          ) as Transaction[];
 
-          setSearchResults(mapped);
+          let filteredResults = mapped;
+
+          if (filterOptions.status === "exclude-paid") {
+            filteredResults = filteredResults.filter(
+              (t) => t.status !== "paid",
+            );
+          } else if (filterOptions.status !== "all") {
+            filteredResults = filteredResults.filter(
+              (t) => t.status === filterOptions.status,
+            );
+          }
+
+          if (filterOptions.dateRange?.from) {
+            filteredResults = filteredResults.filter(
+              (t) => t.dueDate >= filterOptions.dateRange!.from!,
+            );
+          }
+          if (filterOptions.dateRange?.to) {
+            filteredResults = filteredResults.filter(
+              (t) => t.dueDate <= filterOptions.dateRange!.to!,
+            );
+          }
+
+          setSearchResults(filteredResults);
         } catch (e) {
           console.error(e);
           toast.error("Erro na busca");
@@ -207,7 +243,7 @@ export default function AccountsReceivablePage() {
     } else {
       setSearchResults(null);
     }
-  }, [debouncedSearchTerm, selectedCompany, user]);
+  }, [debouncedSearchTerm, selectedCompany, user, filterOptions]);
 
   // Decide entre resultados de busca e resultados paginados
   const transactions = searchResults ?? paginatedTransactions;
@@ -240,7 +276,6 @@ export default function AccountsReceivablePage() {
           },
         });
         toast.success("Recorrência criada com sucesso!");
-
       } else {
         // Normal Transaction
         await transactionService.create(
@@ -384,7 +419,12 @@ export default function AccountsReceivablePage() {
                   </button>
                 )}
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={filterOptions.status}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, status: val }))
+                }
+              >
                 <SelectTrigger id="status-filter" className="w-[200px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -467,9 +507,7 @@ export default function AccountsReceivablePage() {
                     >
                       {debouncedSearchTerm
                         ? `Nenhum resultado para "${debouncedSearchTerm}".`
-                        : showAllTransactions
-                          ? "Nenhuma conta a receber encontrada."
-                          : "Nenhuma conta com vencimento neste mês."}
+                        : "Nenhuma conta a receber encontrada no período."}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -513,15 +551,7 @@ export default function AccountsReceivablePage() {
           )}
           {!isLoading && !debouncedSearchTerm && (
             <div className="mt-4 flex flex-col gap-4">
-              {!showAllTransactions ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setShowAllTransactions(true)}
-                >
-                  Ver Histórico Completo
-                </Button>
-              ) : hasMore ? (
+              {hasMore ? (
                 <Button
                   variant="outline"
                   className="w-full"
