@@ -244,6 +244,11 @@ service cloud.firestore {
        allow write: if isAuthenticated() && isManager(companyId);
     }
     
+    // 14. Reconciliation Sessions
+    match /reconciliation_sessions/{companyId} {
+       allow read, write: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+    }
+    
     // ── API Externa ──────────────────────────────────────────────────────────
 
     // 14. API Keys (gerenciamento das chaves de integração externa)

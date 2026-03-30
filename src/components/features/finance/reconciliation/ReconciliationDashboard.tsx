@@ -27,6 +27,7 @@ import { BankTransaction } from "@/lib/types";
 import { subDays, addDays } from "date-fns";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Dialog,
   DialogContent,
@@ -47,16 +48,36 @@ import { Search } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
+import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
+
 export function ReconciliationDashboard() {
   const {
     transactions,
     setTransactions,
     updateTransactionStatus,
     clearSession,
+    setIsLoading,
   } = useReconciliationStore();
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
+  const { onlyOwnPayables } = usePermissions();
   const [isMatching, setIsMatching] = useState(false);
+
+  // Sync with Firestore
+  useEffect(() => {
+    if (!selectedCompany?.id) return;
+
+    setIsLoading(true);
+    const unsubscribe = reconciliationSessionService.subscribeToSession(
+      selectedCompany.id,
+      (txs) => {
+        setTransactions(txs);
+        setIsLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, [selectedCompany?.id, setTransactions, setIsLoading]);
 
   // Create Modal State
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -108,6 +129,7 @@ export function ReconciliationDashboard() {
           status: "paid",
           startDate: start,
           endDate: end,
+          ...(onlyOwnPayables && user?.uid ? { createdBy: user.uid } : {}),
         });
         setSystemPaidCount(count);
       } catch (e) {
@@ -139,6 +161,24 @@ export function ReconciliationDashboard() {
     };
   }, [transactions]);
 
+  const updateStatusAndSync = async (
+    id: string,
+    status: BankTransaction["status"],
+    updates?: Partial<BankTransaction>,
+  ) => {
+    updateTransactionStatus(id, status, updates);
+    if (!selectedCompany?.id) return;
+
+    // Compute the new transactions state manually to sync it to Firebase
+    const updatedTxs = transactions.map((t) =>
+      t.id === id ? { ...t, status, ...updates } : t,
+    );
+    await reconciliationSessionService.saveSession(
+      selectedCompany.id,
+      updatedTxs,
+    );
+  };
+
   const handleAction = async (
     id: string,
     action: "confirm" | "create" | "ignore",
@@ -169,7 +209,7 @@ export function ReconciliationDashboard() {
           );
         }
 
-        updateTransactionStatus(id, "matched", {
+        await updateStatusAndSync(id, "matched", {
           matchedTransactionId:
             selectedCandidate?.id || tx.matchedTransactionId,
           matchedDetails: selectedCandidate?.transaction || tx.matchedDetails,
@@ -178,7 +218,7 @@ export function ReconciliationDashboard() {
       }
       toast.success("Conciliação confirmada");
     } else if (action === "ignore") {
-      updateTransactionStatus(id, "ignored");
+      await updateStatusAndSync(id, "ignored");
     } else if (action === "create") {
       const tx = transactions.find((t) => t.id === id);
       if (tx) {
@@ -206,7 +246,7 @@ export function ReconciliationDashboard() {
         });
       }
 
-      updateTransactionStatus(selectedBankTx.id, "matched", {
+      await updateStatusAndSync(selectedBankTx.id, "matched", {
         matchedTransactionId: matchedId,
         confidence: 100,
       });
@@ -245,6 +285,7 @@ export function ReconciliationDashboard() {
           companyId: selectedCompany.id,
           startDate: minDate,
           endDate: maxDate,
+          ...(onlyOwnPayables && user?.uid ? { createdBy: user.uid } : {}),
         }),
         entityService.getAll(selectedCompany.id),
       ]);
@@ -255,6 +296,12 @@ export function ReconciliationDashboard() {
         entities,
       );
       setTransactions(processed);
+      if (selectedCompany?.id) {
+        await reconciliationSessionService.saveSession(
+          selectedCompany.id,
+          processed,
+        );
+      }
 
       const matchCount = processed.filter(
         (t) =>
@@ -382,7 +429,14 @@ export function ReconciliationDashboard() {
           <Button
             variant="outline"
             className="text-destructive border-destructive hover:bg-destructive/10"
-            onClick={() => clearSession()}
+            onClick={async () => {
+              clearSession();
+              if (selectedCompany?.id) {
+                await reconciliationSessionService.clearSession(
+                  selectedCompany.id,
+                );
+              }
+            }}
           >
             <Trash2 className="mr-2 h-4 w-4" />
             Limpar Sessão

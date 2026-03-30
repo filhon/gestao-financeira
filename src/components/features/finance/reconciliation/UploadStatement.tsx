@@ -5,15 +5,21 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useState, useRef } from "react";
 import { ReconciliationService } from "@/lib/services/reconciliationService";
-import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
+import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
+import { useCompany } from "@/components/providers/CompanyProvider";
 import { toast } from "sonner";
 
 export function UploadStatement() {
-  const { setTransactions } = useReconciliationStore();
+  const { selectedCompany } = useCompany();
   const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedCompany?.id) {
+      toast.error("Selecione uma empresa antes de importar.");
+      return;
+    }
+
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -23,7 +29,7 @@ export function UploadStatement() {
       // Simple format detection based on extension for now
       const isJson = file.name.endsWith(".json");
       const isOfx = file.name.endsWith(".ofx");
-      const transactions = ReconciliationService.parseStatement(
+      const transactions = await ReconciliationService.parseStatement(
         text,
         isJson ? "json" : isOfx ? "ofx" : "csv",
       );
@@ -33,7 +39,12 @@ export function UploadStatement() {
         return;
       }
 
-      setTransactions(transactions);
+      // Grave no Firebase em vez do localStorage
+      await reconciliationSessionService.saveSession(
+        selectedCompany.id,
+        transactions,
+      );
+
       toast.success(
         `${transactions.length} transações importadas com sucesso!`,
       );

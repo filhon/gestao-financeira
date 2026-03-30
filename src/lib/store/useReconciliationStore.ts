@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import { BankTransaction, Transaction } from "@/lib/types";
 
 interface ReconciliationState {
@@ -14,6 +13,7 @@ interface ReconciliationState {
     updates?: Partial<BankTransaction>,
   ) => void;
   clearSession: () => void;
+  setIsLoading: (loading: boolean) => void;
 }
 
 const reviveTransactionDates = (tx: Transaction): Transaction => ({
@@ -26,7 +26,7 @@ const reviveTransactionDates = (tx: Transaction): Transaction => ({
   updatedAt: tx.updatedAt ? new Date(tx.updatedAt) : tx.updatedAt,
 });
 
-const reviveBankTx = (tx: BankTransaction): BankTransaction => ({
+export const reviveBankTx = (tx: BankTransaction): BankTransaction => ({
   ...tx,
   date: new Date(tx.date),
   matchedDetails: tx.matchedDetails
@@ -37,51 +37,27 @@ const reviveBankTx = (tx: BankTransaction): BankTransaction => ({
     : tx.matchedBundleDetails,
   matchCandidates: tx.matchCandidates
     ? tx.matchCandidates.map((c) => ({
-      ...c,
-      transaction: reviveTransactionDates(c.transaction),
-    }))
+        ...c,
+        transaction: reviveTransactionDates(c.transaction),
+      }))
     : tx.matchCandidates,
 });
 
-const safeStorage = createJSONStorage(() => {
-  if (typeof window !== "undefined") return localStorage;
-  return {
-    length: 0,
-    clear: () => undefined,
-    key: () => null,
-    getItem: () => null,
-    setItem: () => undefined,
-    removeItem: () => undefined,
-  } as Storage;
-});
+export const useReconciliationStore = create<ReconciliationState>((set) => ({
+  transactions: [],
+  isLoading: false,
 
-export const useReconciliationStore = create<ReconciliationState>()(
-  persist(
-    (set) => ({
-      transactions: [],
-      isLoading: false,
+  setTransactions: (transactions) =>
+    set({ transactions: transactions.map(reviveBankTx), isLoading: false }),
 
-      setTransactions: (transactions) =>
-        set({ transactions: transactions.map(reviveBankTx) }),
-
-      updateTransactionStatus: (id, status, updates) =>
-        set((state) => ({
-          transactions: state.transactions.map((t) =>
-            t.id === id ? { ...t, status, ...updates } : t,
-          ),
-        })),
-
-      clearSession: () => set({ transactions: [] }),
+  updateTransactionStatus: (id, status, updates) =>
+    set((state) => {
+      const newTransactions = state.transactions.map((t) =>
+        t.id === id ? { ...t, status, ...updates } : t,
+      );
+      return { transactions: newTransactions };
     }),
-    {
-      name: "reconciliation-session",
-      storage: safeStorage,
-      partialize: (state) => ({ transactions: state.transactions }),
-      onRehydrateStorage: () => (state) => {
-        if (state?.transactions) {
-          state.transactions = state.transactions.map(reviveBankTx);
-        }
-      },
-    },
-  ),
-);
+
+  clearSession: () => set({ transactions: [] }),
+  setIsLoading: (isLoading) => set({ isLoading }),
+}));

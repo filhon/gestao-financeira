@@ -5,13 +5,14 @@ import {
   ReconciliationMatchCandidate,
 } from "@/lib/types";
 import { differenceInDays } from "date-fns";
+import { parse as parseOFXData } from "ofx-js";
+import Papa from "papaparse";
 
 export class ReconciliationService {
-  /* ... existing parse methods ... */
-  static parseStatement(
+  static async parseStatement(
     fileContent: string,
     type: "csv" | "json" | "ofx",
-  ): BankTransaction[] {
+  ): Promise<BankTransaction[]> {
     if (type === "json") {
       try {
         const raw = JSON.parse(fileContent);
@@ -30,7 +31,7 @@ export class ReconciliationService {
         return [];
       }
     } else if (type === "ofx") {
-      return this.parseOFX(fileContent);
+      return await this.parseOFX(fileContent);
     } else if (type === "csv") {
       return this.parseCSV(fileContent);
     }
@@ -39,115 +40,127 @@ export class ReconciliationService {
   }
 
   static parseCSV(content: string): BankTransaction[] {
-    const lines = content
-      .replace(/\r\n/g, "\n")
-      .replace(/\r/g, "\n")
-      .split("\n")
-      .filter((l) => l.trim().length > 0);
-
-    if (lines.length === 0) return [];
-
-    const delimiter = this.detectDelimiter(lines[0]);
-    const header = this.parseCSVLine(lines[0], delimiter).map((value) =>
-      this.normalize(value),
-    );
-    const headerIndex = (names: string[]) =>
-      header.findIndex((h) => names.includes(h));
-
-    const idxDate = headerIndex(["data", "date", "dt", "dtpost", "dtposted"]);
-    const idxDesc = headerIndex([
-      "descricao",
-      "description",
-      "historico",
-      "memo",
-      "lancamento",
-      "narrativa",
-      "details",
-    ]);
-    const idxAmount = headerIndex([
-      "valor",
-      "amount",
-      "montante",
-      "valorlancamento",
-    ]);
-    const idxDebit = headerIndex(["debito", "debit"]);
-    const idxCredit = headerIndex(["credito", "credit"]);
-    const idxDoc = headerIndex(["documento", "doc", "numero", "id", "fitid"]);
-
     const transactions: BankTransaction[] = [];
     const seen = new Set<string>();
 
-    for (let i = 1; i < lines.length; i++) {
-      const cols = this.parseCSVLine(lines[i], delimiter);
-      const rawDate = idxDate >= 0 ? cols[idxDate] : "";
-      const rawDesc = idxDesc >= 0 ? cols[idxDesc] : cols.join(" ");
+    const parsed = Papa.parse(content, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h) => this.normalizeText(h),
+    });
+
+    if (parsed.errors.length > 0) {
+      console.warn("CSV parsing warnings:", parsed.errors);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parsed.data.forEach((row: any, i: number) => {
+      const dateVal =
+        row.data || row.date || row.dt || row.dtpost || row.dtposted;
+      const descVal =
+        row.descricao ||
+        row.description ||
+        row.historico ||
+        row.memo ||
+        row.lancamento ||
+        row.narrativa ||
+        row.details ||
+        "";
+      const docVal =
+        row.documento || row.doc || row.numero || row.id || row.fitid;
 
       let amount = 0;
-      if (idxAmount >= 0) {
-        amount = this.parseAmount(cols[idxAmount]);
-      } else if (idxDebit >= 0 || idxCredit >= 0) {
-        const debit = idxDebit >= 0 ? this.parseAmount(cols[idxDebit]) : 0;
-        const credit = idxCredit >= 0 ? this.parseAmount(cols[idxCredit]) : 0;
+      if (
+        row.valor !== undefined ||
+        row.amount !== undefined ||
+        row.montante !== undefined ||
+        row.valorlancamento !== undefined
+      ) {
+        amount = this.parseAmount(
+          row.valor || row.amount || row.montante || row.valorlancamento,
+        );
+      } else if (
+        row.debito !== undefined ||
+        row.credito !== undefined ||
+        row.debit !== undefined ||
+        row.credit !== undefined
+      ) {
+        const debit = this.parseAmount(row.debito || row.debit || "0");
+        const credit = this.parseAmount(row.credito || row.credit || "0");
         amount = credit - debit;
       }
 
-      const date = this.parseDate(rawDate);
-      if (!date || !Number.isFinite(amount)) continue;
+      const date = this.parseDate(dateVal);
+      if (!date || !Number.isFinite(amount)) return;
 
-      const description = String(rawDesc || "").trim();
+      const description = String(descVal).trim();
       const key = `${date.toISOString().slice(0, 10)}|${amount}|${this.normalizeText(description)}`;
-      if (seen.has(key)) continue;
+
+      if (seen.has(key)) return;
       seen.add(key);
 
       transactions.push({
-        id: (idxDoc >= 0 && cols[idxDoc]) || `bank-tx-${i}-${Date.now()}`,
+        id: docVal || `bank-tx-${i}-${Date.now()}`,
         date,
         amount,
         description,
         type: amount < 0 ? "debit" : "credit",
         status: "unmatched",
         confidence: 0,
-        documentNumber: idxDoc >= 0 ? cols[idxDoc] : undefined,
+        documentNumber: docVal,
       });
-    }
+    });
 
     return transactions;
   }
 
-  static parseOFX(content: string): BankTransaction[] {
+  static async parseOFX(content: string): Promise<BankTransaction[]> {
     const transactions: BankTransaction[] = [];
     try {
-      // Rudimentary Regex OFX Parser
-      const transactionRegex = /<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi;
-      let match;
+      const parsedOfx = await parseOFXData(content);
 
-      while ((match = transactionRegex.exec(content)) !== null) {
-        const block = match[1];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const findTransactions = (obj: any): any[] => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let results: any[] = [];
+        if (!obj || typeof obj !== "object") return results;
 
-        const dateMatch = /<DTPOSTED>([^<]*)/i.exec(block);
-        const amountMatch = /<TRNAMT>([^<]*)/i.exec(block);
-        const fitidMatch = /<FITID>([^<]*)/i.exec(block);
-        const nameMatch = /<NAME>([^<]*)/i.exec(block);
-        const memoMatch = /<MEMO>([^<]*)/i.exec(block);
+        if (Array.isArray(obj)) {
+          for (const item of obj) {
+            results = results.concat(findTransactions(item));
+          }
+        } else {
+          for (const key in obj) {
+            if (key === "STMTTRN") {
+              const val = obj[key];
+              if (Array.isArray(val)) results = results.concat(val);
+              else results.push(val);
+            } else {
+              results = results.concat(findTransactions(obj[key]));
+            }
+          }
+        }
+        return results;
+      };
 
-        const dateStr = dateMatch ? dateMatch[1].trim() : "";
-        const amountStr = amountMatch ? amountMatch[1].trim() : "0";
-        const fitId = fitidMatch
-          ? fitidMatch[1].trim()
-          : `gen-${Math.random()}`;
-        const name = nameMatch ? nameMatch[1].trim() : "";
-        const memo = memoMatch ? memoMatch[1].trim() : "";
+      const txNodes = findTransactions(parsedOfx);
 
-        // Parse Date: YYYYMMDDHHMMSS[-5:EST]
+      for (const node of txNodes) {
+        const dateStr = node.DTPOSTED || "";
+        const amountStr = node.TRNAMT || "0";
+        const fitId = node.FITID || `gen-${Math.random()}`;
+        const name = node.NAME || "";
+        const memo = node.MEMO || "";
+
         const date = this.parseDate(dateStr);
         if (!date) continue;
 
-        const amount = this.parseAmount(amountStr); // OFX uses negative for debit usually
+        const amount = this.parseAmount(amountStr);
 
         transactions.push({
           id: fitId,
-          date: date,
-          amount: amount,
+          date,
+          amount,
           description: (memo || name || "").trim(),
           type: amount < 0 ? "debit" : "credit",
           status: "unmatched",
@@ -594,37 +607,6 @@ export class ReconciliationService {
 
     const parsed = Number(normalized);
     return Number.isNaN(parsed) ? 0 : parsed;
-  }
-
-  private static detectDelimiter(headerLine: string): string {
-    const comma = (headerLine.match(/,/g) || []).length;
-    const semi = (headerLine.match(/;/g) || []).length;
-    return semi > comma ? ";" : ",";
-  }
-
-  private static parseCSVLine(line: string, delimiter: string): string[] {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === delimiter && !inQuotes) {
-        result.push(current.trim());
-        current = "";
-      } else {
-        current += char;
-      }
-    }
-    result.push(current.trim());
-    return result;
   }
 
   private static normalize(value: string): string {
