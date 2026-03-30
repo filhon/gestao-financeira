@@ -273,7 +273,7 @@ export default function AccountsPayablePage() {
       return { items, lastDoc: newLastDoc };
     },
     pageSize: itemsPerPage,
-    enabled: !!selectedCompany && !!user && !debouncedSearchTerm,
+    enabled: !!selectedCompany && !!user && !debouncedSearchTerm && !searchTerm,
   });
 
   // Decide entre resultados de busca e resultados paginados
@@ -354,7 +354,8 @@ export default function AccountsPayablePage() {
   const { targetRef, isIntersecting } =
     useIntersectionObserver<HTMLTableRowElement>({
       threshold: 0.1,
-      enabled: hasMore && !isFetchingNextPage && !debouncedSearchTerm,
+      enabled:
+        hasMore && !isFetchingNextPage && !debouncedSearchTerm && !searchTerm,
     });
 
   useEffect(() => {
@@ -362,6 +363,7 @@ export default function AccountsPayablePage() {
       isIntersecting &&
       hasMore &&
       !debouncedSearchTerm &&
+      !searchTerm &&
       !isFetchingNextPage
     ) {
       loadMore();
@@ -370,6 +372,7 @@ export default function AccountsPayablePage() {
     isIntersecting,
     hasMore,
     debouncedSearchTerm,
+    searchTerm,
     isFetchingNextPage,
     loadMore,
   ]);
@@ -1163,11 +1166,10 @@ export default function AccountsPayablePage() {
                   <TableRow>
                     <TableCell
                       colSpan={7}
-                      className="text-center text-muted-foreground"
+                      className="h-24 text-center text-muted-foreground"
                     >
-                      {sortedTransactions.length === 0
-                        ? "Nenhuma conta a pagar encontrada."
-                        : "Nenhuma conta com vencimento nos próximos 7 dias."}
+                      Nenhuma conta a pagar encontrada com os filtros
+                      selecionados.
                     </TableCell>
                   </TableRow>
                 ) : (

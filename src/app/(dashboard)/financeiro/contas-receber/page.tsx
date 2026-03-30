@@ -154,13 +154,14 @@ export default function AccountsReceivablePage() {
     },
     pageSize: itemsPerPage,
     // Desabilita paginação quando o modo de busca está ativo
-    enabled: !!selectedCompany && !!user && !debouncedSearchTerm,
+    enabled: !!selectedCompany && !!user && !debouncedSearchTerm && !searchTerm,
   });
 
   const { targetRef, isIntersecting } =
     useIntersectionObserver<HTMLTableRowElement>({
       threshold: 0.1,
-      enabled: hasMore && !isFetchingNextPage && !debouncedSearchTerm,
+      enabled:
+        hasMore && !isFetchingNextPage && !debouncedSearchTerm && !searchTerm,
     });
 
   useEffect(() => {
@@ -168,6 +169,7 @@ export default function AccountsReceivablePage() {
       isIntersecting &&
       hasMore &&
       !debouncedSearchTerm &&
+      !searchTerm &&
       !isFetchingNextPage
     ) {
       loadMore();
@@ -176,6 +178,7 @@ export default function AccountsReceivablePage() {
     isIntersecting,
     hasMore,
     debouncedSearchTerm,
+    searchTerm,
     isFetchingNextPage,
     loadMore,
   ]);
@@ -533,12 +536,12 @@ export default function AccountsReceivablePage() {
                 {transactions.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
-                      className="text-center text-muted-foreground"
+                      colSpan={7}
+                      className="h-24 text-center text-muted-foreground"
                     >
                       {debouncedSearchTerm
                         ? `Nenhum resultado para "${debouncedSearchTerm}".`
-                        : "Nenhuma conta a receber encontrada no período."}
+                        : "Nenhuma conta a receber encontrada com os filtros selecionados."}
                     </TableCell>
                   </TableRow>
                 ) : (
