@@ -175,8 +175,9 @@ export function sanitizeCostCenter(
   if (cc.parentId) sanitized.parentId = cc.parentId;
   if (cc.budget !== undefined) sanitized.budget = cc.budget;
   if (cc.budgetYear !== undefined) sanitized.budgetYear = cc.budgetYear;
-  if (cc.availableBalance !== undefined)
-    sanitized.availableBalance = cc.availableBalance;
+  const ccWithBalance = cc as CostCenter & { availableBalance?: number };
+  if (ccWithBalance.availableBalance !== undefined)
+    sanitized.availableBalance = ccWithBalance.availableBalance;
   if (children) sanitized.children = children;
 
   // Garantia: campos bloqueados não passam

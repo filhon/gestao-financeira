@@ -323,17 +323,16 @@ export const updateCostCenterUsage = functions.firestore
       if (!docSnap || !docSnap.exists) return [];
       const data = docSnap.data();
 
-      // Consideramos apenas despesas (payable) que estao PAGAS
-      if (data.type !== "payable" || data.status !== "paid") return [];
+      // Consideramos transações ativas (não rejeitadas)
+      if (data.type !== "payable" || data.status === "rejected") return [];
 
       const allocations = data.costCenterAllocation || [];
-      // Se nao tiver alocacao mas tiver costCenterId (legado ou simples)
+      // Fallback para transações sem o array detalhado de rateio
       if (allocations.length === 0 && data.costCenterId) {
-        // Criar alocacao ficticia de 100%
-        // Mas o ideal seria sempre normalizar no write da transacao.
-        // Vamos assumir que se nao tem array, nao contabiliza ou fallback.
-        // Fallback:
-        // return [{ companyId: data.companyId, costCenterId: data.costCenterId, amount: data.finalAmount || data.amount || 0 }];
+        allocations.push({
+          costCenterId: data.costCenterId,
+          amount: Number(data.finalAmount || data.amount || 0),
+        });
       }
       if (allocations.length === 0) return [];
 
@@ -443,9 +442,20 @@ export const updateCostCenterUsage = functions.firestore
 
 /** Palavras-chave que indicam obrigações tributárias/societárias. */
 const TAX_KEYWORDS = [
-  "darf", "inss", "fgts", "gps", "cofins",
-  "pis/pasep", "pis", "irpj", "csll", "iss",
-  "icms", "simples", "das", "contribuição",
+  "darf",
+  "inss",
+  "fgts",
+  "gps",
+  "cofins",
+  "pis/pasep",
+  "pis",
+  "irpj",
+  "csll",
+  "iss",
+  "icms",
+  "simples",
+  "das",
+  "contribuição",
 ];
 
 /** Normaliza um string para comparação (minúsculas + sem acentos). */
@@ -488,7 +498,10 @@ export const suggestPaymentBatches = functions
     }
 
     // 2. Organiza os documentos por empresa
-    const byCompany = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
+    const byCompany = new Map<
+      string,
+      admin.firestore.QueryDocumentSnapshot[]
+    >();
     for (const doc of snapshot.docs) {
       const companyId: string = doc.data().companyId;
       if (!companyId) continue;
@@ -497,7 +510,7 @@ export const suggestPaymentBatches = functions
     }
 
     console.log(
-      `suggestPaymentBatches: ${snapshot.size} transações em ${byCompany.size} empresa(s).`
+      `suggestPaymentBatches: ${snapshot.size} transações em ${byCompany.size} empresa(s).`,
     );
 
     // 3. Processa empresa por empresa
@@ -514,7 +527,7 @@ export const suggestPaymentBatches = functions
       };
 
       const supplierGroups = new Map<string, GroupAcc>();
-      const dueDateGroups  = new Map<string, GroupAcc>();
+      const dueDateGroups = new Map<string, GroupAcc>();
       const taxGroup: GroupAcc = {
         ids: [],
         totalAmount: 0,
@@ -526,8 +539,8 @@ export const suggestPaymentBatches = functions
 
       for (const doc of docs) {
         const d = doc.data();
-        const amount: number      = Number(d.amount || 0);
-        const supplier: string    = d.supplierOrClient || "";
+        const amount: number = Number(d.amount || 0);
+        const supplier: string = d.supplierOrClient || "";
         const description: string = d.description || "";
         const dueDate: Date | null = d.dueDate ? d.dueDate.toDate() : null;
 
@@ -624,7 +637,7 @@ export const suggestPaymentBatches = functions
 
       await writeBatchFS.commit();
       console.log(
-        `suggestPaymentBatches [${companyId}]: ${suggestions.length} sugestão(ões) gravada(s).`
+        `suggestPaymentBatches [${companyId}]: ${suggestions.length} sugestão(ões) gravada(s).`,
       );
     }
 
@@ -666,25 +679,34 @@ export const processRecurringTemplates = functions
           // 1) Leia o template e garanta dados atualizados
           const templateSnap = await t.get(templateRef);
           if (!templateSnap.exists) return false;
-          
+
           const data = templateSnap.data() as any;
           if (!data.active) return false;
-          
-          const nextDueDate = data.nextDueDate ? data.nextDueDate.toDate() : null;
+
+          const nextDueDate = data.nextDueDate
+            ? data.nextDueDate.toDate()
+            : null;
           const endDate = data.endDate ? data.endDate.toDate() : null;
 
           if (!nextDueDate) return false;
 
-          const thresholdDate = data.type === "payable" ? addDays(today, 7) : today;
+          const thresholdDate =
+            data.type === "payable" ? addDays(today, 7) : today;
 
           // 2) Verifique se a data ainda está dentro da janela
-          if (isBefore(nextDueDate, thresholdDate) || isSameDay(nextDueDate, thresholdDate)) {
+          if (
+            isBefore(nextDueDate, thresholdDate) ||
+            isSameDay(nextDueDate, thresholdDate)
+          ) {
             if (endDate && isBefore(endDate, today)) {
               t.update(templateRef, { active: false });
               return false;
             }
 
-            const costCenterIds = data.baseTransactionData?.costCenterAllocation?.map((a: any) => a.costCenterId) || [];
+            const costCenterIds =
+              data.baseTransactionData?.costCenterAllocation?.map(
+                (a: any) => a.costCenterId,
+              ) || [];
             const costCenterId = costCenterIds[0] || null;
 
             const newTransactionData = {
@@ -704,7 +726,7 @@ export const processRecurringTemplates = functions
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               costCenterIds,
-              costCenterId
+              costCenterId,
             };
 
             // 3) Cria o documento na coleção `transactions` em lote transacional
@@ -715,10 +737,18 @@ export const processRecurringTemplates = functions
             const interval = data.interval || 1;
 
             switch (data.frequency) {
-              case "daily": nextDate = addDays(nextDate, interval); break;
-              case "weekly": nextDate = addWeeks(nextDate, interval); break;
-              case "monthly": nextDate = addMonths(nextDate, interval); break;
-              case "yearly": nextDate = addYears(nextDate, interval); break;
+              case "daily":
+                nextDate = addDays(nextDate, interval);
+                break;
+              case "weekly":
+                nextDate = addWeeks(nextDate, interval);
+                break;
+              case "monthly":
+                nextDate = addMonths(nextDate, interval);
+                break;
+              case "yearly":
+                nextDate = addYears(nextDate, interval);
+                break;
             }
 
             // 4) Atualiza o nextDueDate do template
@@ -741,6 +771,8 @@ export const processRecurringTemplates = functions
       }
     }
 
-    console.log(`processRecurringTemplates: concluído. ${generatedCount} transação(ões) gerada(s).`);
+    console.log(
+      `processRecurringTemplates: concluído. ${generatedCount} transação(ões) gerada(s).`,
+    );
     return null;
   });

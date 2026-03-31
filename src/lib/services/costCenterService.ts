@@ -138,13 +138,20 @@ export const costCenterService = {
     }
 
     // Get all non-rejected receivables allocated to this cost center
-    // Include all statuses (draft, pending_approval, approved, paid) for projected revenue
+    // Include all positive statuses (draft, pending_approval, approved, pending_authorization, authorized, paid) for projected revenue
     // For 'user' role, filter by createdBy to match Firestore rules
     let receivablesQuery = query(
       collection(db, "transactions"),
       where("companyId", "==", companyId),
       where("type", "==", "receivable"),
-      where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
+      where("status", "in", [
+        "draft",
+        "pending_approval",
+        "approved",
+        "pending_authorization",
+        "authorized",
+        "paid",
+      ]),
       where("dueDate", ">=", yearStart),
       where("dueDate", "<=", yearEnd),
     );
@@ -160,11 +167,17 @@ export const costCenterService = {
     receivablesSnapshot.docs.forEach((docSnap) => {
       const tx = docSnap.data();
       const allocations = tx.costCenterAllocation || [];
-      allocations.forEach((alloc: { costCenterId: string; amount: number }) => {
-        if (alloc.costCenterId === costCenterId) {
-          fromReceivables += alloc.amount || 0;
-        }
-      });
+      if (allocations.length > 0) {
+        allocations.forEach(
+          (alloc: { costCenterId: string; amount: number }) => {
+            if (alloc.costCenterId === costCenterId) {
+              fromReceivables += alloc.amount || 0;
+            }
+          },
+        );
+      } else if (tx.costCenterId === costCenterId) {
+        fromReceivables += Number(tx.finalAmount || tx.amount || 0);
+      }
     });
 
     // Get payables (non-rejected) allocated to this cost center
@@ -173,7 +186,14 @@ export const costCenterService = {
       collection(db, "transactions"),
       where("companyId", "==", companyId),
       where("type", "==", "payable"),
-      where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
+      where("status", "in", [
+        "draft",
+        "pending_approval",
+        "approved",
+        "pending_authorization",
+        "authorized",
+        "paid",
+      ]),
       where("dueDate", ">=", yearStart),
       where("dueDate", "<=", yearEnd),
     );
@@ -186,11 +206,17 @@ export const costCenterService = {
     payablesSnapshot.docs.forEach((docSnap) => {
       const tx = docSnap.data();
       const allocations = tx.costCenterAllocation || [];
-      allocations.forEach((alloc: { costCenterId: string; amount: number }) => {
-        if (alloc.costCenterId === costCenterId) {
-          spentOnPayables += alloc.amount || 0;
-        }
-      });
+      if (allocations.length > 0) {
+        allocations.forEach(
+          (alloc: { costCenterId: string; amount: number }) => {
+            if (alloc.costCenterId === costCenterId) {
+              spentOnPayables += alloc.amount || 0;
+            }
+          },
+        );
+      } else if (tx.costCenterId === costCenterId) {
+        spentOnPayables += Number(tx.finalAmount || tx.amount || 0);
+      }
     });
 
     const fromParent = costCenter.allocatedFromParent || 0;
@@ -241,7 +267,14 @@ export const costCenterService = {
     let transactionsQuery = query(
       collection(db, "transactions"),
       where("companyId", "==", companyId),
-      where("status", "in", ["draft", "pending_approval", "approved", "paid"]),
+      where("status", "in", [
+        "draft",
+        "pending_approval",
+        "approved",
+        "pending_authorization",
+        "authorized",
+        "paid",
+      ]),
       where("dueDate", ">=", yearStart),
       where("dueDate", "<=", yearEnd),
     );
@@ -276,18 +309,25 @@ export const costCenterService = {
       // Aggregate from loaded transactions
       for (const tx of transactions) {
         const allocations = tx.costCenterAllocation || [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        allocations.forEach((alloc: any) => {
-          if (alloc.costCenterId === cc.id) {
-            if (tx.type === "receivable") {
-              fromReceivables += alloc.amount || 0;
-            } else if (tx.type === "payable") {
-              spentOnPayables += alloc.amount || 0;
+        if (allocations.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          allocations.forEach((alloc: any) => {
+            if (alloc.costCenterId === cc.id) {
+              if (tx.type === "receivable") {
+                fromReceivables += alloc.amount || 0;
+              } else if (tx.type === "payable") {
+                spentOnPayables += alloc.amount || 0;
+              }
             }
+          });
+        } else if (tx.costCenterId === cc.id) {
+          if (tx.type === "receivable") {
+            fromReceivables += Number(tx.finalAmount || tx.amount || 0);
+          } else if (tx.type === "payable") {
+            spentOnPayables += Number(tx.finalAmount || tx.amount || 0);
           }
-        });
+        }
       }
-
       const fromParent = cc.allocatedFromParent || 0;
       const allocatedToChildren = cc.allocatedToChildren || 0;
       const budgetAmount = budgetMap.get(cc.id) || 0;
@@ -344,13 +384,6 @@ export const costCenterService = {
   /**
    * Update the available balance directly (manual adjustment)
    */
-  updateBalance: async (id: string, availableBalance: number) => {
-    const docRef = doc(db, COLLECTION_NAME, id);
-    return updateDoc(docRef, {
-      availableBalance,
-      updatedAt: serverTimestamp(),
-    });
-  },
 };
 
 export const getHierarchicalCostCenters = (items: CostCenter[]) => {
