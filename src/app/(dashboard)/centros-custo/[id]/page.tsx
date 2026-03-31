@@ -358,6 +358,72 @@ export default function CostCenterDashboard() {
         </Card>
       </div>
 
+      {/* Barra de progresso segmentada do orçamento */}
+      {totalBudget > 0 && (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">Utilização do Orçamento {selectedYear}</span>
+            <span className="text-muted-foreground tabular-nums">
+              {totalBudget > 0
+                ? (((allocatedToChildren + directExpenses) / totalBudget) * 100).toFixed(1)
+                : 0}
+              % utilizado
+            </span>
+          </div>
+          {/* Stacked bar */}
+          <div className="h-3 w-full rounded-full bg-muted overflow-hidden flex">
+            {allocatedToChildren > 0 && (
+              <div
+                className="h-full bg-blue-500 transition-all duration-700"
+                style={{ width: `${Math.min((allocatedToChildren / totalBudget) * 100, 100)}%` }}
+                title={`Filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(allocatedToChildren)}`}
+              />
+            )}
+            {directExpenses > 0 && (
+              <div
+                className="h-full bg-red-500 transition-all duration-700"
+                style={{
+                  width: `${Math.min((directExpenses / totalBudget) * 100, 100 - Math.min((allocatedToChildren / totalBudget) * 100, 100))}%`,
+                }}
+                title={`Despesas: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directExpenses)}`}
+              />
+            )}
+          </div>
+          {/* Legenda */}
+          <div className="flex items-center gap-5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-blue-500 shrink-0" />
+              <span>
+                Filhos:{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(allocatedToChildren)}
+                </span>
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
+              <span>
+                Despesas:{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directExpenses)}
+                </span>
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500 shrink-0" />
+              <span>
+                Disponível:{" "}
+                <span
+                  className={`font-medium tabular-nums ${remainingBalance < 0 ? "text-red-500" : "text-emerald-600"}`}
+                >
+                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Math.max(0, remainingBalance))}
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         {/* Charts */}
         <Card className="col-span-4">
