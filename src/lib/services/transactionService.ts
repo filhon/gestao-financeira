@@ -81,6 +81,7 @@ export const transactionService = {
     startDate?: Date;
     endDate?: Date;
     limit?: number;
+    costCenterId?: string;
   }): Promise<Transaction[]> => {
     let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
@@ -95,6 +96,12 @@ export const transactionService = {
     }
     if (filter?.batchId !== undefined) {
       q = query(q, where("batchId", "==", filter.batchId));
+    }
+    if (filter?.costCenterId) {
+      q = query(
+        q,
+        where("costCenterIds", "array-contains", filter.costCenterId),
+      );
     }
     // Filter by createdBy - essential for 'user' role to match Firestore rules
     if (filter?.createdBy) {

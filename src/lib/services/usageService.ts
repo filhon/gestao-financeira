@@ -110,6 +110,28 @@ export const usageService = {
     );
   },
 
+  getUsageByCompanyAndYear: async (companyId: string, year: number) => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", companyId),
+      where("monthKey", ">=", `${year}-01`),
+      where("monthKey", "<=", `${year}-12`),
+    );
+
+    const snapshot = await getDocs(q);
+    const usages: Record<string, number> = {};
+
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data() as { costCenterId: string; amount: number };
+      if (!usages[data.costCenterId]) {
+        usages[data.costCenterId] = 0;
+      }
+      usages[data.costCenterId] += data.amount || 0;
+    });
+
+    return usages;
+  },
+
   recalculateAll: async (companyId: string) => {
     // This function should be called once to migrate existing data
     const q = query(

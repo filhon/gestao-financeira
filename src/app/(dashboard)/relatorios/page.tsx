@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useCostCenterStore } from "@/lib/store/useCostCenterStore";
 import { transactionService } from "@/lib/services/transactionService";
 import { entityService } from "@/lib/services/entityService";
 import { reportService } from "@/lib/services/reportService";
@@ -63,6 +64,16 @@ export default function ReportsPage() {
   const [reportType, setReportType] = useState("cash_flow");
   const [initialBalance, setInitialBalance] = useState(0);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [costCenterFilter, setCostCenterFilter] = useState("all");
+
+  const { costCenters, fetchCostCenters } = useCostCenterStore();
+
+  useEffect(() => {
+    if (selectedCompany) {
+      const forUserId = onlyOwnPayables ? user?.uid : undefined;
+      fetchCostCenters(selectedCompany.id, forUserId);
+    }
+  }, [selectedCompany, user, onlyOwnPayables, fetchCostCenters]);
 
   const handleGenerate = async (formatType: "pdf" | "csv") => {
     if (!selectedCompany || !user) return;
@@ -76,6 +87,7 @@ export default function ReportsPage() {
         createdBy?: string;
         startDate?: Date;
         endDate?: Date;
+        costCenterId?: string;
       } = {
         companyId: selectedCompany.id,
         startDate: startDate,
@@ -83,6 +95,9 @@ export default function ReportsPage() {
       };
       if (onlyOwnPayables) {
         filter.createdBy = user.uid;
+      }
+      if (costCenterFilter !== "all") {
+        filter.costCenterId = costCenterFilter;
       }
 
       const [allTransactions, entities] = await Promise.all([
@@ -278,7 +293,7 @@ export default function ReportsPage() {
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div className="space-y-2">
               <Label>Data Inicial</Label>
               <Popover>
@@ -370,6 +385,25 @@ export default function ReportsPage() {
                     Somente Pendentes
                   </SelectItem>
                   <SelectItem value="draft">Somente Rascunhos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Centro de Custo</Label>
+              <Select
+                value={costCenterFilter}
+                onValueChange={setCostCenterFilter}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {costCenters.map((cc) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

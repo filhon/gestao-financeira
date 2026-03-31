@@ -45,6 +45,7 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSortableData } from "@/hooks/useSortableData";
+import { useCostCenterStore } from "@/lib/store/useCostCenterStore";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 
@@ -67,11 +68,7 @@ function buildTree(items: CostCenter[]): CostCenterNode[] {
     }
   });
 
-  const sortNodeChildren = (node: CostCenterNode) => {
-    node.children.sort((a, b) => a.code.localeCompare(b.code));
-    node.children.forEach(sortNodeChildren);
-  };
-  roots.forEach(sortNodeChildren);
+  // Removido o sortNodeChildren que quebrava a estrutura ao ordenar primariamente: CC-P03
 
   return roots;
 }
@@ -100,6 +97,7 @@ interface CostCenterRowProps {
   onEdit: (cc: CostCenter) => void;
   onDelete: (id: string) => void;
   canManage: boolean;
+  usages: Record<string, number>;
 }
 
 function CostCenterRow({
@@ -109,6 +107,7 @@ function CostCenterRow({
   onEdit,
   onDelete,
   canManage,
+  usages,
 }: CostCenterRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = node.children.length > 0;
@@ -212,7 +211,7 @@ function CostCenterRow({
                   </Badge>
                 )}
               </div>
-              <BudgetBar used={0} total={node.budget} />
+              <BudgetBar used={usages[node.id] || 0} total={node.budget} />
             </>
           ) : (
             <span className="text-muted-foreground">-</span>
@@ -267,6 +266,7 @@ function CostCenterRow({
               onEdit={onEdit}
               onDelete={onDelete}
               canManage={canManage}
+              usages={usages}
             />
           ))}
         </div>
@@ -326,35 +326,27 @@ export default function CostCentersPage() {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
   const { canManageCostCenters, onlyOwnPayables } = usePermissions();
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { costCenters, usages, isLoading, fetchCostCenters } =
+    useCostCenterStore();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const fetchCostCenters = useCallback(async () => {
-    if (!selectedCompany) {
-      setIsLoading(false);
-      return;
-    }
-    try {
+  const loadData = useCallback(
+    async (forceRefresh = false) => {
+      if (!selectedCompany) {
+        return;
+      }
       const forUserId = onlyOwnPayables ? user?.uid : undefined;
-      const data = await costCenterService.getAll(
-        selectedCompany.id,
-        forUserId,
-      );
-      setCostCenters(data);
-    } catch (error) {
-      console.error("Error fetching cost centers:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedCompany, onlyOwnPayables, user]);
+      await fetchCostCenters(selectedCompany.id, forUserId, forceRefresh);
+    },
+    [selectedCompany, onlyOwnPayables, user, fetchCostCenters],
+  );
 
   useEffect(() => {
-    fetchCostCenters();
-  }, [fetchCostCenters]);
+    loadData();
+  }, [loadData]);
 
   const handleSubmit = async (data: CostCenterFormData) => {
     if (!selectedCompany) return;
@@ -378,7 +370,7 @@ export default function CostCentersPage() {
         );
       }
 
-      await fetchCostCenters();
+      await loadData(true);
       setIsDialogOpen(false);
       setEditingId(null);
     } catch (error) {
@@ -399,7 +391,7 @@ export default function CostCentersPage() {
         return;
       }
       await costCenterService.delete(deleteId);
-      await fetchCostCenters();
+      await loadData(true);
       toast.success("Centro de custo excluído com sucesso.");
     } catch (error) {
       console.error("Error deleting cost center:", error);
@@ -609,6 +601,7 @@ export default function CostCentersPage() {
                   onEdit={handleEdit}
                   onDelete={setDeleteId}
                   canManage={canManageCostCenters}
+                  usages={usages}
                 />
               ))
             )}
