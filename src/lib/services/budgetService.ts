@@ -19,11 +19,13 @@ export const budgetService = {
   getByCostCenterAndYear: async (
     costCenterId: string,
     year: number,
+    companyId: string,
   ): Promise<Budget | null> => {
     const q = query(
       collection(db, COLLECTION_NAME),
       where("costCenterId", "==", costCenterId),
       where("year", "==", year),
+      where("companyId", "==", companyId),
       limit(1),
     );
 
@@ -45,11 +47,12 @@ export const budgetService = {
     costCenterId: string,
     year: number,
     amount: number,
-    companyId?: string,
+    companyId: string,
   ) => {
     const existing = await budgetService.getByCostCenterAndYear(
       costCenterId,
       year,
+      companyId,
     );
 
     if (existing) {

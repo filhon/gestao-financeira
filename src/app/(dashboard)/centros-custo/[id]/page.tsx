@@ -83,7 +83,11 @@ export default function CostCenterDashboard() {
               id,
               selectedYear,
             ),
-            budgetService.getByCostCenterAndYear(id, selectedYear),
+            budgetService.getByCostCenterAndYear(
+              id,
+              selectedYear,
+              selectedCompany.id,
+            ),
           ]);
 
           setCostCenter(cc);
@@ -94,7 +98,11 @@ export default function CostCenterDashboard() {
           // Fetch children's budgets for the selected year (BUG-05)
           const kidsBudgets = await Promise.all(
             kids.map((k) =>
-              budgetService.getByCostCenterAndYear(k.id, selectedYear),
+              budgetService.getByCostCenterAndYear(
+                k.id,
+                selectedYear,
+                selectedCompany.id,
+              ),
             ),
           );
           setChildrenBudgetTotal(
@@ -362,10 +370,15 @@ export default function CostCenterDashboard() {
       {totalBudget > 0 && (
         <div className="rounded-lg border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-medium">Utilização do Orçamento {selectedYear}</span>
+            <span className="font-medium">
+              Utilização do Orçamento {selectedYear}
+            </span>
             <span className="text-muted-foreground tabular-nums">
               {totalBudget > 0
-                ? (((allocatedToChildren + directExpenses) / totalBudget) * 100).toFixed(1)
+                ? (
+                    ((allocatedToChildren + directExpenses) / totalBudget) *
+                    100
+                  ).toFixed(1)
                 : 0}
               % utilizado
             </span>
@@ -375,7 +388,9 @@ export default function CostCenterDashboard() {
             {allocatedToChildren > 0 && (
               <div
                 className="h-full bg-blue-500 transition-all duration-700"
-                style={{ width: `${Math.min((allocatedToChildren / totalBudget) * 100, 100)}%` }}
+                style={{
+                  width: `${Math.min((allocatedToChildren / totalBudget) * 100, 100)}%`,
+                }}
                 title={`Filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(allocatedToChildren)}`}
               />
             )}
@@ -396,7 +411,10 @@ export default function CostCenterDashboard() {
               <span>
                 Filhos:{" "}
                 <span className="font-medium text-foreground tabular-nums">
-                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(allocatedToChildren)}
+                  {new Intl.NumberFormat("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  }).format(allocatedToChildren)}
                 </span>
               </span>
             </div>
@@ -405,7 +423,10 @@ export default function CostCenterDashboard() {
               <span>
                 Despesas:{" "}
                 <span className="font-medium text-foreground tabular-nums">
-                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directExpenses)}
+                  {new Intl.NumberFormat("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  }).format(directExpenses)}
                 </span>
               </span>
             </div>
@@ -416,7 +437,10 @@ export default function CostCenterDashboard() {
                 <span
                   className={`font-medium tabular-nums ${remainingBalance < 0 ? "text-red-500" : "text-emerald-600"}`}
                 >
-                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Math.max(0, remainingBalance))}
+                  {new Intl.NumberFormat("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  }).format(Math.max(0, remainingBalance))}
                 </span>
               </span>
             </div>

@@ -103,11 +103,12 @@ export function CostCenterForm({
 
   useEffect(() => {
     const loadBudget = async () => {
-      if (editingId && watchedYear) {
+      if (editingId && watchedYear && selectedCompany) {
         try {
           const budget = await budgetService.getByCostCenterAndYear(
             editingId,
             watchedYear,
+            selectedCompany.id,
           );
           if (budget) {
             form.setValue("budget", budget.amount);
@@ -134,7 +135,7 @@ export function CostCenterForm({
     // Debounce or check if year actually changed?
     // For now, simple effect.
     loadBudget();
-  }, [editingId, watchedYear, form]);
+  }, [editingId, watchedYear, form, selectedCompany]);
 
   // Load balance info when editing (filtered by selected year)
   useEffect(() => {
@@ -257,12 +258,16 @@ export function CostCenterForm({
                                 {depth > 0 && (
                                   <span
                                     className="text-muted-foreground/50"
-                                    style={{ paddingLeft: `${(depth - 1) * 12}px` }}
+                                    style={{
+                                      paddingLeft: `${(depth - 1) * 12}px`,
+                                    }}
                                   >
                                     {"↳ "}
                                   </span>
                                 )}
-                                <span>{cc.code} — {cc.name}</span>
+                                <span>
+                                  {cc.code} — {cc.name}
+                                </span>
                               </span>
                             </SelectItem>
                           );
@@ -335,8 +340,18 @@ export function CostCenterForm({
                         <div className="flex items-center h-9 border border-input rounded-md bg-transparent shadow-xs">
                           <button
                             type="button"
-                            onClick={() => field.onChange(Math.max(minYear, (field.value ?? new Date().getFullYear()) - 1))}
-                            disabled={(field.value ?? new Date().getFullYear()) <= minYear}
+                            onClick={() =>
+                              field.onChange(
+                                Math.max(
+                                  minYear,
+                                  (field.value ?? new Date().getFullYear()) - 1,
+                                ),
+                              )
+                            }
+                            disabled={
+                              (field.value ?? new Date().getFullYear()) <=
+                              minYear
+                            }
                             className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                             aria-label="Ano anterior"
                           >
@@ -347,8 +362,18 @@ export function CostCenterForm({
                           </span>
                           <button
                             type="button"
-                            onClick={() => field.onChange(Math.min(maxYear, (field.value ?? new Date().getFullYear()) + 1))}
-                            disabled={(field.value ?? new Date().getFullYear()) >= maxYear}
+                            onClick={() =>
+                              field.onChange(
+                                Math.min(
+                                  maxYear,
+                                  (field.value ?? new Date().getFullYear()) + 1,
+                                ),
+                              )
+                            }
+                            disabled={
+                              (field.value ?? new Date().getFullYear()) >=
+                              maxYear
+                            }
                             className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                             aria-label="Próximo ano"
                           >
@@ -423,9 +448,12 @@ export function CostCenterForm({
 
               {/* Barra de utilização */}
               {(() => {
-                const total = balanceInfo.fromReceivables + balanceInfo.fromParent;
-                const spent = balanceInfo.spentOnPayables + balanceInfo.allocatedToChildren;
-                const pct = total > 0 ? Math.min((spent / total) * 100, 100) : 0;
+                const total =
+                  balanceInfo.fromReceivables + balanceInfo.fromParent;
+                const spent =
+                  balanceInfo.spentOnPayables + balanceInfo.allocatedToChildren;
+                const pct =
+                  total > 0 ? Math.min((spent / total) * 100, 100) : 0;
                 return (
                   <div className="space-y-1">
                     <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -444,14 +472,18 @@ export function CostCenterForm({
               {/* Detalhes */}
               <div className="border-t pt-3 space-y-1.5">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Receitas Projetadas</span>
+                  <span className="text-muted-foreground">
+                    Receitas Projetadas
+                  </span>
                   <span className="font-medium text-emerald-600 tabular-nums">
                     +{formatCurrency(balanceInfo.fromReceivables)}
                   </span>
                 </div>
                 {balanceInfo.fromParent > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Recebido do Pai</span>
+                    <span className="text-muted-foreground">
+                      Recebido do Pai
+                    </span>
                     <span className="font-medium text-blue-600 tabular-nums">
                       +{formatCurrency(balanceInfo.fromParent)}
                     </span>
@@ -459,14 +491,18 @@ export function CostCenterForm({
                 )}
                 {balanceInfo.allocatedToChildren > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Alocado para Filhos</span>
+                    <span className="text-muted-foreground">
+                      Alocado para Filhos
+                    </span>
                     <span className="font-medium text-orange-600 tabular-nums">
                       -{formatCurrency(balanceInfo.allocatedToChildren)}
                     </span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Despesas Previstas</span>
+                  <span className="text-muted-foreground">
+                    Despesas Previstas
+                  </span>
                   <span className="font-medium text-red-600 tabular-nums">
                     -{formatCurrency(balanceInfo.spentOnPayables)}
                   </span>

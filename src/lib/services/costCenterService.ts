@@ -11,6 +11,7 @@ import {
   serverTimestamp,
   Timestamp,
   getDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { CostCenter } from "@/lib/types";
@@ -199,6 +200,7 @@ export const costCenterService = {
     const budget = await budgetService.getByCostCenterAndYear(
       costCenterId,
       targetYear,
+      companyId,
     );
     const budgetAmount = budget?.amount || 0;
 
@@ -258,7 +260,7 @@ export const costCenterService = {
     // Note: Ideally we would query budgets by companyId, but schema doesn't have it yet
     const budgets = await Promise.all(
       costCenters.map((cc) =>
-        budgetService.getByCostCenterAndYear(cc.id, targetYear),
+        budgetService.getByCostCenterAndYear(cc.id, targetYear, companyId),
       ),
     );
     const budgetMap = new Map(
@@ -323,19 +325,23 @@ export const costCenterService = {
 
     if (!parent || !child) throw new Error("Cost center not found");
 
+    const batch = writeBatch(db);
+
     // Update parent's allocatedToChildren
     const newParentAllocated = (parent.allocatedToChildren || 0) + amount;
-    await updateDoc(parentRef, {
+    batch.update(parentRef, {
       allocatedToChildren: newParentAllocated,
       updatedAt: serverTimestamp(),
     });
 
     // Update child's allocatedFromParent
     const newChildAllocated = (child.allocatedFromParent || 0) + amount;
-    await updateDoc(childRef, {
+    batch.update(childRef, {
       allocatedFromParent: newChildAllocated,
       updatedAt: serverTimestamp(),
     });
+
+    await batch.commit();
   },
 
   /**

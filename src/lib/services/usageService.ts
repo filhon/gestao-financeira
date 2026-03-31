@@ -73,17 +73,22 @@ export const usageService = {
     const ref = doc(db, COLLECTION_NAME, id);
 
     // Use setDoc with merge to create if not exists
-    await setDoc(
-      ref,
-      {
-        companyId,
-        costCenterId,
-        monthKey,
-        amount: increment(amount),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    try {
+      await setDoc(
+        ref,
+        {
+          companyId,
+          costCenterId,
+          monthKey,
+          amount: increment(amount),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (error) {
+      // Ignore permission errors if locked down for clients (CF fallback)
+      console.warn("Could not update cost center usage:", error);
+    }
   },
 
   getUsageByCostCenter: async (

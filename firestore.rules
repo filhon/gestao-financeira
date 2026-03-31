@@ -230,8 +230,8 @@ service cloud.firestore {
        // Read: Same as reports/dashboard
        allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
        
-       // Write: Anyone who can create/update transactions needs to update usage
-       allow write: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'user']);
+       // Write: Only Cloud Functions or strict managers
+       allow write: if isAuthenticated() && isManager(getCompanyId());
     }
     
     // 13. Company Stats (Current Balance)
