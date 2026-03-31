@@ -1,6 +1,6 @@
 "use client";
 
-import { Upload, FileText, FileSpreadsheet } from "lucide-react";
+import { Upload, FileText, FileSpreadsheet, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useState, useRef } from "react";
@@ -12,21 +12,18 @@ import { toast } from "sonner";
 export function UploadStatement() {
   const { selectedCompany } = useCompany();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processFile = async (file: File) => {
     if (!selectedCompany?.id) {
       toast.error("Selecione uma empresa antes de importar.");
       return;
     }
 
-    const file = e.target.files?.[0];
-    if (!file) return;
-
     setIsProcessing(true);
     try {
       const text = await file.text();
-      // Simple format detection based on extension for now
       const isJson = file.name.endsWith(".json");
       const isOfx = file.name.endsWith(".ofx");
       const transactions = await ReconciliationService.parseStatement(
@@ -39,7 +36,6 @@ export function UploadStatement() {
         return;
       }
 
-      // Grave no Firebase em vez do localStorage
       await reconciliationSessionService.saveSession(
         selectedCompany.id,
         transactions,
@@ -53,16 +49,46 @@ export function UploadStatement() {
       toast.error("Erro ao processar arquivo.");
     } finally {
       setIsProcessing(false);
-      // Reset input
       if (inputRef.current) inputRef.current.value = "";
     }
   };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    await processFile(file);
+  };
+
   return (
     <div
-      onClick={() => inputRef.current?.click()}
+      onClick={() => !isProcessing && inputRef.current?.click()}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       className={cn(
-        "border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors border-muted-foreground/25 hover:border-primary/50",
+        "border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-all duration-200",
+        isDragging
+          ? "border-primary bg-primary/5 scale-[1.01]"
+          : "border-muted-foreground/25 hover:border-primary/50",
+        isProcessing && "cursor-default opacity-70",
       )}
     >
       <input
@@ -73,19 +99,34 @@ export function UploadStatement() {
         accept=".csv,.json,.ofx,.txt"
       />
       <div className="flex flex-col items-center gap-4">
-        <div className="p-4 bg-muted rounded-full">
-          <Upload className="h-8 w-8 text-muted-foreground" />
+        <div className={cn(
+          "p-4 rounded-full transition-colors",
+          isDragging ? "bg-primary/10" : "bg-muted",
+        )}>
+          <Upload className={cn(
+            "h-8 w-8 transition-colors",
+            isDragging ? "text-primary" : "text-muted-foreground",
+          )} />
         </div>
         <div>
-          <h3 className="text-lg font-semibold">Importar Extrato Bancário</h3>
+          <h3 className="text-lg font-semibold">
+            {isDragging ? "Solte o arquivo aqui" : "Importar Extrato Bancário"}
+          </h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Clique para selecionar arquivo (OFX, CSV ou JSON)
+            {isDragging
+              ? "Formato OFX, CSV ou JSON"
+              : "Arraste um arquivo ou clique para selecionar (OFX, CSV ou JSON)"}
           </p>
         </div>
         {isProcessing ? (
-          <Button disabled>Processando...</Button>
+          <Button disabled>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Processando...
+          </Button>
         ) : (
-          <Button variant="outline">Selecionar Arquivo</Button>
+          <Button variant="outline" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
+            Selecionar Arquivo
+          </Button>
         )}
       </div>
       <div className="flex justify-center gap-4 mt-6 text-xs text-muted-foreground">
@@ -94,6 +135,9 @@ export function UploadStatement() {
         </span>
         <span className="flex items-center gap-1">
           <FileSpreadsheet className="h-3 w-3" /> CSV
+        </span>
+        <span className="flex items-center gap-1">
+          <FileText className="h-3 w-3" /> JSON
         </span>
       </div>
     </div>

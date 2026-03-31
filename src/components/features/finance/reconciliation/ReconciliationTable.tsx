@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
-import { Check, Plus, X } from "lucide-react";
+import { Check, Plus, X, CheckCircle2, Zap, MinusCircle, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BankTransaction } from "@/lib/types";
 
@@ -43,21 +43,35 @@ export function ReconciliationTable({
     switch (status) {
       case "matched":
         return (
-          <Badge className="bg-green-500 hover:bg-green-600">Corresp.</Badge>
+          <Badge className="bg-green-500 hover:bg-green-600 gap-1">
+            <CheckCircle2 className="h-3 w-3" />
+            Corresp.
+          </Badge>
         );
       case "potential_match":
         return (
           <Badge
             variant="secondary"
-            className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+            className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200 gap-1"
           >
+            <Zap className="h-3 w-3" />
             Sugestão
           </Badge>
-        ); // yellow
+        );
       case "ignored":
-        return <Badge variant="outline">Ignorado</Badge>;
+        return (
+          <Badge variant="outline" className="gap-1">
+            <MinusCircle className="h-3 w-3" />
+            Ignorado
+          </Badge>
+        );
       default:
-        return <Badge variant="secondary">Novo</Badge>;
+        return (
+          <Badge variant="secondary" className="gap-1">
+            <Circle className="h-3 w-3" />
+            Novo
+          </Badge>
+        );
     }
   };
 
@@ -99,10 +113,14 @@ export function ReconciliationTable({
 
               <TableCell
                 className={cn(
+                  "font-medium",
                   tx.amount < 0 ? "text-red-600" : "text-green-600",
                 )}
               >
-                {formatCurrency(tx.amount)}
+                <span className="text-xs mr-1 opacity-70">
+                  {tx.amount < 0 ? "▼" : "▲"}
+                </span>
+                {formatCurrency(Math.abs(tx.amount))}
               </TableCell>
               <TableCell>{getStatusBadge(tx.status)}</TableCell>
               <TableCell>
@@ -160,9 +178,24 @@ export function ReconciliationTable({
                       </span>
                     )}
                     {tx.confidence && tx.confidence < 100 && (
-                      <span className="text-yellow-600 text-xs mt-1 block font-bold">
-                        Match: {tx.confidence}%
-                      </span>
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <div className="h-1 rounded-full bg-muted flex-1 overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-1 rounded-full transition-all",
+                              tx.confidence >= 80
+                                ? "bg-green-500"
+                                : tx.confidence >= 60
+                                  ? "bg-yellow-500"
+                                  : "bg-red-400",
+                            )}
+                            style={{ width: `${tx.confidence}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                          {tx.confidence}%
+                        </span>
+                      </div>
                     )}
                   </div>
                 ) : tx.matchedTransactionId ? (
@@ -171,9 +204,24 @@ export function ReconciliationTable({
                       ID: {tx.matchedTransactionId.slice(0, 8)}...
                     </span>
                     {tx.confidence && tx.confidence < 100 && (
-                      <span className="text-yellow-600 text-xs">
-                        ({tx.confidence}%)
-                      </span>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <div className="h-1 rounded-full bg-muted flex-1 overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-1 rounded-full",
+                              tx.confidence >= 80
+                                ? "bg-green-500"
+                                : tx.confidence >= 60
+                                  ? "bg-yellow-500"
+                                  : "bg-red-400",
+                            )}
+                            style={{ width: `${tx.confidence}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                          {tx.confidence}%
+                        </span>
+                      </div>
                     )}
                   </div>
                 ) : tx.matchCandidates && tx.matchCandidates.length > 0 ? (
@@ -204,7 +252,22 @@ export function ReconciliationTable({
                               "dd/MM/yyyy",
                             )}
                           </span>
-                          <span>Score: {c.score}%</span>
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-1 rounded-full bg-muted w-12 overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-1 rounded-full",
+                                  c.score >= 80
+                                    ? "bg-green-500"
+                                    : c.score >= 60
+                                      ? "bg-yellow-500"
+                                      : "bg-red-400",
+                                )}
+                                style={{ width: `${c.score}%` }}
+                              />
+                            </div>
+                            <span>{c.score}%</span>
+                          </div>
                         </div>
                         <div className="flex justify-end">
                           <Button

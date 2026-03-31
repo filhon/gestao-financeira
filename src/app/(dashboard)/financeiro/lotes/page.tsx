@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { notificationService } from "@/lib/services/notificationService";
@@ -14,6 +14,11 @@ import {
   Edit,
   CalendarIcon,
   Trash2,
+  Package,
+  Layers,
+  Clock,
+  CheckCircle2,
+  DollarSign,
 } from "lucide-react";
 import {
   Table,
@@ -68,6 +73,13 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function PaymentBatchesPage() {
   const { selectedCompany } = useCompany();
@@ -132,6 +144,24 @@ export default function PaymentBatchesPage() {
     pageSize,
     enabled: !!selectedCompany && canViewBatches,
   });
+
+  const kpiData = useMemo(() => {
+    const open = batches.filter((b) => b.status === "open");
+    const pending = batches.filter(
+      (b) =>
+        b.status === "pending_approval" || b.status === "pending_authorization",
+    );
+    const authorized = batches.filter((b) => b.status === "authorized");
+    const paid = batches.filter((b) => b.status === "paid");
+    return {
+      openCount: open.length,
+      openTotal: open.reduce((s, b) => s + b.totalAmount, 0),
+      pendingCount: pending.length,
+      authorizedCount: authorized.length,
+      authorizedTotal: authorized.reduce((s, b) => s + b.totalAmount, 0),
+      paidTotal: paid.reduce((s, b) => s + b.totalAmount, 0),
+    };
+  }, [batches]);
 
   if (!canViewBatches) return null;
 
@@ -385,25 +415,72 @@ export default function PaymentBatchesPage() {
     }
   };
 
+  const STATUS_CONFIG: Record<
+    string,
+    { label: string; color: string; dot: string }
+  > = {
+    open: {
+      label: "Aberto",
+      color: "bg-slate-100 text-slate-700 border-slate-200",
+      dot: "bg-slate-400",
+    },
+    pending_approval: {
+      label: "Ag. Aprovação",
+      color: "bg-amber-50 text-amber-700 border-amber-200",
+      dot: "bg-amber-400 animate-pulse",
+    },
+    approved: {
+      label: "Aprovado",
+      color: "bg-green-50 text-green-700 border-green-200",
+      dot: "bg-green-500",
+    },
+    pending_authorization: {
+      label: "Ag. Autorização",
+      color: "bg-amber-50 text-amber-700 border-amber-200",
+      dot: "bg-amber-400 animate-pulse",
+    },
+    authorized: {
+      label: "Autorizado",
+      color: "bg-teal-50 text-teal-700 border-teal-200",
+      dot: "bg-teal-500",
+    },
+    paid: {
+      label: "Pago",
+      color: "bg-blue-50 text-blue-700 border-blue-200",
+      dot: "bg-blue-500",
+    },
+    rejected: {
+      label: "Rejeitado",
+      color: "bg-red-50 text-red-700 border-red-200",
+      dot: "bg-red-500",
+    },
+  };
+
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "open":
-        return <Badge variant="outline">Aberto</Badge>;
-      case "pending_approval":
-        return <Badge className="bg-amber-500">Aguardando Aprovação</Badge>;
-      case "approved":
-        return <Badge className="bg-green-500">Aprovado</Badge>;
-      case "pending_authorization":
-        return <Badge className="bg-amber-500">Aguardando Autorização</Badge>;
-      case "authorized":
-        return <Badge className="bg-teal-500">Autorizado</Badge>;
-      case "paid":
-        return <Badge className="bg-blue-500">Pago</Badge>;
-      case "rejected":
-        return <Badge variant="destructive">Rejeitado</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
-    }
+    const cfg = STATUS_CONFIG[status];
+    if (!cfg) return <Badge>{status}</Badge>;
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border",
+          cfg.color,
+        )}
+      >
+        <span className={cn("h-1.5 w-1.5 rounded-full flex-shrink-0", cfg.dot)} />
+        {cfg.label}
+      </span>
+    );
+  };
+
+  const STATUS_LABELS: Record<string, string> = {
+    all: "Todos",
+    open: "Aberto",
+    pending_approval: "Ag. Aprovação",
+    approved: "Aprovado",
+    pending_authorization: "Ag. Autorização",
+    authorized: "Autorizado",
+    paid: "Pago",
+    rejected: "Rejeitado",
   };
 
   const getResponsiblePerson = (batch: PaymentBatch) => {
@@ -525,6 +602,68 @@ export default function PaymentBatchesPage() {
         )}
       </div>
 
+      {/* KPI Summary Cards */}
+      {!isPaginatedLoading && batches.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
+              <Layers className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{kpiData.openCount}</div>
+              <p className="text-xs text-muted-foreground">
+                {formatCurrency(kpiData.openTotal)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className={kpiData.pendingCount > 0 ? "border-amber-200 dark:border-amber-900" : ""}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Aguardando Ação
+              </CardTitle>
+              <Clock
+                className={`h-4 w-4 ${kpiData.pendingCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
+              />
+            </CardHeader>
+            <CardContent>
+              <div
+                className={`text-2xl font-bold ${kpiData.pendingCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              >
+                {kpiData.pendingCount}
+              </div>
+              <p className="text-xs text-muted-foreground">lotes pendentes</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Autorizados</CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
+                {kpiData.authorizedCount}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {formatCurrency(kpiData.authorizedTotal)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Pago</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                {formatCurrency(kpiData.paidTotal)}
+              </div>
+              <p className="text-xs text-muted-foreground">no período</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div className="flex justify-between items-center bg-muted/20 p-4 rounded-lg border">
         <div className="flex items-center gap-2">
           <Label>Status:</Label>
@@ -556,9 +695,32 @@ export default function PaymentBatchesPage() {
 
       <div className="border rounded-lg">
         {isLoading || (isPaginatedLoading && batches.length === 0) ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Responsável</TableHead>
+                <TableHead>Transações</TableHead>
+                <TableHead>Valor Total</TableHead>
+                <TableHead>Criado em</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-36" /></TableCell>
+                  <TableCell><Skeleton className="h-6 w-24 rounded-full" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         ) : (
           <>
             <Table>
@@ -576,11 +738,40 @@ export default function PaymentBatchesPage() {
               <TableBody>
                 {batches.length === 0 ? (
                   <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="text-center py-8 text-muted-foreground"
-                    >
-                      Nenhum lote encontrado.
+                    <TableCell colSpan={7}>
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <div className="rounded-full bg-muted p-4 mb-4">
+                          <Package className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                        <p className="font-medium text-lg">
+                          Nenhum lote encontrado
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                          {filterStatus === "all"
+                            ? "Crie um novo lote para agrupar e gerenciar pagamentos."
+                            : `Não há lotes com status "${STATUS_LABELS[filterStatus] ?? filterStatus}".`}
+                        </p>
+                        {filterStatus !== "all" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-4"
+                            onClick={() => setFilterStatus("all")}
+                          >
+                            Ver todos os lotes
+                          </Button>
+                        )}
+                        {canManageBatches && filterStatus === "all" && (
+                          <Button
+                            size="sm"
+                            className="mt-4"
+                            onClick={() => setIsCreateOpen(true)}
+                          >
+                            <Plus className="mr-2 h-4 w-4" /> Criar Primeiro
+                            Lote
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -601,6 +792,42 @@ export default function PaymentBatchesPage() {
                         })}
                       </TableCell>
                       <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {batch.status === "pending_approval" &&
+                            canApproveBatches && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-green-200 text-green-700 hover:bg-green-50"
+                                onClick={() => handleOpenApproval(batch)}
+                              >
+                                Aprovar
+                              </Button>
+                            )}
+                          {batch.status === "pending_authorization" &&
+                            canPayBatches && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-teal-200 text-teal-700 hover:bg-teal-50"
+                                onClick={() =>
+                                  handleConfirmAuthorization(batch)
+                                }
+                              >
+                                Autorizar
+                              </Button>
+                            )}
+                          {batch.status === "authorized" &&
+                            canManageBatches && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
+                                onClick={() => handleConfirmPayments(batch)}
+                              >
+                                Confirmar Pgto
+                              </Button>
+                            )}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" className="h-8 w-8 p-0">
@@ -699,6 +926,7 @@ export default function PaymentBatchesPage() {
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))

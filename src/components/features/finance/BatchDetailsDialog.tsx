@@ -26,6 +26,8 @@ import {
   ArrowUp,
   ArrowDown,
   Plus,
+  PackageOpen,
+  ChevronDown,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +40,11 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useSortableData } from "@/hooks/useSortableData";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface BatchDetailsDialogProps {
   batch: PaymentBatch | null;
@@ -558,35 +565,44 @@ export function BatchDetailsDialog({
 
   if (!batch) return null;
 
+  const liveTotal = transactions.reduce(
+    (sum, t) =>
+      sum +
+      ((t as Transaction & { batchAdjustedAmount?: number })
+        .batchAdjustedAmount ?? t.amount),
+    0,
+  );
+
+  const batchStatusLabel =
+    batch.status === "open" ? "Aberto" : "Fechado";
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[90vw] w-full max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Detalhes do Lote: {batch.name}</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex gap-4 text-sm text-muted-foreground">
-              <span>
-                Total:{" "}
-                {formatCurrency(
-                  transactions.reduce(
-                    (sum, t) =>
-                      sum +
-                      ((t as Transaction & { batchAdjustedAmount?: number })
-                        .batchAdjustedAmount ?? t.amount),
-                    0,
-                  ),
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant="outline" className="shrink-0">
+                  {batchStatusLabel}
+                </Badge>
+                {batch.startDate && batch.endDate && (
+                  <span className="text-xs text-muted-foreground truncate">
+                    {format(new Date(batch.startDate), "dd/MM/yyyy")} →{" "}
+                    {format(new Date(batch.endDate), "dd/MM/yyyy")}
+                  </span>
                 )}
-              </span>
-              <span>Itens: {transactions.length}</span>
+              </div>
+              <DialogTitle className="text-xl leading-tight">
+                {batch.name}
+              </DialogTitle>
             </div>
             <Button
               variant="outline"
               size="sm"
               onClick={handleExport}
               disabled={isExporting}
+              className="shrink-0"
             >
               {isExporting ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -597,68 +613,106 @@ export function BatchDetailsDialog({
             </Button>
           </div>
 
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            <div className="rounded-lg border bg-card p-3">
+              <p className="text-xs text-muted-foreground mb-1">
+                Total do Lote
+              </p>
+              <p className="text-xl font-bold tabular-nums">
+                {formatCurrency(liveTotal)}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <p className="text-xs text-muted-foreground mb-1">Transações</p>
+              <p className="text-xl font-bold tabular-nums">
+                {transactions.length}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <p className="text-xs text-muted-foreground mb-1">
+                Não incluídas
+              </p>
+              <p
+                className={`text-xl font-bold tabular-nums ${missingTransactions.length > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              >
+                {missingTransactions.length}
+              </p>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-4">
           {missingTransactions.length > 0 &&
             batch.status === "open" &&
             canManageBatches && (
-              <div className="border rounded-md border-amber-200 bg-amber-50 dark:bg-amber-950/20">
-                <div className="p-4 border-b border-amber-200">
-                  <h3 className="font-semibold text-amber-800 dark:text-amber-200">
-                    Transações não incluídas ({missingTransactions.length})
-                  </h3>
-                  <p className="text-sm text-amber-700 dark:text-amber-300">
-                    Existem transações em rascunho neste período que ainda não
-                    foram adicionadas ao lote.
-                  </p>
+              <Collapsible defaultOpen>
+                <div className="border rounded-md border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+                  <CollapsibleTrigger className="flex w-full items-center justify-between p-4 border-b border-amber-200 hover:bg-amber-100/50 dark:hover:bg-amber-950/30 transition-colors rounded-t-md">
+                    <div className="text-left">
+                      <h3 className="font-semibold text-amber-800 dark:text-amber-200">
+                        Transações não incluídas ({missingTransactions.length})
+                      </h3>
+                      <p className="text-sm text-amber-700 dark:text-amber-300">
+                        Existem transações em rascunho neste período que ainda
+                        não foram adicionadas ao lote.
+                      </p>
+                    </div>
+                    <ChevronDown className="h-4 w-4 text-amber-700 dark:text-amber-300 shrink-0 ml-2 transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Vencimento</TableHead>
+                          <TableHead>Descrição</TableHead>
+                          <TableHead>Fornecedor</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                          <TableHead className="w-[50px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {missingTransactions.map((t) => (
+                          <TableRow key={t.id}>
+                            <TableCell>
+                              {format(t.dueDate, "dd/MM/yyyy")}
+                            </TableCell>
+                            <TableCell className="max-w-0 w-[300px]">
+                              <span className="block truncate" title={t.description}>
+                                {t.description}
+                              </span>
+                            </TableCell>
+                            <TableCell>{t.supplierOrClient}</TableCell>
+                            <TableCell className="text-right">
+                              {formatCurrency(t.amount)}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                onClick={() => handleAddTransaction(t)}
+                                disabled={addingId === t.id}
+                              >
+                                {addingId === t.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Plus className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {hasMoreMissing && (
+                      <div className="p-2 text-center text-xs text-amber-700 dark:text-amber-300 border-t border-amber-200 bg-amber-50/50">
+                        Exibindo os primeiros {MISSING_LIMIT} itens. Adicione
+                        estes itens para ver o restante ou refine o período.
+                      </div>
+                    )}
+                  </CollapsibleContent>
                 </div>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Vencimento</TableHead>
-                      <TableHead>Descrição</TableHead>
-                      <TableHead>Fornecedor</TableHead>
-                      <TableHead className="text-right">Valor</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {missingTransactions.map((t) => (
-                      <TableRow key={t.id}>
-                        <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
-                        <TableCell className="max-w-[300px]">
-                          <span className="truncate" title={t.description}>
-                            {t.description}
-                          </span>
-                        </TableCell>
-                        <TableCell>{t.supplierOrClient}</TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(t.amount)}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-primary"
-                            onClick={() => handleAddTransaction(t)}
-                            disabled={addingId === t.id}
-                          >
-                            {addingId === t.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Plus className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {hasMoreMissing && (
-                  <div className="p-2 text-center text-xs text-amber-700 dark:text-amber-300 border-t border-amber-200 bg-amber-50/50">
-                    Exibindo os primeiros {MISSING_LIMIT} itens. Adicione estes
-                    itens para ver o restante ou refine o período.
-                  </div>
-                )}
-              </div>
+              </Collapsible>
             )}
 
           {isLoading ? (
@@ -686,7 +740,7 @@ export function BatchDetailsDialog({
                   </div>
                 )}
               <div className="border rounded-md">
-                <Table>
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
                       {batch.status === "open" && canManageBatches && (
@@ -702,7 +756,7 @@ export function BatchDetailsDialog({
                         </TableHead>
                       )}
                       <TableHead
-                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        className="cursor-pointer hover:bg-muted/50 transition-colors w-[120px]"
                         onClick={() => requestSort("dueDate")}
                       >
                         <div className="flex items-center gap-2">
@@ -719,7 +773,7 @@ export function BatchDetailsDialog({
                         </div>
                       </TableHead>
                       <TableHead
-                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        className="cursor-pointer hover:bg-muted/50 transition-colors w-[35%]"
                         onClick={() => requestSort("description")}
                       >
                         <div className="flex items-center gap-2">
@@ -736,7 +790,7 @@ export function BatchDetailsDialog({
                         </div>
                       </TableHead>
                       <TableHead
-                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        className="cursor-pointer hover:bg-muted/50 transition-colors w-[30%]"
                         onClick={() => requestSort("supplierOrClient")}
                       >
                         <div className="flex items-center gap-2">
@@ -753,7 +807,7 @@ export function BatchDetailsDialog({
                         </div>
                       </TableHead>
                       <TableHead
-                        className="text-right cursor-pointer hover:bg-muted/50 transition-colors"
+                        className="text-right cursor-pointer hover:bg-muted/50 transition-colors w-[120px]"
                         onClick={() => requestSort("amount")}
                       >
                         <div className="flex items-center justify-end gap-2">
@@ -798,9 +852,19 @@ export function BatchDetailsDialog({
                           colSpan={
                             batch.status === "open" && canManageBatches ? 7 : 5
                           }
-                          className="text-center py-4 text-muted-foreground"
+                          className="py-12 text-center"
                         >
-                          Nenhuma transação encontrada neste lote.
+                          <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                            <PackageOpen className="h-10 w-10 opacity-30" />
+                            <p className="font-medium">
+                              Nenhuma transação neste lote
+                            </p>
+                            {batch.status === "open" && canManageBatches && (
+                              <p className="text-sm">
+                                Adicione transações usando o painel acima.
+                              </p>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -821,18 +885,10 @@ export function BatchDetailsDialog({
                           <TableCell>
                             {format(t.dueDate, "dd/MM/yyyy")}
                           </TableCell>
-                          <TableCell className="max-w-[300px]">
-                            <div className="flex items-center gap-2">
-                              <span className="truncate" title={t.description}>
-                                {t.description}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className="shrink-0 text-[10px]"
-                              >
-                                Em Lote
-                              </Badge>
-                            </div>
+                          <TableCell className="max-w-0">
+                            <span className="block truncate" title={t.description}>
+                              {t.description}
+                            </span>
                           </TableCell>
                           <TableCell>{t.supplierOrClient}</TableCell>
                           <TableCell className="text-right">

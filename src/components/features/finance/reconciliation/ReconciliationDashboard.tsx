@@ -22,7 +22,10 @@ import {
   RefreshCw,
   DollarSign,
   Trash2,
+  FileText,
 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { BankTransaction } from "@/lib/types";
 import { subDays, addDays } from "date-fns";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -340,10 +343,13 @@ export function ReconciliationDashboard() {
             <CardTitle className="text-sm font-medium">
               Total Importado
             </CardTitle>
-            <Loader2 className="h-4 w-4 text-muted-foreground" />
+            <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.total}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              lançamentos no extrato
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -355,6 +361,17 @@ export function ReconciliationDashboard() {
             <div className="text-2xl font-bold text-green-600">
               {stats.matched}
             </div>
+            <div className="mt-2 space-y-1">
+              <Progress
+                value={stats.total > 0 ? (stats.matched / stats.total) * 100 : 0}
+                className="h-1.5"
+              />
+              <p className="text-xs text-muted-foreground">
+                {stats.total > 0
+                  ? `${Math.round((stats.matched / stats.total) * 100)}% conciliados`
+                  : "0% conciliados"}
+              </p>
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -365,6 +382,17 @@ export function ReconciliationDashboard() {
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">
               {stats.potential}
+            </div>
+            <div className="mt-2 space-y-1">
+              <Progress
+                value={stats.total > 0 ? (stats.potential / stats.total) * 100 : 0}
+                className="h-1.5 [&>div]:bg-yellow-500"
+              />
+              <p className="text-xs text-muted-foreground">
+                {stats.total > 0
+                  ? `${Math.round((stats.potential / stats.total) * 100)}% com sugestão`
+                  : "aguardando processamento"}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -379,13 +407,13 @@ export function ReconciliationDashboard() {
             <div className="text-2xl font-bold text-blue-600">
               {systemPaidCount}
             </div>
-            <p className="text-xs text-muted-foreground">No período</p>
+            <p className="text-xs text-muted-foreground mt-1">no período do extrato</p>
           </CardContent>
         </Card>
       </div>
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="flex flex-1 items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-1 flex-wrap items-center gap-2 w-full md:w-auto">
           <div className="relative flex-1 md:max-w-[300px]">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -407,17 +435,18 @@ export function ReconciliationDashboard() {
               <SelectItem value="ignored">Ignorados</SelectItem>
             </SelectContent>
           </Select>
-          <div className="flex items-center space-x-2 border-l pl-4 ml-2">
+          <Separator orientation="vertical" className="h-6 hidden md:block" />
+          <div className="flex items-center space-x-2">
             <Checkbox
               id="hide-reconciled"
               checked={hideReconciled}
               onCheckedChange={(c) => setHideReconciled(!!c)}
             />
-            <Label htmlFor="hide-reconciled">Ocultar Conciliados</Label>
+            <Label htmlFor="hide-reconciled" className="cursor-pointer">Ocultar Conciliados</Label>
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <Button onClick={triggerAutoMatch} disabled={isMatching}>
             {isMatching ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -444,10 +473,20 @@ export function ReconciliationDashboard() {
         </div>
       </div>
 
-      <ReconciliationTable
-        transactions={filteredTransactions}
-        onAction={handleAction}
-      />
+      <div className="relative">
+        {isMatching && (
+          <div className="absolute inset-0 z-10 bg-background/60 backdrop-blur-sm rounded-md flex items-center justify-center">
+            <div className="flex items-center gap-2 text-sm font-medium bg-background border rounded-lg px-4 py-2 shadow-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              Identificando correspondências...
+            </div>
+          </div>
+        )}
+        <ReconciliationTable
+          transactions={filteredTransactions}
+          onAction={handleAction}
+        />
+      </div>
 
       <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
