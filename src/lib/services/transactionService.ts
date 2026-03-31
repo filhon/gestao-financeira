@@ -292,17 +292,19 @@ export const transactionService = {
     companyId: string,
     userId?: string,
   ): Promise<Transaction[]> => {
-    // Since we can't easily query array of objects in Firestore without a specific index structure,
-    // we'll fetch company transactions and filter.
-    // Optimization: In a real app, we should maintain a 'relatedCostCenterIds' array field on the transaction.
-    // For 'user' role, filter by createdBy to match Firestore rules
-    const filter: { companyId: string; createdBy?: string } = { companyId };
+    let q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", companyId),
+      where("costCenterIds", "array-contains", costCenterId),
+    );
+
     if (userId) {
-      filter.createdBy = userId;
+      q = query(q, where("createdBy", "==", userId));
     }
-    const all = await transactionService.getAll(filter);
-    return all.filter((t) =>
-      t.costCenterAllocation?.some((a) => a.costCenterId === costCenterId),
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) =>
+      convertDates({ id: doc.id, ...doc.data() }),
     );
   },
 

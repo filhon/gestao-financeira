@@ -256,18 +256,15 @@ export const costCenterService = {
     const transactionsSnapshot = await getDocs(transactionsQuery);
     const transactions = transactionsSnapshot.docs.map((doc) => doc.data());
 
-    // 2. Fetch budgets for all cost centers (parallel)
-    // Note: Ideally we would query budgets by companyId, but schema doesn't have it yet
-    const budgets = await Promise.all(
-      costCenters.map((cc) =>
-        budgetService.getByCostCenterAndYear(cc.id, targetYear, companyId),
-      ),
+    // 2. Fetch budgets for all cost centers (batching to avoid 30 limits and multiple calls)
+    const costCenterIds = costCenters.map((cc) => cc.id);
+    const budgets = await budgetService.getAllBalancesBatch(
+      costCenterIds,
+      targetYear,
+      companyId,
     );
-    const budgetMap = new Map(
-      budgets
-        .filter((b) => b !== null)
-        .map((b) => [b!.costCenterId, b!.amount]),
-    );
+
+    const budgetMap = new Map(budgets.map((b) => [b.costCenterId, b.amount]));
 
     // 3. Calculate balances in memory
     const balances: Record<string, number> = {};

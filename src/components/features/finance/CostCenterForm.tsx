@@ -47,6 +47,8 @@ interface CostCenterFormProps {
   editingId?: string | null;
 }
 
+import { useDebounce } from "@/hooks/useDebounce";
+
 export function CostCenterForm({
   defaultValues,
   onSubmit,
@@ -99,7 +101,8 @@ export function CostCenterForm({
   }, [selectedCompany]);
 
   // eslint-disable-next-line react-hooks/incompatible-library
-  const watchedYear = form.watch("budgetYear");
+  const watchedYearRaw = form.watch("budgetYear");
+  const watchedYear = useDebounce(watchedYearRaw, 500);
 
   useEffect(() => {
     const loadBudget = async () => {

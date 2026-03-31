@@ -43,6 +43,37 @@ export const budgetService = {
     } as Budget;
   },
 
+  getAllBalancesBatch: async (
+    costCenterIds: string[],
+    year: number,
+    companyId: string,
+  ): Promise<Budget[]> => {
+    const budgets: Budget[] = [];
+    const chunkSize = 30; // Firestore limit for 'in' is 30
+
+    for (let i = 0; i < costCenterIds.length; i += chunkSize) {
+      const chunk = costCenterIds.slice(i, i + chunkSize);
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where("companyId", "==", companyId),
+        where("year", "==", year),
+        where("costCenterId", "in", chunk),
+      );
+      const snapshot = await getDocs(q);
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        budgets.push({
+          id: doc.id,
+          ...data,
+          createdAt: (data.createdAt as Timestamp)?.toDate(),
+          updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+        } as Budget);
+      });
+    }
+
+    return budgets;
+  },
+
   setBudget: async (
     costCenterId: string,
     year: number,
