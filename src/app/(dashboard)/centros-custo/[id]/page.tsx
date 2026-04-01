@@ -66,7 +66,7 @@ export default function CostCenterDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [budgetAmount, setBudgetAmount] = useState(0);
-  const [childrenBudgetTotal, setChildrenBudgetTotal] = useState(0);
+  const [childrenUsageTotal, setChildrenUsageTotal] = useState(0);
 
   const id = params.id as string;
 
@@ -95,18 +95,24 @@ export default function CostCenterDashboard() {
           setUsageData(usage);
           setBudgetAmount(budget?.amount || 0);
 
-          // Fetch children's budgets for the selected year (BUG-05)
-          const kidsBudgets = await Promise.all(
-            kids.map((k) =>
-              budgetService.getByCostCenterAndYear(
-                k.id,
-                selectedYear,
-                selectedCompany.id,
+          // Fetch children's budgets and usages for the selected year
+          const [kidsUsages] = await Promise.all([
+            Promise.all(
+              kids.map((k) =>
+                usageService.getUsageByCostCenter(
+                  selectedCompany.id,
+                  k.id,
+                  selectedYear,
+                ),
               ),
             ),
-          );
-          setChildrenBudgetTotal(
-            kidsBudgets.reduce((acc, b) => acc + (b?.amount || 0), 0),
+          ]);
+          setChildrenUsageTotal(
+            kidsUsages.reduce(
+              (acc, usages) =>
+                acc + usages.reduce((s, u) => s + (u.amount || 0), 0),
+              0,
+            ),
           );
         } catch (error) {
           console.error("Error loading dashboard data:", error);
@@ -181,13 +187,17 @@ export default function CostCenterDashboard() {
 
   // Calculations
   const totalBudget = budgetAmount;
-  // Use year-specific budgets fetched for children (BUG-05)
-  const allocatedToChildren = childrenBudgetTotal;
 
-  // Calculate direct expenses from usage data
+  // Despesas diretas neste CC (transações apontadas diretamente a ele)
   const directExpenses = usageData.reduce((acc, curr) => acc + curr.amount, 0);
 
-  const remainingBalance = totalBudget - allocatedToChildren - directExpenses;
+  // Para CCs pai: o consumo real é a soma dos gastos dos filhos + despesas diretas
+  const hasChildren = children.length > 0;
+  const totalConsumed = hasChildren
+    ? childrenUsageTotal + directExpenses
+    : directExpenses;
+
+  const remainingBalance = totalBudget - totalConsumed;
 
   const now = new Date();
   const isPastYear = selectedYear < now.getFullYear();
@@ -203,13 +213,23 @@ export default function CostCenterDashboard() {
 
   // Charts Data
   const budgetDistributionData = [
-    { name: "Filhos", value: allocatedToChildren, color: "#3b82f6" }, // blue-500
-    { name: "Despesas", value: directExpenses, color: "#ef4444" }, // red-500
+    ...(hasChildren
+      ? [
+          {
+            name: "Gasto pelos filhos",
+            value: childrenUsageTotal,
+            color: "#3b82f6",
+          },
+        ]
+      : []),
+    ...(directExpenses > 0
+      ? [{ name: "Despesas diretas", value: directExpenses, color: "#ef4444" }]
+      : []),
     {
       name: "Disponível",
       value: Math.max(0, remainingBalance),
       color: "#22c55e",
-    }, // green-500
+    },
   ].filter((d) => d.value > 0);
 
   // Monthly Spending Trend from Usage Data
@@ -375,61 +395,62 @@ export default function CostCenterDashboard() {
             </span>
             <span className="text-muted-foreground tabular-nums">
               {totalBudget > 0
-                ? (
-                    ((allocatedToChildren + directExpenses) / totalBudget) *
-                    100
-                  ).toFixed(1)
+                ? ((totalConsumed / totalBudget) * 100).toFixed(1)
                 : 0}
               % utilizado
             </span>
           </div>
           {/* Stacked bar */}
           <div className="h-3 w-full rounded-full bg-muted overflow-hidden flex">
-            {allocatedToChildren > 0 && (
+            {hasChildren && childrenUsageTotal > 0 && (
               <div
                 className="h-full bg-blue-500 transition-all duration-700"
                 style={{
-                  width: `${Math.min((allocatedToChildren / totalBudget) * 100, 100)}%`,
+                  width: `${Math.min((childrenUsageTotal / totalBudget) * 100, 100)}%`,
                 }}
-                title={`Filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(allocatedToChildren)}`}
+                title={`Gasto pelos filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(childrenUsageTotal)}`}
               />
             )}
             {directExpenses > 0 && (
               <div
                 className="h-full bg-red-500 transition-all duration-700"
                 style={{
-                  width: `${Math.min((directExpenses / totalBudget) * 100, 100 - Math.min((allocatedToChildren / totalBudget) * 100, 100))}%`,
+                  width: `${Math.min((directExpenses / totalBudget) * 100, 100 - Math.min(((totalConsumed - directExpenses) / totalBudget) * 100, 100))}%`,
                 }}
-                title={`Despesas: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directExpenses)}`}
+                title={`Despesas diretas: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directExpenses)}`}
               />
             )}
           </div>
           {/* Legenda */}
-          <div className="flex items-center gap-5 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-blue-500 shrink-0" />
-              <span>
-                Filhos:{" "}
-                <span className="font-medium text-foreground tabular-nums">
-                  {new Intl.NumberFormat("pt-BR", {
-                    style: "currency",
-                    currency: "BRL",
-                  }).format(allocatedToChildren)}
+          <div className="flex items-center gap-5 text-xs text-muted-foreground flex-wrap">
+            {hasChildren && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-sm bg-blue-500 shrink-0" />
+                <span>
+                  Gasto pelos filhos:{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {new Intl.NumberFormat("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    }).format(childrenUsageTotal)}
+                  </span>
                 </span>
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
-              <span>
-                Despesas:{" "}
-                <span className="font-medium text-foreground tabular-nums">
-                  {new Intl.NumberFormat("pt-BR", {
-                    style: "currency",
-                    currency: "BRL",
-                  }).format(directExpenses)}
+              </div>
+            )}
+            {directExpenses > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
+                <span>
+                  Despesas diretas:{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {new Intl.NumberFormat("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    }).format(directExpenses)}
+                  </span>
                 </span>
-              </span>
-            </div>
+              </div>
+            )}
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500 shrink-0" />
               <span>

@@ -28,7 +28,6 @@ import { costCenterService } from "@/lib/services/costCenterService";
 import { auditService } from "@/lib/services/auditService";
 import { emailService } from "@/lib/services/emailService";
 import { generateChanges } from "@/lib/auditFormatter";
-import { usageService } from "@/lib/services/usageService";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
 
 const COLLECTION_NAME = "transactions";
@@ -399,15 +398,7 @@ export const transactionService = {
           updatedAt: serverTimestamp(),
         };
 
-        promises.push(
-          addDoc(collection(db, COLLECTION_NAME), txData).then(async (ref) => {
-            await usageService.updateUsage(
-              { ...txData, id: ref.id } as unknown as Transaction,
-              1,
-            );
-            return ref;
-          }),
-        );
+        promises.push(addDoc(collection(db, COLLECTION_NAME), txData));
       }
 
       const refs = await Promise.all(promises);
@@ -468,19 +459,6 @@ export const transactionService = {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-
-    // Update Cost Center Usage
-    await usageService.updateUsage(
-      {
-        ...transactionData,
-        id: docRef.id,
-        companyId,
-        createdBy: userId,
-        status: status,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any,
-      1,
-    );
 
     // Trigger Notification if pending approval
     if (status === "pending_approval" && transactionData.costCenterAllocation) {
@@ -554,7 +532,6 @@ export const transactionService = {
     if (!currentDoc.exists()) throw new Error("Transaction not found");
 
     const currentData = currentDoc.data();
-    const oldTransaction = convertDates({ id: currentDoc.id, ...currentData });
 
     const updatePayload: DocumentData = {
       ...cleanData,
@@ -599,15 +576,6 @@ export const transactionService = {
     } else {
       await updateDoc(docRef, updatePayload);
     }
-
-    // Update Usage
-    await usageService.updateUsage(oldTransaction, -1);
-
-    const newTransaction = {
-      ...oldTransaction,
-      ...cleanData,
-    } as Transaction;
-    await usageService.updateUsage(newTransaction, 1);
 
     // Generate changes for audit log
     const changes = generateChanges(
@@ -860,8 +828,6 @@ export const transactionService = {
         id: currentDoc.id,
         ...currentData,
       });
-      await usageService.updateUsage(oldTransaction, -1);
-
       // If transaction belongs to a batch, remove it atomically before deleting.
       // This keeps the batch totalAmount and transactionIds consistent.
       if (currentData.batchId) {

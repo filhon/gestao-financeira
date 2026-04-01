@@ -73,6 +73,31 @@ function buildTree(items: CostCenter[]): CostCenterNode[] {
   return roots;
 }
 
+// Agrega recursivamente usages e budget de toda a subárvore de um nó.
+// - total: orçamento próprio (se definido) ou soma dos orçamentos dos filhos
+// - used: soma dos usages de todos os descendentes folha
+function aggregateNode(
+  node: CostCenterNode,
+  usages: Record<string, number>,
+): { used: number; total: number } {
+  if (node.children.length === 0) {
+    return { used: usages[node.id] || 0, total: node.budget || 0 };
+  }
+
+  const childAgg = node.children.reduce(
+    (acc, child) => {
+      const c = aggregateNode(child, usages);
+      return { used: acc.used + c.used, total: acc.total + c.total };
+    },
+    { used: 0, total: 0 },
+  );
+
+  return {
+    used: childAgg.used,
+    total: (node.budget || 0) > 0 ? node.budget! : childAgg.total,
+  };
+}
+
 // Mini barra de progresso de orçamento
 function BudgetBar({ used, total }: { used: number; total: number }) {
   if (!total || total <= 0) return null;
@@ -192,31 +217,36 @@ function CostCenterRow({
           )}
         </div>
 
-        <div className="col-span-2 flex flex-col justify-center">
-          {node.budget ? (
-            <>
-              <div className="flex items-center gap-1.5">
-                <span>
-                  {new Intl.NumberFormat("pt-BR", {
-                    style: "currency",
-                    currency: "BRL",
-                  }).format(node.budget)}
-                </span>
-                {node.budgetYear && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] px-1 py-0 h-5"
-                  >
-                    {node.budgetYear}
-                  </Badge>
-                )}
-              </div>
-              <BudgetBar used={usages[node.id] || 0} total={node.budget} />
-            </>
-          ) : (
-            <span className="text-muted-foreground">-</span>
-          )}
-        </div>
+        {(() => {
+          const agg = aggregateNode(node, usages);
+          return (
+            <div className="col-span-2 flex flex-col justify-center">
+              {agg.total > 0 ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span>
+                      {new Intl.NumberFormat("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                      }).format(agg.total)}
+                    </span>
+                    {node.budgetYear && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] px-1 py-0 h-5"
+                      >
+                        {node.budgetYear}
+                      </Badge>
+                    )}
+                  </div>
+                  <BudgetBar used={agg.used} total={agg.total} />
+                </>
+              ) : (
+                <span className="text-muted-foreground">-</span>
+              )}
+            </div>
+          );
+        })()}
 
         <div
           className="col-span-2 text-muted-foreground truncate"

@@ -8,6 +8,7 @@ import {
   query,
   collection,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { Transaction } from "@/lib/types";
 
@@ -133,25 +134,95 @@ export const usageService = {
   },
 
   recalculateAll: async (companyId: string) => {
-    // This function should be called once to migrate existing data
-    const q = query(
-      collection(db, "transactions"),
-      where("companyId", "==", companyId),
-    );
-    const snapshot = await getDocs(q);
+    const BATCH_SIZE = 499;
 
-    console.log(`Recalculating usage for ${snapshot.size} transactions...`);
+    // 1. Lê transações e documentos existentes em paralelo
+    const [txSnap, existingSnap] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, "transactions"),
+          where("companyId", "==", companyId),
+          where("type", "==", "payable"),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, COLLECTION_NAME),
+          where("companyId", "==", companyId),
+        ),
+      ),
+    ]);
 
-    for (const doc of snapshot.docs) {
-      const data = doc.data();
-      const tx = {
-        id: doc.id,
-        ...data,
-        dueDate: data.dueDate?.toDate(),
-        paymentDate: data.paymentDate?.toDate(),
-      } as Transaction;
-      await usageService.updateUsage(tx, 1);
+    // 2. Agrega tudo em memória: docId → { costCenterId, monthKey, amount }
+    const aggregated = new Map<
+      string,
+      { costCenterId: string; monthKey: string; amount: number }
+    >();
+
+    for (const d of txSnap.docs) {
+      const data = d.data();
+      if (data.status === "rejected") continue;
+
+      const date = data.paymentDate?.toDate() ?? data.dueDate?.toDate();
+      if (!date) continue;
+
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const amount = Number(
+        data.status === "paid" && data.finalAmount != null
+          ? data.finalAmount
+          : data.amount ?? 0,
+      );
+
+      const allocations: { costCenterId: string; amount: number }[] =
+        data.costCenterAllocation?.length > 0
+          ? data.costCenterAllocation
+          : data.costCenterId
+            ? [{ costCenterId: data.costCenterId, amount }]
+            : [];
+
+      for (const alloc of allocations) {
+        const key = `${companyId}_${alloc.costCenterId}_${monthKey}`;
+        const existing = aggregated.get(key);
+        if (existing) {
+          existing.amount += Number(alloc.amount ?? 0);
+        } else {
+          aggregated.set(key, {
+            costCenterId: alloc.costCenterId,
+            monthKey,
+            amount: Number(alloc.amount ?? 0),
+          });
+        }
+      }
     }
-    console.log("Recalculation complete.");
+
+    // 3. Deleta docs antigos + escreve novos — tudo em batches de 499
+    let batch = writeBatch(db);
+    let count = 0;
+    const batches: ReturnType<typeof writeBatch>[] = [batch];
+
+    const flush = () => {
+      batch = writeBatch(db);
+      batches.push(batch);
+      count = 0;
+    };
+
+    for (const d of existingSnap.docs) {
+      batch.delete(d.ref);
+      if (++count >= BATCH_SIZE) flush();
+    }
+
+    for (const [key, entry] of aggregated) {
+      const ref = doc(db, COLLECTION_NAME, key);
+      batch.set(ref, {
+        companyId,
+        costCenterId: entry.costCenterId,
+        monthKey: entry.monthKey,
+        amount: entry.amount,
+        updatedAt: serverTimestamp(),
+      });
+      if (++count >= BATCH_SIZE) flush();
+    }
+
+    await Promise.all(batches.map((b) => b.commit()));
   },
 };

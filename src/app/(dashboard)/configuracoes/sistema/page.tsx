@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { transactionService } from "@/lib/services/transactionService";
+import { usageService } from "@/lib/services/usageService";
 import {
   Loader2,
   RefreshCw,
@@ -27,6 +28,10 @@ export default function SystemSettingsPage() {
   const { selectedCompany } = useCompany();
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
+  const [isRecalculatingUsage, setIsRecalculatingUsage] = useState(false);
+  const [usageRecalcResult, setUsageRecalcResult] = useState<{
+    transactionCount: number;
+  } | null>(null);
   const [lastResult, setLastResult] = useState<{
     newBalance: number;
     transactionCount: number;
@@ -64,6 +69,27 @@ export default function SystemSettingsPage() {
       });
     } finally {
       setIsRecalculating(false);
+    }
+  };
+
+  const handleRecalculateUsage = async () => {
+    if (!selectedCompany) return;
+    try {
+      setIsRecalculatingUsage(true);
+      await usageService.recalculateAll(selectedCompany.id);
+      // recalculateAll logs internally; count comes from the service
+      setUsageRecalcResult({ transactionCount: -1 }); // sentinel: success
+      toast.success("Cache Recalculado", {
+        description:
+          "O uso dos centros de custo foi recalculado com base nas transações.",
+      });
+    } catch (error) {
+      console.error(error);
+      toast.error("Erro", {
+        description: "Falha ao recalcular o cache. Tente novamente.",
+      });
+    } finally {
+      setIsRecalculatingUsage(false);
     }
   };
 
@@ -110,7 +136,7 @@ export default function SystemSettingsPage() {
         </h1>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -257,6 +283,73 @@ export default function SystemSettingsPage() {
                       <p className="text-xs mt-1">
                         {migrationResult.total} transações analisadas no total.
                       </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Recalcular Uso dos Centros de Custo
+            </CardTitle>
+            <CardDescription>
+              Recalcula o cache de uso dos centros de custo a partir das
+              transações. Use quando os valores de orçamento utilizado
+              estiverem incorretos.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-md bg-amber-50 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <AlertTriangle className="h-5 w-5 text-amber-400" />
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-amber-800">
+                    Atenção
+                  </h3>
+                  <div className="mt-2 text-sm text-amber-700">
+                    <p>
+                      Limpa e reconstrói o cache de uso de todas as transações
+                      ativas (exceto rejeitadas). Pode levar alguns segundos.
+                      Seguro executar mais de uma vez.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleRecalculateUsage}
+              disabled={isRecalculatingUsage || !selectedCompany}
+              className="w-full"
+            >
+              {isRecalculatingUsage ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Recalculando...
+                </>
+              ) : (
+                "Recalcular Uso"
+              )}
+            </Button>
+
+            {usageRecalcResult && (
+              <div className="mt-4 rounded-md bg-green-50 p-4 animate-in fade-in slide-in-from-top-2">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <CheckCircle2 className="h-5 w-5 text-green-400" />
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-green-800">
+                      Concluído
+                    </h3>
+                    <div className="mt-2 text-sm text-green-700">
+                      <p>Cache de uso dos centros de custo atualizado.</p>
                     </div>
                   </div>
                 </div>
