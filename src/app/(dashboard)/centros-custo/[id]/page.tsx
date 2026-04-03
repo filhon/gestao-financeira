@@ -61,7 +61,7 @@ export default function CostCenterDashboard() {
   const [children, setChildren] = useState<CostCenter[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [usageData, setUsageData] = useState<
-    { monthKey: string; amount: number }[]
+    { monthKey: string; amount: number; amountPaid?: number }[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -188,14 +188,24 @@ export default function CostCenterDashboard() {
   // Calculations
   const totalBudget = budgetAmount;
 
-  // Despesas diretas neste CC (transações apontadas diretamente a ele)
-  const directExpenses = usageData.reduce((acc, curr) => acc + curr.amount, 0);
+  // Realizado = somente transações com status "paid"
+  const directRealized = usageData.reduce(
+    (acc, curr) => acc + (curr.amountPaid ?? 0),
+    0,
+  );
+  // Comprometido = total não-rejeitado (inclui paid + pendentes)
+  const directCommitted = usageData.reduce(
+    (acc, curr) => acc + curr.amount,
+    0,
+  );
+  // Pendente = comprometido que ainda não foi pago
+  const directPending = directCommitted - directRealized;
 
-  // Para CCs pai: o consumo real é a soma dos gastos dos filhos + despesas diretas
+  // Para CCs pai: o consumo é a soma dos gastos dos filhos + despesas diretas
   const hasChildren = children.length > 0;
   const totalConsumed = hasChildren
-    ? childrenUsageTotal + directExpenses
-    : directExpenses;
+    ? childrenUsageTotal + directCommitted
+    : directCommitted;
 
   const remainingBalance = totalBudget - totalConsumed;
 
@@ -213,23 +223,18 @@ export default function CostCenterDashboard() {
 
   // Charts Data
   const budgetDistributionData = [
-    ...(hasChildren
-      ? [
-          {
-            name: "Gasto pelos filhos",
-            value: childrenUsageTotal,
-            color: "#3b82f6",
-          },
-        ]
+    ...(hasChildren && childrenUsageTotal > 0
+      ? [{ name: "Gasto pelos filhos", value: childrenUsageTotal, color: "#3b82f6" }]
       : []),
-    ...(directExpenses > 0
-      ? [{ name: "Despesas diretas", value: directExpenses, color: "#ef4444" }]
+    ...(directRealized > 0
+      ? [{ name: "Realizado", value: directRealized, color: "#ef4444" }]
       : []),
-    {
-      name: "Disponível",
-      value: Math.max(0, remainingBalance),
-      color: "#22c55e",
-    },
+    ...(directPending > 0
+      ? [{ name: "Pendente", value: directPending, color: "#fb923c" }]
+      : []),
+    ...(remainingBalance > 0
+      ? [{ name: "Disponível", value: remainingBalance, color: "#22c55e" }]
+      : []),
   ].filter((d) => d.value > 0);
 
   // Monthly Spending Trend from Usage Data
@@ -314,7 +319,7 @@ export default function CostCenterDashboard() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -376,11 +381,27 @@ export default function CostCenterDashboard() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(directExpenses)}
+            <div className="text-2xl font-bold text-red-600">
+              {formatCurrency(directRealized)}
             </div>
             <p className="text-xs text-muted-foreground">
-              Total gasto em {selectedYear}
+              Pagamentos efetivados em {selectedYear}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Comprometido Pendente
+            </CardTitle>
+            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-500">
+              {formatCurrency(directPending)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Aprovado mas ainda não pago
             </p>
           </CardContent>
         </Card>
@@ -397,10 +418,10 @@ export default function CostCenterDashboard() {
               {totalBudget > 0
                 ? ((totalConsumed / totalBudget) * 100).toFixed(1)
                 : 0}
-              % utilizado
+              % comprometido
             </span>
           </div>
-          {/* Stacked bar */}
+          {/* Stacked bar: filhos (azul) + realizado (vermelho) + pendente (laranja) */}
           <div className="h-3 w-full rounded-full bg-muted overflow-hidden flex">
             {hasChildren && childrenUsageTotal > 0 && (
               <div
@@ -411,13 +432,22 @@ export default function CostCenterDashboard() {
                 title={`Gasto pelos filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(childrenUsageTotal)}`}
               />
             )}
-            {directExpenses > 0 && (
+            {directRealized > 0 && (
               <div
                 className="h-full bg-red-500 transition-all duration-700"
                 style={{
-                  width: `${Math.min((directExpenses / totalBudget) * 100, 100 - Math.min(((totalConsumed - directExpenses) / totalBudget) * 100, 100))}%`,
+                  width: `${Math.min((directRealized / totalBudget) * 100, Math.max(0, 100 - (childrenUsageTotal / totalBudget) * 100))}%`,
                 }}
-                title={`Despesas diretas: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directExpenses)}`}
+                title={`Realizado: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directRealized)}`}
+              />
+            )}
+            {directPending > 0 && (
+              <div
+                className="h-full bg-orange-400 transition-all duration-700"
+                style={{
+                  width: `${Math.min((directPending / totalBudget) * 100, Math.max(0, 100 - ((childrenUsageTotal + directRealized) / totalBudget) * 100))}%`,
+                }}
+                title={`Comprometido pendente: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directPending)}`}
               />
             )}
           </div>
@@ -437,16 +467,30 @@ export default function CostCenterDashboard() {
                 </span>
               </div>
             )}
-            {directExpenses > 0 && (
+            {directRealized > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
                 <span>
-                  Despesas diretas:{" "}
+                  Realizado:{" "}
                   <span className="font-medium text-foreground tabular-nums">
                     {new Intl.NumberFormat("pt-BR", {
                       style: "currency",
                       currency: "BRL",
-                    }).format(directExpenses)}
+                    }).format(directRealized)}
+                  </span>
+                </span>
+              </div>
+            )}
+            {directPending > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-sm bg-orange-400 shrink-0" />
+                <span>
+                  Pendente:{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {new Intl.NumberFormat("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    }).format(directPending)}
                   </span>
                 </span>
               </div>

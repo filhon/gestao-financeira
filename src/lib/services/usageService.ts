@@ -38,6 +38,8 @@ export const usageService = {
         ? transaction.finalAmount
         : transaction.amount;
 
+    const isPaid = transaction.status === "paid";
+
     // Handle allocations
     if (
       transaction.costCenterAllocation &&
@@ -50,6 +52,7 @@ export const usageService = {
           alloc.costCenterId,
           monthKey,
           allocAmount,
+          isPaid ? allocAmount : 0,
         );
       });
       await Promise.all(promises);
@@ -60,6 +63,7 @@ export const usageService = {
         transaction.costCenterId,
         monthKey,
         signedAmount,
+        isPaid ? signedAmount : 0,
       );
     }
   },
@@ -69,6 +73,7 @@ export const usageService = {
     costCenterId: string,
     monthKey: string,
     amount: number,
+    amountPaid: number = 0,
   ) => {
     const id = `${companyId}_${costCenterId}_${monthKey}`;
     const ref = doc(db, COLLECTION_NAME, id);
@@ -82,6 +87,7 @@ export const usageService = {
           costCenterId,
           monthKey,
           amount: increment(amount),
+          amountPaid: increment(amountPaid),
           updatedAt: serverTimestamp(),
         },
         { merge: true },
@@ -153,10 +159,10 @@ export const usageService = {
       ),
     ]);
 
-    // 2. Agrega tudo em memória: docId → { costCenterId, monthKey, amount }
+    // 2. Agrega tudo em memória: docId → { costCenterId, monthKey, amount, amountPaid }
     const aggregated = new Map<
       string,
-      { costCenterId: string; monthKey: string; amount: number }
+      { costCenterId: string; monthKey: string; amount: number; amountPaid: number }
     >();
 
     for (const d of txSnap.docs) {
@@ -167,10 +173,9 @@ export const usageService = {
       if (!date) continue;
 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const isPaid = data.status === "paid";
       const amount = Number(
-        data.status === "paid" && data.finalAmount != null
-          ? data.finalAmount
-          : data.amount ?? 0,
+        isPaid && data.finalAmount != null ? data.finalAmount : data.amount ?? 0,
       );
 
       const allocations: { costCenterId: string; amount: number }[] =
@@ -181,15 +186,18 @@ export const usageService = {
             : [];
 
       for (const alloc of allocations) {
+        const allocAmount = Number(alloc.amount ?? 0);
         const key = `${companyId}_${alloc.costCenterId}_${monthKey}`;
         const existing = aggregated.get(key);
         if (existing) {
-          existing.amount += Number(alloc.amount ?? 0);
+          existing.amount += allocAmount;
+          if (isPaid) existing.amountPaid += allocAmount;
         } else {
           aggregated.set(key, {
             costCenterId: alloc.costCenterId,
             monthKey,
-            amount: Number(alloc.amount ?? 0),
+            amount: allocAmount,
+            amountPaid: isPaid ? allocAmount : 0,
           });
         }
       }
@@ -218,6 +226,7 @@ export const usageService = {
         costCenterId: entry.costCenterId,
         monthKey: entry.monthKey,
         amount: entry.amount,
+        amountPaid: entry.amountPaid,
         updatedAt: serverTimestamp(),
       });
       if (++count >= BATCH_SIZE) flush();

@@ -139,8 +139,8 @@ export const dashboardService = {
     year?: number,
   ): Promise<DashboardMetrics> => {
     const targetYear = year || new Date().getFullYear();
-    const yearStart = Timestamp.fromDate(startOfYear(new Date(targetYear, 0, 1)));
-    const yearEnd = Timestamp.fromDate(endOfYear(new Date(targetYear, 0, 1)));
+    const yearStartDate = startOfYear(new Date(targetYear, 0, 1));
+    const yearEndDate = endOfYear(new Date(targetYear, 0, 1));
 
     // Short-term window: today → +30 days (always based on real today)
     const todayDate = new Date();
@@ -149,13 +149,51 @@ export const dashboardService = {
     const shortTermStart = Timestamp.fromDate(todayDate);
     const shortTermEnd = Timestamp.fromDate(in30Days);
 
-    const baseQuery = query(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const applyUserFilter = (q: any) =>
+      userId ? query(q, where("createdBy", "==", userId)) : q;
+
+    const pendingStatuses = ["draft", "pending_approval", "approved"];
+
+    // --- Paid totals: use paymentDate as effective date ---
+    // Expand dueDate query window ±90 days to capture early/late payments,
+    // then filter in memory by effectiveDate (paymentDate if paid, else dueDate).
+    const paidQueryStart = Timestamp.fromDate(addDays(yearStartDate, -90));
+    const paidQueryEnd = Timestamp.fromDate(addDays(yearEndDate, 90));
+
+    let paidQuery = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
-      where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd),
+      where("status", "==", "paid"),
+      where("dueDate", ">=", paidQueryStart),
+      where("dueDate", "<=", paidQueryEnd),
     );
+    if (userId) paidQuery = query(paidQuery, where("createdBy", "==", userId));
 
+    const paidSnapshot = await getDocs(paidQuery);
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+
+    paidSnapshot.docs.forEach((d) => {
+      const data = d.data();
+      // Use paymentDate as effective date for paid transactions
+      const effDate: Date = data.paymentDate
+        ? (data.paymentDate as Timestamp).toDate()
+        : (data.dueDate as Timestamp).toDate();
+      if (effDate < yearStartDate || effDate > yearEndDate) return;
+      // Prefer finalAmount (actual amount paid) over amount
+      const amount = Number(data.finalAmount ?? data.amount) || 0;
+      if (data.type === "receivable") totalRevenue += amount;
+      else if (data.type === "payable") totalExpenses += amount;
+    });
+
+    // --- Pending totals: dueDate is correct (no paymentDate yet) ---
+    const pendingBaseQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("companyId", "==", companyId),
+      where("dueDate", ">=", Timestamp.fromDate(yearStartDate)),
+      where("dueDate", "<=", Timestamp.fromDate(yearEndDate)),
+    );
     const shortTermBaseQuery = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
@@ -163,25 +201,17 @@ export const dashboardService = {
       where("dueDate", "<=", shortTermEnd),
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const applyUserFilter = (q: any) =>
-      userId ? query(q, where("createdBy", "==", userId)) : q;
+    let pendingPayables = 0;
+    let pendingReceivables = 0;
+    let shortTermPayables = 0;
+    let shortTermReceivables = 0;
 
-    const pendingStatuses = ["draft", "pending_approval", "approved"];
-
-    // Strategy: try aggregation queries, fallback to getDocs if indexes not ready
     try {
-      const revenueQuery = applyUserFilter(
-        query(baseQuery, where("status", "==", "paid"), where("type", "==", "receivable")),
-      );
-      const expensesQuery = applyUserFilter(
-        query(baseQuery, where("status", "==", "paid"), where("type", "==", "payable")),
-      );
       const pendingReceivablesQuery = applyUserFilter(
-        query(baseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
+        query(pendingBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
       );
       const pendingPayablesQuery = applyUserFilter(
-        query(baseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
+        query(pendingBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
       );
       const shortTermRecQuery = applyUserFilter(
         query(shortTermBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
@@ -190,26 +220,18 @@ export const dashboardService = {
         query(shortTermBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
       );
 
-      const [revenueSnap, expensesSnap, pendingRecSnap, pendingPaySnap, stRecSnap, stPaySnap] =
+      const [pendingRecSnap, pendingPaySnap, stRecSnap, stPaySnap] =
         await Promise.all([
-          getAggregateFromServer(revenueQuery, { total: sum("amount") }),
-          getAggregateFromServer(expensesQuery, { total: sum("amount") }),
           getAggregateFromServer(pendingReceivablesQuery, { total: sum("amount") }),
           getAggregateFromServer(pendingPayablesQuery, { total: sum("amount") }),
           getAggregateFromServer(shortTermRecQuery, { total: sum("amount") }),
           getAggregateFromServer(shortTermPayQuery, { total: sum("amount") }),
         ]);
 
-      return {
-        totalRevenue: revenueSnap.data().total || 0,
-        totalExpenses: expensesSnap.data().total || 0,
-        balance: (revenueSnap.data().total || 0) - (expensesSnap.data().total || 0),
-        pendingPayables: pendingPaySnap.data().total || 0,
-        pendingReceivables: pendingRecSnap.data().total || 0,
-        shortTermReceivables: stRecSnap.data().total || 0,
-        shortTermPayables: stPaySnap.data().total || 0,
-        year: targetYear,
-      };
+      pendingPayables = pendingPaySnap.data().total || 0;
+      pendingReceivables = pendingRecSnap.data().total || 0;
+      shortTermReceivables = stRecSnap.data().total || 0;
+      shortTermPayables = stPaySnap.data().total || 0;
     } catch {
       // Fallback: indexes may still be building. Use getDocs + client-side sum.
       console.warn("Aggregation query failed (indexes may be building). Using fallback getDocs approach.");
@@ -217,8 +239,9 @@ export const dashboardService = {
       let fallbackQuery = query(
         collection(db, TRANSACTIONS_COLLECTION),
         where("companyId", "==", companyId),
-        where("dueDate", ">=", yearStart),
-        where("dueDate", "<=", yearEnd),
+        where("dueDate", ">=", Timestamp.fromDate(yearStartDate)),
+        where("dueDate", "<=", Timestamp.fromDate(yearEndDate)),
+        where("status", "in", pendingStatuses),
       );
 
       if (userId) {
@@ -227,46 +250,86 @@ export const dashboardService = {
 
       const snapshot = await getDocs(fallbackQuery);
 
-      let totalRevenue = 0;
-      let totalExpenses = 0;
-      let pendingReceivables = 0;
-      let pendingPayables = 0;
-      let shortTermReceivables = 0;
-      let shortTermPayables = 0;
-
       snapshot.docs.forEach((d) => {
         const data = d.data();
         const amount = Number(data.amount) || 0;
-        const status = data.status as string;
         const type = data.type as string;
         const dueDate: Date = (data.dueDate as Timestamp).toDate();
         const isShortTerm = dueDate >= todayDate && dueDate <= in30Days;
 
-        if (status === "paid") {
-          if (type === "receivable") totalRevenue += amount;
-          else if (type === "payable") totalExpenses += amount;
-        } else if (pendingStatuses.includes(status)) {
-          if (type === "receivable") {
-            pendingReceivables += amount;
-            if (isShortTerm) shortTermReceivables += amount;
-          } else if (type === "payable") {
-            pendingPayables += amount;
-            if (isShortTerm) shortTermPayables += amount;
+        if (type === "receivable") {
+          pendingReceivables += amount;
+          if (isShortTerm) shortTermReceivables += amount;
+        } else if (type === "payable") {
+          pendingPayables += amount;
+          if (isShortTerm) shortTermPayables += amount;
+        }
+      });
+    }
+
+    // --- Recurring templates: project future occurrences not yet created ---
+    // nextDueDate is always the next UNGENERATED date, so there is no double-counting
+    // risk with actual transactions already in the database.
+    const recurringTemplates = await recurrenceService.getTemplates(companyId);
+    recurringTemplates
+      .filter((t) => t.active)
+      .forEach((template) => {
+        let nextDate = new Date(template.nextDueDate);
+        const interval = template.interval || 1;
+
+        while (
+          isBefore(nextDate, yearEndDate) ||
+          isSameDay(nextDate, yearEndDate)
+        ) {
+          if (template.endDate && isAfter(nextDate, template.endDate)) break;
+
+          if (
+            (isAfter(nextDate, yearStartDate) ||
+              isSameDay(nextDate, yearStartDate))
+          ) {
+            const amount = template.amount;
+            if (template.type === "payable") pendingPayables += amount;
+            else pendingReceivables += amount;
+
+            const isShortTerm =
+              (isAfter(nextDate, todayDate) ||
+                isSameDay(nextDate, todayDate)) &&
+              (isBefore(nextDate, in30Days) || isSameDay(nextDate, in30Days));
+            if (isShortTerm) {
+              if (template.type === "payable") shortTermPayables += amount;
+              else shortTermReceivables += amount;
+            }
+          }
+
+          switch (template.frequency) {
+            case "daily":
+              nextDate = addDays(nextDate, interval);
+              break;
+            case "weekly":
+              nextDate = addWeeks(nextDate, interval);
+              break;
+            case "monthly":
+              nextDate = addMonths(nextDate, interval);
+              break;
+            case "yearly":
+              nextDate = addYears(nextDate, interval);
+              break;
+            default:
+              nextDate = addMonths(nextDate, interval);
           }
         }
       });
 
-      return {
-        totalRevenue,
-        totalExpenses,
-        balance: totalRevenue - totalExpenses,
-        pendingPayables,
-        pendingReceivables,
-        shortTermReceivables,
-        shortTermPayables,
-        year: targetYear,
-      };
-    }
+    return {
+      totalRevenue,
+      totalExpenses,
+      balance: totalRevenue - totalExpenses,
+      pendingPayables,
+      pendingReceivables,
+      shortTermReceivables,
+      shortTermPayables,
+      year: targetYear,
+    };
   },
 
   // getUpcomingTransactions and getCashFlowData removed (dead code)
@@ -389,10 +452,12 @@ export const dashboardService = {
     }
 
     // PERFORMANCE: Pre-group transactions by date key for O(n+m) instead of O(n*m)
+    // Use effectiveDate: paymentDate for paid transactions, dueDate otherwise
     const dateKeyFormat = mode === "year" ? "yyyy-MM-dd" : "yyyy-MM-dd";
     const txByDateKey = new Map<string, Transaction[]>();
     combinedTransactions.forEach((t) => {
-      const key = format(t.dueDate, dateKeyFormat);
+      const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+      const key = format(effDate, dateKeyFormat);
       if (!txByDateKey.has(key)) txByDateKey.set(key, []);
       txByDateKey.get(key)!.push(t);
     });
@@ -407,7 +472,8 @@ export const dashboardService = {
     // To find the balance at Jan 1st, we must subtract all net changes that occurred between Jan 1st and Today.
     if (mode === "year") {
       const pastTransactions = combinedTransactions.filter((t) => {
-        return t.status === "paid" && isBefore(t.dueDate, today);
+        const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+        return t.status === "paid" && isBefore(effDate, today);
       });
 
       const netChangeBeforeToday = pastTransactions.reduce((acc, t) => {
@@ -441,7 +507,8 @@ export const dashboardService = {
           dayTxns.forEach((t) => {
             // In '30days' mode: skip paid transactions on or before today
             if (mode === "30days") {
-              const isPastOrToday = !isAfter(t.dueDate, today);
+              const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+              const isPastOrToday = !isAfter(effDate, today);
               if (t.status === "paid" && isPastOrToday) return;
             }
 
@@ -476,20 +543,36 @@ export const dashboardService = {
   getExpensesByCostCenter: async (
     companyId: string,
   ): Promise<CostCenterData[]> => {
-    // Get transactions for current month
+    // Get transactions for current month using effectiveDate (paymentDate if paid, else dueDate).
+    // Expand query window by ±31 days so early/late payments are captured, then filter in memory.
     const start = startOfMonth(new Date());
     const end = endOfMonth(new Date());
+    const queryStart = addDays(start, -31);
+    const queryEnd = addDays(end, 31);
 
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
       where("companyId", "==", companyId),
       where("type", "==", "payable"),
-      where("dueDate", ">=", Timestamp.fromDate(start)),
-      where("dueDate", "<=", Timestamp.fromDate(end)),
+      where("dueDate", ">=", Timestamp.fromDate(queryStart)),
+      where("dueDate", "<=", Timestamp.fromDate(queryEnd)),
     );
 
     const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map((doc) => doc.data() as Transaction);
+    // Apply effectiveDate filter in memory
+    const transactions = snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          ...data,
+          paymentDate: (data.paymentDate as Timestamp)?.toDate(),
+          dueDate: (data.dueDate as Timestamp).toDate(),
+        } as Transaction;
+      })
+      .filter((t) => {
+        const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+        return effDate >= start && effDate <= end;
+      });
 
     // Get Cost Centers to map names
     const ccQuery = query(

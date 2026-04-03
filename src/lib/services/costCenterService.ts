@@ -125,6 +125,13 @@ export const costCenterService = {
     const yearStart = new Date(targetYear, 0, 1); // Jan 1
     const yearEnd = new Date(targetYear, 11, 31, 23, 59, 59); // Dec 31
 
+    // Expand query window ±90 days to capture transactions paid outside the strict year boundary.
+    // effectiveDate (paymentDate if paid, else dueDate) is applied in memory.
+    const queryStart = new Date(yearStart);
+    queryStart.setDate(queryStart.getDate() - 90);
+    const queryEnd = new Date(yearEnd);
+    queryEnd.setDate(queryEnd.getDate() + 90);
+
     // Get the cost center
     const costCenter = await costCenterService.getById(costCenterId);
     if (!costCenter) {
@@ -152,8 +159,8 @@ export const costCenterService = {
         "authorized",
         "paid",
       ]),
-      where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd),
+      where("dueDate", ">=", queryStart),
+      where("dueDate", "<=", queryEnd),
     );
 
     if (userId) {
@@ -166,6 +173,11 @@ export const costCenterService = {
     let fromReceivables = 0;
     receivablesSnapshot.docs.forEach((docSnap) => {
       const tx = docSnap.data();
+      // Use effectiveDate to determine if this transaction belongs to the target year
+      const effDate: Date = tx.status === "paid" && tx.paymentDate
+        ? (tx.paymentDate as Timestamp).toDate()
+        : (tx.dueDate as Timestamp).toDate();
+      if (effDate < yearStart || effDate > yearEnd) return;
       const allocations = tx.costCenterAllocation || [];
       if (allocations.length > 0) {
         allocations.forEach(
@@ -194,8 +206,8 @@ export const costCenterService = {
         "authorized",
         "paid",
       ]),
-      where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd),
+      where("dueDate", ">=", queryStart),
+      where("dueDate", "<=", queryEnd),
     );
 
     if (userId) {
@@ -205,6 +217,11 @@ export const costCenterService = {
     let spentOnPayables = 0;
     payablesSnapshot.docs.forEach((docSnap) => {
       const tx = docSnap.data();
+      // Use effectiveDate to determine if this transaction belongs to the target year
+      const effDate: Date = tx.status === "paid" && tx.paymentDate
+        ? (tx.paymentDate as Timestamp).toDate()
+        : (tx.dueDate as Timestamp).toDate();
+      if (effDate < yearStart || effDate > yearEnd) return;
       const allocations = tx.costCenterAllocation || [];
       if (allocations.length > 0) {
         allocations.forEach(
@@ -263,6 +280,12 @@ export const costCenterService = {
     const yearStart = new Date(targetYear, 0, 1);
     const yearEnd = new Date(targetYear, 11, 31, 23, 59, 59);
 
+    // Expand query window ±90 days; effectiveDate filtering happens in memory below.
+    const queryStart = new Date(yearStart);
+    queryStart.setDate(queryStart.getDate() - 90);
+    const queryEnd = new Date(yearEnd);
+    queryEnd.setDate(queryEnd.getDate() + 90);
+
     // 1. Fetch all relevant transactions for the company/year ONCE
     let transactionsQuery = query(
       collection(db, "transactions"),
@@ -275,8 +298,8 @@ export const costCenterService = {
         "authorized",
         "paid",
       ]),
-      where("dueDate", ">=", yearStart),
-      where("dueDate", "<=", yearEnd),
+      where("dueDate", ">=", queryStart),
+      where("dueDate", "<=", queryEnd),
     );
 
     if (userId) {
@@ -287,7 +310,15 @@ export const costCenterService = {
     }
 
     const transactionsSnapshot = await getDocs(transactionsQuery);
-    const transactions = transactionsSnapshot.docs.map((doc) => doc.data());
+    // Pre-filter by effectiveDate: paymentDate if paid, else dueDate — must fall in target year
+    const transactions = transactionsSnapshot.docs
+      .map((doc) => doc.data())
+      .filter((tx) => {
+        const effDate: Date = tx.status === "paid" && tx.paymentDate
+          ? (tx.paymentDate as Timestamp).toDate()
+          : (tx.dueDate as Timestamp).toDate();
+        return effDate >= yearStart && effDate <= yearEnd;
+      });
 
     // 2. Fetch budgets for all cost centers (batching to avoid 30 limits and multiple calls)
     const costCenterIds = costCenters.map((cc) => cc.id);
