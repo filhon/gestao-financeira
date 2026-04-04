@@ -113,7 +113,7 @@ export function ReconciliationTable({
 
               <TableCell
                 className={cn(
-                  "font-medium",
+                  "font-medium font-financial",
                   tx.amount < 0 ? "text-red-600" : "text-green-600",
                 )}
               >
@@ -130,7 +130,7 @@ export function ReconciliationTable({
                     <span className="font-medium text-green-700">
                       Combo ({tx.matchedTransactionIds.length} itens)
                     </span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-muted-foreground font-financial">
                       {formatCurrency(tx.amount)} (Total)
                     </span>
                     {tx.matchedBundleDetails && (
@@ -146,7 +146,7 @@ export function ReconciliationTable({
                             >
                               {sub.description}
                             </span>
-                            <span className="whitespace-nowrap">
+                            <span className="whitespace-nowrap font-financial">
                               {formatCurrency(sub.amount)}
                             </span>
                           </div>
@@ -169,7 +169,7 @@ export function ReconciliationTable({
                           "dd/MM/yyyy",
                         )}
                       </span>
-                      <span>{formatCurrency(tx.matchedDetails.amount)}</span>
+                      <span className="font-financial">{formatCurrency(tx.matchedDetails.amount)}</span>
                     </div>
                     {/* Entity Name if available */}
                     {getMatchedEntityName(tx.matchedDetails) && (
@@ -241,7 +241,7 @@ export function ReconciliationTable({
                           >
                             {c.transaction.description}
                           </span>
-                          <span className="whitespace-nowrap">
+                          <span className="whitespace-nowrap font-financial">
                             {formatCurrency(c.transaction.amount)}
                           </span>
                         </div>

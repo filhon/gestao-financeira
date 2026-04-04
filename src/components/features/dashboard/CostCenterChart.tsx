@@ -171,7 +171,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                             }}
                           />
                         </div>
-                        <div className="flex justify-between text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">
+                        <div className="flex justify-between text-[10px] text-muted-foreground group-hover:text-foreground transition-colors font-financial">
                           <span>{formatCurrency(item.spent)}</span>
                           {item.budget > 0 && (
                             <span>meta: {formatCurrency(item.budget)}</span>
@@ -192,7 +192,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                             <span className="text-[10px] uppercase text-muted-foreground">
                               Realizado
                             </span>
-                            <span className="font-bold text-red-600">
+                            <span className="font-bold font-financial text-red-600">
                               {formatCurrency(item.spent)}
                             </span>
                           </div>
@@ -200,7 +200,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                             <span className="text-[10px] uppercase text-muted-foreground">
                               Orçamento
                             </span>
-                            <span className="font-bold text-emerald-600">
+                            <span className="font-bold font-financial text-emerald-600">
                               {formatCurrency(item.budget)}
                             </span>
                           </div>
@@ -246,8 +246,8 @@ export function CostCenterChart({ year }: { year?: number }) {
                         return (
                           <div className="bg-popover border text-popover-foreground shadow-sm rounded-lg p-2 text-xs">
                             <p className="font-semibold mb-1">{data.name}</p>
-                            <p>Realizado: {formatCurrency(data.spent)}</p>
-                            <p>Orçado: {formatCurrency(data.budget)}</p>
+                            <p className="font-financial">Realizado: {formatCurrency(data.spent)}</p>
+                            <p className="font-financial">Orçado: {formatCurrency(data.budget)}</p>
                           </div>
                         );
                       }

@@ -19,6 +19,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   Database,
+  Wrench,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -77,8 +79,7 @@ export default function SystemSettingsPage() {
     try {
       setIsRecalculatingUsage(true);
       await usageService.recalculateAll(selectedCompany.id);
-      // recalculateAll logs internally; count comes from the service
-      setUsageRecalcResult({ transactionCount: -1 }); // sentinel: success
+      setUsageRecalcResult({ transactionCount: -1 });
       toast.success("Cache Recalculado", {
         description:
           "O uso dos centros de custo foi recalculado com base nas transações.",
@@ -125,22 +126,39 @@ export default function SystemSettingsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/configuracoes">
           <Button variant="ghost" size="icon">
             <ChevronLeft className="h-4 w-4" />
           </Button>
         </Link>
-        <h1 className="text-3xl font-bold tracking-tight">
-          Sistema e Ferramentas
-        </h1>
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-50 dark:bg-orange-950/60 shrink-0">
+            <Wrench className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Sistema e Ferramentas
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Manutenção, recalibração e correção de dados.
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <RefreshCw className="h-5 w-5" />
+      {/* Section label */}
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+        Ferramentas de Manutenção
+      </h2>
+
+      <div className="grid gap-4">
+        {/* Card 1 — Recalibração de Saldo */}
+        <Card className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationFillMode: "both" }}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <RefreshCw className="h-4 w-4 text-amber-500" />
               Recalibração de Saldo
             </CardTitle>
             <CardDescription>
@@ -149,65 +167,57 @@ export default function SystemSettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md bg-amber-50 p-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-amber-400" />
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-amber-800">
-                    Atenção
-                  </h3>
-                  <div className="mt-2 text-sm text-amber-700">
-                    <p>
-                      Esta ação irá sobrescrever o saldo atual em cache pelo
-                      valor exato da soma de todas as transações pagas. Isso
-                      pode levar alguns segundos dependendo do volume de dados.
-                    </p>
-                  </div>
-                </div>
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/40 p-3.5 border border-amber-100 dark:border-amber-900/50">
+              <div className="flex gap-2.5">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  Esta ação irá sobrescrever o saldo atual em cache pelo valor
+                  exato da soma de todas as transações pagas. Pode levar alguns
+                  segundos dependendo do volume de dados.
+                </p>
               </div>
             </div>
 
-            <Button
-              onClick={handleRecalculate}
-              disabled={isRecalculating || !selectedCompany}
-              className="w-full"
-            >
-              {isRecalculating ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Recalculando...
-                </>
-              ) : (
-                "Recalcular Agora"
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleRecalculate}
+                disabled={isRecalculating || !selectedCompany}
+                variant="outline"
+                className="min-w-[160px]"
+              >
+                {isRecalculating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Recalculando...
+                  </>
+                ) : (
+                  "Recalcular Agora"
+                )}
+              </Button>
+              {!selectedCompany && (
+                <p className="text-xs text-muted-foreground">
+                  Selecione uma empresa para continuar.
+                </p>
               )}
-            </Button>
+            </div>
 
             {lastResult && (
-              <div className="mt-4 rounded-md bg-green-50 p-4 animate-in fade-in slide-in-from-top-2">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <CheckCircle2 className="h-5 w-5 text-green-400" />
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-green-800">
-                      Sucesso
-                    </h3>
-                    <div className="mt-2 text-sm text-green-700">
-                      <p>
-                        Saldo atualizado para:{" "}
-                        <span className="font-bold">
-                          R${" "}
-                          {lastResult.newBalance.toLocaleString("pt-BR", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </p>
-                      <p className="text-xs mt-1">
-                        Baseado em {lastResult.transactionCount} transações.
-                      </p>
-                    </div>
+              <div className="rounded-md bg-green-50 dark:bg-green-950/40 p-3.5 border border-green-100 dark:border-green-900/50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex gap-2.5">
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                      Saldo atualizado para{" "}
+                      <span className="font-bold">
+                        R${" "}
+                        {lastResult.newBalance.toLocaleString("pt-BR", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </span>
+                    </p>
+                    <p className="text-xs text-green-700 dark:text-green-400">
+                      Baseado em {lastResult.transactionCount} transações.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -215,10 +225,11 @@ export default function SystemSettingsPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5" />
+        {/* Card 2 — Corrigir Índices */}
+        <Card className="border-l-4 border-l-blue-400 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: "60ms", animationFillMode: "both" }}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Database className="h-4 w-4 text-blue-500" />
               Corrigir Filtro por Centro de Custo
             </CardTitle>
             <CardDescription>
@@ -228,130 +239,117 @@ export default function SystemSettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md bg-blue-50 p-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-blue-400" />
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-blue-800">
-                    Informação
-                  </h3>
-                  <div className="mt-2 text-sm text-blue-700">
-                    <p>
-                      Esta ação analisa todas as transações e corrige os índices
-                      de centro de custo para que o filtro funcione
-                      corretamente. É seguro executar várias vezes.
-                    </p>
-                  </div>
-                </div>
+            <div className="rounded-md bg-blue-50 dark:bg-blue-950/40 p-3.5 border border-blue-100 dark:border-blue-900/50">
+              <div className="flex gap-2.5">
+                <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-blue-800 dark:text-blue-300">
+                  Analisa todas as transações e corrige os índices de centro de
+                  custo para que o filtro funcione corretamente. É seguro
+                  executar várias vezes.
+                </p>
               </div>
             </div>
 
-            <Button
-              onClick={handleBackfillCostCenterIds}
-              disabled={isMigrating || !selectedCompany}
-              className="w-full"
-            >
-              {isMigrating ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Corrigindo...
-                </>
-              ) : (
-                "Corrigir Índices"
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleBackfillCostCenterIds}
+                disabled={isMigrating || !selectedCompany}
+                variant="outline"
+                className="min-w-[160px]"
+              >
+                {isMigrating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Corrigindo...
+                  </>
+                ) : (
+                  "Corrigir Índices"
+                )}
+              </Button>
+              {!selectedCompany && (
+                <p className="text-xs text-muted-foreground">
+                  Selecione uma empresa para continuar.
+                </p>
               )}
-            </Button>
+            </div>
 
             {migrationResult && (
-              <div className="mt-4 rounded-md bg-green-50 p-4 animate-in fade-in slide-in-from-top-2">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <CheckCircle2 className="h-5 w-5 text-green-400" />
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-green-800">
-                      Concluído
-                    </h3>
-                    <div className="mt-2 text-sm text-green-700">
-                      <p>
-                        <span className="font-bold">
-                          {migrationResult.updated}
-                        </span>{" "}
-                        transações corrigidas.
-                      </p>
-                      <p className="text-xs mt-1">
-                        {migrationResult.total} transações analisadas no total.
-                      </p>
-                    </div>
+              <div className="rounded-md bg-green-50 dark:bg-green-950/40 p-3.5 border border-green-100 dark:border-green-900/50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex gap-2.5">
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                      <span className="font-bold">{migrationResult.updated}</span>{" "}
+                      {migrationResult.updated === 1
+                        ? "transação corrigida"
+                        : "transações corrigidas"}
+                      .
+                    </p>
+                    <p className="text-xs text-green-700 dark:text-green-400">
+                      {migrationResult.total} transações analisadas no total.
+                    </p>
                   </div>
                 </div>
               </div>
             )}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <RefreshCw className="h-5 w-5" />
+
+        {/* Card 3 — Recalcular Uso dos Centros de Custo */}
+        <Card className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: "120ms", animationFillMode: "both" }}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <RefreshCw className="h-4 w-4 text-amber-500" />
               Recalcular Uso dos Centros de Custo
             </CardTitle>
             <CardDescription>
               Recalcula o cache de uso dos centros de custo a partir das
-              transações. Use quando os valores de orçamento utilizado
-              estiverem incorretos.
+              transações. Use quando os valores de orçamento utilizado estiverem
+              incorretos.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md bg-amber-50 p-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-amber-400" />
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-amber-800">
-                    Atenção
-                  </h3>
-                  <div className="mt-2 text-sm text-amber-700">
-                    <p>
-                      Limpa e reconstrói o cache de uso de todas as transações
-                      ativas (exceto rejeitadas). Pode levar alguns segundos.
-                      Seguro executar mais de uma vez.
-                    </p>
-                  </div>
-                </div>
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/40 p-3.5 border border-amber-100 dark:border-amber-900/50">
+              <div className="flex gap-2.5">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  Limpa e reconstrói o cache de uso de todas as transações ativas
+                  (exceto rejeitadas). Pode levar alguns segundos. Seguro
+                  executar mais de uma vez.
+                </p>
               </div>
             </div>
 
-            <Button
-              onClick={handleRecalculateUsage}
-              disabled={isRecalculatingUsage || !selectedCompany}
-              className="w-full"
-            >
-              {isRecalculatingUsage ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Recalculando...
-                </>
-              ) : (
-                "Recalcular Uso"
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleRecalculateUsage}
+                disabled={isRecalculatingUsage || !selectedCompany}
+                variant="outline"
+                className="min-w-[160px]"
+              >
+                {isRecalculatingUsage ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Recalculando...
+                  </>
+                ) : (
+                  "Recalcular Uso"
+                )}
+              </Button>
+              {!selectedCompany && (
+                <p className="text-xs text-muted-foreground">
+                  Selecione uma empresa para continuar.
+                </p>
               )}
-            </Button>
+            </div>
 
             {usageRecalcResult && (
-              <div className="mt-4 rounded-md bg-green-50 p-4 animate-in fade-in slide-in-from-top-2">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <CheckCircle2 className="h-5 w-5 text-green-400" />
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-green-800">
-                      Concluído
-                    </h3>
-                    <div className="mt-2 text-sm text-green-700">
-                      <p>Cache de uso dos centros de custo atualizado.</p>
-                    </div>
-                  </div>
+              <div className="rounded-md bg-green-50 dark:bg-green-950/40 p-3.5 border border-green-100 dark:border-green-900/50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex gap-2.5">
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                    Cache de uso dos centros de custo atualizado com sucesso.
+                  </p>
                 </div>
               </div>
             )}

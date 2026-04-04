@@ -612,7 +612,7 @@ export default function PaymentBatchesPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{kpiData.openCount}</div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground font-financial">
                 {formatCurrency(kpiData.openTotal)}
               </p>
             </CardContent>
@@ -644,7 +644,7 @@ export default function PaymentBatchesPage() {
               <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
                 {kpiData.authorizedCount}
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground font-financial">
                 {formatCurrency(kpiData.authorizedTotal)}
               </p>
             </CardContent>
@@ -655,7 +655,7 @@ export default function PaymentBatchesPage() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              <div className="text-2xl font-bold font-financial text-blue-600 dark:text-blue-400">
                 {formatCurrency(kpiData.paidTotal)}
               </div>
               <p className="text-xs text-muted-foreground">no período</p>
@@ -785,7 +785,7 @@ export default function PaymentBatchesPage() {
                         {getResponsiblePerson(batch)}
                       </TableCell>
                       <TableCell>{batch.transactionIds.length}</TableCell>
-                      <TableCell>{formatCurrency(batch.totalAmount)}</TableCell>
+                      <TableCell className="font-financial">{formatCurrency(batch.totalAmount)}</TableCell>
                       <TableCell>
                         {format(batch.createdAt, "dd/MM/yyyy", {
                           locale: ptBR,

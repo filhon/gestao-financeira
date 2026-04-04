@@ -618,7 +618,7 @@ export function BatchDetailsDialog({
               <p className="text-xs text-muted-foreground mb-1">
                 Total do Lote
               </p>
-              <p className="text-xl font-bold tabular-nums">
+              <p className="text-xl font-bold font-financial">
                 {formatCurrency(liveTotal)}
               </p>
             </div>
@@ -682,7 +682,7 @@ export function BatchDetailsDialog({
                               </span>
                             </TableCell>
                             <TableCell>{t.supplierOrClient}</TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right font-financial">
                               {formatCurrency(t.amount)}
                             </TableCell>
                             <TableCell>
@@ -891,7 +891,7 @@ export function BatchDetailsDialog({
                             </span>
                           </TableCell>
                           <TableCell>{t.supplierOrClient}</TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-right font-financial">
                             {formatCurrency(t.amount)}
                           </TableCell>
                           <TableCell>

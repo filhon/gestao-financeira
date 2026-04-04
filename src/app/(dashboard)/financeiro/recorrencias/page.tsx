@@ -504,7 +504,7 @@ export default function RecorrenciasPage() {
                       </TableCell>
 
                       {/* Valor */}
-                      <TableCell className="tabular-nums font-medium">
+                      <TableCell className="font-financial font-medium">
                         {formatCurrency(t.amount)}
                       </TableCell>
 

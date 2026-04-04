@@ -5,17 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { transactionService } from "@/lib/services/transactionService";
 import { Entity, Transaction } from "@/lib/types";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft,
   TrendingDown,
@@ -27,18 +18,11 @@ import {
   FileText,
   Banknote,
   CreditCard,
-  BarChart3,
   Info,
   Loader2,
+  Activity,
+  Wallet,
 } from "lucide-react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -75,6 +59,7 @@ export default function EntityDashboard() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [activeTab, setActiveTab] = useState<"overview" | "info">("overview");
 
   const id = params.id as string;
 
@@ -84,7 +69,6 @@ export default function EntityDashboard() {
 
       setIsLoading(true);
       try {
-        // Load entity
         const entityDoc = await getDoc(doc(db, "entities", id));
         if (!entityDoc.exists()) {
           setEntity(null);
@@ -100,7 +84,6 @@ export default function EntityDashboard() {
 
         setEntity(entityData);
 
-        // For 'user' role, filter by createdBy to match Firestore rules
         const filter: { companyId: string; createdBy?: string } = {
           companyId: selectedCompany.id,
         };
@@ -108,11 +91,8 @@ export default function EntityDashboard() {
           filter.createdBy = user.uid;
         }
 
-        // Load all transactions for the company
         const allTxs = await transactionService.getAll(filter);
 
-        // Filter transactions associated with this entity
-        // Match by entityId OR by supplierOrClient name (for legacy/manual entries)
         const entityTxs = allTxs.filter(
           (tx) =>
             tx.entityId === id ||
@@ -132,11 +112,10 @@ export default function EntityDashboard() {
     loadData();
   }, [selectedCompany, id, user, onlyOwnPayables]);
 
-  // Redirect if user doesn't have permission
   if (!canViewEntities) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
+        <div className="text-center space-y-2">
           <h2 className="text-2xl font-bold">Acesso Negado</h2>
           <p className="text-muted-foreground">
             Você não tem permissão para visualizar esta página.
@@ -149,7 +128,7 @@ export default function EntityDashboard() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -162,15 +141,12 @@ export default function EntityDashboard() {
     );
   }
 
-  // Filter transactions for the selected year
-  // For paid transactions, use paymentDate; for others use dueDate
   const yearTransactions = transactions.filter((t) => {
     const dateToCheck =
       t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
     return dateToCheck.getFullYear() === selectedYear;
   });
 
-  // Calculations
   const payables = yearTransactions.filter(
     (t) => t.type === "payable" && t.status !== "rejected",
   );
@@ -193,14 +169,13 @@ export default function EntityDashboard() {
 
   const balance = totalReceivables - totalPayables;
 
-  // Status distribution for pie chart
   const statusDistribution = [
     {
       name: "Pago",
       value:
         payables.filter((t) => t.status === "paid").length +
         receivables.filter((t) => t.status === "paid").length,
-      color: "#22c55e",
+      color: "#10b981",
     },
     {
       name: "Aprovado",
@@ -225,8 +200,6 @@ export default function EntityDashboard() {
     },
   ].filter((d) => d.value > 0);
 
-  // Monthly trend data
-  // For paid transactions, use paymentDate; for others use dueDate
   const monthlyTrendData = yearTransactions
     .reduce(
       (acc, t) => {
@@ -264,7 +237,6 @@ export default function EntityDashboard() {
     )
     .sort((a, b) => a.monthIndex - b.monthIndex);
 
-  // Recent transactions - sorted by the actual date (payment or due)
   const recentTransactions = [...yearTransactions]
     .sort((a, b) => {
       const dateA =
@@ -281,260 +253,356 @@ export default function EntityDashboard() {
   );
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "approved":
-        return <Badge className="bg-emerald-500">Aprovado</Badge>;
-      case "pending_approval":
-        return <Badge className="bg-amber-500">Pendente</Badge>;
-      case "paid":
-        return <Badge className="bg-blue-500">Pago</Badge>;
-      case "rejected":
-        return <Badge className="bg-red-500">Rejeitado</Badge>;
-      default:
-        return <Badge variant="secondary">Rascunho</Badge>;
-    }
+    const styles: Record<string, string> = {
+      approved: "bg-emerald-500/10 text-emerald-600 border-emerald-200",
+      pending_approval: "bg-amber-500/10 text-amber-600 border-amber-200",
+      paid: "bg-blue-500/10 text-blue-600 border-blue-200",
+      rejected: "bg-red-500/10 text-red-600 border-red-200",
+      draft: "bg-zinc-100 text-zinc-500 border-zinc-200",
+    };
+    const labels: Record<string, string> = {
+      approved: "Aprovado",
+      pending_approval: "Pendente",
+      paid: "Pago",
+      rejected: "Rejeitado",
+      draft: "Rascunho",
+    };
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${styles[status] ?? styles.draft}`}
+      >
+        {labels[status] ?? "Rascunho"}
+      </span>
+    );
   };
 
-  const getCategoryBadge = (category: string) => {
-    switch (category) {
-      case "supplier":
-        return (
-          <Badge variant="outline" className="border-red-500 text-red-600">
-            Fornecedor
-          </Badge>
-        );
-      case "client":
-        return (
-          <Badge variant="outline" className="border-green-500 text-green-600">
-            Cliente
-          </Badge>
-        );
-      case "both":
-        return (
-          <Badge
-            variant="outline"
-            className="border-purple-500 text-purple-600"
-          >
-            Fornecedor/Cliente
-          </Badge>
-        );
-      default:
-        return <Badge variant="outline">-</Badge>;
-    }
+  const categoryConfig: Record<
+    string,
+    { label: string; color: string; bg: string }
+  > = {
+    supplier: {
+      label: "Fornecedor",
+      color: "text-rose-600",
+      bg: "bg-rose-50 border-rose-200",
+    },
+    client: {
+      label: "Cliente",
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 border-emerald-200",
+    },
+    both: {
+      label: "Fornecedor / Cliente",
+      color: "text-violet-600",
+      bg: "bg-violet-50 border-violet-200",
+    },
   };
+  const catCfg = categoryConfig[entity.category] ?? {
+    label: "-",
+    color: "text-zinc-500",
+    bg: "bg-zinc-50 border-zinc-200",
+  };
+
+  const entityInitials = entity.name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
 
   return (
-    <div className="space-y-6 p-8 pt-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="text-3xl font-bold tracking-tight">
-                {entity.name}
-              </h2>
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      {/* ── Header ── */}
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="max-w-7xl mx-auto px-6 py-5">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            {/* Left: back + entity identity */}
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => router.back()}
+                className="rounded-full h-9 w-9 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+
+              {/* Avatar */}
+              <div
+                className={`h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
+                  entity.category === "client"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : entity.category === "supplier"
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-violet-100 text-violet-700"
+                }`}
+              >
+                {entityInitials}
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                    {entity.name}
+                  </h1>
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${catCfg.bg} ${catCfg.color}`}
+                  >
+                    {catCfg.label}
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-500 mt-0.5">
+                  {entity.type === "company"
+                    ? "Pessoa Jurídica"
+                    : "Pessoa Física"}
+                  {entity.document && (
+                    <span className="ml-2 font-mono">{entity.document}</span>
+                  )}
+                </p>
+              </div>
             </div>
-            <p className="text-muted-foreground">
-              {entity.type === "company" ? "Pessoa Jurídica" : "Pessoa Física"}
-              {entity.document && ` • ${entity.document}`}
-            </p>
+
+            {/* Right: year selector */}
+            <Select
+              value={selectedYear.toString()}
+              onValueChange={(v) => setSelectedYear(parseInt(v))}
+            >
+              <SelectTrigger className="w-[110px] h-9 text-sm bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700">
+                <SelectValue placeholder="Ano" />
+              </SelectTrigger>
+              <SelectContent>
+                {years.map((year) => (
+                  <SelectItem key={year} value={year.toString()}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select
-            value={selectedYear.toString()}
-            onValueChange={(value) => setSelectedYear(parseInt(value))}
-          >
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="Ano" />
-            </SelectTrigger>
-            <SelectContent>
-              {years.map((year) => (
-                <SelectItem key={year} value={year.toString()}>
-                  {year}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+          {/* Tab bar */}
+          <div className="flex gap-1 mt-5 -mb-px">
+            {(
+              [
+                { id: "overview", label: "Visão Geral", icon: Activity },
+                { id: "info", label: "Informações", icon: Info },
+              ] as const
+            ).map(({ id: tabId, label, icon: Icon }) => (
+              <button
+                key={tabId}
+                onClick={() => setActiveTab(tabId)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tabId
+                    ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100"
+                    : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview" className="gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Visão Geral
-          </TabsTrigger>
-          <TabsTrigger value="info" className="gap-2">
-            <Info className="h-4 w-4" />
-            Informações
-          </TabsTrigger>
-        </TabsList>
+      {/* ── Content ── */}
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {activeTab === "overview" && (
+          <>
+            {/* KPI row */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {/* A Pagar */}
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      Total a Pagar
+                    </p>
+                    <p className="mt-1.5 text-2xl font-bold font-financial text-rose-600">
+                      {formatCurrency(totalPayables)}
+                    </p>
+                  </div>
+                  <div className="p-2 rounded-lg bg-rose-50 dark:bg-rose-950">
+                    <TrendingDown className="h-4 w-4 text-rose-500" />
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                  <p className="text-xs text-zinc-500">
+                    Pendente:{" "}
+                    <span className="font-medium font-financial text-zinc-700 dark:text-zinc-300">
+                      {formatCurrency(pendingPayables)}
+                    </span>
+                  </p>
+                </div>
+              </div>
 
-        <TabsContent value="overview" className="space-y-4">
-          {/* KPI Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total a Pagar
-                </CardTitle>
-                <TrendingDown className="h-4 w-4 text-red-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  {formatCurrency(totalPayables)}
+              {/* A Receber */}
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      Total a Receber
+                    </p>
+                    <p className="mt-1.5 text-2xl font-bold font-financial text-emerald-600">
+                      {formatCurrency(totalReceivables)}
+                    </p>
+                  </div>
+                  <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Pendente: {formatCurrency(pendingPayables)}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total a Receber
-                </CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {formatCurrency(totalReceivables)}
+                <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                  <p className="text-xs text-zinc-500">
+                    Pendente:{" "}
+                    <span className="font-medium font-financial text-zinc-700 dark:text-zinc-300">
+                      {formatCurrency(pendingReceivables)}
+                    </span>
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Pendente: {formatCurrency(pendingReceivables)}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Saldo</CardTitle>
-                {balance >= 0 ? (
-                  <TrendingUp className="h-4 w-4 text-green-500" />
-                ) : (
-                  <TrendingDown className="h-4 w-4 text-red-500" />
-                )}
-              </CardHeader>
-              <CardContent>
-                <div
-                  className={`text-2xl font-bold ${balance >= 0 ? "text-green-600" : "text-red-600"}`}
-                >
-                  {formatCurrency(balance)}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Receitas - Despesas
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Transações
-                </CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {yearTransactions.length}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Em {selectedYear}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-            {/* Monthly Trend Chart */}
-            <Card className="col-span-4">
-              <CardHeader>
-                <CardTitle>Movimentação Mensal ({selectedYear})</CardTitle>
-              </CardHeader>
-              <CardContent className="pl-2">
-                <div className="h-[300px]">
+              {/* Saldo */}
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      Saldo
+                    </p>
+                    <p
+                      className={`mt-1.5 text-2xl font-bold font-financial ${balance >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                    >
+                      {formatCurrency(balance)}
+                    </p>
+                  </div>
+                  <div
+                    className={`p-2 rounded-lg ${balance >= 0 ? "bg-emerald-50 dark:bg-emerald-950" : "bg-rose-50 dark:bg-rose-950"}`}
+                  >
+                    {balance >= 0 ? (
+                      <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    ) : (
+                      <TrendingDown className="h-4 w-4 text-rose-500" />
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                  <p className="text-xs text-zinc-500">Receitas − Despesas</p>
+                </div>
+              </div>
+
+              {/* Transações */}
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      Transações
+                    </p>
+                    <p className="mt-1.5 text-2xl font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">
+                      {yearTransactions.length}
+                    </p>
+                  </div>
+                  <div className="p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                    <FileText className="h-4 w-4 text-zinc-500" />
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                  <p className="text-xs text-zinc-500">Em {selectedYear}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Charts row */}
+            <div className="grid gap-4 lg:grid-cols-7">
+              {/* Area chart */}
+              <div className="lg:col-span-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                    Movimentação Mensal
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">{selectedYear}</p>
+                </div>
+                <div className="h-[260px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={monthlyTrendData}
-                      margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                      margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
                     >
                       <defs>
                         <linearGradient
-                          id="payablesGradient"
+                          id="gradPayables"
                           x1="0"
                           y1="0"
                           x2="0"
                           y2="1"
                         >
                           <stop
-                            offset="5%"
-                            stopColor="#ef4444"
-                            stopOpacity={0.4}
+                            offset="0%"
+                            stopColor="#f43f5e"
+                            stopOpacity={0.18}
                           />
                           <stop
-                            offset="95%"
-                            stopColor="#ef4444"
-                            stopOpacity={0.05}
+                            offset="100%"
+                            stopColor="#f43f5e"
+                            stopOpacity={0}
                           />
                         </linearGradient>
                         <linearGradient
-                          id="receivablesGradient"
+                          id="gradReceivables"
                           x1="0"
                           y1="0"
                           x2="0"
                           y2="1"
                         >
                           <stop
-                            offset="5%"
-                            stopColor="#22c55e"
-                            stopOpacity={0.4}
+                            offset="0%"
+                            stopColor="#10b981"
+                            stopOpacity={0.18}
                           />
                           <stop
-                            offset="95%"
-                            stopColor="#22c55e"
-                            stopOpacity={0.05}
+                            offset="100%"
+                            stopColor="#10b981"
+                            stopOpacity={0}
                           />
                         </linearGradient>
                       </defs>
                       <CartesianGrid
                         strokeDasharray="3 3"
-                        className="stroke-muted"
+                        stroke="#e4e4e7"
+                        strokeOpacity={0.6}
                       />
                       <XAxis
                         dataKey="name"
-                        stroke="#888888"
-                        fontSize={12}
+                        stroke="#a1a1aa"
+                        fontSize={11}
                         tickLine={false}
                         axisLine={false}
+                        tick={{ fill: "#71717a" }}
                       />
                       <YAxis
-                        stroke="#888888"
-                        fontSize={12}
+                        stroke="#a1a1aa"
+                        fontSize={11}
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(value) => {
-                          if (Math.abs(value) >= 1000) {
-                            return `R$${(value / 1000).toFixed(0)}k`;
-                          }
-                          return `R$${value}`;
-                        }}
+                        tick={{ fill: "#71717a" }}
+                        tickFormatter={(v) =>
+                          Math.abs(v) >= 1000
+                            ? `R$${(v / 1000).toFixed(0)}k`
+                            : `R$${v}`
+                        }
                       />
                       <Tooltip
                         content={({ active, payload, label }) => {
                           if (active && payload && payload.length) {
                             return (
-                              <div className="rounded-lg border bg-popover p-3 shadow-md">
-                                <p className="text-sm font-medium text-popover-foreground">
+                              <div className="rounded-lg border border-zinc-200 bg-white shadow-lg px-3 py-2 text-xs space-y-1">
+                                <p className="font-semibold text-zinc-700 capitalize">
                                   {label}
                                 </p>
-                                <p className="text-sm text-red-600">
+                                <p className="text-rose-600 font-financial">
                                   Despesas:{" "}
                                   {formatCurrency(
                                     (payload[0]?.value as number) || 0,
                                   )}
                                 </p>
-                                <p className="text-sm text-green-600">
+                                <p className="text-emerald-600 font-financial">
                                   Receitas:{" "}
                                   {formatCurrency(
                                     (payload[1]?.value as number) || 0,
@@ -549,229 +617,267 @@ export default function EntityDashboard() {
                       <Area
                         type="monotone"
                         dataKey="payables"
-                        stroke="#ef4444"
+                        stroke="#f43f5e"
                         strokeWidth={2}
-                        fill="url(#payablesGradient)"
+                        fill="url(#gradPayables)"
                         dot={false}
+                        activeDot={{ r: 4, fill: "#f43f5e" }}
                       />
                       <Area
                         type="monotone"
                         dataKey="receivables"
-                        stroke="#22c55e"
+                        stroke="#10b981"
                         strokeWidth={2}
-                        fill="url(#receivablesGradient)"
+                        fill="url(#gradReceivables)"
                         dot={false}
+                        activeDot={{ r: 4, fill: "#10b981" }}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-              </CardContent>
-            </Card>
+                <div className="flex items-center gap-5 mt-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block w-3 h-0.5 rounded bg-rose-500" />
+                    <span className="text-xs text-zinc-500">Despesas</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block w-3 h-0.5 rounded bg-emerald-500" />
+                    <span className="text-xs text-zinc-500">Receitas</span>
+                  </div>
+                </div>
+              </div>
 
-            {/* Status Distribution */}
-            <Card className="col-span-3">
-              <CardHeader>
-                <CardTitle>Status das Transações</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col h-[300px]">
-                  <div className="flex-1 min-h-0">
-                    {statusDistribution.length > 0 ? (
+              {/* Pie chart */}
+              <div className="lg:col-span-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                    Status das Transações
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">{selectedYear}</p>
+                </div>
+                {statusDistribution.length > 0 ? (
+                  <>
+                    <div className="h-[200px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
                             data={statusDistribution}
                             cx="50%"
                             cy="50%"
-                            innerRadius={50}
-                            outerRadius={70}
-                            paddingAngle={5}
+                            innerRadius={56}
+                            outerRadius={78}
+                            paddingAngle={3}
                             dataKey="value"
                           >
                             {statusDistribution.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={entry.color}
+                                stroke="transparent"
+                              />
                             ))}
                           </Pie>
                           <Tooltip
-                            formatter={(
-                              value:
-                                | number
-                                | string
-                                | Array<number | string>
-                                | readonly (number | string)[]
-                                | undefined,
-                            ) => `${value} transações`}
+                            formatter={(v) => [`${v} transações`]}
                             contentStyle={{
                               borderRadius: "8px",
-                              border: "1px solid #e5e7eb",
-                              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                              border: "1px solid #e4e4e7",
+                              fontSize: "12px",
+                              boxShadow: "0 4px 6px -1px rgba(0,0,0,0.06)",
                             }}
                           />
                         </PieChart>
                       </ResponsiveContainer>
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        Nenhuma transação encontrada
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
-                    {statusDistribution.map((entry, index) => (
-                      <div key={index} className="flex items-center gap-2">
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {statusDistribution.map((entry, i) => (
                         <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: entry.color }}
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          {entry.name}
-                        </span>
-                      </div>
-                    ))}
+                          key={i}
+                          className="flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                              {entry.name}
+                            </span>
+                          </div>
+                          <span className="text-xs font-semibold font-financial text-zinc-800 dark:text-zinc-200">
+                            {entry.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center h-60 text-sm text-zinc-400">
+                    Nenhuma transação encontrada
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+                )}
+              </div>
+            </div>
 
-          {/* Recent Transactions */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Últimas Transações</CardTitle>
-              <CardDescription>
-                Transações mais recentes com esta entidade em {selectedYear}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+            {/* Transactions table */}
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
+                <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                  Últimas Transações
+                </h3>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Movimentações mais recentes com esta entidade em{" "}
+                  {selectedYear}
+                </p>
+              </div>
               {recentTransactions.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Descrição</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Valor</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentTransactions.map((tx) => {
-                      const displayDate =
-                        tx.status === "paid" && tx.paymentDate
-                          ? tx.paymentDate
-                          : tx.dueDate;
-                      return (
-                        <TableRow key={tx.id}>
-                          <TableCell>
-                            {format(displayDate, "dd/MM/yyyy")}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {tx.description}
-                          </TableCell>
-                          <TableCell>
-                            {tx.type === "payable" ? (
-                              <Badge
-                                variant="outline"
-                                className="border-red-500 text-red-600"
-                              >
-                                A Pagar
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="border-green-500 text-green-600"
-                              >
-                                A Receber
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell
-                            className={
-                              tx.type === "payable"
-                                ? "text-red-600"
-                                : "text-green-600"
-                            }
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-100 dark:border-zinc-800">
+                        <th className="text-left px-5 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                          Data
+                        </th>
+                        <th className="text-left px-5 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                          Descrição
+                        </th>
+                        <th className="text-left px-5 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                          Tipo
+                        </th>
+                        <th className="text-right px-5 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                          Valor
+                        </th>
+                        <th className="text-left px-5 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentTransactions.map((tx, i) => {
+                        const displayDate =
+                          tx.status === "paid" && tx.paymentDate
+                            ? tx.paymentDate
+                            : tx.dueDate;
+                        const isPayable = tx.type === "payable";
+                        return (
+                          <tr
+                            key={tx.id}
+                            className={`border-b border-zinc-50 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors ${
+                              i === recentTransactions.length - 1
+                                ? "border-b-0"
+                                : ""
+                            }`}
                           >
-                            {tx.type === "payable" ? "-" : "+"}
-                            {formatCurrency(tx.amount)}
-                          </TableCell>
-                          <TableCell>{getStatusBadge(tx.status)}</TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                            <td className="px-5 py-3.5 text-xs text-zinc-500 font-mono whitespace-nowrap">
+                              {format(displayDate, "dd/MM/yyyy")}
+                            </td>
+                            <td className="px-5 py-3.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 max-w-60 truncate">
+                              {tx.description}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {isPayable ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-600">
+                                  <TrendingDown className="h-3 w-3" />A Pagar
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
+                                  <TrendingUp className="h-3 w-3" />A Receber
+                                </span>
+                              )}
+                            </td>
+                            <td
+                              className={`px-5 py-3.5 text-sm font-semibold font-financial text-right whitespace-nowrap ${
+                                isPayable ? "text-rose-600" : "text-emerald-600"
+                              }`}
+                            >
+                              {isPayable ? "−" : "+"}
+                              {formatCurrency(tx.amount)}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {getStatusBadge(tx.status)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
+                <div className="py-12 text-center text-sm text-zinc-400">
                   Nenhuma transação encontrada para esta entidade em{" "}
                   {selectedYear}.
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </div>
+          </>
+        )}
 
-        <TabsContent value="info" className="space-y-4">
-          {/* Contact Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                Informações de Contato
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {entity.email && (
+        {activeTab === "info" && (
+          <div className="grid gap-4 lg:grid-cols-3">
+            {/* Contact */}
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                  <User className="h-3.5 w-3.5 text-zinc-500" />
+                </div>
+                <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                  Contato
+                </h3>
+              </div>
+              <div className="space-y-3">
+                {entity.email ? (
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-muted">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    <Mail className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                     <div>
-                      <p className="text-sm text-muted-foreground">E-mail</p>
-                      <p className="font-medium">{entity.email}</p>
+                      <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
+                        E-mail
+                      </p>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
+                        {entity.email}
+                      </p>
                     </div>
                   </div>
-                )}
-                {entity.phone && (
+                ) : null}
+                {entity.phone ? (
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-muted">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    <Phone className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                     <div>
-                      <p className="text-sm text-muted-foreground">Telefone</p>
-                      <p className="font-medium">{entity.phone}</p>
+                      <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
+                        Telefone
+                      </p>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium font-mono">
+                        {entity.phone}
+                      </p>
                     </div>
                   </div>
-                )}
+                ) : null}
                 {!entity.email && !entity.phone && (
-                  <p className="text-muted-foreground col-span-full">
+                  <p className="text-sm text-zinc-400">
                     Nenhuma informação de contato cadastrada.
                   </p>
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Bank Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Banknote className="h-5 w-5" />
-                Informações Bancárias
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {entity.pixKey && (
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-muted">
-                      <CreditCard className="h-4 w-4 text-muted-foreground" />
-                    </div>
+            {/* Bank */}
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                  <Banknote className="h-3.5 w-3.5 text-zinc-500" />
+                </div>
+                <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                  Dados Bancários
+                </h3>
+              </div>
+              <div className="space-y-3">
+                {entity.pixKey ? (
+                  <div className="flex items-start gap-3">
+                    <CreditCard className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
                         Chave PIX
                         {entity.pixKeyType && (
-                          <span className="ml-1">
+                          <span className="ml-1 normal-case">
                             (
                             {entity.pixKeyType === "cpf"
                               ? "CPF"
@@ -781,60 +887,63 @@ export default function EntityDashboard() {
                                   ? "E-mail"
                                   : entity.pixKeyType === "phone"
                                     ? "Telefone"
-                                    : entity.pixKeyType === "random"
-                                      ? "Chave Aleatória"
-                                      : ""}
+                                    : "Aleatória"}
                             )
                           </span>
                         )}
                       </p>
-                      <p className="font-medium break-all">{entity.pixKey}</p>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium font-mono break-all">
+                        {entity.pixKey}
+                      </p>
                     </div>
                   </div>
-                )}
-                {entity.bankName && (
-                  <div className="flex items-center gap-3 md:col-span-2">
-                    <div className="p-2 rounded-lg bg-muted">
-                      <Building2 className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                ) : null}
+                {entity.bankName ? (
+                  <div className="flex items-start gap-3">
+                    <Building2 className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-muted-foreground">
-                        Conta Bancária
+                      <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
+                        Banco
                       </p>
-                      <p className="font-medium">
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
                         {entity.bankName}
-                        {entity.agency && ` • Agência: ${entity.agency}`}
-                        {entity.account && ` • Conta: ${entity.account}`}
                       </p>
+                      {(entity.agency || entity.account) && (
+                        <p className="text-xs text-zinc-500 font-mono mt-0.5">
+                          {entity.agency && `Ag. ${entity.agency}`}
+                          {entity.agency && entity.account && " · "}
+                          {entity.account && `Cc. ${entity.account}`}
+                        </p>
+                      )}
                     </div>
                   </div>
-                )}
+                ) : null}
                 {!entity.pixKey && !entity.bankName && (
-                  <p className="text-muted-foreground col-span-full">
+                  <p className="text-sm text-zinc-400">
                     Nenhuma informação bancária cadastrada.
                   </p>
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Additional Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Informações Adicionais
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {/* General info */}
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                  <FileText className="h-3.5 w-3.5 text-zinc-500" />
+                </div>
+                <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                  Informações Gerais
+                </h3>
+              </div>
+              <div className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-muted">
-                    <Building2 className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                  <Building2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                   <div>
-                    <p className="text-sm text-muted-foreground">Tipo</p>
-                    <p className="font-medium">
+                    <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
+                      Tipo
+                    </p>
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
                       {entity.type === "company"
                         ? "Pessoa Jurídica"
                         : "Pessoa Física"}
@@ -843,33 +952,35 @@ export default function EntityDashboard() {
                 </div>
                 {entity.document && (
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-muted">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    <FileText className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                     <div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
                         {entity.type === "company" ? "CNPJ" : "CPF"}
                       </p>
-                      <p className="font-medium">{entity.document}</p>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium font-mono">
+                        {entity.document}
+                      </p>
                     </div>
                   </div>
                 )}
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-muted">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                  <Wallet className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                   <div>
-                    <p className="text-sm text-muted-foreground">Categoria</p>
-                    <div className="mt-1">
-                      {getCategoryBadge(entity.category)}
-                    </div>
+                    <p className="text-[11px] text-zinc-400 uppercase tracking-wide">
+                      Categoria
+                    </p>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border mt-0.5 ${catCfg.bg} ${catCfg.color}`}
+                    >
+                      {catCfg.label}
+                    </span>
                   </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

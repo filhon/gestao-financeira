@@ -228,7 +228,7 @@ export default function ApprovalPage() {
                 <p className="font-semibold text-emerald-900">
                   {transaction.description}
                 </p>
-                <p className="text-2xl font-bold text-emerald-700 mt-2">
+                <p className="text-2xl font-bold font-financial text-emerald-700 mt-2">
                   {formatCurrency(getAdjustedAmount())}
                 </p>
               </div>
@@ -389,13 +389,13 @@ export default function ApprovalPage() {
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <p className="text-3xl font-bold text-blue-600">
+                  <p className="text-3xl font-bold font-financial text-blue-600">
                     {formatCurrency(adjustedAmount)}
                   </p>
                   {hasAmountChange() && (
                     <p className="text-sm text-muted-foreground">
                       Original:{" "}
-                      <span className="line-through">
+                      <span className="line-through font-financial">
                         {formatCurrency(transaction.amount)}
                       </span>
                     </p>

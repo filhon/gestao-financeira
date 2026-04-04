@@ -55,7 +55,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
                 ref={ref}
                 value={displayValue}
                 onChange={handleChange}
-                className={cn("tabular-nums", className)}
+                className={cn("font-financial", className)}
                 placeholder="R$ 0,00"
             />
         );

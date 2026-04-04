@@ -483,7 +483,7 @@ export default function CostCentersPage() {
               <span className="text-muted-foreground/40">·</span>
               <span className="text-sm text-muted-foreground">
                 Total orçado:{" "}
-                <span className="font-medium text-foreground">
+                <span className="font-medium font-financial text-foreground">
                   {formatCurrency(totalBudget)}
                 </span>
               </span>

@@ -27,6 +27,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus,
   Pencil,
@@ -36,6 +39,9 @@ import {
   Loader2,
   Eye,
   Search,
+  Users,
+  TruckIcon,
+  HandshakeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EntityForm } from "@/components/features/entities/EntityForm";
@@ -44,11 +50,53 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { useQuery } from "@tanstack/react-query";
+
+function getEntityInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getAvatarColor(name: string): string {
+  const colors = [
+    "bg-blue-100 text-blue-700",
+    "bg-emerald-100 text-emerald-700",
+    "bg-orange-100 text-orange-700",
+    "bg-violet-100 text-violet-700",
+    "bg-rose-100 text-rose-700",
+    "bg-cyan-100 text-cyan-700",
+    "bg-amber-100 text-amber-700",
+    "bg-teal-100 text-teal-700",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+const categoryBadge: Record<string, React.ReactNode> = {
+  supplier: (
+    <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50 font-normal">
+      Fornecedor
+    </Badge>
+  ),
+  client: (
+    <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 font-normal">
+      Cliente
+    </Badge>
+  ),
+  both: (
+    <Badge variant="outline" className="text-violet-600 border-violet-300 bg-violet-50 font-normal">
+      Ambos
+    </Badge>
+  ),
+};
 
 export default function EntitiesPage() {
   const { user } = useAuth();
@@ -70,6 +118,22 @@ export default function EntitiesPage() {
       router.push("/dashboard");
     }
   }, [canViewEntities, router]);
+
+  // KPI totals
+  const { data: allEntities = [] } = useQuery({
+    queryKey: ["entities-all", selectedCompany?.id],
+    queryFn: () => entityService.getAll(selectedCompany!.id),
+    enabled: !!selectedCompany && canViewEntities,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const totalEntities = allEntities.length;
+  const totalSuppliers = allEntities.filter(
+    (e) => e.category === "supplier" || e.category === "both",
+  ).length;
+  const totalClients = allEntities.filter(
+    (e) => e.category === "client" || e.category === "both",
+  ).length;
 
   const {
     items: entities,
@@ -183,6 +247,7 @@ export default function EntitiesPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Cadastros</h1>
@@ -197,19 +262,53 @@ export default function EntitiesPage() {
         )}
       </div>
 
-      <Tabs
-        defaultValue="all"
-        onValueChange={setActiveTab}
-        className="space-y-4"
-      >
-        <TabsList>
-          <TabsTrigger value="all">Todos</TabsTrigger>
-          <TabsTrigger value="supplier">Fornecedores</TabsTrigger>
-          <TabsTrigger value="client">Clientes</TabsTrigger>
-        </TabsList>
-
+      {/* KPI Cards */}
+      <div className="grid grid-cols-3 gap-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-muted">
+                <Users className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total</p>
+                <p className="text-2xl font-bold">{totalEntities}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-orange-50">
+                <TruckIcon className="h-5 w-5 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Fornecedores</p>
+                <p className="text-2xl font-bold">{totalSuppliers}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-50">
+                <HandshakeIcon className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Clientes</p>
+                <p className="text-2xl font-bold">{totalClients}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Table Card with integrated Tabs */}
+      <Card>
+        <CardHeader className="pb-0">
+          <div className="flex flex-row items-start justify-between gap-4">
             <div className="space-y-1">
               <CardTitle>Entidades</CardTitle>
               <CardDescription>
@@ -227,163 +326,224 @@ export default function EntitiesPage() {
                 />
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead
-                      className="cursor-pointer hover:text-primary"
-                      onClick={() => requestSort("name")}
-                    >
-                      Nome{" "}
-                      {sortConfig?.key === "name" &&
-                        (sortConfig.direction === "asc" ? "↑" : "↓")}
-                    </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:text-primary"
-                      onClick={() => requestSort("type")}
-                    >
-                      Tipo{" "}
-                      {sortConfig?.key === "type" &&
-                        (sortConfig.direction === "asc" ? "↑" : "↓")}
-                    </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:text-primary"
-                      onClick={() => requestSort("category")}
-                    >
-                      Categoria{" "}
-                      {sortConfig?.key === "category" &&
-                        (sortConfig.direction === "asc" ? "↑" : "↓")}
-                    </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:text-primary"
-                      onClick={() => requestSort("document")}
-                    >
-                      Documento{" "}
-                      {sortConfig?.key === "document" &&
-                        (sortConfig.direction === "asc" ? "↑" : "↓")}
-                    </TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading && entities.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center">
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin inline" />
-                        Carregando...
-                      </TableCell>
-                    </TableRow>
-                  ) : sortedEntities.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center">
-                        Nenhuma entidade encontrada.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    sortedEntities.map((entity) => (
-                      <TableRow
-                        key={entity.id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() =>
-                          router.push(`/cadastros/entidades/${entity.id}`)
-                        }
-                      >
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            {entity.type === "company" ? (
-                              <Building2 className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <User className="h-4 w-4 text-muted-foreground" />
-                            )}
-                            <span className="hover:underline">
-                              {entity.name}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {entity.type === "company"
-                            ? "Pessoa Jurídica"
-                            : "Pessoa Física"}
-                        </TableCell>
-                        <TableCell>
-                          {entity.category === "supplier" && "Fornecedor"}
-                          {entity.category === "client" && "Cliente"}
-                          {entity.category === "both" && "Ambos"}
-                        </TableCell>
-                        <TableCell>{entity.document || "-"}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(
-                                  `/cadastros/entidades/${entity.id}`,
-                                );
-                              }}
-                              title="Ver detalhes"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {canManageEntities && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEditDialog(entity);
-                                  }}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="text-red-500 hover:text-red-700"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeleteId(entity.id);
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+          </div>
+          <div className="mt-4">
+            <Tabs defaultValue="all" onValueChange={setActiveTab}>
+              <TabsList>
+                <TabsTrigger value="all">Todos</TabsTrigger>
+                <TabsTrigger value="supplier">Fornecedores</TabsTrigger>
+                <TabsTrigger value="client">Clientes</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+        </CardHeader>
 
+        <CardContent className="pt-4">
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead
+                    className="cursor-pointer hover:text-primary"
+                    onClick={() => requestSort("name")}
+                  >
+                    Nome{" "}
+                    {sortConfig?.key === "name" &&
+                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer hover:text-primary"
+                    onClick={() => requestSort("type")}
+                  >
+                    Tipo{" "}
+                    {sortConfig?.key === "type" &&
+                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer hover:text-primary"
+                    onClick={() => requestSort("category")}
+                  >
+                    Categoria{" "}
+                    {sortConfig?.key === "category" &&
+                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer hover:text-primary"
+                    onClick={() => requestSort("document")}
+                  >
+                    Documento{" "}
+                    {sortConfig?.key === "document" &&
+                      (sortConfig.direction === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading && entities.length === 0 ? (
+                  // Skeleton rows
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-7 w-7 rounded-full" />
+                          <Skeleton className="h-4 w-40" />
+                        </div>
+                      </TableCell>
+                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                      <TableCell className="flex justify-end gap-2">
+                        <Skeleton className="h-8 w-8 rounded-md" />
+                        <Skeleton className="h-8 w-8 rounded-md" />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : sortedEntities.length === 0 ? (
+                  // Empty state
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-48 text-center">
+                      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                        <Building2 className="h-10 w-10 opacity-20" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-foreground">
+                            Nenhuma entidade encontrada
+                          </p>
+                          <p className="text-xs">
+                            {debouncedSearchTerm
+                              ? `Sem resultados para "${debouncedSearchTerm}"`
+                              : "Comece cadastrando seu primeiro fornecedor ou cliente."}
+                          </p>
+                        </div>
+                        {canManageEntities && !debouncedSearchTerm && (
+                          <Button size="sm" onClick={openCreateDialog}>
+                            <Plus className="h-3 w-3 mr-1" /> Criar entidade
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  sortedEntities.map((entity) => (
+                    <TableRow
+                      key={entity.id}
+                      className="group cursor-pointer hover:bg-muted/50"
+                      onClick={() =>
+                        router.push(`/cadastros/entidades/${entity.id}`)
+                      }
+                    >
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-7 w-7">
+                            <AvatarFallback
+                              className={`text-xs font-medium ${getAvatarColor(entity.name)}`}
+                            >
+                              {getEntityInitials(entity.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="hover:underline">{entity.name}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          {entity.type === "company" ? (
+                            <Building2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <User className="h-3.5 w-3.5" />
+                          )}
+                          <span>
+                            {entity.type === "company"
+                              ? "Pessoa Jurídica"
+                              : "Pessoa Física"}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {categoryBadge[entity.category] ?? entity.category}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {entity.document || "-"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(
+                                `/cadastros/entidades/${entity.id}`,
+                              );
+                            }}
+                            title="Ver detalhes"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {canManageEntities && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditDialog(entity);
+                                }}
+                                title="Editar"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-red-500 hover:text-red-700"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteId(entity.id);
+                                }}
+                                title="Excluir"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Footer: load more + result count */}
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-xs text-muted-foreground">
+              {sortedEntities.length > 0 &&
+                (hasMore
+                  ? `Exibindo ${sortedEntities.length} entidades`
+                  : `${sortedEntities.length} ${sortedEntities.length === 1 ? "entidade" : "entidades"} encontrada${sortedEntities.length === 1 ? "" : "s"}`
+                )}
+              {debouncedSearchTerm && sortedEntities.length > 0 &&
+                ` para "${debouncedSearchTerm}"`}
+            </p>
             {hasMore && entities.length > 0 && (
-              <div className="flex justify-center mt-4">
-                <Button
-                  variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Carregando...
-                    </>
-                  ) : (
-                    "Carregar Mais"
-                  )}
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                onClick={loadMore}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Carregando...
+                  </>
+                ) : (
+                  "Carregar Mais"
+                )}
+              </Button>
             )}
-          </CardContent>
-        </Card>
-      </Tabs>
+          </div>
+        </CardContent>
+      </Card>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">

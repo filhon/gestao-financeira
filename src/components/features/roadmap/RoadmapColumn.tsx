@@ -11,6 +11,7 @@ import {
 import { RoadmapItem } from "./RoadmapItem";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Lightbulb, CalendarClock, Zap, CheckCircle2, MoveRight } from "lucide-react";
 
 interface RoadmapColumnProps {
   id: RoadmapStatus;
@@ -20,6 +21,46 @@ interface RoadmapColumnProps {
   onRefresh: () => void;
   extraHeader?: React.ReactNode;
 }
+
+const COLUMN_CONFIG: Record<
+  RoadmapStatus,
+  {
+    icon: React.ElementType;
+    iconColor: string;
+    iconBg: string;
+    borderTop: string;
+    emptyText: string;
+  }
+> = {
+  suggestion: {
+    icon: Lightbulb,
+    iconColor: "text-amber-500",
+    iconBg: "bg-amber-500/10",
+    borderTop: "border-t-amber-400",
+    emptyText: "Nenhuma sugestão ainda.\nEnvie a sua!",
+  },
+  planned: {
+    icon: CalendarClock,
+    iconColor: "text-blue-500",
+    iconBg: "bg-blue-500/10",
+    borderTop: "border-t-blue-400",
+    emptyText: "Nada planejado\npor enquanto.",
+  },
+  in_progress: {
+    icon: Zap,
+    iconColor: "text-violet-500",
+    iconBg: "bg-violet-500/10",
+    borderTop: "border-t-violet-400",
+    emptyText: "Nenhum item\nem progresso.",
+  },
+  done: {
+    icon: CheckCircle2,
+    iconColor: "text-emerald-500",
+    iconBg: "bg-emerald-500/10",
+    borderTop: "border-t-emerald-400",
+    emptyText: "Nenhum item\nconcluído ainda.",
+  },
+};
 
 export function RoadmapColumn({
   id,
@@ -43,15 +84,25 @@ export function RoadmapColumn({
   });
 
   const itemIds = useMemo(() => items.map((item) => item.id), [items]);
+  const config = COLUMN_CONFIG[id];
+  const Icon = config.icon;
 
   return (
-    <div className="flex flex-col h-full rounded-lg bg-muted/50 w-full flex-shrink-0">
-      <div className="p-4 pb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h3 className="font-semibold">{title}</h3>
+    <div
+      className={cn(
+        "flex flex-col h-full rounded-lg bg-muted/50 w-full shrink-0 border-t-2",
+        config.borderTop,
+      )}
+    >
+      <div className="p-4 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className={cn("flex h-7 w-7 items-center justify-center rounded-md", config.iconBg)}>
+            <Icon className={cn("h-3.5 w-3.5", config.iconColor)} />
+          </div>
+          <h3 className="font-semibold text-sm">{title}</h3>
           <Badge
             variant="secondary"
-            className="rounded-full px-2 py-0.5 text-xs"
+            className="rounded-full px-2 py-0.5 text-xs font-medium"
           >
             {items.length}
           </Badge>
@@ -62,7 +113,7 @@ export function RoadmapColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "flex-1 p-2 space-y-2 overflow-y-auto min-h-[150px]",
+          "flex-1 p-2 space-y-2 overflow-y-auto min-h-[150px] transition-colors",
           isOver && "bg-primary/5 rounded-b-lg",
         )}
       >
@@ -78,10 +129,19 @@ export function RoadmapColumn({
         </SortableContext>
 
         {items.length === 0 && (
-          <div className="h-24 flex items-center justify-center border-2 border-dashed border-muted-foreground/20 rounded-lg text-muted-foreground text-sm text-center px-4">
-            {id === "suggestion"
-              ? "Nenhuma sugestão ainda."
-              : "Arraste itens para cá."}
+          <div className="h-24 flex flex-col items-center justify-center gap-1.5 border-2 border-dashed border-muted-foreground/20 rounded-lg px-4">
+            {isAdmin && id !== "suggestion" ? (
+              <>
+                <MoveRight className="h-4 w-4 text-muted-foreground/40" />
+                <span className="text-xs text-muted-foreground/60 text-center">
+                  Arraste itens para cá.
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-muted-foreground/60 text-center whitespace-pre-line">
+                {config.emptyText}
+              </span>
+            )}
           </div>
         )}
       </div>

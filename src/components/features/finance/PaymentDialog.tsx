@@ -134,19 +134,19 @@ export function PaymentDialog({
               value={finalAmount}
               onChange={setFinalAmount}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground font-financial">
               Valor original: {formatCurrency(transaction.amount)}
             </p>
           </div>
           {finalAmount > 0 && (
             <div className="text-sm">
               {finalAmount < transaction.amount && (
-                <p className="text-green-600">
+                <p className="text-green-600 font-financial">
                   Desconto: {formatCurrency(transaction.amount - finalAmount)}
                 </p>
               )}
               {finalAmount > transaction.amount && (
-                <p className="text-red-600">
+                <p className="text-red-600 font-financial">
                   Juros/Multa: {formatCurrency(finalAmount - transaction.amount)}
                 </p>
               )}

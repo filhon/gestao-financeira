@@ -35,7 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Eye, MessageCircle, Loader2, Search, Filter } from "lucide-react";
+import { Eye, MessageCircle, MessageSquare, Loader2, Search, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -105,7 +105,7 @@ export function AdminFeedbackTable({
 }: AdminFeedbackTableProps) {
   const { user } = useAuth();
   const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(
-    null
+    null,
   );
   const [responseText, setResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -179,7 +179,7 @@ export function AdminFeedbackTable({
 
   const handleStatusChange = async (
     feedbackId: string,
-    newStatus: FeedbackStatus
+    newStatus: FeedbackStatus,
   ) => {
     try {
       await feedbackService.updateStatus(feedbackId, newStatus);
@@ -202,9 +202,9 @@ export function AdminFeedbackTable({
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4">
+      <div className="flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar por título, descrição ou usuário..."
             value={searchQuery}
@@ -214,8 +214,8 @@ export function AdminFeedbackTable({
         </div>
         <div className="flex gap-2">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[180px]">
-              <Filter className="h-4 w-4 mr-2" />
+            <SelectTrigger className="w-[170px]">
+              <Filter className="h-4 w-4 mr-2 shrink-0" />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -228,7 +228,7 @@ export function AdminFeedbackTable({
             </SelectContent>
           </Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
@@ -241,6 +241,12 @@ export function AdminFeedbackTable({
             </SelectContent>
           </Select>
         </div>
+        {filteredFeedbacks.length !== feedbacks.length && (
+          <div className="flex items-center self-center text-xs text-muted-foreground shrink-0">
+            {filteredFeedbacks.length} de {feedbacks.length} resultado
+            {feedbacks.length !== 1 ? "s" : ""}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -248,7 +254,7 @@ export function AdminFeedbackTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[40px]"></TableHead>
+              <TableHead className="w-10"></TableHead>
               <TableHead>Usuário</TableHead>
               <TableHead>Tipo</TableHead>
               <TableHead>Prioridade</TableHead>
@@ -261,11 +267,22 @@ export function AdminFeedbackTable({
           <TableBody>
             {filteredFeedbacks.length === 0 ? (
               <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-8 text-muted-foreground"
-                >
-                  Nenhum feedback encontrado.
+                <TableCell colSpan={8}>
+                  <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
+                      <MessageSquare className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">
+                        Nenhum feedback encontrado
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {feedbacks.length > 0
+                          ? "Tente ajustar os filtros para ver mais resultados."
+                          : "Ainda não há feedbacks enviados pelos usuários."}
+                      </p>
+                    </div>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
@@ -276,7 +293,10 @@ export function AdminFeedbackTable({
                 >
                   <TableCell>
                     {!feedback.read && (
-                      <div className="h-2 w-2 rounded-full bg-primary" />
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-50" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -294,7 +314,7 @@ export function AdminFeedbackTable({
                     <Badge
                       className={cn(
                         "text-xs",
-                        priorityColors[feedback.priority]
+                        priorityColors[feedback.priority],
                       )}
                     >
                       {priorityLabels[feedback.priority]}
@@ -315,8 +335,8 @@ export function AdminFeedbackTable({
                     >
                       <SelectTrigger
                         className={cn(
-                          "w-[160px] text-xs h-8",
-                          statusColors[feedback.status]
+                          "w-40 text-xs h-8",
+                          statusColors[feedback.status],
                         )}
                       >
                         <SelectValue />
@@ -381,7 +401,7 @@ export function AdminFeedbackTable({
                 <Badge
                   className={cn(
                     "text-xs",
-                    priorityColors[selectedFeedback.priority]
+                    priorityColors[selectedFeedback.priority],
                   )}
                 >
                   {priorityLabels[selectedFeedback.priority]}
@@ -389,7 +409,7 @@ export function AdminFeedbackTable({
                 <Badge
                   className={cn(
                     "text-xs",
-                    statusColors[selectedFeedback.status]
+                    statusColors[selectedFeedback.status],
                   )}
                 >
                   {statusLabels[selectedFeedback.status]}
@@ -473,7 +493,7 @@ export function AdminFeedbackTable({
                       {format(
                         selectedFeedback.respondedAt,
                         "dd/MM/yyyy 'às' HH:mm",
-                        { locale: ptBR }
+                        { locale: ptBR },
                       )}
                     </p>
                   )}

@@ -558,7 +558,7 @@ export default function AccountsReceivablePage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold font-financial">
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
@@ -590,7 +590,7 @@ export default function AccountsReceivablePage() {
                 kpis.overdueCount
               )}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground font-financial">
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
@@ -625,7 +625,7 @@ export default function AccountsReceivablePage() {
                 kpis.dueSoonCount
               )}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground font-financial">
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
@@ -641,7 +641,7 @@ export default function AccountsReceivablePage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+            <div className="text-2xl font-bold font-financial text-blue-600 dark:text-blue-400">
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
@@ -881,7 +881,7 @@ export default function AccountsReceivablePage() {
                         <TableCell className="text-muted-foreground text-sm">
                           {t.supplierOrClient}
                         </TableCell>
-                        <TableCell className="text-right font-semibold">
+                        <TableCell className="text-right font-semibold font-financial">
                           {formatCurrency(t.amount)}
                         </TableCell>
                         <TableCell>{getStatusBadge(t.status)}</TableCell>

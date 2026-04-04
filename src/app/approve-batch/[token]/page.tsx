@@ -422,7 +422,7 @@ export default function BatchApprovalPage() {
               <CardDescription>Saldo Atual</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-2xl font-bold font-financial text-gray-900">
                 {formatCurrency(0)}
               </p>
               <p className="text-xs text-muted-foreground">
@@ -435,7 +435,7 @@ export default function BatchApprovalPage() {
               <CardDescription>Saldo Projetado (Fim do Ano)</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-2xl font-bold font-financial text-gray-900">
                 {formatCurrency(0)}
               </p>
               <p className="text-xs text-muted-foreground">
@@ -448,7 +448,7 @@ export default function BatchApprovalPage() {
               <CardDescription>Saldo Após Pagamento</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-amber-700">
+              <p className="text-2xl font-bold font-financial text-amber-700">
                 {formatCurrency(0 - totalAmount)}
               </p>
               <p className="text-xs text-muted-foreground">
@@ -466,7 +466,7 @@ export default function BatchApprovalPage() {
           </div>
           <div>
             <span className="text-sm text-muted-foreground">Total: </span>
-            <span className="font-bold text-lg">
+            <span className="font-bold font-financial text-lg">
               {formatCurrency(totalAmount)}
             </span>
           </div>
@@ -496,7 +496,7 @@ export default function BatchApprovalPage() {
                     </span>
                   ))}
                 </div>
-                <div className="text-sm text-muted-foreground">
+                <div className="text-sm text-muted-foreground font-financial">
                   Total: {formatCurrency(ccGroup.totalAmount)}
                 </div>
               </CardHeader>
@@ -511,7 +511,7 @@ export default function BatchApprovalPage() {
                       <AccordionTrigger className="px-4 hover:no-underline">
                         <div className="flex justify-between w-full mr-4">
                           <span className="font-medium">{sg.supplier}</span>
-                          <span className="text-muted-foreground">
+                          <span className="text-muted-foreground font-financial">
                             {sg.transactions.length} transações •{" "}
                             {formatCurrency(sg.totalAmount)}
                           </span>
@@ -589,7 +589,7 @@ export default function BatchApprovalPage() {
                                     </div>
                                   ) : (
                                     <>
-                                      <span className="font-semibold">
+                                      <span className="font-semibold font-financial">
                                         {formatCurrency(amount)}
                                       </span>
                                       <Button

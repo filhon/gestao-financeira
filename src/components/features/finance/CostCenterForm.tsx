@@ -283,8 +283,8 @@ export function CostCenterForm({
                         <span
                           className={
                             parentBalanceInfo.available > 0
-                              ? "text-green-600 font-medium"
-                              : "text-muted-foreground"
+                              ? "text-green-600 font-medium font-financial"
+                              : "text-muted-foreground font-financial"
                           }
                         >
                           {formatCurrency(parentBalanceInfo.available)}
@@ -443,7 +443,7 @@ export function CostCenterForm({
                   Saldo Líquido
                 </span>
                 <span
-                  className={`text-2xl font-bold tabular-nums ${balanceInfo.available >= 0 ? "text-emerald-600" : "text-red-600"}`}
+                  className={`text-2xl font-bold font-financial ${balanceInfo.available >= 0 ? "text-emerald-600" : "text-red-600"}`}
                 >
                   {formatCurrency(balanceInfo.available)}
                 </span>
@@ -478,7 +478,7 @@ export function CostCenterForm({
                   <span className="text-muted-foreground">
                     Receitas Projetadas
                   </span>
-                  <span className="font-medium text-emerald-600 tabular-nums">
+                  <span className="font-medium text-emerald-600 font-financial">
                     +{formatCurrency(balanceInfo.fromReceivables)}
                   </span>
                 </div>
@@ -487,7 +487,7 @@ export function CostCenterForm({
                     <span className="text-muted-foreground">
                       Recebido do Pai
                     </span>
-                    <span className="font-medium text-blue-600 tabular-nums">
+                    <span className="font-medium text-blue-600 font-financial">
                       +{formatCurrency(balanceInfo.fromParent)}
                     </span>
                   </div>
@@ -497,7 +497,7 @@ export function CostCenterForm({
                     <span className="text-muted-foreground">
                       Alocado para Filhos
                     </span>
-                    <span className="font-medium text-orange-600 tabular-nums">
+                    <span className="font-medium text-orange-600 font-financial">
                       -{formatCurrency(balanceInfo.allocatedToChildren)}
                     </span>
                   </div>
@@ -506,7 +506,7 @@ export function CostCenterForm({
                   <span className="text-muted-foreground">
                     Despesas Previstas
                   </span>
-                  <span className="font-medium text-red-600 tabular-nums">
+                  <span className="font-medium text-red-600 font-financial">
                     -{formatCurrency(balanceInfo.spentOnPayables)}
                   </span>
                 </div>

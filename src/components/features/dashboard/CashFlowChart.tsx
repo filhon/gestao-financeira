@@ -278,8 +278,8 @@ export function CashFlowChart({ year }: { year?: number }) {
                         <span
                           className={
                             sim.type === "receivable"
-                              ? "text-emerald-600 font-medium"
-                              : "text-red-600 font-medium"
+                              ? "text-emerald-600 font-medium font-financial"
+                              : "text-red-600 font-medium font-financial"
                           }
                         >
                           {sim.type === "receivable" ? "+" : "−"}
@@ -426,8 +426,8 @@ export function CashFlowChart({ year }: { year?: number }) {
                           <span
                             className={
                               point.balance >= 0
-                                ? "text-emerald-600 font-medium text-xs"
-                                : "text-red-600 font-medium text-xs"
+                                ? "text-emerald-600 font-medium text-xs font-financial"
+                                : "text-red-600 font-medium text-xs font-financial"
                             }
                           >
                             {formatCurrency(point.balance)}
@@ -443,8 +443,8 @@ export function CashFlowChart({ year }: { year?: number }) {
                             <span
                               className={
                                 point.simulatedBalance >= 0
-                                  ? "text-violet-600 font-medium text-xs"
-                                  : "text-red-500 font-medium text-xs"
+                                  ? "text-violet-600 font-medium text-xs font-financial"
+                                  : "text-red-500 font-medium text-xs font-financial"
                               }
                             >
                               {formatCurrency(point.simulatedBalance)}
@@ -455,12 +455,12 @@ export function CashFlowChart({ year }: { year?: number }) {
                         {(point.income > 0 || point.expense > 0) && (
                           <div className="mt-2 pt-2 border-t space-y-0.5">
                             {point.income > 0 && (
-                              <p className="text-xs text-emerald-600">
+                              <p className="text-xs text-emerald-600 font-financial">
                                 + {formatCurrency(point.income)} receitas
                               </p>
                             )}
                             {point.expense > 0 && (
-                              <p className="text-xs text-red-600">
+                              <p className="text-xs text-red-600 font-financial">
                                 − {formatCurrency(point.expense)} despesas
                               </p>
                             )}

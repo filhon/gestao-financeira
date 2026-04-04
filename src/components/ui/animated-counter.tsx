@@ -55,5 +55,5 @@ export function AnimatedCounter({
         };
     }, [value, duration]);
 
-    return <span className={className}>{formatter(displayed)}</span>;
+    return <span className={`font-financial${className ? ` ${className}` : ""}`}>{formatter(displayed)}</span>;
 }

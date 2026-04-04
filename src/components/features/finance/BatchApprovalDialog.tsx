@@ -225,7 +225,7 @@ export function BatchApprovalDialog({
           {/* Summary */}
           <div className="flex justify-between text-sm font-medium bg-muted/50 p-3 rounded-lg">
             <span>Transações: {transactions.length}</span>
-            <span>Total: {formatCurrency(totalAmount)}</span>
+            <span className="font-financial">Total: {formatCurrency(totalAmount)}</span>
           </div>
 
           {/* Transactions Table */}
@@ -293,7 +293,7 @@ export function BatchApprovalDialog({
                               </Button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1 justify-end">
+                            <div className="flex items-center gap-1 justify-end font-financial">
                               {isAmountEdited(t) && (
                                 <Badge variant="secondary" className="text-xs">
                                   Editado

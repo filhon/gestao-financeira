@@ -50,7 +50,7 @@ function PayablesCard({
           </div>
         ) : (
           <>
-            <p className="text-2xl font-bold tracking-tight text-foreground">
+            <p className="text-2xl font-bold font-financial tracking-tight text-foreground">
               {formatCurrency(pendingPayables)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">total pendente</p>
@@ -65,7 +65,7 @@ function PayablesCard({
             </span>
           )}
           {!loading && shortTermPayables > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950 px-2.5 py-1 text-xs font-medium font-financial text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
               <Clock className="h-3 w-3" />
               {formatCurrency(shortTermPayables)} nos próx. 30d
             </span>
@@ -107,7 +107,7 @@ function ReceivablesCard({
           </div>
         ) : (
           <>
-            <p className="text-2xl font-bold tracking-tight text-foreground">
+            <p className="text-2xl font-bold font-financial tracking-tight text-foreground">
               {formatCurrency(pendingReceivables)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">total pendente</p>
@@ -116,7 +116,7 @@ function ReceivablesCard({
 
         {!loading && shortTermReceivables > 0 && (
           <div className="mt-5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950 px-2.5 py-1 text-xs font-medium font-financial text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
               <Clock className="h-3 w-3" />
               {formatCurrency(shortTermReceivables)} nos próx. 30d
             </span>

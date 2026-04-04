@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Users, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -45,9 +45,46 @@ import {
 } from "@/components/ui/dialog";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { cn } from "@/lib/utils";
 
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
+
+const roleBadgeConfig: Record<
+  UserRole,
+  { label: string; className: string }
+> = {
+  admin: {
+    label: "Administrador",
+    className:
+      "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-400 dark:border-violet-800",
+  },
+  financial_manager: {
+    label: "Gerente Financeiro",
+    className:
+      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+  },
+  approver: {
+    label: "Aprovador",
+    className:
+      "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800",
+  },
+  releaser: {
+    label: "Pagador/Baixador",
+    className:
+      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800",
+  },
+  auditor: {
+    label: "Auditor",
+    className:
+      "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-400 dark:border-orange-800",
+  },
+  user: {
+    label: "Usuário",
+    className:
+      "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700",
+  },
+};
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
@@ -76,12 +113,9 @@ export default function UsersPage() {
     }
   }, [canManageUsers, router]);
 
-  // Validating permissions...
-
   const fetchUsers = async () => {
     try {
       setIsLoading(true);
-      // Filtra pelos usuários da empresa selecionada para não expor dados de outras empresas
       const data = await userService.getAll(selectedCompany?.id);
       setUsers(data);
     } catch (error) {
@@ -103,7 +137,6 @@ export default function UsersPage() {
     const admin = { uid: currentUser.uid, email: currentUser.email ?? "" };
     try {
       if (newRole === "none") {
-        // Remove o acesso do usuário à empresa
         await userService.revokeAccess(uid, selectedCompany.id, admin);
         setUsers(
           users.map((u) => {
@@ -155,14 +188,12 @@ export default function UsersPage() {
     try {
       setIsApproving(true);
 
-      // 1. Update Status
       await userService.updateStatus(
         selectedUserToApprove.uid,
         "active",
         admin,
       );
 
-      // 2. Assign Role - use the company that the user requested if it matches, otherwise current selected company
       const targetCompanyId =
         selectedUserToApprove.pendingCompanyId || selectedCompany.id;
       await userService.updateRole(
@@ -172,7 +203,6 @@ export default function UsersPage() {
         targetCompanyId,
       );
 
-      // 3. Clear pending access fields
       await userService.clearPendingAccess(selectedUserToApprove.uid);
 
       toast.success(
@@ -213,15 +243,6 @@ export default function UsersPage() {
       .substring(0, 2);
   };
 
-  const roleLabels: Record<UserRole, string> = {
-    admin: "Administrador",
-    financial_manager: "Gerente Financeiro",
-    approver: "Aprovador",
-    releaser: "Pagador/Baixador",
-    auditor: "Auditor",
-    user: "Usuário",
-  };
-
   const getRoleForCompany = (user: UserProfile) => {
     if (!selectedCompany) return user.role;
     return user.companyRoles?.[selectedCompany.id] || "none";
@@ -229,19 +250,16 @@ export default function UsersPage() {
 
   const activeUsers = users.filter(
     (u) => u.status === "active" || (!u.status && u.active),
-  ); // Backward compat
-  // Filter pending users: those who requested access to the current company OR old 'pending' status users
+  );
   const pendingUsers = users.filter((u) => {
     const isPendingApproval = u.status === "pending_approval";
     const isOldPendingStatus = (u.status as string) === "pending";
     const isPendingCompanySetup = u.status === "pending_company_setup";
 
-    // Include if pending_approval and matches current company (or has no pending company)
     if (isPendingApproval) {
       return !u.pendingCompanyId || u.pendingCompanyId === selectedCompany?.id;
     }
 
-    // Include old pending status users for backward compatibility
     if (isOldPendingStatus || isPendingCompanySetup) {
       return true;
     }
@@ -267,29 +285,64 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          Gerenciamento de Usuários
-        </h1>
-        <p className="text-muted-foreground">
-          Gerencie os acessos para a empresa:{" "}
-          <span className="font-semibold text-foreground">
-            {selectedCompany?.name}
-          </span>
-        </p>
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950/60">
+            <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Gerenciamento de Usuários
+            </h1>
+            <p className="text-muted-foreground text-sm mt-0.5">
+              Empresa:{" "}
+              <span className="font-semibold text-foreground">
+                {selectedCompany?.name}
+              </span>
+              {" · "}
+              <span>{activeUsers.length} ativo{activeUsers.length !== 1 ? "s" : ""}</span>
+              {pendingUsers.length > 0 && (
+                <>
+                  {" · "}
+                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                    {pendingUsers.length} pendente{pendingUsers.length !== 1 ? "s" : ""}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* Pending alert callout */}
+      {pendingUsers.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            <strong>{pendingUsers.length}</strong> solicitaç{pendingUsers.length > 1 ? "ões" : "ão"} de acesso aguardando aprovação.
+          </span>
+        </div>
+      )}
 
       <Tabs defaultValue="active" className="w-full">
         <TabsList>
-          <TabsTrigger value="active">
-            Ativos ({activeUsers.length})
+          <TabsTrigger value="active" className="gap-2">
+            Ativos
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums leading-none">
+              {activeUsers.length}
+            </span>
           </TabsTrigger>
           <TabsTrigger value="pending" className="gap-2">
             Pendentes
-            {pendingUsers.length > 0 && (
+            {pendingUsers.length > 0 ? (
               <Badge className="h-5 min-w-5 px-1.5 text-xs bg-red-500 text-white">
                 {pendingUsers.length}
               </Badge>
+            ) : (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums leading-none">
+                0
+              </span>
             )}
           </TabsTrigger>
         </TabsList>
@@ -327,32 +380,47 @@ export default function UsersPage() {
                 <TableBody>
                   {sortedActiveUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center py-8 text-muted-foreground"
-                      >
-                        Nenhum usuário ativo nesta empresa.
+                      <TableCell colSpan={4} className="py-16 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                            <Users className="h-6 w-6 text-muted-foreground" />
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Nenhum usuário ativo nesta empresa.
+                          </p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedActiveUsers.map((user) => {
+                    sortedActiveUsers.map((user, idx) => {
                       const currentRole = getRoleForCompany(user);
                       const isCurrentUser = currentUser?.uid === user.uid;
+                      const roleConfig = roleBadgeConfig[currentRole as UserRole];
                       return (
-                        <TableRow key={user.uid}>
+                        <TableRow
+                          key={user.uid}
+                          className="animate-in fade-in slide-in-from-bottom-1 duration-200"
+                          style={{
+                            animationDelay: `${idx * 40}ms`,
+                            animationFillMode: "both",
+                          }}
+                        >
                           <TableCell>
                             <Link
                               href={`/perfil/${user.uid}`}
                               className="flex items-center gap-3 hover:underline"
                             >
-                              <Avatar>
-                                <AvatarImage src={user.photoURL || ""} />
-                                <AvatarFallback>
-                                  {user.displayName
-                                    ? getInitials(user.displayName)
-                                    : "U"}
-                                </AvatarFallback>
-                              </Avatar>
+                              <div className="relative">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={user.photoURL || ""} />
+                                  <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                                    {user.displayName
+                                      ? getInitials(user.displayName)
+                                      : "U"}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-card" />
+                              </div>
                               <span className="font-medium">
                                 {user.displayName}
                               </span>
@@ -363,19 +431,25 @@ export default function UsersPage() {
                               )}
                             </Link>
                           </TableCell>
-                          <TableCell>{user.email}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {user.email}
+                          </TableCell>
                           <TableCell>
-                            <Badge
-                              variant={
-                                currentRole === "none" ? "secondary" : "outline"
-                              }
-                              className="capitalize"
-                            >
-                              {currentRole === "none"
-                                ? "Sem Acesso"
-                                : roleLabels[currentRole as UserRole] ||
-                                  currentRole}
-                            </Badge>
+                            {currentRole === "none" ? (
+                              <Badge variant="secondary" className="capitalize">
+                                Sem Acesso
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "font-medium",
+                                  roleConfig?.className,
+                                )}
+                              >
+                                {roleConfig?.label ?? currentRole}
+                              </Badge>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <Select
@@ -439,42 +513,65 @@ export default function UsersPage() {
                 <TableBody>
                   {pendingUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="text-center py-8 text-muted-foreground"
-                      >
-                        Nenhuma solicitação pendente.
+                      <TableCell colSpan={5} className="py-16 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                            <Users className="h-6 w-6 text-muted-foreground" />
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Nenhuma solicitação pendente.
+                          </p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    pendingUsers.map((user) => (
-                      <TableRow key={user.uid}>
+                    pendingUsers.map((user, idx) => (
+                      <TableRow
+                        key={user.uid}
+                        className="animate-in fade-in slide-in-from-bottom-1 duration-200"
+                        style={{
+                          animationDelay: `${idx * 40}ms`,
+                          animationFillMode: "both",
+                        }}
+                      >
                         <TableCell className="flex items-center gap-3">
-                          <Avatar>
-                            <AvatarImage src={user.photoURL || ""} />
-                            <AvatarFallback>
-                              {user.displayName
-                                ? getInitials(user.displayName)
-                                : "U"}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">
-                            {user.displayName}
-                          </span>
+                          <div className="relative">
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={user.photoURL || ""} />
+                              <AvatarFallback className="text-xs bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+                                {user.displayName
+                                  ? getInitials(user.displayName)
+                                  : "U"}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-card" />
+                          </div>
+                          <span className="font-medium">{user.displayName}</span>
                         </TableCell>
-                        <TableCell>{user.email}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {user.email}
+                        </TableCell>
                         <TableCell>
                           {user.pendingRole ? (
-                            <Badge variant="outline">
-                              {roleLabels[user.pendingRole] || user.pendingRole}
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "font-medium",
+                                roleBadgeConfig[user.pendingRole]?.className,
+                              )}
+                            >
+                              {roleBadgeConfig[user.pendingRole]?.label ??
+                                user.pendingRole}
                             </Badge>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-muted-foreground">
                           {user.createdAt
-                            ? new Date(user.createdAt).toLocaleDateString()
+                            ? new Date(user.createdAt).toLocaleDateString(
+                                "pt-BR",
+                              )
                             : "-"}
                         </TableCell>
                         <TableCell className="text-right">

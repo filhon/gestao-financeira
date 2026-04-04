@@ -19,6 +19,7 @@ import {
   LucideIcon,
   Map as MapIcon,
   Scale,
+  TrendingUp,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -169,104 +170,146 @@ export function Sidebar() {
   };
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card px-4 py-6">
-      <div className="mb-6 flex items-center gap-2 px-2">
-        <span className="text-xl font-bold">Fin Control</span>
+    <div className="flex h-full w-64 flex-col border-r bg-card">
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 px-5 py-5 border-b">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
+          <TrendingUp className="h-4 w-4 text-primary-foreground" />
+        </div>
+        <span className="text-base font-semibold tracking-tight">
+          Fin Control
+        </span>
       </div>
 
-      <CompanySwitcher />
+      {/* Company Switcher */}
+      <div className="px-3 pt-3 pb-1">
+        <CompanySwitcher />
+      </div>
 
-      <nav className="flex-1 space-y-1 mt-4">
-        {menuItems.map((item) => {
-          if (item.items) {
-            const isOpen = openGroups.includes(item.title);
-            const isActiveGroup = item.items.some(
-              (subItem) => subItem.href === pathname,
-            );
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-3 py-2">
+        <div className="space-y-0.5">
+          {menuItems.map((item) => {
+            if (item.items) {
+              const isOpen = openGroups.includes(item.title);
+              const isActiveGroup = item.items.some(
+                (subItem) => subItem.href === pathname,
+              );
 
-            return (
-              <Collapsible
-                key={item.title}
-                open={isOpen}
-                onOpenChange={() => toggleGroup(item.title)}
-                className="w-full"
-              >
-                <CollapsibleTrigger asChild>
-                  <button
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground",
-                      isActiveGroup ? "text-primary" : "text-muted-foreground",
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <item.icon className="h-4 w-4" />
-                      {item.title}
-                    </div>
-                    <ChevronRight
+              return (
+                <Collapsible
+                  key={item.title}
+                  open={isOpen}
+                  onOpenChange={() => toggleGroup(item.title)}
+                  className="w-full"
+                >
+                  <CollapsibleTrigger asChild>
+                    <button
                       className={cn(
-                        "h-4 w-4 transition-transform duration-200",
-                        isOpen && "rotate-90",
+                        "group flex w-full items-center justify-between rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+                        isActiveGroup
+                          ? "text-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
                       )}
-                    />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-1 pt-1">
-                  {item.items.map((subItem) => {
-                    const isActive = pathname === subItem.href;
-                    return (
-                      <Link
-                        key={subItem.href}
-                        href={subItem.href!}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={cn(
+                            "flex h-6 w-6 items-center justify-center rounded-md transition-colors",
+                            isActiveGroup
+                              ? "bg-primary/10 text-primary"
+                              : "text-muted-foreground group-hover:text-foreground",
+                          )}
+                        >
+                          <item.icon className="h-3.5 w-3.5" />
+                        </div>
+                        {item.title}
+                      </div>
+                      <ChevronRight
                         className={cn(
-                          "flex items-center gap-3 rounded-lg pl-9 pr-3 py-2 text-sm font-medium transition-colors",
-                          isActive
-                            ? "bg-primary/10 text-primary"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                          "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
+                          isOpen && "rotate-90",
                         )}
-                      >
-                        <subItem.icon className="h-4 w-4" />
-                        {subItem.title}
-                      </Link>
-                    );
-                  })}
-                </CollapsibleContent>
-              </Collapsible>
-            );
-          }
+                      />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-3 pb-1">
+                      {item.items.map((subItem) => {
+                        const isActive = pathname === subItem.href;
+                        return (
+                          <Link
+                            key={subItem.href}
+                            href={subItem.href!}
+                            className={cn(
+                              "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                              isActive
+                                ? "bg-primary/10 font-medium text-primary"
+                                : "font-normal text-muted-foreground hover:bg-muted hover:text-foreground",
+                            )}
+                          >
+                            <subItem.icon
+                              className={cn(
+                                "h-3.5 w-3.5 shrink-0",
+                                isActive
+                                  ? "text-primary"
+                                  : "text-muted-foreground",
+                              )}
+                            />
+                            {subItem.title}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            }
 
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href!}
-              href={item.href!}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              )}
-            >
-              <item.icon className="h-4 w-4" />
-              {item.title}
-            </Link>
-          );
-        })}
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href!}
+                href={item.href!}
+                className={cn(
+                  "group flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <div
+                  className={cn(
+                    "flex h-6 w-6 items-center justify-center rounded-md transition-colors",
+                    isActive
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground group-hover:text-foreground",
+                  )}
+                >
+                  <item.icon className="h-3.5 w-3.5" />
+                </div>
+                {item.title}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
 
-      {/* Footer section with Legal links */}
-      <div className="mt-auto pt-4 border-t space-y-2">
-        <div className="px-3 text-xs text-muted-foreground flex flex-col gap-1">
+      {/* Footer */}
+      <div className="border-t px-5 py-4">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <Link
             href="/politica-privacidade"
             className="hover:text-foreground transition-colors"
           >
-            Política de Privacidade
+            Privacidade
           </Link>
+          <span className="text-border">·</span>
           <Link
             href="/termos-uso"
             className="hover:text-foreground transition-colors"
           >
-            Termos de Serviço
+            Termos
           </Link>
         </div>
       </div>

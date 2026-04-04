@@ -145,7 +145,7 @@ export default function BatchAuthorizationPage() {
                         </div>
                         <div className="flex justify-between border-t pt-2">
                             <span className="text-muted-foreground">Valor Total:</span>
-                            <span className="font-bold text-lg text-sky-700">
+                            <span className="font-bold font-financial text-lg text-sky-700">
                                 {formatCurrency(batch?.totalAmount || 0)}
                             </span>
                         </div>

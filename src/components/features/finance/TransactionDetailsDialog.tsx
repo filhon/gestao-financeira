@@ -417,7 +417,7 @@ export function TransactionDetailsDialog({
             <h4 className="text-sm font-medium text-muted-foreground">
               Valor Final
             </h4>
-            <p className="text-sm font-medium">
+            <p className="text-sm font-medium font-financial">
               {formatCurrency(transaction.finalAmount)}
             </p>
           </div>

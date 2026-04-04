@@ -1082,7 +1082,7 @@ export function TransactionForm({
                                             balance !== undefined && (
                                               <span
                                                 className={cn(
-                                                  "ml-auto text-xs shrink-0",
+                                                  "ml-auto text-xs shrink-0 font-financial",
                                                   balance > 0
                                                     ? "text-green-600"
                                                     : "text-muted-foreground",

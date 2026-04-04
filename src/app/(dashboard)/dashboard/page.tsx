@@ -185,7 +185,7 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
                     Venceu em {format(t.dueDate, "dd/MM/yyyy")}
                   </p>
                 </div>
-                <div className="font-bold text-red-600 shrink-0">
+                <div className="font-bold font-financial text-red-600 shrink-0">
                   {formatCurrency(t.amount)}
                 </div>
               </div>
@@ -247,7 +247,7 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
                     {format(t.dueDate, "dd/MM/yyyy")}
                   </p>
                 </div>
-                <div className="font-medium text-amber-600 shrink-0">
+                <div className="font-medium font-financial text-amber-600 shrink-0">
                   {formatCurrency(t.amount)}
                 </div>
               </div>

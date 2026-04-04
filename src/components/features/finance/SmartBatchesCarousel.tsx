@@ -282,7 +282,7 @@ export function SmartBatchesCarousel({ onBatchAccepted }: SmartBatchesCarouselPr
                       {s.label}
                     </p>
                     <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-base font-bold">
+                      <span className="text-base font-bold font-financial">
                         {formatCurrency(s.totalAmount)}
                       </span>
                       <span className="text-xs opacity-60">

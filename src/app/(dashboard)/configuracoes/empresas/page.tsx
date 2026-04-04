@@ -33,6 +33,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { usePermissions } from "@/hooks/usePermissions";
+import Image from "next/image";
 
 export default function CompaniesPage() {
   const { user } = useAuth();
@@ -142,14 +143,30 @@ export default function CompaniesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Gerenciamento de Empresas
-          </h1>
-          <p className="text-muted-foreground">
-            Crie e gerencie as empresas do grupo (Holding).
-          </p>
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-50 dark:bg-violet-950/60">
+            <Building2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Gerenciamento de Empresas
+            </h1>
+            <p className="text-muted-foreground text-sm mt-0.5">
+              Crie e gerencie as empresas do grupo (Holding).
+              {companies.length > 0 && (
+                <>
+                  {" · "}
+                  <span>
+                    {companies.length} empresa
+                    {companies.length !== 1 ? "s" : ""} cadastrada
+                    {companies.length !== 1 ? "s" : ""}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
         </div>
         <Button onClick={openCreateDialog}>
           <Plus className="mr-2 h-4 w-4" /> Nova Empresa
@@ -167,47 +184,102 @@ export default function CompaniesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Nome</TableHead>
+                <TableHead>Empresa</TableHead>
                 <TableHead>CNPJ</TableHead>
                 <TableHead>Telefone</TableHead>
+                <TableHead>Endereço</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {companies.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={4}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    Nenhuma empresa cadastrada.
+                  <TableCell colSpan={5} className="py-16 text-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                        <Building2 className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Nenhuma empresa cadastrada
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Clique em &quot;Nova Empresa&quot; para começar.
+                        </p>
+                      </div>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
-                companies.map((company) => (
-                  <TableRow key={company.id}>
-                    <TableCell className="font-medium flex items-center gap-2">
-                      <Building2 className="h-4 w-4 text-muted-foreground" />
-                      {company.name}
+                companies.map((company, idx) => (
+                  <TableRow
+                    key={company.id}
+                    className="animate-in fade-in slide-in-from-bottom-1 duration-200"
+                    style={{
+                      animationDelay: `${idx * 40}ms`,
+                      animationFillMode: "both",
+                    }}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        {company.logoUrl ? (
+                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border bg-white">
+                            <Image
+                              src={company.logoUrl}
+                              alt={`Logo ${company.name}`}
+                              width={32}
+                              height={32}
+                              unoptimized
+                              className="h-full w-full object-contain"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display =
+                                  "none";
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-50 dark:bg-violet-950/60">
+                            <Building2 className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                          </div>
+                        )}
+                        <span className="font-medium">{company.name}</span>
+                      </div>
                     </TableCell>
-                    <TableCell>{company.cnpj || "-"}</TableCell>
-                    <TableCell>{company.phone || "-"}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-sm">
+                      {company.cnpj || (
+                        <span className="text-muted-foreground/50">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {company.phone || (
+                        <span className="text-muted-foreground/50">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell
+                      className="text-muted-foreground max-w-[200px] truncate"
+                      title={company.address}
+                    >
+                      {company.address || (
+                        <span className="text-muted-foreground/50">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
                           onClick={() => openEditDialog(company)}
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-red-500 hover:text-red-700"
+                          className="h-8 w-8 text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
                           onClick={() => setDeleteId(company.id)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </TableCell>

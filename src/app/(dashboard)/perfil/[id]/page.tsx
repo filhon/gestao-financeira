@@ -16,8 +16,19 @@ import { costCenterService } from "@/lib/services/costCenterService";
 import { transactionService } from "@/lib/services/transactionService";
 import { UserProfile, CostCenter, Transaction, UserRole } from "@/lib/types";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { Loader2, Calendar, AlertCircle } from "lucide-react";
+import {
+  Loader2,
+  Calendar,
+  ShieldCheck,
+  Building2,
+  Banknote,
+  UserCircle2,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+} from "lucide-react";
 import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { Progress } from "@/components/ui/progress";
 import {
   Table,
@@ -29,30 +40,240 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
+import { cn } from "@/lib/utils";
 
-const ROLE_DESCRIPTIONS: Record<UserRole | "none", string> = {
-  admin:
-    "Acesso total a todas as funcionalidades e configurações, incluindo gerenciamento de usuários e empresas.",
-  financial_manager:
-    "Gerencia transações, contas e relatórios financeiros da empresa. Pode criar e aprovar transações de qualquer centro de custo.",
-  approver:
-    "Responsável por aprovar solicitações e despesas dentro do seu limite e centros de custo atribuídos.",
-  releaser:
-    "Responsável por realizar pagamentos (baixas) de transações já aprovadas.",
-  auditor:
-    "Acesso apenas para visualização de dados, relatórios e auditoria. Não pode realizar alterações.",
-  user: "Pode criar transações nos centros de custo autorizados e visualizar apenas suas próprias transações.",
-  none: "Sem acesso a esta empresa.",
+// ─── Role Config ────────────────────────────────────────────────────────────
+
+const ROLE_CONFIG: Record<
+  UserRole | "none",
+  {
+    label: string;
+    description: string;
+    badgeClass: string;
+    icon: React.ReactNode;
+  }
+> = {
+  admin: {
+    label: "Administrador",
+    description:
+      "Acesso total a todas as funcionalidades e configurações, incluindo gerenciamento de usuários e empresas.",
+    badgeClass:
+      "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-400 dark:border-violet-800",
+    icon: <ShieldCheck className="h-4 w-4" />,
+  },
+  financial_manager: {
+    label: "Gerente Financeiro",
+    description:
+      "Gerencia transações, contas e relatórios financeiros da empresa. Pode criar e aprovar transações de qualquer centro de custo.",
+    badgeClass:
+      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+    icon: <Banknote className="h-4 w-4" />,
+  },
+  approver: {
+    label: "Aprovador",
+    description:
+      "Responsável por aprovar solicitações e despesas dentro do seu limite e centros de custo atribuídos.",
+    badgeClass:
+      "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800",
+    icon: <CheckCircle2 className="h-4 w-4" />,
+  },
+  releaser: {
+    label: "Pagador/Baixador",
+    description:
+      "Responsável por realizar pagamentos (baixas) de transações já aprovadas.",
+    badgeClass:
+      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800",
+    icon: <Banknote className="h-4 w-4" />,
+  },
+  auditor: {
+    label: "Auditor",
+    description:
+      "Acesso apenas para visualização de dados, relatórios e auditoria. Não pode realizar alterações.",
+    badgeClass:
+      "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-400 dark:border-orange-800",
+    icon: <AlertCircle className="h-4 w-4" />,
+  },
+  user: {
+    label: "Usuário",
+    description:
+      "Pode criar transações nos centros de custo autorizados e visualizar apenas suas próprias transações.",
+    badgeClass:
+      "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700",
+    icon: <UserCircle2 className="h-4 w-4" />,
+  },
+  none: {
+    label: "Sem Acesso",
+    description: "Sem acesso a esta empresa.",
+    badgeClass:
+      "bg-red-50 text-red-600 border-red-200 dark:bg-red-950/50 dark:text-red-400 dark:border-red-800",
+    icon: <AlertCircle className="h-4 w-4" />,
+  },
 };
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: "Administrador",
-  financial_manager: "Gerente Financeiro",
-  approver: "Aprovador",
-  releaser: "Pagador/Baixador",
-  auditor: "Auditor",
-  user: "Usuário",
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; badgeClass: string; icon: React.ReactNode }
+> = {
+  pending_approval: {
+    label: "Pendente",
+    badgeClass:
+      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800",
+    icon: <Clock className="h-3 w-3" />,
+  },
+  approved: {
+    label: "Aprovado",
+    badgeClass:
+      "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800",
+    icon: <CheckCircle2 className="h-3 w-3" />,
+  },
+  pending_authorization: {
+    label: "Aguard. Autorização",
+    badgeClass:
+      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+    icon: <Clock className="h-3 w-3" />,
+  },
 };
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .substring(0, 2);
+}
+
+function formatCurrencyBR(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  icon,
+  className,
+  valueClassName,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+  className?: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-lg border bg-card p-4",
+        className,
+      )}
+    >
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-xs text-muted-foreground">{label}</p>
+        <p className={cn("truncate text-sm font-semibold", valueClassName)}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function CostCenterCard({
+  cc,
+  userEmail,
+  currentRole,
+}: {
+  cc: CostCenter;
+  userEmail: string;
+  currentRole: string;
+}) {
+  const isApprover = cc.approverEmail === userEmail;
+  const isReleaser = cc.releaserEmail === userEmail;
+  const isAdmin =
+    !isApprover &&
+    !isReleaser &&
+    ["admin", "financial_manager"].includes(currentRole);
+
+  const usagePercent = cc.budget && cc.budget > 0 ? 0 : 0;
+
+  return (
+    <Card className="overflow-hidden transition-shadow hover:shadow-md">
+      <div
+        className={cn(
+          "h-1 w-full",
+          isApprover
+            ? "bg-emerald-500"
+            : isReleaser
+              ? "bg-amber-500"
+              : "bg-primary/20",
+        )}
+      />
+      <CardHeader className="pb-3 pt-4">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle
+            className="line-clamp-2 text-sm font-semibold leading-tight"
+            title={cc.name}
+          >
+            {cc.name}
+          </CardTitle>
+          <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 pb-4">
+        {/* Budget bar */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Orçamento Anual</span>
+            <span className="font-medium font-financial text-foreground">
+              {formatCurrencyBR(cc.budget || 0)}
+            </span>
+          </div>
+          <Progress
+            value={usagePercent}
+            className={cn(
+              "h-1.5",
+              usagePercent >= 90 && "[&>div]:bg-red-500",
+              usagePercent >= 75 && usagePercent < 90 && "[&>div]:bg-amber-500",
+            )}
+          />
+          {cc.budget && cc.budget > 0 && (
+            <p className="text-right text-xs text-muted-foreground">
+              {usagePercent.toFixed(0)}% utilizado
+            </p>
+          )}
+        </div>
+
+        {/* Role indicators */}
+        <div className="space-y-1 text-xs">
+          {isApprover && (
+            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" />
+              <span>Responsável por Aprovação</span>
+            </div>
+          )}
+          {isReleaser && (
+            <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+              <Banknote className="h-3 w-3" />
+              <span>Responsável por Pagamentos</span>
+            </div>
+          )}
+          {isAdmin && (
+            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+              <ShieldCheck className="h-3 w-3" />
+              <span>Acesso Administrativo</span>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function UserProfilePage({
   params,
@@ -75,46 +296,32 @@ export default function UserProfilePage({
       if (!userId || !selectedCompany) return;
       setIsLoading(true);
       try {
-        // 1. Fetch User
         const user = await userService.getById(userId);
         setUserProfile(user);
 
-        // 2. Fetch Cost Centers (filtered by permissions)
-        // For MVP: Fetch all and filter client-side if "Authorized" means something specific beyond role.
-        // Assuming "Authorized" means "Can View/Use".
-        // If Admin/Manager -> All.
-        // If Approver -> Can approve.
-        // If simple User -> Maybe none or specific ones?
-        // Let's assume for now we list ALL cost centers of the company and highlight role.
-        // Or better: filter by `allowedRoles` inside CostCenter?
         const allCostCenters = await costCenterService.getAll(
-          selectedCompany.id
+          selectedCompany.id,
         );
-        // Filter logic could be complex. For now, show ALL and maybe badge "Authorized".
-        // Implementation Plan suggested "Cost Center Access: Authorized cost centers".
-        // Let's filter: if user is admin/manager, show all. Else, check usage permissions.
-
         const role = user?.companyRoles?.[selectedCompany.id];
         let visibleCostCenters = allCostCenters;
 
-        if (role && ["admin", "financial_manager", "auditor"].includes(role)) {
-          // See all
-        } else if (user) {
-          // Filter based on `allowedRoles` in Cost Center (if implemented) or `approverEmail` match?
-          // Currently CostCenter has `approverEmail` and `releaserEmail`.
+        if (
+          !role ||
+          !["admin", "financial_manager", "auditor"].includes(role)
+        ) {
           visibleCostCenters = allCostCenters.filter(
             (cc) =>
-              cc.approverEmail === user.email || cc.releaserEmail === user.email
+              cc.approverEmail === user?.email ||
+              cc.releaserEmail === user?.email,
           );
         }
 
         setCostCenters(visibleCostCenters);
 
-        // 3. Fetch Upcoming Transactions
         const upcoming = await transactionService.getUpcomingByUser(
           userId,
           user?.email,
-          selectedCompany.id
+          selectedCompany.id,
         );
         setUpcomingTransactions(upcoming);
       } catch (error) {
@@ -128,18 +335,9 @@ export default function UserProfilePage({
     loadData();
   }, [userId, selectedCompany]);
 
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .substring(0, 2);
-  };
-
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-96">
+      <div className="flex h-96 items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
@@ -150,92 +348,169 @@ export default function UserProfilePage({
   }
 
   const currentRole =
-    userProfile.companyRoles?.[selectedCompany?.id || ""] || "none";
+    (userProfile.companyRoles?.[selectedCompany?.id || ""] as
+      | UserRole
+      | undefined) || "none";
+  const roleConfig = ROLE_CONFIG[currentRole];
+
+  const totalBudget = costCenters.reduce(
+    (sum, cc) => sum + (cc.budget || 0),
+    0,
+  );
+  const approverCount = costCenters.filter(
+    (cc) => cc.approverEmail === userProfile.email,
+  ).length;
+  const releaserCount = costCenters.filter(
+    (cc) => cc.releaserEmail === userProfile.email,
+  ).length;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-6">
-        <Avatar className="h-24 w-24">
+      {/* ── Header ── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+        <Avatar className="h-20 w-20 shrink-0 ring-2 ring-border">
           <AvatarImage src={userProfile.photoURL || ""} />
-          <AvatarFallback className="text-2xl">
+          <AvatarFallback className="text-xl font-semibold">
             {userProfile.displayName
               ? getInitials(userProfile.displayName)
               : "U"}
           </AvatarFallback>
         </Avatar>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            {userProfile.displayName}
-          </h1>
-          <p className="text-muted-foreground">{userProfile.email}</p>
-          <div className="mt-2 flex items-center gap-2">
+
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <h1 className="truncate text-2xl font-bold tracking-tight">
+              {userProfile.displayName}
+            </h1>
+            <p className="text-sm text-muted-foreground">{userProfile.email}</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <Badge
-              variant={currentRole === "none" ? "secondary" : "default"}
-              className="capitalize"
+              variant="outline"
+              className={cn(
+                "flex items-center gap-1.5 text-xs",
+                roleConfig.badgeClass,
+              )}
             >
-              {currentRole === "none"
-                ? "Sem Acesso"
-                : ROLE_LABELS[currentRole as UserRole] || currentRole}
+              {roleConfig.icon}
+              {roleConfig.label}
             </Badge>
-            <span className="text-sm text-muted-foreground">
-              em {selectedCompany?.name}
-            </span>
+            {selectedCompany && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Building2 className="h-3 w-3" />
+                {selectedCompany.name}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
+      {/* ── Quick stats ── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          label="Centros de Custo"
+          value={costCenters.length}
+          icon={<Building2 className="h-4 w-4" />}
+        />
+        <StatCard
+          label="Orçamento Total"
+          value={formatCurrencyBR(totalBudget)}
+          icon={<Banknote className="h-4 w-4" />}
+          valueClassName="font-financial"
+        />
+        <StatCard
+          label="Aprovador em"
+          value={`${approverCount} CC`}
+          icon={<CheckCircle2 className="h-4 w-4" />}
+        />
+        <StatCard
+          label="Pagador em"
+          value={`${releaserCount} CC`}
+          icon={<Banknote className="h-4 w-4" />}
+        />
+      </div>
+
+      {/* ── Tabs ── */}
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
           <TabsTrigger value="cost-centers">
-            Centros de Custo ({costCenters.length})
+            Centros de Custo
+            {costCenters.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium">
+                {costCenters.length}
+              </span>
+            )}
           </TabsTrigger>
-          {/* Activity Tab could go here */}
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-6">
-          {/* Access Summary */}
+        {/* ── Overview tab ── */}
+        <TabsContent value="overview" className="mt-4 space-y-4">
+          {/* Access level card */}
           <Card>
-            <CardHeader>
-              <CardTitle>Nível de Acesso</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Nível de Acesso</CardTitle>
               <CardDescription>
-                Detalhes das permissões do usuário na empresa atual.
+                Permissões do usuário na empresa atual.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-start gap-4 p-4 rounded-lg bg-muted/50">
-                <AlertCircle className="h-5 w-5 text-primary mt-0.5" />
+              <div
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border p-4",
+                  currentRole === "none"
+                    ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20"
+                    : "border-border bg-muted/30",
+                )}
+              >
+                <div
+                  className={cn(
+                    "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                    currentRole === "none"
+                      ? "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400"
+                      : "bg-primary/10 text-primary",
+                  )}
+                >
+                  {roleConfig.icon}
+                </div>
                 <div>
-                  <h4 className="font-semibold capitalize mb-1">
-                    {currentRole === "none"
-                      ? "Sem Função Definida"
-                      : ROLE_LABELS[currentRole as UserRole] || currentRole}
-                  </h4>
-                  <p className="text-sm text-muted-foreground">
-                    {ROLE_DESCRIPTIONS[currentRole as UserRole | "none"]}
+                  <h4 className="text-sm font-semibold">{roleConfig.label}</h4>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {roleConfig.description}
                   </p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Upcoming Payables */}
+          {/* Upcoming payables card */}
           <Card>
-            <CardHeader>
-              <CardTitle>Próximas Contas a Pagar</CardTitle>
-              <CardDescription>
-                Contas com vencimento nos próximos 7 dias vinculadas a este
-                usuário.
-              </CardDescription>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">
+                    Próximas Contas a Pagar
+                  </CardTitle>
+                  <CardDescription className="mt-0.5">
+                    Vencimentos nos próximos 7 dias vinculados a este usuário.
+                  </CardDescription>
+                </div>
+                {upcomingTransactions.length > 0 && (
+                  <Badge variant="secondary" className="shrink-0 text-xs">
+                    {upcomingTransactions.length}
+                  </Badge>
+                )}
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Descrição</TableHead>
+                    <TableHead className="pl-6">Descrição</TableHead>
                     <TableHead>Vencimento</TableHead>
-                    <TableHead>Valor</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead className="pr-6">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -243,44 +518,61 @@ export default function UserProfilePage({
                     <TableRow>
                       <TableCell
                         colSpan={4}
-                        className="text-center py-6 text-muted-foreground"
+                        className="py-10 text-center text-sm text-muted-foreground"
                       >
-                        Nenhuma conta próxima encontrada.
+                        <div className="flex flex-col items-center gap-2">
+                          <CheckCircle2 className="h-8 w-8 text-muted-foreground/40" />
+                          <span>Nenhuma conta próxima encontrada.</span>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    upcomingTransactions.map((t) => (
-                      <TableRow
-                        key={t.id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => setSelectedTransaction(t)}
-                      >
-                        <TableCell className="font-medium">
-                          {t.description}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-4 w-4 text-muted-foreground" />
-                            {format(t.dueDate, "dd/MM/yyyy")}
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-bold">
-                          {t.amount.toLocaleString("pt-BR", {
-                            style: "currency",
-                            currency: "BRL",
-                          })}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">
-                            {t.status === "pending_approval"
-                              ? "Pendente"
-                              : t.status === "approved"
-                                ? "Aprovado"
-                                : t.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    upcomingTransactions.map((t) => {
+                      const statusConf = STATUS_CONFIG[t.status] || null;
+                      return (
+                        <TableRow
+                          key={t.id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => setSelectedTransaction(t)}
+                        >
+                          <TableCell className="pl-6 font-medium">
+                            {t.description}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1.5 text-sm">
+                              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                              {format(t.dueDate, "dd/MM/yyyy", {
+                                locale: ptBR,
+                              })}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-semibold font-financial">
+                            {formatCurrencyBR(t.amount)}
+                          </TableCell>
+                          <TableCell className="pr-6">
+                            {statusConf ? (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "flex w-fit items-center gap-1 text-xs",
+                                  statusConf.badgeClass,
+                                )}
+                              >
+                                {statusConf.icon}
+                                {statusConf.label}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-xs capitalize"
+                              >
+                                {t.status}
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -288,80 +580,38 @@ export default function UserProfilePage({
           </Card>
         </TabsContent>
 
-        <TabsContent value="cost-centers">
+        {/* ── Cost Centers tab ── */}
+        <TabsContent value="cost-centers" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Centros de Custo Autorizados</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                Centros de Custo Autorizados
+              </CardTitle>
               <CardDescription>
-                Centros de custo onde o usuário possui responsabilidades diretas
-                (Aprovação/Pagamento) ou acesso total.
+                Centros onde o usuário possui responsabilidades diretas ou
+                acesso total.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {costCenters.map((cc) => (
-                  <Card key={cc.id} className="overflow-hidden">
-                    <div className="h-2 bg-primary/10 w-full" />
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base truncate" title={cc.name}>
-                        {cc.name}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {/* Budget Simulation - Actual app would need real budget fetching */}
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">
-                              Orçamento Anual
-                            </span>
-                            <span className="font-medium">
-                              {/* Placeholder for now, or fetch if available */}
-                              {(cc.budget || 0).toLocaleString("pt-BR", {
-                                style: "currency",
-                                currency: "BRL",
-                              })}
-                            </span>
-                          </div>
-                          <Progress value={0} className="h-2" />
-                        </div>
-
-                        <div className="text-xs text-muted-foreground space-y-1">
-                          {cc.approverEmail === userProfile.email && (
-                            <div className="flex items-center gap-2 text-amber-600">
-                              <span className="w-2 h-2 rounded-full bg-amber-500" />
-                              Responsável por Aprovação
-                            </div>
-                          )}
-                          {cc.releaserEmail === userProfile.email && (
-                            <div className="flex items-center gap-2 text-green-600">
-                              <span className="w-2 h-2 rounded-full bg-green-500" />
-                              Responsável por Pagamentos
-                            </div>
-                          )}
-                          {(!cc.approverEmail ||
-                            cc.approverEmail !== userProfile.email) &&
-                            (!cc.releaserEmail ||
-                              cc.releaserEmail !== userProfile.email) &&
-                            ["admin", "financial_manager"].includes(
-                              currentRole as string
-                            ) && (
-                              <div className="flex items-center gap-2 text-blue-600">
-                                <span className="w-2 h-2 rounded-full bg-blue-500" />
-                                Acesso Administrativo
-                              </div>
-                            )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                {costCenters.length === 0 && (
-                  <div className="col-span-full text-center py-8 text-muted-foreground">
+              {costCenters.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-10 text-center">
+                  <Building2 className="h-8 w-8 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">
                     Nenhum centro de custo associado diretamente.
-                  </div>
-                )}
-              </div>
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {costCenters.map((cc) => (
+                    <CostCenterCard
+                      key={cc.id}
+                      cc={cc}
+                      userEmail={userProfile.email}
+                      currentRole={currentRole}
+                    />
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -373,7 +623,6 @@ export default function UserProfilePage({
         transaction={selectedTransaction}
         costCenters={costCenters}
         onUpdate={() => {
-          // Refresh upcoming
           if (userId && selectedCompany) {
             transactionService
               .getUpcomingByUser(userId, userProfile?.email, selectedCompany.id)

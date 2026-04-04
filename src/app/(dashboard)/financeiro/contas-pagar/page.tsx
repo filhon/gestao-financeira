@@ -941,7 +941,7 @@ export default function AccountsPayablePage() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold font-financial">
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
@@ -976,7 +976,7 @@ export default function AccountsPayablePage() {
                 <AnimatedNumber value={kpis.overdueCount} />
               )}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground font-financial">
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
@@ -1011,7 +1011,7 @@ export default function AccountsPayablePage() {
                 <AnimatedNumber value={kpis.dueSoonCount} />
               )}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground font-financial">
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
@@ -1027,7 +1027,7 @@ export default function AccountsPayablePage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+            <div className="text-2xl font-bold font-financial text-blue-600 dark:text-blue-400">
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
@@ -1303,7 +1303,7 @@ export default function AccountsPayablePage() {
                         <TableCell className="text-muted-foreground text-sm">
                           {t.supplierOrClient}
                         </TableCell>
-                        <TableCell className="text-right font-semibold">
+                        <TableCell className="text-right font-semibold font-financial">
                           {new Intl.NumberFormat("pt-BR", {
                             style: "currency",
                             currency: "BRL",
@@ -1629,7 +1629,7 @@ export default function AccountsPayablePage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Valor original</span>
-                  <span className="font-semibold">
+                  <span className="font-semibold font-financial">
                     {formatCurrency(transactionToConfirm.amount)}
                   </span>
                 </div>

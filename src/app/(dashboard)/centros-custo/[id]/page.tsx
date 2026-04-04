@@ -328,7 +328,7 @@ export default function CostCenterDashboard() {
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold font-financial">
               {formatCurrency(totalBudget)}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -345,7 +345,7 @@ export default function CostCenterDashboard() {
           </CardHeader>
           <CardContent>
             <div
-              className={`text-2xl font-bold ${remainingBalance < 0 ? "text-red-500" : "text-green-500"}`}
+              className={`text-2xl font-bold font-financial ${remainingBalance < 0 ? "text-red-500" : "text-green-500"}`}
             >
               {formatCurrency(remainingBalance)}
             </div>
@@ -365,7 +365,7 @@ export default function CostCenterDashboard() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold font-financial">
               {formatCurrency(suggestedMonthlySpend)}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -381,7 +381,7 @@ export default function CostCenterDashboard() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">
+            <div className="text-2xl font-bold font-financial text-red-600">
               {formatCurrency(directRealized)}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -397,7 +397,7 @@ export default function CostCenterDashboard() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-500">
+            <div className="text-2xl font-bold font-financial text-orange-500">
               {formatCurrency(directPending)}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -458,7 +458,7 @@ export default function CostCenterDashboard() {
                 <div className="w-2.5 h-2.5 rounded-sm bg-blue-500 shrink-0" />
                 <span>
                   Gasto pelos filhos:{" "}
-                  <span className="font-medium text-foreground tabular-nums">
+                  <span className="font-medium text-foreground font-financial">
                     {new Intl.NumberFormat("pt-BR", {
                       style: "currency",
                       currency: "BRL",
@@ -472,7 +472,7 @@ export default function CostCenterDashboard() {
                 <div className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
                 <span>
                   Realizado:{" "}
-                  <span className="font-medium text-foreground tabular-nums">
+                  <span className="font-medium text-foreground font-financial">
                     {new Intl.NumberFormat("pt-BR", {
                       style: "currency",
                       currency: "BRL",
@@ -486,7 +486,7 @@ export default function CostCenterDashboard() {
                 <div className="w-2.5 h-2.5 rounded-sm bg-orange-400 shrink-0" />
                 <span>
                   Pendente:{" "}
-                  <span className="font-medium text-foreground tabular-nums">
+                  <span className="font-medium text-foreground font-financial">
                     {new Intl.NumberFormat("pt-BR", {
                       style: "currency",
                       currency: "BRL",
@@ -500,7 +500,7 @@ export default function CostCenterDashboard() {
               <span>
                 Disponível:{" "}
                 <span
-                  className={`font-medium tabular-nums ${remainingBalance < 0 ? "text-red-500" : "text-emerald-600"}`}
+                  className={`font-medium font-financial ${remainingBalance < 0 ? "text-red-500" : "text-emerald-600"}`}
                 >
                   {new Intl.NumberFormat("pt-BR", {
                     style: "currency",
@@ -692,7 +692,7 @@ export default function CostCenterDashboard() {
                       <TableCell className="font-medium">
                         {child.name}
                       </TableCell>
-                      <TableCell>{formatCurrency(child.budget || 0)}</TableCell>
+                      <TableCell className="font-financial">{formatCurrency(child.budget || 0)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -726,7 +726,7 @@ export default function CostCenterDashboard() {
                         {format(tx.dueDate, "dd/MM/yyyy")}
                       </p>
                     </div>
-                    <div className="font-bold text-red-500">
+                    <div className="font-bold font-financial text-red-500">
                       {formatCurrency(
                         // Display the allocated amount for this CC, not total tx amount
                         tx.costCenterAllocation?.find(
