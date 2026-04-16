@@ -76,7 +76,7 @@ export function usePermissions(): Permissions {
   const isOneOf = useCallback(
     (roles: UserRole[]) =>
       effectiveRole ? roles.includes(effectiveRole) : false,
-    [effectiveRole]
+    [effectiveRole],
   );
 
   // Role definitions
@@ -203,6 +203,6 @@ export function usePermissions(): Permissions {
       isAdmin,
       isFinancialManager: isManager,
     }),
-    [effectiveRole, isAdmin, isManager, isUser, isAdminOrManager, isOneOf]
+    [effectiveRole, isAdmin, isManager, isUser, isAdminOrManager, isOneOf],
   );
 }

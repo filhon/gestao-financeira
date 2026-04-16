@@ -36,7 +36,11 @@ export function useProjectedCashFlow(mode: "30days" | "year", year?: number) {
     queryKey: ["projected-cash-flow", selectedCompany?.id, mode, year],
     queryFn: async () => {
       if (!selectedCompany) return null;
-      return dashboardService.getProjectedCashFlow(selectedCompany.id, mode, year);
+      return dashboardService.getProjectedCashFlow(
+        selectedCompany.id,
+        mode,
+        year,
+      );
     },
     enabled: !!selectedCompany,
   });
@@ -49,7 +53,10 @@ export function useBudgetProgress(year?: number) {
     queryKey: ["budget-progress", selectedCompany?.id, year],
     queryFn: async () => {
       if (!selectedCompany) return [];
-      return dashboardService.getBudgetProgressByCostCenter(selectedCompany.id, year);
+      return dashboardService.getBudgetProgressByCostCenter(
+        selectedCompany.id,
+        year,
+      );
     },
     enabled: !!selectedCompany,
   });

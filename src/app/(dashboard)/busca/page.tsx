@@ -186,7 +186,7 @@ function SearchContent() {
           t.description.toLowerCase().includes(lowerQuery) ||
           t.supplierOrClient?.toLowerCase()?.includes(lowerQuery) ||
           t.requestOrigin?.name?.toLowerCase()?.includes(lowerQuery) ||
-          t.amount.toString().includes(query)
+          t.amount.toString().includes(query),
       );
 
       setTransactions(filtered);
@@ -328,7 +328,10 @@ function SearchContent() {
                     >
                       <span className="inline-flex items-center">
                         Descrição
-                        <SortIcon column="description" sortConfig={sortConfig} />
+                        <SortIcon
+                          column="description"
+                          sortConfig={sortConfig}
+                        />
                       </span>
                     </TableHead>
                     <TableHead
@@ -385,7 +388,7 @@ function SearchContent() {
                       <TableRow
                         key={transaction.id}
                         className={cn(
-                          "group cursor-pointer animate-in fade-in-0 slide-in-from-bottom-1"
+                          "group cursor-pointer animate-in fade-in-0 slide-in-from-bottom-1",
                         )}
                         style={{
                           animationDelay: `${i * 30}ms`,
@@ -399,7 +402,7 @@ function SearchContent() {
                                 "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                                 isPayable
                                   ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400"
-                                  : "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400"
+                                  : "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400",
                               )}
                             >
                               {isPayable ? "Pagar" : "Receber"}
@@ -432,7 +435,7 @@ function SearchContent() {
                             "text-right font-semibold font-financial pr-6",
                             isPayable
                               ? "text-red-600 dark:text-red-400"
-                              : "text-emerald-600 dark:text-emerald-400"
+                              : "text-emerald-600 dark:text-emerald-400",
                           )}
                         >
                           {isPayable ? "−" : "+"}

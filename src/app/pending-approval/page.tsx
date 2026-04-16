@@ -72,7 +72,7 @@ export default function PendingApprovalPage() {
       },
       (error) => {
         console.error("Error listening to user status:", error);
-      }
+      },
     );
 
     return () => unsubscribe();

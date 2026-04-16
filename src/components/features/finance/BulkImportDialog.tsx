@@ -166,11 +166,11 @@ export function BulkImportDialog({
         if (defaultCostCenterId) {
           validatedRows = importService.applyDefaultCostCenter(
             validatedRows,
-            defaultCostCenterId
+            defaultCostCenterId,
           );
           validatedRows = importService.validateRows(
             validatedRows,
-            costCenters
+            costCenters,
           );
         }
 
@@ -181,12 +181,12 @@ export function BulkImportDialog({
         }, 300);
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "Erro ao processar arquivo"
+          error instanceof Error ? error.message : "Erro ao processar arquivo",
         );
         setStep("upload");
       }
     },
-    [costCenters, defaultCostCenterId]
+    [costCenters, defaultCostCenterId],
   );
 
   const handleDrop = useCallback(
@@ -196,7 +196,7 @@ export function BulkImportDialog({
       const file = e.dataTransfer.files[0];
       if (file) processFile(file);
     },
-    [processFile]
+    [processFile],
   );
 
   // Handle file input change
@@ -237,7 +237,7 @@ export function BulkImportDialog({
     let updated = importService.applyCostCenterToSelected(
       rows,
       selectedIds,
-      bulkCostCenterId
+      bulkCostCenterId,
     );
     updated = importService.validateRows(updated, costCenters);
     setRows(updated);
@@ -256,7 +256,7 @@ export function BulkImportDialog({
   const startEdit = (
     id: string,
     field: string,
-    currentValue: string | number | undefined
+    currentValue: string | number | undefined,
   ) => {
     setEditingCell({ id, field });
     setEditValue(currentValue?.toString() || "");
@@ -324,7 +324,7 @@ export function BulkImportDialog({
         selectedCompany.id,
         (current, total) => {
           setProgress(Math.round((current / total) * 100));
-        }
+        },
       );
 
       setResult(importResult);
@@ -378,7 +378,7 @@ export function BulkImportDialog({
           "border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer",
           isDragOver
             ? "border-primary bg-primary/5"
-            : "border-muted-foreground/25 hover:border-primary/50"
+            : "border-muted-foreground/25 hover:border-primary/50",
         )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -522,7 +522,7 @@ export function BulkImportDialog({
                   key={row.id}
                   className={cn(
                     hasError && "bg-red-500/10",
-                    hasWarning && !hasError && "bg-amber-500/10"
+                    hasWarning && !hasError && "bg-amber-500/10",
                   )}
                 >
                   <TableCell>
@@ -553,7 +553,7 @@ export function BulkImportDialog({
                         className={cn(
                           "cursor-pointer hover:bg-muted px-1 rounded",
                           row.errors.some((e) => e.field === "description") &&
-                            "text-red-500"
+                            "text-red-500",
                         )}
                         onClick={() =>
                           startEdit(row.id, "description", row.description)
@@ -582,7 +582,7 @@ export function BulkImportDialog({
                         className={cn(
                           "cursor-pointer hover:bg-muted px-1 rounded",
                           row.errors.some((e) => e.field === "amount") &&
-                            "text-red-500"
+                            "text-red-500",
                         )}
                         onClick={() => startEdit(row.id, "amount", row.amount)}
                       >
@@ -610,7 +610,7 @@ export function BulkImportDialog({
                         className={cn(
                           "cursor-pointer hover:bg-muted px-1 rounded",
                           row.errors.some((e) => e.field === "dueDate") &&
-                            "text-red-500"
+                            "text-red-500",
                         )}
                         onClick={() =>
                           startEdit(row.id, "dueDate", row.dueDate)
@@ -639,14 +639,14 @@ export function BulkImportDialog({
                         className={cn(
                           "cursor-pointer hover:bg-muted px-1 rounded",
                           row.errors.some(
-                            (e) => e.field === "supplierOrClient"
-                          ) && "text-red-500"
+                            (e) => e.field === "supplierOrClient",
+                          ) && "text-red-500",
                         )}
                         onClick={() =>
                           startEdit(
                             row.id,
                             "supplierOrClient",
-                            row.supplierOrClient
+                            row.supplierOrClient,
                           )
                         }
                       >
@@ -664,7 +664,7 @@ export function BulkImportDialog({
                       <SelectTrigger
                         className={cn(
                           "h-7 w-[140px]",
-                          !row.costCenterId && "border-amber-500"
+                          !row.costCenterId && "border-amber-500",
                         )}
                       >
                         <SelectValue placeholder="Selecione" />

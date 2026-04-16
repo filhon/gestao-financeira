@@ -82,17 +82,26 @@ function getAvatarColor(name: string): string {
 
 const categoryBadge: Record<string, React.ReactNode> = {
   supplier: (
-    <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50 font-normal">
+    <Badge
+      variant="outline"
+      className="text-orange-600 border-orange-300 bg-orange-50 font-normal"
+    >
       Fornecedor
     </Badge>
   ),
   client: (
-    <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 font-normal">
+    <Badge
+      variant="outline"
+      className="text-blue-600 border-blue-300 bg-blue-50 font-normal"
+    >
       Cliente
     </Badge>
   ),
   both: (
-    <Badge variant="outline" className="text-violet-600 border-violet-300 bg-violet-50 font-normal">
+    <Badge
+      variant="outline"
+      className="text-violet-600 border-violet-300 bg-violet-50 font-normal"
+    >
       Ambos
     </Badge>
   ),
@@ -389,9 +398,15 @@ export default function EntitiesPage() {
                           <Skeleton className="h-4 w-40" />
                         </div>
                       </TableCell>
-                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-20 rounded-full" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-32" />
+                      </TableCell>
                       <TableCell className="flex justify-end gap-2">
                         <Skeleton className="h-8 w-8 rounded-md" />
                         <Skeleton className="h-8 w-8 rounded-md" />
@@ -470,9 +485,7 @@ export default function EntitiesPage() {
                             size="icon"
                             onClick={(e) => {
                               e.stopPropagation();
-                              router.push(
-                                `/cadastros/entidades/${entity.id}`,
-                              );
+                              router.push(`/cadastros/entidades/${entity.id}`);
                             }}
                             title="Ver detalhes"
                           >
@@ -520,9 +533,9 @@ export default function EntitiesPage() {
               {sortedEntities.length > 0 &&
                 (hasMore
                   ? `Exibindo ${sortedEntities.length} entidades`
-                  : `${sortedEntities.length} ${sortedEntities.length === 1 ? "entidade" : "entidades"} encontrada${sortedEntities.length === 1 ? "" : "s"}`
-                )}
-              {debouncedSearchTerm && sortedEntities.length > 0 &&
+                  : `${sortedEntities.length} ${sortedEntities.length === 1 ? "entidade" : "entidades"} encontrada${sortedEntities.length === 1 ? "" : "s"}`)}
+              {debouncedSearchTerm &&
+                sortedEntities.length > 0 &&
                 ` para "${debouncedSearchTerm}"`}
             </p>
             {hasMore && entities.length > 0 && (

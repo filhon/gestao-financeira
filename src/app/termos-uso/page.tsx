@@ -25,7 +25,7 @@ export default function TermsOfServicePage() {
   const [selectedVersion, setSelectedVersion] =
     useState<LegalDocumentVersion | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
-    null
+    null,
   );
   const [loading, setLoading] = useState(true);
 

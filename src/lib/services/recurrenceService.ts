@@ -16,7 +16,6 @@ import {
 } from "firebase/firestore";
 import { RecurringTransactionTemplate } from "@/lib/types";
 
-
 const COLLECTION_NAME = "recurring_templates";
 
 export const recurrenceService = {

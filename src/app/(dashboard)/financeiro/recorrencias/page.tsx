@@ -70,7 +70,9 @@ export default function RecorrenciasPage() {
     useState<RecurringTransactionTemplate | null>(null);
 
   // All active templates for KPI calculation (unfiltered)
-  const [allTemplates, setAllTemplates] = useState<RecurringTransactionTemplate[]>([]);
+  const [allTemplates, setAllTemplates] = useState<
+    RecurringTransactionTemplate[]
+  >([]);
   const [kpiLoading, setKpiLoading] = useState(true);
 
   useEffect(() => {
@@ -98,7 +100,12 @@ export default function RecorrenciasPage() {
     isFetchingNextPage,
     refresh: fetchTemplates,
   } = usePaginatedQuery<RecurringTransactionTemplate>({
-    queryKey: ["recurrences", selectedCompany?.id, statusFilter, debouncedSearchTerm],
+    queryKey: [
+      "recurrences",
+      selectedCompany?.id,
+      statusFilter,
+      debouncedSearchTerm,
+    ],
     queryFn: async (pageSize, lastDoc) => {
       const filter: { active?: boolean; searchTerm?: string } = {
         active: statusFilter === "all" ? undefined : statusFilter === "active",
@@ -127,11 +134,16 @@ export default function RecorrenciasPage() {
     // Monthly equivalent for each active template
     const toMonthlyAmount = (t: RecurringTransactionTemplate): number => {
       switch (t.frequency) {
-        case "daily":   return t.amount * 30 / t.interval;
-        case "weekly":  return t.amount * (52 / 12) / t.interval;
-        case "monthly": return t.amount / t.interval;
-        case "yearly":  return t.amount / 12 / t.interval;
-        default:        return 0;
+        case "daily":
+          return (t.amount * 30) / t.interval;
+        case "weekly":
+          return (t.amount * (52 / 12)) / t.interval;
+        case "monthly":
+          return t.amount / t.interval;
+        case "yearly":
+          return t.amount / 12 / t.interval;
+        default:
+          return 0;
       }
     };
 
@@ -188,21 +200,31 @@ export default function RecorrenciasPage() {
   const getFrequencyLabel = (freq: string, interval: number) => {
     const intervalLabel = interval > 1 ? `A cada ${interval} ` : "";
     switch (freq) {
-      case "daily":   return `${intervalLabel}${interval > 1 ? "dias" : "Diário"}`;
-      case "weekly":  return `${intervalLabel}${interval > 1 ? "semanas" : "Semanal"}`;
-      case "monthly": return `${intervalLabel}${interval > 1 ? "meses" : "Mensal"}`;
-      case "yearly":  return `${intervalLabel}${interval > 1 ? "anos" : "Anual"}`;
-      default:        return freq;
+      case "daily":
+        return `${intervalLabel}${interval > 1 ? "dias" : "Diário"}`;
+      case "weekly":
+        return `${intervalLabel}${interval > 1 ? "semanas" : "Semanal"}`;
+      case "monthly":
+        return `${intervalLabel}${interval > 1 ? "meses" : "Mensal"}`;
+      case "yearly":
+        return `${intervalLabel}${interval > 1 ? "anos" : "Anual"}`;
+      default:
+        return freq;
     }
   };
 
   const getFrequencyIcon = (freq: string) => {
     switch (freq) {
-      case "daily":   return "D";
-      case "weekly":  return "S";
-      case "monthly": return "M";
-      case "yearly":  return "A";
-      default:        return "?";
+      case "daily":
+        return "D";
+      case "weekly":
+        return "S";
+      case "monthly":
+        return "M";
+      case "yearly":
+        return "A";
+      default:
+        return "?";
     }
   };
 
@@ -323,31 +345,39 @@ export default function RecorrenciasPage() {
         </Card>
 
         {/* Vencendo em breve / vencidas */}
-        <Card className={cn(
-          kpis.overdue.length > 0 && "border-red-300 dark:border-red-800",
-          kpis.overdue.length === 0 && kpis.dueIn7.length > 0 && "border-yellow-300 dark:border-yellow-800",
-        )}>
+        <Card
+          className={cn(
+            kpis.overdue.length > 0 && "border-red-300 dark:border-red-800",
+            kpis.overdue.length === 0 &&
+              kpis.dueIn7.length > 0 &&
+              "border-yellow-300 dark:border-yellow-800",
+          )}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Atenção Necessária
             </CardTitle>
-            <div className={cn(
-              "rounded-md p-1.5",
-              kpis.overdue.length > 0
-                ? "bg-red-100 dark:bg-red-900/30"
-                : kpis.dueIn7.length > 0
-                  ? "bg-yellow-100 dark:bg-yellow-900/30"
-                  : "bg-muted",
-            )}>
+            <div
+              className={cn(
+                "rounded-md p-1.5",
+                kpis.overdue.length > 0
+                  ? "bg-red-100 dark:bg-red-900/30"
+                  : kpis.dueIn7.length > 0
+                    ? "bg-yellow-100 dark:bg-yellow-900/30"
+                    : "bg-muted",
+              )}
+            >
               {kpis.overdue.length > 0 ? (
                 <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />
               ) : (
-                <CalendarClock className={cn(
-                  "h-4 w-4",
-                  kpis.dueIn7.length > 0
-                    ? "text-yellow-600 dark:text-yellow-400"
-                    : "text-muted-foreground",
-                )} />
+                <CalendarClock
+                  className={cn(
+                    "h-4 w-4",
+                    kpis.dueIn7.length > 0
+                      ? "text-yellow-600 dark:text-yellow-400"
+                      : "text-muted-foreground",
+                  )}
+                />
               )}
             </div>
           </CardHeader>
@@ -358,7 +388,8 @@ export default function RecorrenciasPage() {
               <>
                 {kpis.overdue.length > 0 && (
                   <div className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    {kpis.overdue.length} vencida{kpis.overdue.length > 1 ? "s" : ""}
+                    {kpis.overdue.length} vencida
+                    {kpis.overdue.length > 1 ? "s" : ""}
                   </div>
                 )}
                 {kpis.overdue.length === 0 && kpis.dueIn7.length > 0 && (
@@ -367,7 +398,9 @@ export default function RecorrenciasPage() {
                   </div>
                 )}
                 {kpis.overdue.length === 0 && kpis.dueIn7.length === 0 && (
-                  <div className="text-2xl font-bold text-muted-foreground">—</div>
+                  <div className="text-2xl font-bold text-muted-foreground">
+                    —
+                  </div>
                 )}
               </>
             )}
@@ -522,15 +555,23 @@ export default function RecorrenciasPage() {
                           <span
                             className={cn(
                               "text-sm tabular-nums",
-                              urgency === "overdue" && "font-semibold text-red-600 dark:text-red-400",
-                              urgency === "critical" && "font-semibold text-orange-600 dark:text-orange-400",
-                              urgency === "warning" && "font-medium text-yellow-600 dark:text-yellow-500",
+                              urgency === "overdue" &&
+                                "font-semibold text-red-600 dark:text-red-400",
+                              urgency === "critical" &&
+                                "font-semibold text-orange-600 dark:text-orange-400",
+                              urgency === "warning" &&
+                                "font-medium text-yellow-600 dark:text-yellow-500",
                             )}
                           >
-                            {format(t.nextDueDate, "dd/MM/yyyy", { locale: ptBR })}
+                            {format(t.nextDueDate, "dd/MM/yyyy", {
+                              locale: ptBR,
+                            })}
                           </span>
                           {urgency === "overdue" && (
-                            <Badge variant="destructive" className="h-4 px-1 text-[10px]">
+                            <Badge
+                              variant="destructive"
+                              className="h-4 px-1 text-[10px]"
+                            >
                               Vencida
                             </Badge>
                           )}
@@ -639,7 +680,9 @@ export default function RecorrenciasPage() {
         template={editTemplate}
         onSuccess={() => {
           fetchTemplates();
-          recurrenceService.getTemplates(selectedCompany!.id).then(setAllTemplates);
+          recurrenceService
+            .getTemplates(selectedCompany!.id)
+            .then(setAllTemplates);
         }}
       />
     </div>

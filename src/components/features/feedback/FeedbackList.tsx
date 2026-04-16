@@ -142,7 +142,7 @@ export function FeedbackList({ feedbacks, isLoading }: FeedbackListProps) {
                     {format(
                       feedback.createdAt,
                       "dd 'de' MMMM 'de' yyyy 'às' HH:mm",
-                      { locale: ptBR }
+                      { locale: ptBR },
                     )}
                   </p>
                 </div>
@@ -165,7 +165,7 @@ export function FeedbackList({ feedbacks, isLoading }: FeedbackListProps) {
                       <Badge
                         className={cn(
                           "text-xs",
-                          priorityColors[feedback.priority]
+                          priorityColors[feedback.priority],
                         )}
                       >
                         {feedback.priority.charAt(0).toUpperCase() +
@@ -230,7 +230,7 @@ export function FeedbackList({ feedbacks, isLoading }: FeedbackListProps) {
                             {format(
                               feedback.respondedAt,
                               "dd/MM/yyyy 'às' HH:mm",
-                              { locale: ptBR }
+                              { locale: ptBR },
                             )}
                           </p>
                         )}

@@ -188,7 +188,8 @@ export function TransactionDetailsDialog({
             }
             if (newStatus === "approved")
               toast.success("Transação aprovada com sucesso!");
-            else if (newStatus === "rejected") toast.info("Transação rejeitada.");
+            else if (newStatus === "rejected")
+              toast.info("Transação rejeitada.");
             else if (newStatus === "paid")
               toast.success("Pagamento/Recebimento confirmado!");
           }
@@ -632,47 +633,47 @@ export function TransactionDetailsDialog({
 
                   {activeTab === "billing" && (
                     <div className="space-y-4 pt-2">
-                    {/* QR Code PIX placeholder */}
-                    <div className="flex flex-col items-center gap-4 p-6 border border-dashed rounded-xl bg-muted/30">
-                      <p className="text-sm font-semibold text-muted-foreground tracking-wide uppercase">
-                        QR Code PIX
-                      </p>
-                      <Skeleton className="h-44 w-44 rounded-xl" />
-                      <p className="text-xs text-muted-foreground text-center max-w-xs leading-relaxed">
-                        A geração automática do QR Code será ativada após
-                        integração com o provedor de pagamentos. Em breve!
-                      </p>
-                    </div>
+                      {/* QR Code PIX placeholder */}
+                      <div className="flex flex-col items-center gap-4 p-6 border border-dashed rounded-xl bg-muted/30">
+                        <p className="text-sm font-semibold text-muted-foreground tracking-wide uppercase">
+                          QR Code PIX
+                        </p>
+                        <Skeleton className="h-44 w-44 rounded-xl" />
+                        <p className="text-xs text-muted-foreground text-center max-w-xs leading-relaxed">
+                          A geração automática do QR Code será ativada após
+                          integração com o provedor de pagamentos. Em breve!
+                        </p>
+                      </div>
 
-                    {/* Link da fatura placeholder */}
-                    <div className="flex items-center gap-3 p-3 border border-dashed rounded-xl bg-muted/30">
-                      <Skeleton className="h-9 flex-1 rounded-lg" />
+                      {/* Link da fatura placeholder */}
+                      <div className="flex items-center gap-3 p-3 border border-dashed rounded-xl bg-muted/30">
+                        <Skeleton className="h-9 flex-1 rounded-lg" />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          disabled
+                          title="Copiar link da fatura (em breve)"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-center text-muted-foreground -mt-2">
+                        Link de fatura — disponível na próxima fase
+                      </p>
+
+                      {/* Botão WhatsApp */}
                       <Button
-                        variant="outline"
-                        size="icon"
-                        disabled
-                        title="Copiar link da fatura (em breve)"
+                        className="w-full bg-[#25D366] hover:bg-[#1ebe5d] text-white font-semibold shadow-sm"
+                        onClick={() => {
+                          const msg = encodeURIComponent(
+                            `Olá ${transaction.supplierOrClient}, tudo bem?\n\nPassando para lembrar que a fatura referente a *${transaction.description}* no valor de *${formatCurrency(transaction.amount)}* vence em *${format(transaction.dueDate, "dd/MM/yyyy")}*.\n\nQualquer dúvida, estou à disposição. 😊`,
+                          );
+                          window.open(`https://wa.me/?text=${msg}`, "_blank");
+                        }}
                       >
-                        <Copy className="h-4 w-4" />
+                        <MessageCircle className="h-4 w-4 mr-2" />
+                        Enviar Cobrança por WhatsApp
                       </Button>
-                    </div>
-                    <p className="text-xs text-center text-muted-foreground -mt-2">
-                      Link de fatura — disponível na próxima fase
-                    </p>
-
-                    {/* Botão WhatsApp */}
-                    <Button
-                      className="w-full bg-[#25D366] hover:bg-[#1ebe5d] text-white font-semibold shadow-sm"
-                      onClick={() => {
-                        const msg = encodeURIComponent(
-                          `Olá ${transaction.supplierOrClient}, tudo bem?\n\nPassando para lembrar que a fatura referente a *${transaction.description}* no valor de *${formatCurrency(transaction.amount)}* vence em *${format(transaction.dueDate, "dd/MM/yyyy")}*.\n\nQualquer dúvida, estou à disposição. 😊`,
-                        );
-                        window.open(`https://wa.me/?text=${msg}`, "_blank");
-                      }}
-                    >
-                      <MessageCircle className="h-4 w-4 mr-2" />
-                      Enviar Cobrança por WhatsApp
-                    </Button>
                     </div>
                   )}
                 </div>
@@ -683,88 +684,90 @@ export function TransactionDetailsDialog({
 
               {!isEditing && (
                 <DialogFooter className="gap-2 sm:gap-2">
-                {canEdit && (
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsEditing(true)}
-                    disabled={isProcessing}
-                  >
-                    <Edit2 className="mr-2 h-4 w-4" />
-                    Editar
-                  </Button>
-                )}
-
-                {transaction.status === "draft" && !isReceivable && (
-                  <Button
-                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
-                    onClick={() => handleStatusUpdate("pending_approval")}
-                    disabled={isProcessing}
-                  >
-                    {isProcessing ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="mr-2 h-4 w-4" />
-                    )}
-                    Enviar para Aprovação
-                  </Button>
-                )}
-
-                {transaction.status === "pending_approval" &&
-                  canApprove &&
-                  !isReceivable && (
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <Button
-                        variant="destructive"
-                        onClick={() => handleStatusUpdate("rejected")}
-                        disabled={isProcessing}
-                      >
-                        {isProcessing ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <XCircle className="mr-2 h-4 w-4" />
-                        )}
-                        Rejeitar
-                      </Button>
-                      <Button
-                        className="bg-emerald-600 hover:bg-emerald-700"
-                        onClick={() => handleStatusUpdate("approved")}
-                        disabled={isProcessing}
-                      >
-                        {isProcessing ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                        )}
-                        Aprovar
-                      </Button>
-                    </div>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsEditing(true)}
+                      disabled={isProcessing}
+                    >
+                      <Edit2 className="mr-2 h-4 w-4" />
+                      Editar
+                    </Button>
                   )}
 
-                {(transaction.status === "approved" ||
-                  (transaction.status === "draft" && isReceivable)) &&
-                  canPay && (
+                  {transaction.status === "draft" && !isReceivable && (
                     <Button
                       className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
-                      onClick={() => setIsPaymentDialogOpen(true)}
+                      onClick={() => handleStatusUpdate("pending_approval")}
                       disabled={isProcessing}
                     >
                       {isProcessing ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
-                        <Banknote className="mr-2 h-4 w-4" />
+                        <Send className="mr-2 h-4 w-4" />
                       )}
-                      {isPayable ? "Confirmar Pagamento" : "Confirmar Recebimento"}
+                      Enviar para Aprovação
                     </Button>
                   )}
 
-                <Button
-                  variant="outline"
-                  onClick={onClose}
-                  disabled={isProcessing}
-                >
-                  Fechar
-                </Button>
-              </DialogFooter>
+                  {transaction.status === "pending_approval" &&
+                    canApprove &&
+                    !isReceivable && (
+                      <div className="flex gap-2 w-full sm:w-auto">
+                        <Button
+                          variant="destructive"
+                          onClick={() => handleStatusUpdate("rejected")}
+                          disabled={isProcessing}
+                        >
+                          {isProcessing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <XCircle className="mr-2 h-4 w-4" />
+                          )}
+                          Rejeitar
+                        </Button>
+                        <Button
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                          onClick={() => handleStatusUpdate("approved")}
+                          disabled={isProcessing}
+                        >
+                          {isProcessing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                          )}
+                          Aprovar
+                        </Button>
+                      </div>
+                    )}
+
+                  {(transaction.status === "approved" ||
+                    (transaction.status === "draft" && isReceivable)) &&
+                    canPay && (
+                      <Button
+                        className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
+                        onClick={() => setIsPaymentDialogOpen(true)}
+                        disabled={isProcessing}
+                      >
+                        {isProcessing ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Banknote className="mr-2 h-4 w-4" />
+                        )}
+                        {isPayable
+                          ? "Confirmar Pagamento"
+                          : "Confirmar Recebimento"}
+                      </Button>
+                    )}
+
+                  <Button
+                    variant="outline"
+                    onClick={onClose}
+                    disabled={isProcessing}
+                  >
+                    Fechar
+                  </Button>
+                </DialogFooter>
               )}
             </>
           ) : (

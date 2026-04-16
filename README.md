@@ -5,16 +5,18 @@ Uma plataforma completa de gestão financeira desenvolvida com **Next.js 16**, *
 ## 🚀 Funcionalidades Principais
 
 ### 🏢 Gestão Multi-Empresa & Segurança
+
 - **Multi-CNPJ**: Gerencie múltiplas empresas (Holding) em uma única interface.
 - **Controle de Acesso (RBAC)**:
-    - **Admin**: Acesso total.
-    - **Gerente Financeiro**: Gestão operacional completa.
-    - **Aprovador**: Aprova despesas de seus centros de custo.
-    - **Pagador (Releaser)**: Realiza a baixa (pagamento) de transações aprovadas.
-    - **Auditor**: Apenas visualização.
+  - **Admin**: Acesso total.
+  - **Gerente Financeiro**: Gestão operacional completa.
+  - **Aprovador**: Aprova despesas de seus centros de custo.
+  - **Pagador (Releaser)**: Realiza a baixa (pagamento) de transações aprovadas.
+  - **Auditor**: Apenas visualização.
 - **Log de Auditoria**: Rastreabilidade completa de ações (quem fez, quando e o que mudou).
 
 ### 💰 Gestão Financeira
+
 - **Contas a Pagar e Receber**: Controle total de fluxo de caixa.
 - **Parcelamento e Recorrência**: Criação automática de parcelas e gestão de assinaturas/mensalidades.
 - **Lotes de Pagamento (Batches)**: Agrupamento de transações para aprovação e pagamento em massa.
@@ -22,20 +24,23 @@ Uma plataforma completa de gestão financeira desenvolvida com **Next.js 16**, *
 - **Anexos**: Upload de comprovantes e documentos fiscais.
 
 ### 📊 Painéis e Relatórios (BI)
+
 - **Dashboard Executivo**: KPIs em tempo real (Receita, Despesa, Saldo, Pendências).
 - **Gráficos Interativos**: Fluxo de Caixa (6 meses) e Distribuição por Centro de Custo.
 - **Relatórios Exportáveis**:
-    - **Fluxo de Caixa (PDF)**: Extrato detalhado.
-    - **DRE Gerencial (PDF)**: Visão de resultado operacional.
-    - **Exportação CSV/Excel**: Dados brutos para análise externa.
+  - **Fluxo de Caixa (PDF)**: Extrato detalhado.
+  - **DRE Gerencial (PDF)**: Visão de resultado operacional.
+  - **Exportação CSV/Excel**: Dados brutos para análise externa.
 
 ### ⚙️ Cadastros e Configurações
+
 - **Centros de Custo Hierárquicos**: Estrutura em árvore (Pai/Filho) com orçamentos anuais.
 - **Entidades (CRM)**: Cadastro unificado de Clientes e Fornecedores com dados bancários.
 - **Usuários**: Convite e gestão de permissões por empresa.
 - **Perfil do Usuário**: Visão centralizada de tarefas e responsabilidades.
 
 ### 🛠️ Recursos Avançados
+
 - **Busca Global**: Pesquise transações, entidades ou páginas de qualquer lugar.
 - **Notificações**: Alertas em tempo real para aprovações e vencimentos.
 - **Modo Escuro (Dark Mode)**: Suporte nativo a temas (Claro/Escuro).
@@ -60,18 +65,21 @@ Uma plataforma completa de gestão financeira desenvolvida com **Next.js 16**, *
 ## 🏁 Como Iniciar
 
 ### Pré-requisitos
+
 - Node.js 18+ instalado.
 - Conta no Firebase configurada.
 
 ### Instalação
 
 1. **Clone o repositório:**
+
    ```bash
    git clone https://github.com/seu-usuario/gestao-financeira.git
    cd gestao-financeira
    ```
 
 2. **Instale as dependências:**
+
    ```bash
    npm install
    # ou
@@ -80,6 +88,7 @@ Uma plataforma completa de gestão financeira desenvolvida com **Next.js 16**, *
 
 3. **Configure as Variáveis de Ambiente:**
    Crie um arquivo `.env.local` na raiz do projeto com suas credenciais do Firebase:
+
    ```env
    NEXT_PUBLIC_FIREBASE_API_KEY=seu_api_key
    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=seu_auth_domain
@@ -90,6 +99,7 @@ Uma plataforma completa de gestão financeira desenvolvida com **Next.js 16**, *
    ```
 
 4. **Execute o servidor de desenvolvimento:**
+
    ```bash
    npm run dev
    ```
@@ -123,13 +133,13 @@ src/
 
 ## 🔐 Níveis de Acesso (Detalhado)
 
-| Perfil | Descrição |
-| :--- | :--- |
-| **Admin** | Acesso total a todas as configurações e dados de todas as empresas. |
+| Perfil                 | Descrição                                                                             |
+| :--------------------- | :------------------------------------------------------------------------------------ |
+| **Admin**              | Acesso total a todas as configurações e dados de todas as empresas.                   |
 | **Gerente Financeiro** | Pode criar, editar e excluir transações, gerenciar entidades e visualizar relatórios. |
-| **Aprovador** | Responsável por validar despesas lançadas em seus Centros de Custo. Não pode pagar. |
-| **Pagador (Releaser)** | Responsável por efetivar o pagamento (baixa) de despesas já aprovadas. |
-| **Auditor** | Acesso somente leitura a todos os dados para conferência. |
+| **Aprovador**          | Responsável por validar despesas lançadas em seus Centros de Custo. Não pode pagar.   |
+| **Pagador (Releaser)** | Responsável por efetivar o pagamento (baixa) de despesas já aprovadas.                |
+| **Auditor**            | Acesso somente leitura a todos os dados para conferência.                             |
 
 ---
 

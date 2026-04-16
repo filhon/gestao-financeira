@@ -17,13 +17,16 @@ export default function RoadmapPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
               <Map className="h-4 w-4 text-primary" />
             </div>
-            <h2 className="text-2xl font-bold tracking-tight">Roadmap de Desenvolvimento</h2>
+            <h2 className="text-2xl font-bold tracking-tight">
+              Roadmap de Desenvolvimento
+            </h2>
             <Badge variant="secondary" className="text-xs font-normal">
               Beta
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground pl-[42px]">
-            Acompanhe o que está sendo desenvolvido e vote nas próximas funcionalidades.
+            Acompanhe o que está sendo desenvolvido e vote nas próximas
+            funcionalidades.
           </p>
         </div>
         <div className="hidden sm:flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground">

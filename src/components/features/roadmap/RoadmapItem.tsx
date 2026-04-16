@@ -102,7 +102,8 @@ export function RoadmapItem({ item, isAdmin, onRefresh }: RoadmapItemProps) {
           <CardTitle
             className={cn(
               "text-sm font-medium leading-snug line-clamp-2",
-              isDone && "text-muted-foreground line-through decoration-muted-foreground/30",
+              isDone &&
+                "text-muted-foreground line-through decoration-muted-foreground/30",
             )}
           >
             {item.title}

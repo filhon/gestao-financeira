@@ -176,7 +176,9 @@ function StatCard({
       </div>
       <div className="min-w-0">
         <p className="truncate text-xs text-muted-foreground">{label}</p>
-        <p className={cn("truncate text-sm font-semibold", valueClassName)}>{value}</p>
+        <p className={cn("truncate text-sm font-semibold", valueClassName)}>
+          {value}
+        </p>
       </div>
     </div>
   );

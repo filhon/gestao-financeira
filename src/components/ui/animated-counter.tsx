@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 
 interface AnimatedCounterProps {
-    value: number;
-    formatter: (value: number) => string;
-    duration?: number;
-    className?: string;
+  value: number;
+  formatter: (value: number) => string;
+  duration?: number;
+  className?: string;
 }
 
 /**
@@ -14,46 +14,50 @@ interface AnimatedCounterProps {
  * Uses an ease-out curve for a premium feel.
  */
 export function AnimatedCounter({
-    value,
-    formatter,
-    duration = 600,
-    className,
+  value,
+  formatter,
+  duration = 600,
+  className,
 }: AnimatedCounterProps) {
-    const [displayed, setDisplayed] = useState(value);
-    const prevValue = useRef(value);
-    const rafRef = useRef<number | null>(null);
+  const [displayed, setDisplayed] = useState(value);
+  const prevValue = useRef(value);
+  const rafRef = useRef<number | null>(null);
 
-    useEffect(() => {
-        const from = prevValue.current;
-        const to = value;
-        prevValue.current = to;
+  useEffect(() => {
+    const from = prevValue.current;
+    const to = value;
+    prevValue.current = to;
 
-        if (from === to) return;
+    if (from === to) return;
 
-        const startTime = performance.now();
+    const startTime = performance.now();
 
-        const animate = (now: number) => {
-            const elapsed = now - startTime;
-            const progress = Math.min(elapsed / duration, 1);
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
 
-            // Ease-out cubic for smooth deceleration
-            const eased = 1 - Math.pow(1 - progress, 3);
+      // Ease-out cubic for smooth deceleration
+      const eased = 1 - Math.pow(1 - progress, 3);
 
-            setDisplayed(from + (to - from) * eased);
+      setDisplayed(from + (to - from) * eased);
 
-            if (progress < 1) {
-                rafRef.current = requestAnimationFrame(animate);
-            } else {
-                setDisplayed(to);
-            }
-        };
-
+      if (progress < 1) {
         rafRef.current = requestAnimationFrame(animate);
+      } else {
+        setDisplayed(to);
+      }
+    };
 
-        return () => {
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        };
-    }, [value, duration]);
+    rafRef.current = requestAnimationFrame(animate);
 
-    return <span className={`font-financial${className ? ` ${className}` : ""}`}>{formatter(displayed)}</span>;
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [value, duration]);
+
+  return (
+    <span className={`font-financial${className ? ` ${className}` : ""}`}>
+      {formatter(displayed)}
+    </span>
+  );
 }

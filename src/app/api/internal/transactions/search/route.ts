@@ -133,11 +133,7 @@ export async function GET(request: NextRequest) {
       );
     }
     if (endDate) {
-      baseQuery = baseQuery.where(
-        "dueDate",
-        "<=",
-        Timestamp.fromDate(endDate),
-      );
+      baseQuery = baseQuery.where("dueDate", "<=", Timestamp.fromDate(endDate));
     }
 
     // Ordena por dueDate desc para priorizar transações mais recentes

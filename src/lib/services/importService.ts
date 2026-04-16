@@ -28,7 +28,7 @@ const parseDate = (value: string | number | Date): Date | null => {
     // Excel serial date (days since 1900-01-01)
     const excelEpoch = new Date(1900, 0, 1);
     const date = new Date(
-      excelEpoch.getTime() + (value - 2) * 24 * 60 * 60 * 1000
+      excelEpoch.getTime() + (value - 2) * 24 * 60 * 60 * 1000,
     );
     return isValid(date) ? date : null;
   }
@@ -106,7 +106,7 @@ export const importService = {
             {
               defval: "",
               raw: false,
-            }
+            },
           );
 
           if (jsonData.length === 0) {
@@ -146,8 +146,8 @@ export const importService = {
         } catch {
           reject(
             new Error(
-              "Erro ao processar arquivo. Verifique se o formato está correto."
-            )
+              "Erro ao processar arquivo. Verifique se o formato está correto.",
+            ),
           );
         }
       };
@@ -206,7 +206,8 @@ export const importService = {
     if (row.costCenterCode && !costCenterId) {
       const code = row.costCenterCode.toString().trim().toUpperCase();
       const found = costCenters.find(
-        (cc) => cc.code.toUpperCase() === code || cc.name.toUpperCase() === code
+        (cc) =>
+          cc.code.toUpperCase() === code || cc.name.toUpperCase() === code,
       );
       if (found) {
         costCenterId = found.id;
@@ -254,7 +255,7 @@ export const importService = {
    */
   validateRows: (
     rows: ImportedRow[],
-    costCenters: CostCenter[]
+    costCenters: CostCenter[],
   ): ImportedRow[] => {
     return rows.map((row) => importService.validateRow(row, costCenters));
   },
@@ -264,7 +265,7 @@ export const importService = {
    */
   applyDefaultCostCenter: (
     rows: ImportedRow[],
-    defaultCostCenterId: string
+    defaultCostCenterId: string,
   ): ImportedRow[] => {
     return rows.map((row) => {
       if (!row.costCenterId) {
@@ -275,7 +276,7 @@ export const importService = {
           warnings: row.warnings.filter(
             (w) =>
               w.field !== "costCenterCode" ||
-              w.message !== "Centro de custo não informado"
+              w.message !== "Centro de custo não informado",
           ),
         };
         return updatedRow;
@@ -290,7 +291,7 @@ export const importService = {
   applyCostCenterToSelected: (
     rows: ImportedRow[],
     selectedIds: Set<string>,
-    costCenterId: string
+    costCenterId: string,
   ): ImportedRow[] => {
     return rows.map((row) => {
       if (selectedIds.has(row.id)) {
@@ -301,7 +302,7 @@ export const importService = {
           warnings: row.warnings.filter(
             (w) =>
               w.field !== "costCenterCode" ||
-              w.message !== "Centro de custo não informado"
+              w.message !== "Centro de custo não informado",
           ),
         };
         return updatedRow;
@@ -318,7 +319,7 @@ export const importService = {
     type: "payable" | "receivable",
     user: { uid: string; email: string },
     companyId: string,
-    onProgress?: (current: number, total: number) => void
+    onProgress?: (current: number, total: number) => void,
   ): Promise<ImportResult> => {
     const validRows = rows.filter((r) => r.isValid && r.costCenterId);
     const result: ImportResult = {

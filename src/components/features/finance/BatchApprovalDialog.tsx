@@ -114,8 +114,8 @@ export function BatchApprovalDialog({
             ...currentEdit,
             adjustedAmount:
               newAmount !== currentEdit.originalAmount ? newAmount : undefined,
-          })
-        )
+          }),
+        ),
       );
     }
     setEditingAmountId(null);
@@ -137,7 +137,7 @@ export function BatchApprovalDialog({
       await paymentBatchService.rejectTransaction(
         batch.id,
         rejectingId,
-        rejectReason
+        rejectReason,
       );
       // Remove from local state
       setTransactions(transactions.filter((t) => t.id !== rejectingId));
@@ -173,7 +173,7 @@ export function BatchApprovalDialog({
         batch.id,
         userId,
         comment || undefined,
-        adjustments.length > 0 ? adjustments : undefined
+        adjustments.length > 0 ? adjustments : undefined,
       );
 
       toast.success("Lote aprovado com sucesso");
@@ -209,7 +209,7 @@ export function BatchApprovalDialog({
 
   const totalAmount = transactions.reduce(
     (sum, t) => sum + getDisplayAmount(t),
-    0
+    0,
   );
 
   if (!batch) return null;
@@ -225,7 +225,9 @@ export function BatchApprovalDialog({
           {/* Summary */}
           <div className="flex justify-between text-sm font-medium bg-muted/50 p-3 rounded-lg">
             <span>Transações: {transactions.length}</span>
-            <span className="font-financial">Total: {formatCurrency(totalAmount)}</span>
+            <span className="font-financial">
+              Total: {formatCurrency(totalAmount)}
+            </span>
           </div>
 
           {/* Transactions Table */}

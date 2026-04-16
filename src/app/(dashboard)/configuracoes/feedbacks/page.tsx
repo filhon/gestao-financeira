@@ -15,13 +15,7 @@ import { feedbackService } from "@/lib/services/feedbackService";
 import { Feedback } from "@/lib/types";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
-import {
-  Loader2,
-  MessageSquare,
-  Clock,
-  CheckCircle,
-  Bell,
-} from "lucide-react";
+import { Loader2, MessageSquare, Clock, CheckCircle, Bell } from "lucide-react";
 
 interface StatCardProps {
   title: string;
@@ -70,7 +64,12 @@ function StatCard({
       <Card className="transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">{title}</CardTitle>
-          <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", iconBg)}>
+          <div
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-lg",
+              iconBg,
+            )}
+          >
             <Icon className={cn("h-4 w-4", color)} />
           </div>
         </CardHeader>
@@ -126,15 +125,16 @@ export default function AdminFeedbacksPage() {
   // Stats
   const totalFeedbacks = feedbacks.length;
   const pendingFeedbacks = feedbacks.filter(
-    (f) => f.status === "pending"
+    (f) => f.status === "pending",
   ).length;
   const resolvedFeedbacks = feedbacks.filter(
-    (f) => f.status === "resolved"
+    (f) => f.status === "resolved",
   ).length;
   const unreadFeedbacks = feedbacks.filter((f) => !f.read).length;
-  const resolvedPercent = totalFeedbacks > 0
-    ? Math.round((resolvedFeedbacks / totalFeedbacks) * 100)
-    : 0;
+  const resolvedPercent =
+    totalFeedbacks > 0
+      ? Math.round((resolvedFeedbacks / totalFeedbacks) * 100)
+      : 0;
 
   if (canManageFeedback === undefined) {
     return (
@@ -163,9 +163,7 @@ export default function AdminFeedbacksPage() {
       subtitle: "aguardando visualização",
       icon: Bell,
       color: unreadFeedbacks > 0 ? "text-primary" : "text-muted-foreground",
-      iconBg: unreadFeedbacks > 0
-        ? "bg-primary/10"
-        : "bg-muted",
+      iconBg: unreadFeedbacks > 0 ? "bg-primary/10" : "bg-muted",
     },
     {
       title: "Pendentes",
@@ -203,7 +201,12 @@ export default function AdminFeedbacksPage() {
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         {stats.map((stat, i) => (
-          <StatCard key={stat.title} {...stat} isLoading={isLoading} index={i} />
+          <StatCard
+            key={stat.title}
+            {...stat}
+            isLoading={isLoading}
+            index={i}
+          />
         ))}
       </div>
 
@@ -218,7 +221,8 @@ export default function AdminFeedbacksPage() {
               <div>
                 <CardTitle>Todos os Feedbacks</CardTitle>
                 <CardDescription className="mt-1">
-                  Clique em um feedback para ver os detalhes ou responder ao usuário.
+                  Clique em um feedback para ver os detalhes ou responder ao
+                  usuário.
                 </CardDescription>
               </div>
               {unreadFeedbacks > 0 && (
@@ -227,7 +231,8 @@ export default function AdminFeedbacksPage() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-50" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                   </span>
-                  {unreadFeedbacks} não {unreadFeedbacks === 1 ? "lido" : "lidos"}
+                  {unreadFeedbacks} não{" "}
+                  {unreadFeedbacks === 1 ? "lido" : "lidos"}
                 </div>
               )}
             </div>

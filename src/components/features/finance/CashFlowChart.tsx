@@ -60,7 +60,7 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
                   | string
                   | Array<number | string>
                   | readonly (number | string)[]
-                  | undefined
+                  | undefined,
               ) =>
                 new Intl.NumberFormat("pt-BR", {
                   style: "currency",

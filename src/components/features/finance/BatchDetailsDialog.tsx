@@ -573,8 +573,7 @@ export function BatchDetailsDialog({
     0,
   );
 
-  const batchStatusLabel =
-    batch.status === "open" ? "Aberto" : "Fechado";
+  const batchStatusLabel = batch.status === "open" ? "Aberto" : "Fechado";
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -677,7 +676,10 @@ export function BatchDetailsDialog({
                               {format(t.dueDate, "dd/MM/yyyy")}
                             </TableCell>
                             <TableCell className="max-w-0 w-[300px]">
-                              <span className="block truncate" title={t.description}>
+                              <span
+                                className="block truncate"
+                                title={t.description}
+                              >
                                 {t.description}
                               </span>
                             </TableCell>
@@ -886,7 +888,10 @@ export function BatchDetailsDialog({
                             {format(t.dueDate, "dd/MM/yyyy")}
                           </TableCell>
                           <TableCell className="max-w-0">
-                            <span className="block truncate" title={t.description}>
+                            <span
+                              className="block truncate"
+                              title={t.description}
+                            >
                               {t.description}
                             </span>
                           </TableCell>

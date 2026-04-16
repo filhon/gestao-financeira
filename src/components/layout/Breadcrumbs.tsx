@@ -37,13 +37,13 @@ export function Breadcrumbs() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const [dynamicLabels, setDynamicLabels] = useState<Record<string, string>>(
-    {}
+    {},
   );
 
   // Memoize segments to prevent infinite loop - segments was being recreated on every render
   const segments = useMemo(
     () => pathname.split("/").filter(Boolean),
-    [pathname]
+    [pathname],
   );
 
   // Fetch dynamic labels for IDs - hooks must be called before any early returns
@@ -79,7 +79,7 @@ export function Breadcrumbs() {
             if (selectedCompany) {
               try {
                 const costCenters = await costCenterService.getAll(
-                  selectedCompany.id
+                  selectedCompany.id,
                 );
                 const cc = costCenters.find((c) => c.id === segment);
                 labels[segment] = cc?.name || "Detalhes";

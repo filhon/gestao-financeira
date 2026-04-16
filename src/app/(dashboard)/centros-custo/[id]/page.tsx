@@ -194,10 +194,7 @@ export default function CostCenterDashboard() {
     0,
   );
   // Comprometido = total não-rejeitado (inclui paid + pendentes)
-  const directCommitted = usageData.reduce(
-    (acc, curr) => acc + curr.amount,
-    0,
-  );
+  const directCommitted = usageData.reduce((acc, curr) => acc + curr.amount, 0);
   // Pendente = comprometido que ainda não foi pago
   const directPending = directCommitted - directRealized;
 
@@ -224,7 +221,13 @@ export default function CostCenterDashboard() {
   // Charts Data
   const budgetDistributionData = [
     ...(hasChildren && childrenUsageTotal > 0
-      ? [{ name: "Gasto pelos filhos", value: childrenUsageTotal, color: "#3b82f6" }]
+      ? [
+          {
+            name: "Gasto pelos filhos",
+            value: childrenUsageTotal,
+            color: "#3b82f6",
+          },
+        ]
       : []),
     ...(directRealized > 0
       ? [{ name: "Realizado", value: directRealized, color: "#ef4444" }]
@@ -692,7 +695,9 @@ export default function CostCenterDashboard() {
                       <TableCell className="font-medium">
                         {child.name}
                       </TableCell>
-                      <TableCell className="font-financial">{formatCurrency(child.budget || 0)}</TableCell>
+                      <TableCell className="font-financial">
+                        {formatCurrency(child.budget || 0)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

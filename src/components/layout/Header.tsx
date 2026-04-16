@@ -24,7 +24,7 @@ export function Header() {
   const [isMac] = useState(
     () =>
       typeof navigator !== "undefined" &&
-      navigator.platform.toUpperCase().indexOf("MAC") >= 0
+      navigator.platform.toUpperCase().indexOf("MAC") >= 0,
   );
 
   const getInitials = (name: string) => {
@@ -91,7 +91,7 @@ export function Header() {
               <button
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
-                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                 )}
               >
                 <Avatar className="h-7 w-7">

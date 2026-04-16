@@ -162,7 +162,12 @@ export const usageService = {
     // 2. Agrega tudo em memória: docId → { costCenterId, monthKey, amount, amountPaid }
     const aggregated = new Map<
       string,
-      { costCenterId: string; monthKey: string; amount: number; amountPaid: number }
+      {
+        costCenterId: string;
+        monthKey: string;
+        amount: number;
+        amountPaid: number;
+      }
     >();
 
     for (const d of txSnap.docs) {
@@ -175,7 +180,9 @@ export const usageService = {
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
       const isPaid = data.status === "paid";
       const amount = Number(
-        isPaid && data.finalAmount != null ? data.finalAmount : data.amount ?? 0,
+        isPaid && data.finalAmount != null
+          ? data.finalAmount
+          : (data.amount ?? 0),
       );
 
       const allocations: { costCenterId: string; amount: number }[] =

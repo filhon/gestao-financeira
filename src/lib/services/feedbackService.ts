@@ -94,7 +94,7 @@ export const feedbackService = {
       data.userEmail,
       data.type,
       data.title,
-      data.description
+      data.description,
     );
 
     return docRef.id;
@@ -107,12 +107,12 @@ export const feedbackService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where("userId", "==", userId),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
 
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
   },
 
@@ -122,12 +122,12 @@ export const feedbackService = {
   getAll: async (): Promise<Feedback[]> => {
     const q = query(
       collection(db, COLLECTION_NAME),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
 
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
   },
 
@@ -148,7 +148,7 @@ export const feedbackService = {
   respond: async (
     id: string,
     response: string,
-    admin: { uid: string; email: string; displayName?: string }
+    admin: { uid: string; email: string; displayName?: string },
   ): Promise<void> => {
     const now = new Date();
     const docRef = doc(db, COLLECTION_NAME, id);
@@ -208,7 +208,7 @@ export const feedbackService = {
     userEmail: string,
     feedbackType: FeedbackType,
     title: string,
-    description: string
+    description: string,
   ): Promise<void> => {
     // Find global admins
     const usersRef = collection(db, "users");
@@ -264,7 +264,7 @@ export const feedbackService = {
   getUnreadCount: async (): Promise<number> => {
     const q = query(
       collection(db, COLLECTION_NAME),
-      where("read", "==", false)
+      where("read", "==", false),
     );
     const snapshot = await getDocs(q);
     return snapshot.size;

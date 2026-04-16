@@ -85,9 +85,7 @@ export async function GET(request: NextRequest) {
 
   // ── Validações ───────────────────────────────────────────────────────────
   if (!qParam || qParam.trim().length === 0) {
-    return ApiErrors.badRequest(
-      "Parameter 'q' is required for search.",
-    );
+    return ApiErrors.badRequest("Parameter 'q' is required for search.");
   }
   if (qParam.trim().length < 2) {
     return ApiErrors.badRequest(

@@ -66,7 +66,7 @@ export default function LegalDocumentsSettingsPage() {
           setContent(
             activeTab === "privacy_policy"
               ? DEFAULT_PRIVACY_POLICY
-              : DEFAULT_TERMS_OF_SERVICE
+              : DEFAULT_TERMS_OF_SERVICE,
           );
         }
       } catch (error) {
@@ -113,9 +113,7 @@ export default function LegalDocumentsSettingsPage() {
     }, 0);
   };
 
-  const wordCount = content.trim()
-    ? content.trim().split(/\s+/).length
-    : 0;
+  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   const charCount = content.length;
 
   if (!canAccessSettings) return null;
@@ -171,8 +169,8 @@ export default function LegalDocumentsSettingsPage() {
                         : "Termos de Uso"}
                     </CardTitle>
                     <CardDescription className="mt-0.5">
-                      Use Markdown para formatar. As alterações serão
-                      refletidas imediatamente nas páginas públicas.
+                      Use Markdown para formatar. As alterações serão refletidas
+                      imediatamente nas páginas públicas.
                     </CardDescription>
                   </div>
 
@@ -184,7 +182,7 @@ export default function LegalDocumentsSettingsPage() {
                       className={cn(
                         "h-7 gap-1.5 px-2.5 text-xs transition-all",
                         viewMode === "edit" &&
-                          "bg-background shadow-sm text-foreground"
+                          "bg-background shadow-sm text-foreground",
                       )}
                       onClick={() => setViewMode("edit")}
                     >
@@ -197,7 +195,7 @@ export default function LegalDocumentsSettingsPage() {
                       className={cn(
                         "h-7 gap-1.5 px-2.5 text-xs transition-all",
                         viewMode === "preview" &&
-                          "bg-background shadow-sm text-foreground"
+                          "bg-background shadow-sm text-foreground",
                       )}
                       onClick={() => setViewMode("preview")}
                     >
@@ -361,9 +359,7 @@ export default function LegalDocumentsSettingsPage() {
                                     part.startsWith("*") &&
                                     part.endsWith("*")
                                   )
-                                    return (
-                                      <em key={j}>{part.slice(1, -1)}</em>
-                                    );
+                                    return <em key={j}>{part.slice(1, -1)}</em>;
                                   return part;
                                 })}
                             </p>

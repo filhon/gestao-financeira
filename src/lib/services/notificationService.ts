@@ -1,16 +1,16 @@
 import {
-    collection,
-    addDoc,
-    updateDoc,
-    doc,
-    getDocs,
-    query,
-    where,
-    orderBy,
-    limit,
-    Timestamp,
-    DocumentData,
-    writeBatch
+  collection,
+  addDoc,
+  updateDoc,
+  doc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  limit,
+  Timestamp,
+  DocumentData,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { Notification } from "@/lib/types";
@@ -18,188 +18,197 @@ import { Notification } from "@/lib/types";
 const COLLECTION_NAME = "notifications";
 
 const convertDates = (data: DocumentData): Notification => {
-    return {
-        id: data.id,
-        ...data,
-        createdAt: (data.createdAt as Timestamp)?.toDate(),
-    } as Notification;
+  return {
+    id: data.id,
+    ...data,
+    createdAt: (data.createdAt as Timestamp)?.toDate(),
+  } as Notification;
 };
 
 export const notificationService = {
-    create: async (data: Omit<Notification, "id" | "createdAt" | "read">): Promise<void> => {
-        const now = new Date();
-        await addDoc(collection(db, COLLECTION_NAME), {
-            ...data,
-            read: false,
-            createdAt: Timestamp.fromDate(now),
-        });
-    },
+  create: async (
+    data: Omit<Notification, "id" | "createdAt" | "read">,
+  ): Promise<void> => {
+    const now = new Date();
+    await addDoc(collection(db, COLLECTION_NAME), {
+      ...data,
+      read: false,
+      createdAt: Timestamp.fromDate(now),
+    });
+  },
 
-    getUserNotifications: async (userId: string, limitCount = 20): Promise<Notification[]> => {
-        const q = query(
-            collection(db, COLLECTION_NAME),
-            where("userId", "==", userId),
-            orderBy("createdAt", "desc"),
-            limit(limitCount)
-        );
+  getUserNotifications: async (
+    userId: string,
+    limitCount = 20,
+  ): Promise<Notification[]> => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc"),
+      limit(limitCount),
+    );
 
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map((doc) => convertDates({ id: doc.id, ...doc.data() }));
-    },
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) =>
+      convertDates({ id: doc.id, ...doc.data() }),
+    );
+  },
 
-    getUnreadCount: async (userId: string): Promise<number> => {
-        const q = query(
-            collection(db, COLLECTION_NAME),
-            where("userId", "==", userId),
-            where("read", "==", false)
-        );
-        const snapshot = await getDocs(q);
-        return snapshot.size;
-    },
+  getUnreadCount: async (userId: string): Promise<number> => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("userId", "==", userId),
+      where("read", "==", false),
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.size;
+  },
 
-    markAsRead: async (id: string): Promise<void> => {
-        const docRef = doc(db, COLLECTION_NAME, id);
-        await updateDoc(docRef, {
-            read: true,
-        });
-    },
+  markAsRead: async (id: string): Promise<void> => {
+    const docRef = doc(db, COLLECTION_NAME, id);
+    await updateDoc(docRef, {
+      read: true,
+    });
+  },
 
-    markAllAsRead: async (userId: string): Promise<void> => {
-        const q = query(
-            collection(db, COLLECTION_NAME),
-            where("userId", "==", userId),
-            where("read", "==", false)
-        );
-        const snapshot = await getDocs(q);
+  markAllAsRead: async (userId: string): Promise<void> => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("userId", "==", userId),
+      where("read", "==", false),
+    );
+    const snapshot = await getDocs(q);
 
-        const batch = writeBatch(db);
-        snapshot.docs.forEach((doc) => {
-            batch.update(doc.ref, { read: true });
-        });
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((doc) => {
+      batch.update(doc.ref, { read: true });
+    });
 
-        await batch.commit();
-    },
+    await batch.commit();
+  },
 
-    notifyAdminsOfNewUser: async (
-        companyId: string,
-        companyName: string,
-        userName: string,
-        requestedRole: string
-    ): Promise<void> => {
-        // Find global admins (users with role === 'admin')
-        const usersRef = collection(db, "users");
-        const adminQuery = query(usersRef, where("role", "==", "admin"));
-        const adminSnapshot = await getDocs(adminQuery);
+  notifyAdminsOfNewUser: async (
+    companyId: string,
+    companyName: string,
+    userName: string,
+    requestedRole: string,
+  ): Promise<void> => {
+    // Find global admins (users with role === 'admin')
+    const usersRef = collection(db, "users");
+    const adminQuery = query(usersRef, where("role", "==", "admin"));
+    const adminSnapshot = await getDocs(adminQuery);
 
-        console.log(`[notifyAdminsOfNewUser] Found ${adminSnapshot.docs.length} global admins`);
+    console.log(
+      `[notifyAdminsOfNewUser] Found ${adminSnapshot.docs.length} global admins`,
+    );
 
-        // Note: We cannot query for company admins using dynamic field names in Firestore
-        // (e.g., `companyRoles.${companyId}` as a field path doesn't work for queries)
-        // In the future, this should be handled by a Cloud Function with admin SDK
+    // Note: We cannot query for company admins using dynamic field names in Firestore
+    // (e.g., `companyRoles.${companyId}` as a field path doesn't work for queries)
+    // In the future, this should be handled by a Cloud Function with admin SDK
 
-        const adminIds = new Set<string>();
-        adminSnapshot.docs.forEach(doc => {
-            adminIds.add(doc.id);
-        });
+    const adminIds = new Set<string>();
+    adminSnapshot.docs.forEach((doc) => {
+      adminIds.add(doc.id);
+    });
 
-        // Send notification to each admin
-        for (const adminId of adminIds) {
-            await notificationService.create({
-                userId: adminId,
-                companyId: companyId,
-                title: "Novo usuário pendente",
-                message: `${userName} solicitou acesso como ${requestedRole} na empresa ${companyName}.`,
-                type: 'info',
-                link: '/configuracoes/usuarios'
-            });
-        }
-    },
-
-    // ============================================
-    // Payment Batch Workflow Notifications
-    // ============================================
-
-    notifyBatchCreated: async (
-        managerId: string,
-        batchName: string,
-        batchId: string,
-        companyId: string
-    ): Promise<void> => {
-        await notificationService.create({
-            userId: managerId,
-            companyId,
-            title: "Novo lote de pagamento criado",
-            message: `O lote "${batchName}" foi criado automaticamente e está pronto para revisão.`,
-            type: 'info',
-            link: `/financeiro/lotes`
-        });
-    },
-
-    notifyBatchForApproval: async (
-        approverId: string,
-        batchName: string,
-        batchId: string,
-        senderName: string,
-        companyId: string
-    ): Promise<void> => {
-        await notificationService.create({
-            userId: approverId,
-            companyId,
-            title: "Lote aguardando sua aprovação",
-            message: `${senderName} enviou o lote "${batchName}" para sua aprovação.`,
-            type: 'warning',
-            link: `/financeiro/lotes`
-        });
-    },
-
-    notifyBatchApproved: async (
-        managerId: string,
-        batchName: string,
-        batchId: string,
-        approverName: string,
-        companyId: string
-    ): Promise<void> => {
-        await notificationService.create({
-            userId: managerId,
-            companyId,
-            title: "Lote aprovado",
-            message: `${approverName} aprovou o lote "${batchName}". Pronto para exportação bancária.`,
-            type: 'success',
-            link: `/financeiro/lotes`
-        });
-    },
-
-    notifyBatchForAuthorization: async (
-        authorizerId: string,
-        batchName: string,
-        batchId: string,
-        senderName: string,
-        companyId: string
-    ): Promise<void> => {
-        await notificationService.create({
-            userId: authorizerId,
-            companyId,
-            title: "Lote aguardando autorização bancária",
-            message: `${senderName} enviou o lote "${batchName}" para autorização no banco.`,
-            type: 'warning',
-            link: `/financeiro/lotes`
-        });
-    },
-
-    notifyBatchAuthorized: async (
-        managerId: string,
-        batchName: string,
-        batchId: string,
-        authorizerName: string,
-        companyId: string
-    ): Promise<void> => {
-        await notificationService.create({
-            userId: managerId,
-            companyId,
-            title: "Lote autorizado",
-            message: `${authorizerName} autorizou o lote "${batchName}" no banco. Confirme os pagamentos quando concluídos.`,
-            type: 'success',
-            link: `/financeiro/lotes`
-        });
+    // Send notification to each admin
+    for (const adminId of adminIds) {
+      await notificationService.create({
+        userId: adminId,
+        companyId: companyId,
+        title: "Novo usuário pendente",
+        message: `${userName} solicitou acesso como ${requestedRole} na empresa ${companyName}.`,
+        type: "info",
+        link: "/configuracoes/usuarios",
+      });
     }
+  },
+
+  // ============================================
+  // Payment Batch Workflow Notifications
+  // ============================================
+
+  notifyBatchCreated: async (
+    managerId: string,
+    batchName: string,
+    batchId: string,
+    companyId: string,
+  ): Promise<void> => {
+    await notificationService.create({
+      userId: managerId,
+      companyId,
+      title: "Novo lote de pagamento criado",
+      message: `O lote "${batchName}" foi criado automaticamente e está pronto para revisão.`,
+      type: "info",
+      link: `/financeiro/lotes`,
+    });
+  },
+
+  notifyBatchForApproval: async (
+    approverId: string,
+    batchName: string,
+    batchId: string,
+    senderName: string,
+    companyId: string,
+  ): Promise<void> => {
+    await notificationService.create({
+      userId: approverId,
+      companyId,
+      title: "Lote aguardando sua aprovação",
+      message: `${senderName} enviou o lote "${batchName}" para sua aprovação.`,
+      type: "warning",
+      link: `/financeiro/lotes`,
+    });
+  },
+
+  notifyBatchApproved: async (
+    managerId: string,
+    batchName: string,
+    batchId: string,
+    approverName: string,
+    companyId: string,
+  ): Promise<void> => {
+    await notificationService.create({
+      userId: managerId,
+      companyId,
+      title: "Lote aprovado",
+      message: `${approverName} aprovou o lote "${batchName}". Pronto para exportação bancária.`,
+      type: "success",
+      link: `/financeiro/lotes`,
+    });
+  },
+
+  notifyBatchForAuthorization: async (
+    authorizerId: string,
+    batchName: string,
+    batchId: string,
+    senderName: string,
+    companyId: string,
+  ): Promise<void> => {
+    await notificationService.create({
+      userId: authorizerId,
+      companyId,
+      title: "Lote aguardando autorização bancária",
+      message: `${senderName} enviou o lote "${batchName}" para autorização no banco.`,
+      type: "warning",
+      link: `/financeiro/lotes`,
+    });
+  },
+
+  notifyBatchAuthorized: async (
+    managerId: string,
+    batchName: string,
+    batchId: string,
+    authorizerName: string,
+    companyId: string,
+  ): Promise<void> => {
+    await notificationService.create({
+      userId: managerId,
+      companyId,
+      title: "Lote autorizado",
+      message: `${authorizerName} autorizou o lote "${batchName}" no banco. Confirme os pagamentos quando concluídos.`,
+      type: "success",
+      link: `/financeiro/lotes`,
+    });
+  },
 };

@@ -155,7 +155,10 @@ export default function SystemSettingsPage() {
 
       <div className="grid gap-4">
         {/* Card 1 — Recalibração de Saldo */}
-        <Card className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationFillMode: "both" }}>
+        <Card
+          className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300"
+          style={{ animationFillMode: "both" }}
+        >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <RefreshCw className="h-4 w-4 text-amber-500" />
@@ -226,7 +229,10 @@ export default function SystemSettingsPage() {
         </Card>
 
         {/* Card 2 — Corrigir Índices */}
-        <Card className="border-l-4 border-l-blue-400 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: "60ms", animationFillMode: "both" }}>
+        <Card
+          className="border-l-4 border-l-blue-400 animate-in fade-in slide-in-from-bottom-2 duration-300"
+          style={{ animationDelay: "60ms", animationFillMode: "both" }}
+        >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Database className="h-4 w-4 text-blue-500" />
@@ -279,7 +285,9 @@ export default function SystemSettingsPage() {
                   <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
                   <div className="space-y-0.5">
                     <p className="text-sm font-medium text-green-800 dark:text-green-300">
-                      <span className="font-bold">{migrationResult.updated}</span>{" "}
+                      <span className="font-bold">
+                        {migrationResult.updated}
+                      </span>{" "}
                       {migrationResult.updated === 1
                         ? "transação corrigida"
                         : "transações corrigidas"}
@@ -296,7 +304,10 @@ export default function SystemSettingsPage() {
         </Card>
 
         {/* Card 3 — Recalcular Uso dos Centros de Custo */}
-        <Card className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: "120ms", animationFillMode: "both" }}>
+        <Card
+          className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300"
+          style={{ animationDelay: "120ms", animationFillMode: "both" }}
+        >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <RefreshCw className="h-4 w-4 text-amber-500" />
@@ -313,8 +324,8 @@ export default function SystemSettingsPage() {
               <div className="flex gap-2.5">
                 <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                 <p className="text-sm text-amber-800 dark:text-amber-300">
-                  Limpa e reconstrói o cache de uso de todas as transações ativas
-                  (exceto rejeitadas). Pode levar alguns segundos. Seguro
+                  Limpa e reconstrói o cache de uso de todas as transações
+                  ativas (exceto rejeitadas). Pode levar alguns segundos. Seguro
                   executar mais de uma vez.
                 </p>
               </div>

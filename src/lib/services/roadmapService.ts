@@ -1,14 +1,14 @@
-import { 
-  collection, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  getDocs, 
-  query, 
-  orderBy, 
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  orderBy,
   serverTimestamp,
-  Timestamp 
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 
@@ -26,7 +26,10 @@ export interface RoadmapItem {
   updatedAt: Timestamp;
 }
 
-export type NewRoadmapItem = Omit<RoadmapItem, "id" | "createdAt" | "updatedAt" | "votes">;
+export type NewRoadmapItem = Omit<
+  RoadmapItem,
+  "id" | "createdAt" | "updatedAt" | "votes"
+>;
 
 const COLLECTION_NAME = "roadmap_items";
 
@@ -34,12 +37,15 @@ export const roadmapService = {
   // Buscar todos os itens do roadmap
   getAllItems: async (): Promise<RoadmapItem[]> => {
     try {
-      const q = query(collection(db, COLLECTION_NAME), orderBy("createdAt", "desc"));
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        orderBy("createdAt", "desc"),
+      );
       const querySnapshot = await getDocs(q);
-      
-      return querySnapshot.docs.map(doc => ({
+
+      return querySnapshot.docs.map((doc) => ({
         id: doc.id,
-        ...doc.data()
+        ...doc.data(),
       })) as RoadmapItem[];
     } catch (error) {
       console.error("Error fetching roadmap items:", error);
@@ -64,7 +70,10 @@ export const roadmapService = {
   },
 
   // Atualizar um item (apenas admins, controlado pelas regras de segurança e UI)
-  updateItem: async (id: string, updates: Partial<RoadmapItem>): Promise<void> => {
+  updateItem: async (
+    id: string,
+    updates: Partial<RoadmapItem>,
+  ): Promise<void> => {
     try {
       const docRef = doc(db, COLLECTION_NAME, id);
       await updateDoc(docRef, {
@@ -89,7 +98,10 @@ export const roadmapService = {
   },
 
   // Mover item para outra coluna/status
-  updateItemStatus: async (id: string, newStatus: RoadmapStatus): Promise<void> => {
+  updateItemStatus: async (
+    id: string,
+    newStatus: RoadmapStatus,
+  ): Promise<void> => {
     try {
       const docRef = doc(db, COLLECTION_NAME, id);
       await updateDoc(docRef, {
@@ -101,5 +113,4 @@ export const roadmapService = {
       throw error;
     }
   },
-
 };

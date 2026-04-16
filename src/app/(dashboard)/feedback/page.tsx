@@ -29,7 +29,7 @@ function FeedbackPageContent() {
             timestamp: new Date(),
           }
         : undefined,
-    [errorMessage, errorUrl]
+    [errorMessage, errorUrl],
   );
 
   // If coming from an error, switch to "new" tab

@@ -113,7 +113,7 @@ export default function BatchApprovalPage() {
         if (batchData.status !== "pending_approval") {
           setStatus("error");
           setErrorMessage(
-            `Este lote não está aguardando aprovação (status: ${batchData.status}).`
+            `Este lote não está aguardando aprovação (status: ${batchData.status}).`,
           );
           return;
         }
@@ -127,7 +127,7 @@ export default function BatchApprovalPage() {
         // Load cost centers for this company
         const ccQuery = query(
           collection(db, "cost_centers"),
-          where("companyId", "==", batchData.companyId)
+          where("companyId", "==", batchData.companyId),
         );
         const ccSnapshot = await getDocs(ccQuery);
         const ccData = ccSnapshot.docs.map((doc) => ({
@@ -166,7 +166,7 @@ export default function BatchApprovalPage() {
 
       return result;
     },
-    [costCenters]
+    [costCenters],
   );
 
   // Group transactions by cost center and supplier
@@ -283,7 +283,7 @@ export default function BatchApprovalPage() {
       await paymentBatchService.rejectTransaction(
         batch.id,
         rejectingId,
-        rejectReason
+        rejectReason,
       );
       setTransactions(transactions.filter((t) => t.id !== rejectingId));
       edits.delete(rejectingId);
@@ -331,12 +331,12 @@ export default function BatchApprovalPage() {
     setIsSubmitting(true);
     try {
       const adjustments = Array.from(edits.values()).filter(
-        (e) => e.adjustedAmount !== undefined
+        (e) => e.adjustedAmount !== undefined,
       );
       await paymentBatchService.approveByToken(
         token,
         comment || undefined,
-        adjustments.length > 0 ? adjustments : undefined
+        adjustments.length > 0 ? adjustments : undefined,
       );
       setStatus("success");
     } catch (error) {

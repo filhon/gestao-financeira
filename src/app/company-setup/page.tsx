@@ -101,7 +101,7 @@ export default function CompanySetupPage() {
       // 1. Try to find existing company by CNPJ or name
       const existingCompany = await companyService.findByIdentifier(
         companyCnpj,
-        companyName
+        companyName,
       );
 
       let companyId: string;
@@ -116,7 +116,7 @@ export default function CompanySetupPage() {
         // Create new company
         const newCompany = await companyService.create(
           { name: companyName.trim(), cnpj: companyCnpj.trim() },
-          { uid: user.uid, email: user.email }
+          { uid: user.uid, email: user.email },
         );
         companyId = newCompany.id;
         companyDisplayName = newCompany.name;
@@ -127,7 +127,7 @@ export default function CompanySetupPage() {
       await userService.setPendingCompanyAccess(
         user.uid,
         companyId,
-        selectedRole
+        selectedRole,
       );
 
       // 3. Get role label for notification
@@ -139,7 +139,7 @@ export default function CompanySetupPage() {
           companyId,
           companyDisplayName,
           user.displayName,
-          roleName
+          roleName,
         );
       } catch (notifError) {
         console.warn("Could not send admin notifications:", notifError);
@@ -241,7 +241,7 @@ export default function CompanySetupPage() {
                         "hover:border-primary/50 hover:bg-muted/50",
                         selectedRole === role
                           ? "border-primary bg-primary/5"
-                          : "border-border"
+                          : "border-border",
                       )}
                     >
                       <RadioGroupItem

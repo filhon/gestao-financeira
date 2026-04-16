@@ -36,6 +36,7 @@ Firebase Custom Claims mirror roles for fast Firestore rule evaluation (DB fallb
 ## Key Conventions
 
 ### File naming
+
 - Services: `src/lib/services/*Service.ts`
 - Stores: `src/lib/store/use*Store.ts`
 - Validations: `src/lib/validations/*.ts` (Zod schemas)
@@ -44,6 +45,7 @@ Firebase Custom Claims mirror roles for fast Firestore rule evaluation (DB fallb
 - Feature components: `src/components/features/<domain>/`
 
 ### Services
+
 Export a plain object with async methods. Never use classes.
 
 ```ts
@@ -60,6 +62,7 @@ export const myService = {
 - Use `writeBatch()` for atomic multi-document updates
 
 ### Zustand stores
+
 Plain `create<State>()` — no middleware unless persistence is needed.
 
 ```ts
@@ -71,6 +74,7 @@ export const useMyStore = create<MyState>((set) => ({ ... }));
 ```
 
 ### Components
+
 - Functional components only
 - Radix UI + shadcn/ui for all base UI (`src/components/ui/`)
 - `sonner` for toasts
@@ -78,6 +82,7 @@ export const useMyStore = create<MyState>((set) => ({ ... }));
 - Always use `currency.js` for monetary values — never raw floats
 
 ### Firestore collections
+
 `transactions`, `users`, `companies`, `payment_batches`, `cost_centers`, `entities`, `recurring_templates`, `audit_logs`, `notifications`, `budgets`, `api_keys`, `reconciliation_sessions`, `company_stats`
 
 ## Environment Variables

@@ -20,7 +20,7 @@ export interface LegalDocumentVersion {
 }
 
 export const getLegalDocument = async (
-  type: LegalDocumentType
+  type: LegalDocumentType,
 ): Promise<string | null> => {
   try {
     const docRef = doc(db, "legal_documents", type);
@@ -38,7 +38,7 @@ export const getLegalDocument = async (
 };
 
 export const getLegalDocumentVersions = async (
-  type: LegalDocumentType
+  type: LegalDocumentType,
 ): Promise<LegalDocumentVersion[]> => {
   try {
     const versionsRef = collection(db, "legal_documents", type, "versions");
@@ -58,7 +58,7 @@ export const getLegalDocumentVersions = async (
 
 export const getLegalDocumentVersionContent = async (
   type: LegalDocumentType,
-  versionId: string
+  versionId: string,
 ): Promise<string | null> => {
   try {
     const docRef = doc(db, "legal_documents", type, "versions", versionId);
@@ -77,7 +77,7 @@ export const getLegalDocumentVersionContent = async (
 
 export const saveLegalDocument = async (
   type: LegalDocumentType,
-  content: string
+  content: string,
 ): Promise<void> => {
   try {
     const timestamp = new Date();

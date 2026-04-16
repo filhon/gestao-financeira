@@ -47,7 +47,7 @@ export const auditService = {
       action?: string;
       startDate?: Date;
       endDate?: Date;
-    }
+    },
   ): Promise<{
     logs: AuditLog[];
     lastDoc: QueryDocumentSnapshot<DocumentData> | null;
@@ -55,7 +55,7 @@ export const auditService = {
     let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
 
     if (filter?.userId) {
@@ -70,13 +70,13 @@ export const auditService = {
     if (filter?.startDate) {
       q = query(
         q,
-        where("createdAt", ">=", Timestamp.fromDate(filter.startDate))
+        where("createdAt", ">=", Timestamp.fromDate(filter.startDate)),
       );
     }
     if (filter?.endDate) {
       q = query(
         q,
-        where("createdAt", "<=", Timestamp.fromDate(filter.endDate))
+        where("createdAt", "<=", Timestamp.fromDate(filter.endDate)),
       );
     }
 
@@ -88,7 +88,7 @@ export const auditService = {
 
     const snapshot = await getDocs(q);
     const logs = snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
     const newLastDoc = snapshot.docs[snapshot.docs.length - 1] || null;
 
@@ -106,7 +106,7 @@ export const auditService = {
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
       orderBy("createdAt", "desc"),
-      limit(1000)
+      limit(1000),
     );
 
     const snapshot = await getDocs(q);
@@ -166,12 +166,12 @@ export const auditService = {
       startDate?: Date;
       endDate?: Date;
     },
-    limitCount = 50
+    limitCount = 50,
   ): Promise<AuditLog[]> => {
     let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
 
     if (filter?.userId) {
@@ -186,13 +186,13 @@ export const auditService = {
     if (filter?.startDate) {
       q = query(
         q,
-        where("createdAt", ">=", Timestamp.fromDate(filter.startDate))
+        where("createdAt", ">=", Timestamp.fromDate(filter.startDate)),
       );
     }
     if (filter?.endDate) {
       q = query(
         q,
-        where("createdAt", "<=", Timestamp.fromDate(filter.endDate))
+        where("createdAt", "<=", Timestamp.fromDate(filter.endDate)),
       );
     }
 
@@ -200,7 +200,7 @@ export const auditService = {
 
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() })
+      convertDates({ id: doc.id, ...doc.data() }),
     );
   },
 };

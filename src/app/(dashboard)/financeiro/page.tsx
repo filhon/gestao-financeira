@@ -12,7 +12,10 @@ import {
   Clock,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
-import { useDashboardMetrics, useOverdueTransactions } from "@/hooks/useDashboardData";
+import {
+  useDashboardMetrics,
+  useOverdueTransactions,
+} from "@/hooks/useDashboardData";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ─── Featured modules (primary) ──────────────────────────────────────────────
@@ -41,7 +44,9 @@ function PayablesCard({
           <ArrowUpRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-rose-500" />
         </div>
 
-        <p className="text-sm font-medium text-muted-foreground mb-1">Contas a Pagar</p>
+        <p className="text-sm font-medium text-muted-foreground mb-1">
+          Contas a Pagar
+        </p>
 
         {loading ? (
           <div className="space-y-2 mt-2">
@@ -98,7 +103,9 @@ function ReceivablesCard({
           <ArrowUpRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-emerald-500" />
         </div>
 
-        <p className="text-sm font-medium text-muted-foreground mb-1">Contas a Receber</p>
+        <p className="text-sm font-medium text-muted-foreground mb-1">
+          Contas a Receber
+        </p>
 
         {loading ? (
           <div className="space-y-2 mt-2">
@@ -181,7 +188,12 @@ function UtilityCard({
         )}
       >
         <div className="flex items-start justify-between mb-4">
-          <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", bg)}>
+          <div
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-lg",
+              bg,
+            )}
+          >
             <Icon className={cn("h-4 w-4", accent)} />
           </div>
           <ArrowUpRight
@@ -191,8 +203,12 @@ function UtilityCard({
             )}
           />
         </div>
-        <p className="text-sm font-semibold text-foreground leading-snug">{title}</p>
-        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{description}</p>
+        <p className="text-sm font-semibold text-foreground leading-snug">
+          {title}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+          {description}
+        </p>
       </div>
     </Link>
   );
@@ -259,7 +275,10 @@ export default function FinanceiroPage() {
           <div
             key={mod.href}
             className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-            style={{ animationDelay: `${160 + i * 60}ms`, animationFillMode: "both" }}
+            style={{
+              animationDelay: `${160 + i * 60}ms`,
+              animationFillMode: "both",
+            }}
           >
             <UtilityCard {...mod} />
           </div>

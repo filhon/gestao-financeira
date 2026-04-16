@@ -99,14 +99,18 @@ export function UploadStatement() {
         accept=".csv,.json,.ofx,.txt"
       />
       <div className="flex flex-col items-center gap-4">
-        <div className={cn(
-          "p-4 rounded-full transition-colors",
-          isDragging ? "bg-primary/10" : "bg-muted",
-        )}>
-          <Upload className={cn(
-            "h-8 w-8 transition-colors",
-            isDragging ? "text-primary" : "text-muted-foreground",
-          )} />
+        <div
+          className={cn(
+            "p-4 rounded-full transition-colors",
+            isDragging ? "bg-primary/10" : "bg-muted",
+          )}
+        >
+          <Upload
+            className={cn(
+              "h-8 w-8 transition-colors",
+              isDragging ? "text-primary" : "text-muted-foreground",
+            )}
+          />
         </div>
         <div>
           <h3 className="text-lg font-semibold">
@@ -124,7 +128,13 @@ export function UploadStatement() {
             Processando...
           </Button>
         ) : (
-          <Button variant="outline" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
+          <Button
+            variant="outline"
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
+          >
             Selecionar Arquivo
           </Button>
         )}

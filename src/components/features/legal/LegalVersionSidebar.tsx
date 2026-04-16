@@ -25,7 +25,7 @@ export function LegalVersionSidebar({
     <div
       className={cn(
         "flex flex-col w-full md:w-64 border bg-card rounded-xl px-4 py-5 shrink-0",
-        className
+        className,
       )}
     >
       <div className="mb-4 flex items-center gap-2 px-1">
@@ -58,7 +58,7 @@ export function LegalVersionSidebar({
                         "absolute left-0 top-2.5 h-3.5 w-3.5 rounded-full border-2 transition-colors",
                         isCurrent
                           ? "border-primary bg-primary"
-                          : "border-border bg-card hover:border-primary/50"
+                          : "border-border bg-card hover:border-primary/50",
                       )}
                     />
 
@@ -68,14 +68,14 @@ export function LegalVersionSidebar({
                         "flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
                         isCurrent
                           ? "bg-primary/10 text-foreground"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
                       )}
                     >
                       <div className="flex items-center justify-between w-full gap-2">
                         <span
                           className={cn(
                             "font-medium text-xs",
-                            isCurrent && "text-primary"
+                            isCurrent && "text-primary",
                           )}
                         >
                           {format(version.createdAt, "dd MMM yyyy", {
@@ -88,7 +88,7 @@ export function LegalVersionSidebar({
                               "shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium",
                               isCurrent
                                 ? "bg-primary/15 text-primary"
-                                : "bg-muted text-muted-foreground"
+                                : "bg-muted text-muted-foreground",
                             )}
                           >
                             Atual

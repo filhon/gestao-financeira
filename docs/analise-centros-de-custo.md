@@ -54,17 +54,17 @@ transactions/{id}        → costCenterAllocation[], costCenterIds[], costCenter
 
 ### 2.1 Responsabilidades
 
-| Método | Descrição |
-|--------|-----------|
-| `getAll(companyId?, forUserId?)` | Lista todos os CCs; filtra por `allowedUserIds` para o role `user` |
-| `getById(id)` | Busca documento único por ID |
-| `create / update / delete` | CRUD padrão |
-| `getEffectiveBalance(costCenterId, companyId, year?, userId?)` | Calcula saldo real com base nas transações |
-| `getAllBalances(companyId, costCenters, year?, userId?)` | Versão otimizada: 1 scan de transações + N leituras de orçamento |
-| `allocateToChild(parentId, childId, amount)` | Transfere saldo de pai para filho |
-| `updateBalance(id, availableBalance)` | Sobrescreve manualmente o campo `availableBalance` |
-| `getChildren(parentId)` | Lista filhos diretos |
-| `getHierarchicalCostCenters(items)` | Constrói árvore em memória |
+| Método                                                         | Descrição                                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `getAll(companyId?, forUserId?)`                               | Lista todos os CCs; filtra por `allowedUserIds` para o role `user` |
+| `getById(id)`                                                  | Busca documento único por ID                                       |
+| `create / update / delete`                                     | CRUD padrão                                                        |
+| `getEffectiveBalance(costCenterId, companyId, year?, userId?)` | Calcula saldo real com base nas transações                         |
+| `getAllBalances(companyId, costCenters, year?, userId?)`       | Versão otimizada: 1 scan de transações + N leituras de orçamento   |
+| `allocateToChild(parentId, childId, amount)`                   | Transfere saldo de pai para filho                                  |
+| `updateBalance(id, availableBalance)`                          | Sobrescreve manualmente o campo `availableBalance`                 |
+| `getChildren(parentId)`                                        | Lista filhos diretos                                               |
+| `getHierarchicalCostCenters(items)`                            | Constrói árvore em memória                                         |
 
 ### 2.2 Problemas Identificados
 
@@ -73,6 +73,7 @@ transactions/{id}        → costCenterAllocation[], costCenterIds[], costCenter
 `getById` usa `getDoc` diretamente sem validar que o documento pertence ao tenant do usuário. A segurança fica 100% dependente das regras do Firestore. Em calls internas do serviço, o dado retornado não é validado contra o `companyId` esperado.
 
 **Correção sugerida:**
+
 ```ts
 async getById(id: string, companyId: string): Promise<CostCenter | null> {
   const doc = await getDoc(/* ... */);
@@ -98,6 +99,7 @@ Consulta apenas por `parentId`, sem restrição de tenant. Um `parentId` de outr
 Para cada chamada: 1 query de payables + 1 query de receivables + 1 leitura de budget = 3 operações Firestore. Em empresas com 10 mil+ transações, isso é custoso. `getAllBalances` melhora o scan de transações, mas ainda faz N leituras individuais de budget.
 
 **Correção sugerida:**
+
 - Usar a abordagem de `in` query (até 30 items) do `dashboardService.getBudgetProgressByCostCenter` para buscar todos os budgets em lote.
 - Criar índice Firestore composto em `(companyId, costCenterIds, type, status)`.
 
@@ -119,7 +121,7 @@ Mantidos para compatibilidade com dados antigos, mas criam ambiguidade com a col
 
 ### 3.1 Lista de Centros de Custo
 
-**Arquivo**: [src/app/(dashboard)/centros-custo/page.tsx](src/app/(dashboard)/centros-custo/page.tsx)
+**Arquivo**: [src/app/(dashboard)/centros-custo/page.tsx](<src/app/(dashboard)/centros-custo/page.tsx>)
 
 #### [CC-P01] `BudgetBar` sempre renderiza `used=0` — **Alta**
 
@@ -150,7 +152,7 @@ Com hierarquias de 100+ CCs a lista completa é renderizada de uma vez.
 
 ### 3.2 Dashboard de Centro de Custo
 
-**Arquivo**: [src/app/(dashboard)/centros-custo/[id]/page.tsx](src/app/(dashboard)/centros-custo/[id]/page.tsx)
+**Arquivo**: [src/app/(dashboard)/centros-custo/[id]/page.tsx](<src/app/(dashboard)/centros-custo/[id]/page.tsx>)
 
 #### [CC-D01] Dois `useEffect` independentes com as mesmas dependências — **Alta**
 
@@ -164,9 +166,9 @@ Se a empresa tiver >100 payables, apenas a primeira página é processada. Trans
 
 #### [CC-D03] Inconsistência na contabilização de status — **Média**
 
-| Fonte | Statuses contados |
-|-------|------------------|
-| `usageService.getUsageByCostCenter` | Apenas `paid` |
+| Fonte                                   | Statuses contados                               |
+| --------------------------------------- | ----------------------------------------------- |
+| `usageService.getUsageByCostCenter`     | Apenas `paid`                                   |
 | `costCenterService.getEffectiveBalance` | `draft`, `pending_approval`, `approved`, `paid` |
 
 O dashboard exibe os dois valores lado a lado, mas eles medem coisas diferentes sem indicação clara para o usuário.
@@ -195,6 +197,7 @@ A tabela de centros de custo filhos usa `child.budget` (campo do documento), que
 Toda vez que o usuário clica no stepper de ano ou troca o CC pai, um `useEffect` dispara imediatamente chamando `budgetService.getByCostCenterAndYear` e `costCenterService.getEffectiveBalance`. O hook `useDebounce` existe no projeto mas não é utilizado aqui.
 
 **Correção sugerida:**
+
 ```ts
 const debouncedYear = useDebounce(watchedYear, 400);
 // usar debouncedYear nas dependências do useEffect
@@ -247,6 +250,7 @@ Não existe store Zustand dedicado para centros de custo. Todo estado é `useSta
 #### [CC-Z01] Ausência de cache compartilhado — **Média**
 
 A lista de CCs é refetchada do Firestore toda vez que:
+
 - A página de centros de custo é aberta
 - O `TransactionForm` é aberto
 - O `CostCenterForm` é aberto
@@ -262,6 +266,7 @@ A lista de CCs é refetchada do Firestore toda vez que:
 ### Modelo de dados
 
 Cada transação pode ter alocação múltipla por CC:
+
 ```ts
 costCenterAllocation: CostCenterAllocation[]  // multi-CC com percentual
 costCenterIds: string[]                        // desnormalizado para queries
@@ -302,7 +307,7 @@ Em transações alocadas a múltiplos CCs com aprovadores distintos, todos receb
 
 ## 8. Integração com Relatórios
 
-**Arquivos**: [src/app/(dashboard)/relatorios/page.tsx](src/app/(dashboard)/relatorios/page.tsx) | [src/lib/services/reportService.ts](src/lib/services/reportService.ts)
+**Arquivos**: [src/app/(dashboard)/relatorios/page.tsx](<src/app/(dashboard)/relatorios/page.tsx>) | [src/lib/services/reportService.ts](src/lib/services/reportService.ts)
 
 #### [CC-R01] Nenhum filtro por centro de custo nos relatórios — **Alta**
 
@@ -312,7 +317,7 @@ A página de relatórios tem filtros de período, tipo e status, mas **não há 
 
 ```ts
 // reportService.ts linha ~573
-t.costCenterId ?? ""
+t.costCenterId ?? "";
 ```
 
 - Exporta o ID do CC, não o nome
@@ -334,6 +339,7 @@ t.costCenterId ?? ""
 `getByCostCenterAndYear` não inclui `where("companyId", "==", companyId)`. A isolação de tenant depende exclusivamente do fato de que `costCenterId` pertence a uma empresa. Se um `costCenterId` for obtido por outro tenant, o budget pode ser lido.
 
 **Correção sugerida:**
+
 ```ts
 async getByCostCenterAndYear(costCenterId: string, year: number, companyId: string) {
   const q = query(
@@ -367,11 +373,11 @@ Dois usuários salvando o orçamento do mesmo CC simultaneamente podem resultar 
 
 Não existe hook dedicado para centros de custo. Hooks relacionados em uso:
 
-| Hook | Uso nos CCs |
-|------|-------------|
-| `usePermissions` | `canManageCostCenters`, `onlyOwnPayables` |
-| `useSortableData` | Ordenação na lista (com o bug CC-P03) |
-| `useDebounce` | **Existe no projeto, mas não é usado** nos efeitos do `CostCenterForm` (ver CC-F01) |
+| Hook              | Uso nos CCs                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `usePermissions`  | `canManageCostCenters`, `onlyOwnPayables`                                           |
+| `useSortableData` | Ordenação na lista (com o bug CC-P03)                                               |
+| `useDebounce`     | **Existe no projeto, mas não é usado** nos efeitos do `CostCenterForm` (ver CC-F01) |
 
 **Oportunidade**: um hook `useCostCenters(companyId)` encapsulando fetch + cache + tree building eliminaria duplicação entre a página de lista, `TransactionForm` e `CostCenterForm`.
 
@@ -421,11 +427,11 @@ O trigger usa `increment` baseado no delta antes/depois. Em cenário de retentat
 
 #### [CC-CF03] Inconsistência de status entre Cloud Function e serviço — **Média**
 
-| Componente | Statuses considerados |
-|------------|----------------------|
-| `updateCostCenterUsage` (Cloud Function) | Apenas `paid` |
-| `usageService.updateUsage` (cliente) | Apenas `paid` |
-| `costCenterService.getEffectiveBalance` | `draft`, `pending_approval`, `approved`, `paid` |
+| Componente                               | Statuses considerados                           |
+| ---------------------------------------- | ----------------------------------------------- |
+| `updateCostCenterUsage` (Cloud Function) | Apenas `paid`                                   |
+| `usageService.updateUsage` (cliente)     | Apenas `paid`                                   |
+| `costCenterService.getEffectiveBalance`  | `draft`, `pending_approval`, `approved`, `paid` |
 
 O dashboard de CC exibe "Despesas Realizadas" (via usage, só `paid`) e "Saldo Disponível" (via `getEffectiveBalance`, inclui comprometidos). São métricas conceitualmente distintas, mas não sinalizadas claramente para o usuário.
 
@@ -441,63 +447,63 @@ O trigger `updateCostCenterUsage` cuida da atualização de usage quando a trans
 
 ### Alta Prioridade (11 itens)
 
-| ID | Arquivo | Problema |
-|----|---------|----------|
-| CC-S01 | `costCenterService.ts` | `getById` sem validação de `companyId` |
-| CC-S02 | `costCenterService.ts` | `allocateToChild` não usa `writeBatch` (não atômico) |
-| CC-P01 | `centros-custo/page.tsx` | `BudgetBar` hardcoded com `used=0` |
-| CC-P03 | `centros-custo/page.tsx` | Ordenação destrói hierarquia de árvore |
-| CC-D01 | `centros-custo/[id]/page.tsx` | Dois `useEffect` duplicados com mesmas dependências |
-| CC-F01 | `CostCenterForm.tsx` | Reads Firestore sem debounce no stepper de ano |
-| CC-TX01 | `transactionService.ts` | `getByCostCenter` faz scan completo da coleção |
-| CC-TX02 | `transactionService.ts` | Filtro >10 CCs trunca silenciosamente |
-| CC-B01 | `budgetService.ts` | Queries de budget sem filtro de `companyId` |
-| CC-R01 | `relatorios/page.tsx` | Ausência de filtro por CC nos relatórios |
-| CC-CF01 | `functions/src/index.ts` | Transações legadas ignoradas em `updateCostCenterUsage` |
+| ID      | Arquivo                       | Problema                                                |
+| ------- | ----------------------------- | ------------------------------------------------------- |
+| CC-S01  | `costCenterService.ts`        | `getById` sem validação de `companyId`                  |
+| CC-S02  | `costCenterService.ts`        | `allocateToChild` não usa `writeBatch` (não atômico)    |
+| CC-P01  | `centros-custo/page.tsx`      | `BudgetBar` hardcoded com `used=0`                      |
+| CC-P03  | `centros-custo/page.tsx`      | Ordenação destrói hierarquia de árvore                  |
+| CC-D01  | `centros-custo/[id]/page.tsx` | Dois `useEffect` duplicados com mesmas dependências     |
+| CC-F01  | `CostCenterForm.tsx`          | Reads Firestore sem debounce no stepper de ano          |
+| CC-TX01 | `transactionService.ts`       | `getByCostCenter` faz scan completo da coleção          |
+| CC-TX02 | `transactionService.ts`       | Filtro >10 CCs trunca silenciosamente                   |
+| CC-B01  | `budgetService.ts`            | Queries de budget sem filtro de `companyId`             |
+| CC-R01  | `relatorios/page.tsx`         | Ausência de filtro por CC nos relatórios                |
+| CC-CF01 | `functions/src/index.ts`      | Transações legadas ignoradas em `updateCostCenterUsage` |
 
 ### Média Prioridade (14 itens)
 
-| ID | Arquivo | Problema |
-|----|---------|----------|
-| CC-S03 | `costCenterService.ts` | `getChildren` sem filtro de `companyId` |
-| CC-S04 | `costCenterService.ts` | `getEffectiveBalance` com 2 scans completos |
-| CC-S05 | `costCenterService.ts` | Dupla representação de saldo (`availableBalance` vs calculado) |
-| CC-P02 | `centros-custo/page.tsx` | `budget` exibido vem do documento, não da coleção `budgets` |
-| CC-D02 | `centros-custo/[id]/page.tsx` | `getPaginated` filtrando em memória (perde além da página 1) |
-| CC-D03 | `centros-custo/[id]/page.tsx` | Inconsistência de status entre "Despesas" e "Saldo" |
-| CC-D04 | `centros-custo/[id]/page.tsx` | Orçamento dos filhos ignora o ano selecionado |
-| CC-F02 | `CostCenterForm.tsx` | Sem loading state nos painéis de saldo |
-| CC-F03 | `CostCenterForm.tsx` | Carrega todos os usuários sem paginação |
-| CC-T01 | `types/index.ts` | Interface `Budget` sem `companyId` |
-| CC-Z01 | (ausente) | Sem cache compartilhado — refetch em todo mount |
-| CC-TX03 | `transactionService.ts` | Dupla escrita `costCenterId`/`costCenterIds` sem helper central |
-| CC-TX04 | `transactionService.ts` | Multi-aprovadores recebem links inválidos |
-| CC-TX05 | `TransactionForm.tsx` | Recalculo de saldo a cada mudança de data |
-| CC-B02 | `budgetService.ts` | N leituras individuais de budget em `getAllBalances` |
-| CC-B03 | `centros-custo/page.tsx` | Falha silenciosa ao salvar orçamento |
-| CC-CF02 | `functions/src/index.ts` | Potencial dupla contagem em retentativas do trigger |
-| CC-CF03 | `functions/src/index.ts` | Inconsistência de status entre CF e `getEffectiveBalance` |
+| ID      | Arquivo                       | Problema                                                        |
+| ------- | ----------------------------- | --------------------------------------------------------------- |
+| CC-S03  | `costCenterService.ts`        | `getChildren` sem filtro de `companyId`                         |
+| CC-S04  | `costCenterService.ts`        | `getEffectiveBalance` com 2 scans completos                     |
+| CC-S05  | `costCenterService.ts`        | Dupla representação de saldo (`availableBalance` vs calculado)  |
+| CC-P02  | `centros-custo/page.tsx`      | `budget` exibido vem do documento, não da coleção `budgets`     |
+| CC-D02  | `centros-custo/[id]/page.tsx` | `getPaginated` filtrando em memória (perde além da página 1)    |
+| CC-D03  | `centros-custo/[id]/page.tsx` | Inconsistência de status entre "Despesas" e "Saldo"             |
+| CC-D04  | `centros-custo/[id]/page.tsx` | Orçamento dos filhos ignora o ano selecionado                   |
+| CC-F02  | `CostCenterForm.tsx`          | Sem loading state nos painéis de saldo                          |
+| CC-F03  | `CostCenterForm.tsx`          | Carrega todos os usuários sem paginação                         |
+| CC-T01  | `types/index.ts`              | Interface `Budget` sem `companyId`                              |
+| CC-Z01  | (ausente)                     | Sem cache compartilhado — refetch em todo mount                 |
+| CC-TX03 | `transactionService.ts`       | Dupla escrita `costCenterId`/`costCenterIds` sem helper central |
+| CC-TX04 | `transactionService.ts`       | Multi-aprovadores recebem links inválidos                       |
+| CC-TX05 | `TransactionForm.tsx`         | Recalculo de saldo a cada mudança de data                       |
+| CC-B02  | `budgetService.ts`            | N leituras individuais de budget em `getAllBalances`            |
+| CC-B03  | `centros-custo/page.tsx`      | Falha silenciosa ao salvar orçamento                            |
+| CC-CF02 | `functions/src/index.ts`      | Potencial dupla contagem em retentativas do trigger             |
+| CC-CF03 | `functions/src/index.ts`      | Inconsistência de status entre CF e `getEffectiveBalance`       |
 
 ### Baixa Prioridade (13 itens)
 
-| ID | Arquivo | Problema |
-|----|---------|----------|
-| CC-S06 | `costCenterService.ts` | Sentinel `"none"` no `parentId` histórico |
-| CC-S07 | `costCenterService.ts` | Campos legados `budget`/`budgetYear` no documento |
-| CC-P04 | `centros-custo/page.tsx` | `defaultValues` recalculados em todo render |
-| CC-P05 | `centros-custo/page.tsx` | Sem paginação/virtualização na lista |
-| CC-D05 | `centros-custo/[id]/page.tsx` | Índice composto potencialmente ausente para `cost_center_usage` |
-| CC-D06 | `centros-custo/[id]/page.tsx` | Intervalo de anos inconsistente entre páginas |
-| CC-F04 | `CostCenterForm.tsx` | Campo `budgetLimit` sem efeito no sistema |
-| CC-T02 | `types/index.ts` | Campos legados no tipo `CostCenter` |
-| CC-T03 | `types/index.ts` | `actionCategoryId` com feature incompleta de reconciliação |
-| CC-V01 | `costCenter.ts` (validação) | Unicidade do `code` não é validada |
-| CC-V02 | `costCenter.ts` (validação) | `"none"` pode escapar para o banco via `parentId` |
-| CC-R02 | `reportService.ts` | CSV exporta ID bruto do CC, não nome |
-| CC-R03 | `reportService.ts` | Sem DRE por centro de custo |
-| CC-RU02 | `firestore.rules` | `approver`/`releaser` podem escrever em `cost_center_usage` |
-| CC-B04 | `budgetService.ts` | `setBudget` sem transação atômica |
-| CC-CF04 | `functions/src/index.ts` | Padrão divergente de `usageService` entre transações normais e recorrentes |
+| ID      | Arquivo                       | Problema                                                                   |
+| ------- | ----------------------------- | -------------------------------------------------------------------------- |
+| CC-S06  | `costCenterService.ts`        | Sentinel `"none"` no `parentId` histórico                                  |
+| CC-S07  | `costCenterService.ts`        | Campos legados `budget`/`budgetYear` no documento                          |
+| CC-P04  | `centros-custo/page.tsx`      | `defaultValues` recalculados em todo render                                |
+| CC-P05  | `centros-custo/page.tsx`      | Sem paginação/virtualização na lista                                       |
+| CC-D05  | `centros-custo/[id]/page.tsx` | Índice composto potencialmente ausente para `cost_center_usage`            |
+| CC-D06  | `centros-custo/[id]/page.tsx` | Intervalo de anos inconsistente entre páginas                              |
+| CC-F04  | `CostCenterForm.tsx`          | Campo `budgetLimit` sem efeito no sistema                                  |
+| CC-T02  | `types/index.ts`              | Campos legados no tipo `CostCenter`                                        |
+| CC-T03  | `types/index.ts`              | `actionCategoryId` com feature incompleta de reconciliação                 |
+| CC-V01  | `costCenter.ts` (validação)   | Unicidade do `code` não é validada                                         |
+| CC-V02  | `costCenter.ts` (validação)   | `"none"` pode escapar para o banco via `parentId`                          |
+| CC-R02  | `reportService.ts`            | CSV exporta ID bruto do CC, não nome                                       |
+| CC-R03  | `reportService.ts`            | Sem DRE por centro de custo                                                |
+| CC-RU02 | `firestore.rules`             | `approver`/`releaser` podem escrever em `cost_center_usage`                |
+| CC-B04  | `budgetService.ts`            | `setBudget` sem transação atômica                                          |
+| CC-CF04 | `functions/src/index.ts`      | Padrão divergente de `usageService` entre transações normais e recorrentes |
 
 ---
 

@@ -246,8 +246,12 @@ export function CostCenterChart({ year }: { year?: number }) {
                         return (
                           <div className="bg-popover border text-popover-foreground shadow-sm rounded-lg p-2 text-xs">
                             <p className="font-semibold mb-1">{data.name}</p>
-                            <p className="font-financial">Realizado: {formatCurrency(data.spent)}</p>
-                            <p className="font-financial">Orçado: {formatCurrency(data.budget)}</p>
+                            <p className="font-financial">
+                              Realizado: {formatCurrency(data.spent)}
+                            </p>
+                            <p className="font-financial">
+                              Orçado: {formatCurrency(data.budget)}
+                            </p>
                           </div>
                         );
                       }

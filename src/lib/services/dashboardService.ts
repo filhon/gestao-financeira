@@ -75,7 +75,10 @@ export interface BudgetProgressData {
 }
 
 export const dashboardService = {
-  getOverdueTransactions: async (companyId: string, userId?: string): Promise<Transaction[]> => {
+  getOverdueTransactions: async (
+    companyId: string,
+    userId?: string,
+  ): Promise<Transaction[]> => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -208,22 +211,42 @@ export const dashboardService = {
 
     try {
       const pendingReceivablesQuery = applyUserFilter(
-        query(pendingBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
+        query(
+          pendingBaseQuery,
+          where("status", "in", pendingStatuses),
+          where("type", "==", "receivable"),
+        ),
       );
       const pendingPayablesQuery = applyUserFilter(
-        query(pendingBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
+        query(
+          pendingBaseQuery,
+          where("status", "in", pendingStatuses),
+          where("type", "==", "payable"),
+        ),
       );
       const shortTermRecQuery = applyUserFilter(
-        query(shortTermBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "receivable")),
+        query(
+          shortTermBaseQuery,
+          where("status", "in", pendingStatuses),
+          where("type", "==", "receivable"),
+        ),
       );
       const shortTermPayQuery = applyUserFilter(
-        query(shortTermBaseQuery, where("status", "in", pendingStatuses), where("type", "==", "payable")),
+        query(
+          shortTermBaseQuery,
+          where("status", "in", pendingStatuses),
+          where("type", "==", "payable"),
+        ),
       );
 
       const [pendingRecSnap, pendingPaySnap, stRecSnap, stPaySnap] =
         await Promise.all([
-          getAggregateFromServer(pendingReceivablesQuery, { total: sum("amount") }),
-          getAggregateFromServer(pendingPayablesQuery, { total: sum("amount") }),
+          getAggregateFromServer(pendingReceivablesQuery, {
+            total: sum("amount"),
+          }),
+          getAggregateFromServer(pendingPayablesQuery, {
+            total: sum("amount"),
+          }),
           getAggregateFromServer(shortTermRecQuery, { total: sum("amount") }),
           getAggregateFromServer(shortTermPayQuery, { total: sum("amount") }),
         ]);
@@ -234,7 +257,9 @@ export const dashboardService = {
       shortTermPayables = stPaySnap.data().total || 0;
     } catch {
       // Fallback: indexes may still be building. Use getDocs + client-side sum.
-      console.warn("Aggregation query failed (indexes may be building). Using fallback getDocs approach.");
+      console.warn(
+        "Aggregation query failed (indexes may be building). Using fallback getDocs approach.",
+      );
 
       let fallbackQuery = query(
         collection(db, TRANSACTIONS_COLLECTION),
@@ -284,8 +309,8 @@ export const dashboardService = {
           if (template.endDate && isAfter(nextDate, template.endDate)) break;
 
           if (
-            (isAfter(nextDate, yearStartDate) ||
-              isSameDay(nextDate, yearStartDate))
+            isAfter(nextDate, yearStartDate) ||
+            isSameDay(nextDate, yearStartDate)
           ) {
             const amount = template.amount;
             if (template.type === "payable") pendingPayables += amount;
@@ -456,7 +481,8 @@ export const dashboardService = {
     const dateKeyFormat = mode === "year" ? "yyyy-MM-dd" : "yyyy-MM-dd";
     const txByDateKey = new Map<string, Transaction[]>();
     combinedTransactions.forEach((t) => {
-      const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+      const effDate =
+        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
       const key = format(effDate, dateKeyFormat);
       if (!txByDateKey.has(key)) txByDateKey.set(key, []);
       txByDateKey.get(key)!.push(t);
@@ -472,7 +498,8 @@ export const dashboardService = {
     // To find the balance at Jan 1st, we must subtract all net changes that occurred between Jan 1st and Today.
     if (mode === "year") {
       const pastTransactions = combinedTransactions.filter((t) => {
-        const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+        const effDate =
+          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
         return t.status === "paid" && isBefore(effDate, today);
       });
 
@@ -500,14 +527,20 @@ export const dashboardService = {
 
       // Collect transactions for this period using pre-grouped map
       let daysToCheck = new Date(currentDate);
-      while (isBefore(daysToCheck, nextDate) || (mode !== "year" && isSameDay(daysToCheck, currentDate))) {
+      while (
+        isBefore(daysToCheck, nextDate) ||
+        (mode !== "year" && isSameDay(daysToCheck, currentDate))
+      ) {
         const key = format(daysToCheck, dateKeyFormat);
         const dayTxns = txByDateKey.get(key);
         if (dayTxns) {
           dayTxns.forEach((t) => {
             // In '30days' mode: skip paid transactions on or before today
             if (mode === "30days") {
-              const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+              const effDate =
+                t.status === "paid" && t.paymentDate
+                  ? t.paymentDate
+                  : t.dueDate;
               const isPastOrToday = !isAfter(effDate, today);
               if (t.status === "paid" && isPastOrToday) return;
             }
@@ -570,7 +603,8 @@ export const dashboardService = {
         } as Transaction;
       })
       .filter((t) => {
-        const effDate = (t.status === "paid" && t.paymentDate) ? t.paymentDate : t.dueDate;
+        const effDate =
+          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
         return effDate >= start && effDate <= end;
       });
 
@@ -691,7 +725,10 @@ export const dashboardService = {
       if (monthKey < currentMonthKey) {
         ytdExpensesByCC.set(ccId, (ytdExpensesByCC.get(ccId) || 0) + amount);
       } else if (monthKey === currentMonthKey) {
-        currentMonthExpensesByCC.set(ccId, (currentMonthExpensesByCC.get(ccId) || 0) + amount);
+        currentMonthExpensesByCC.set(
+          ccId,
+          (currentMonthExpensesByCC.get(ccId) || 0) + amount,
+        );
       }
     });
 

@@ -20,11 +20,15 @@ export function proxy(request: NextRequest) {
     publicRoutes.some(
       (route) =>
         pathname === route ||
-        (route !== "/" && pathname.startsWith(route + "/"))
+        (route !== "/" && pathname.startsWith(route + "/")),
     )
   ) {
     // If user is logged in and active, redirect login and landing to dashboard
-    if (token && status === "active" && (pathname === "/login" || pathname === "/")) {
+    if (
+      token &&
+      status === "active" &&
+      (pathname === "/login" || pathname === "/")
+    ) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
     // If user is logged in but pending, redirect landing/login to appropriate page

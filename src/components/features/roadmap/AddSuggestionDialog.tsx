@@ -29,8 +29,14 @@ import { Loader2, Plus } from "lucide-react";
 import { useAuth } from "@/components/providers/AuthProvider";
 
 const formSchema = z.object({
-  title: z.string().min(3, "O título deve ter pelo menos 3 caracteres").max(100, "O título deve ter no máximo 100 caracteres"),
-  description: z.string().min(10, "A descrição deve ter pelo menos 10 caracteres").max(500, "A descrição deve ter no máximo 500 caracteres"),
+  title: z
+    .string()
+    .min(3, "O título deve ter pelo menos 3 caracteres")
+    .max(100, "O título deve ter no máximo 100 caracteres"),
+  description: z
+    .string()
+    .min(10, "A descrição deve ter pelo menos 10 caracteres")
+    .max(500, "A descrição deve ter no máximo 500 caracteres"),
 });
 
 interface AddSuggestionDialogProps {
@@ -40,7 +46,7 @@ interface AddSuggestionDialogProps {
 export function AddSuggestionDialog({ onSuccess }: AddSuggestionDialogProps) {
   const [open, setOpen] = useState(false);
   const { user } = useAuth();
-  
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -51,8 +57,8 @@ export function AddSuggestionDialog({ onSuccess }: AddSuggestionDialogProps) {
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!user) {
-        toast.error("Você precisa estar logado para enviar uma sugestão.");
-        return;
+      toast.error("Você precisa estar logado para enviar uma sugestão.");
+      return;
     }
 
     try {
@@ -111,11 +117,11 @@ export function AddSuggestionDialog({ onSuccess }: AddSuggestionDialogProps) {
                 <FormItem>
                   <FormLabel>Descrição</FormLabel>
                   <FormControl>
-                    <Textarea 
-                      placeholder="Descreva detalhadamente como essa funcionalidade ajudaria..." 
+                    <Textarea
+                      placeholder="Descreva detalhadamente como essa funcionalidade ajudaria..."
                       className="resize-none"
                       rows={4}
-                      {...field} 
+                      {...field}
                     />
                   </FormControl>
                   <FormDescription>
@@ -127,7 +133,9 @@ export function AddSuggestionDialog({ onSuccess }: AddSuggestionDialogProps) {
             />
             <DialogFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {form.formState.isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Enviar Sugestão
               </Button>
             </DialogFooter>

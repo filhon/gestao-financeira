@@ -103,7 +103,9 @@ const PERMISSION_DESCRIPTIONS: Record<keyof ApiKeyPermissions, string> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function toSeconds(ts?: { _seconds: number } | { seconds: number }): number | null {
+function toSeconds(
+  ts?: { _seconds: number } | { seconds: number },
+): number | null {
   if (!ts) return null;
   return "_seconds" in ts ? ts._seconds : ts.seconds;
 }
@@ -118,7 +120,9 @@ function formatDate(ts?: { _seconds: number } | { seconds: number }) {
   });
 }
 
-function isExpiringSoon(ts?: { _seconds: number } | { seconds: number }): boolean {
+function isExpiringSoon(
+  ts?: { _seconds: number } | { seconds: number },
+): boolean {
   const secs = toSeconds(ts);
   if (!secs) return false;
   const daysLeft = (secs * 1000 - Date.now()) / (1000 * 60 * 60 * 24);
@@ -157,7 +161,12 @@ function StatCard({
       className="animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-4"
       style={{ animationDelay: `${delay}ms`, animationFillMode: "both" }}
     >
-      <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", iconBgClassName)}>
+      <div
+        className={cn(
+          "flex h-9 w-9 items-center justify-center rounded-lg",
+          iconBgClassName,
+        )}
+      >
         <Icon className={cn("h-4 w-4", iconClassName)} />
       </div>
       <div>
@@ -175,7 +184,9 @@ function PermissionBadges({
   permissions: ApiKeyPermissions;
   maxVisible?: number;
 }) {
-  const active = (Object.entries(permissions) as [keyof ApiKeyPermissions, boolean][])
+  const active = (
+    Object.entries(permissions) as [keyof ApiKeyPermissions, boolean][]
+  )
     .filter(([, v]) => v)
     .map(([k]) => k);
 
@@ -217,7 +228,7 @@ function PermissionToggleCard({
         "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors duration-150",
         checked
           ? "border-rose-200 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30"
-          : "border-border bg-muted/30 hover:bg-muted/60"
+          : "border-border bg-muted/30 hover:bg-muted/60",
       )}
     >
       <Checkbox
@@ -227,8 +238,12 @@ function PermissionToggleCard({
         className="mt-0.5"
       />
       <div className="space-y-0.5">
-        <p className="text-sm font-medium leading-none">{PERMISSION_LABELS[permKey]}</p>
-        <p className="text-xs text-muted-foreground">{PERMISSION_DESCRIPTIONS[permKey]}</p>
+        <p className="text-sm font-medium leading-none">
+          {PERMISSION_LABELS[permKey]}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {PERMISSION_DESCRIPTIONS[permKey]}
+        </p>
       </div>
     </label>
   );
@@ -252,7 +267,8 @@ export default function ApiKeysPage() {
 
   // Form
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyPerms, setNewKeyPerms] = useState<ApiKeyPermissions>(defaultPermissions());
+  const [newKeyPerms, setNewKeyPerms] =
+    useState<ApiKeyPermissions>(defaultPermissions());
   const [isCreating, setIsCreating] = useState(false);
 
   // ── Guards ────────────────────────────────────────────────────────────────
@@ -417,8 +433,9 @@ export default function ApiKeysPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-amber-700 dark:text-amber-500">
-          As chaves de API concedem acesso programático aos dados financeiros da empresa. Nunca
-          compartilhe suas chaves e revogue imediatamente qualquer chave comprometida.
+          As chaves de API concedem acesso programático aos dados financeiros da
+          empresa. Nunca compartilhe suas chaves e revogue imediatamente
+          qualquer chave comprometida.
         </CardContent>
       </Card>
 
@@ -430,7 +447,9 @@ export default function ApiKeysPage() {
             Chaves Ativas
           </CardTitle>
           <CardDescription>
-            {isLoading ? "Carregando…" : `${activeKeys.length} chave(s) ativa(s)`}
+            {isLoading
+              ? "Carregando…"
+              : `${activeKeys.length} chave(s) ativa(s)`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -441,7 +460,10 @@ export default function ApiKeysPage() {
               icon={Key}
               title="Nenhuma chave de API criada"
               description="Crie uma chave para permitir integrações externas com acesso controlado aos dados financeiros."
-              action={{ label: "Nova Chave", onClick: () => setShowCreateDialog(true) }}
+              action={{
+                label: "Nova Chave",
+                onClick: () => setShowCreateDialog(true),
+              }}
             />
           ) : (
             <Table>
@@ -462,9 +484,12 @@ export default function ApiKeysPage() {
                     key={key.id}
                     className={cn(
                       "animate-in fade-in duration-200",
-                      !key.active && "opacity-50"
+                      !key.active && "opacity-50",
                     )}
-                    style={{ animationDelay: `${idx * 40}ms`, animationFillMode: "both" }}
+                    style={{
+                      animationDelay: `${idx * 40}ms`,
+                      animationFillMode: "both",
+                    }}
                   >
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
@@ -496,7 +521,10 @@ export default function ApiKeysPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <PermissionBadges permissions={key.permissions} maxVisible={2} />
+                      <PermissionBadges
+                        permissions={key.permissions}
+                        maxVisible={2}
+                      />
                     </TableCell>
                     <TableCell>
                       <Badge variant={key.active ? "default" : "outline"}>
@@ -554,16 +582,18 @@ export default function ApiKeysPage() {
             <div className="space-y-2">
               <Label>Permissões</Label>
               <div className="space-y-2">
-                {(Object.keys(newKeyPerms) as (keyof ApiKeyPermissions)[]).map((perm) => (
-                  <PermissionToggleCard
-                    key={perm}
-                    permKey={perm}
-                    checked={newKeyPerms[perm]}
-                    onChange={(val) =>
-                      setNewKeyPerms((prev) => ({ ...prev, [perm]: val }))
-                    }
-                  />
-                ))}
+                {(Object.keys(newKeyPerms) as (keyof ApiKeyPermissions)[]).map(
+                  (perm) => (
+                    <PermissionToggleCard
+                      key={perm}
+                      permKey={perm}
+                      checked={newKeyPerms[perm]}
+                      onChange={(val) =>
+                        setNewKeyPerms((prev) => ({ ...prev, [perm]: val }))
+                      }
+                    />
+                  ),
+                )}
               </div>
             </div>
           </div>
@@ -601,8 +631,8 @@ export default function ApiKeysPage() {
               Chave criada com sucesso!
             </DialogTitle>
             <DialogDescription className="text-destructive font-medium">
-              Copie e guarde as credenciais abaixo agora. Elas não poderão ser recuperadas após
-              fechar esta janela.
+              Copie e guarde as credenciais abaixo agora. Elas não poderão ser
+              recuperadas após fechar esta janela.
             </DialogDescription>
           </DialogHeader>
 
@@ -617,7 +647,9 @@ export default function ApiKeysPage() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    onClick={() => copyToClipboard(newKeyResult.apiKey, "API Key")}
+                    onClick={() =>
+                      copyToClipboard(newKeyResult.apiKey, "API Key")
+                    }
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
@@ -625,7 +657,9 @@ export default function ApiKeysPage() {
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Secret Key</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Secret Key
+                </Label>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-xs bg-muted px-3 py-2 rounded font-mono break-all">
                     {showSecretKey
@@ -646,7 +680,9 @@ export default function ApiKeysPage() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    onClick={() => copyToClipboard(newKeyResult.secretKey, "Secret Key")}
+                    onClick={() =>
+                      copyToClipboard(newKeyResult.secretKey, "Secret Key")
+                    }
                   >
                     <Copy className="h-4 w-4" />
                   </Button>

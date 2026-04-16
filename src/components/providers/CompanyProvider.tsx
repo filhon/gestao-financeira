@@ -70,7 +70,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
             {
               name: "Minha Empresa",
             },
-            { uid: user.uid, email: user.email }
+            { uid: user.uid, email: user.email },
           );
 
           // Assign current user as admin of this new company
@@ -80,7 +80,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
               user.uid,
               "admin",
               { uid: user.uid, email: user.email },
-              defaultCompany.id
+              defaultCompany.id,
             );
           }
 
@@ -119,8 +119,6 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
       window.location.reload();
     }
   };
-
-
 
   return (
     <CompanyContext.Provider

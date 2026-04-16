@@ -156,7 +156,10 @@ interface CfoInsightsProps {
   overdueTransactions: Transaction[];
 }
 
-export function CfoInsights({ metrics, overdueTransactions }: CfoInsightsProps) {
+export function CfoInsights({
+  metrics,
+  overdueTransactions,
+}: CfoInsightsProps) {
   const insights = useMemo(
     () => buildInsights(metrics, overdueTransactions),
     [metrics, overdueTransactions],
@@ -200,7 +203,9 @@ export function CfoInsights({ metrics, overdueTransactions }: CfoInsightsProps) 
                   >
                     {severityLabel[insight.severity]}
                   </span>
-                  <p className={`text-xs font-semibold leading-snug ${styles.title}`}>
+                  <p
+                    className={`text-xs font-semibold leading-snug ${styles.title}`}
+                  >
                     {insight.title}
                   </p>
                 </div>

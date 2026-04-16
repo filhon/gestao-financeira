@@ -434,23 +434,30 @@ export function CashFlowChart({ year }: { year?: number }) {
                           </span>
                         </div>
                         {/* Simulated balance row — only when a simulation is active */}
-                        {isSimulating && point.simulatedBalance !== undefined && (
-                          <div className="flex items-center justify-between gap-3 mt-1">
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <span className="inline-block h-2 w-4 rounded-sm bg-violet-500 opacity-70" style={{ background: 'repeating-linear-gradient(90deg,#8b5cf6 0,#8b5cf6 3px,transparent 3px,transparent 8px)' }} />
-                              Simulado
-                            </span>
-                            <span
-                              className={
-                                point.simulatedBalance >= 0
-                                  ? "text-violet-600 font-medium text-xs font-financial"
-                                  : "text-red-500 font-medium text-xs font-financial"
-                              }
-                            >
-                              {formatCurrency(point.simulatedBalance)}
-                            </span>
-                          </div>
-                        )}
+                        {isSimulating &&
+                          point.simulatedBalance !== undefined && (
+                            <div className="flex items-center justify-between gap-3 mt-1">
+                              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <span
+                                  className="inline-block h-2 w-4 rounded-sm bg-violet-500 opacity-70"
+                                  style={{
+                                    background:
+                                      "repeating-linear-gradient(90deg,#8b5cf6 0,#8b5cf6 3px,transparent 3px,transparent 8px)",
+                                  }}
+                                />
+                                Simulado
+                              </span>
+                              <span
+                                className={
+                                  point.simulatedBalance >= 0
+                                    ? "text-violet-600 font-medium text-xs font-financial"
+                                    : "text-red-500 font-medium text-xs font-financial"
+                                }
+                              >
+                                {formatCurrency(point.simulatedBalance)}
+                              </span>
+                            </div>
+                          )}
                         {/* Income / expense detail */}
                         {(point.income > 0 || point.expense > 0) && (
                           <div className="mt-2 pt-2 border-t space-y-0.5">
@@ -495,7 +502,12 @@ export function CashFlowChart({ year }: { year?: number }) {
                 strokeWidth={2.5}
                 fill="url(#cfGradientReal)"
                 dot={false}
-                activeDot={{ r: 5, fill: "#3b82f6", stroke: "#fff", strokeWidth: 2 }}
+                activeDot={{
+                  r: 5,
+                  fill: "#3b82f6",
+                  stroke: "#fff",
+                  strokeWidth: 2,
+                }}
               />
               {/* ── Simulated balance line — violet dashed, only when simulating ── */}
               {isSimulating && (
@@ -508,7 +520,12 @@ export function CashFlowChart({ year }: { year?: number }) {
                   strokeDasharray="5 5"
                   fill="url(#cfGradientSim)"
                   dot={false}
-                  activeDot={{ r: 5, fill: "#8b5cf6", stroke: "#fff", strokeWidth: 2 }}
+                  activeDot={{
+                    r: 5,
+                    fill: "#8b5cf6",
+                    stroke: "#fff",
+                    strokeWidth: 2,
+                  }}
                 />
               )}
             </AreaChart>
@@ -518,4 +535,3 @@ export function CashFlowChart({ year }: { year?: number }) {
     </Card>
   );
 }
-

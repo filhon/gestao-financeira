@@ -389,7 +389,10 @@ export function TransactionForm({
                 type="button"
                 onClick={() => {
                   const refs = [section0Ref, section1Ref, section2Ref];
-                  refs[i].current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  refs[i].current?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
                 }}
                 className="flex items-center gap-2 group"
               >
@@ -404,7 +407,13 @@ export function TransactionForm({
                 >
                   {i < activeStep ? (
                     <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none">
-                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path
+                        d="M2 6l3 3 5-5"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </svg>
                   ) : (
                     i + 1
@@ -412,14 +421,18 @@ export function TransactionForm({
                 </div>
                 <span
                   className={`text-xs font-medium transition-colors duration-200 hidden sm:block ${
-                    i === activeStep ? "text-foreground" : "text-muted-foreground/60"
+                    i === activeStep
+                      ? "text-foreground"
+                      : "text-muted-foreground/60"
                   }`}
                 >
                   {step.label}
                 </span>
               </button>
               {i < steps.length - 1 && (
-                <div className={`flex-1 h-px mx-2 transition-colors duration-300 ${i < activeStep ? "bg-primary" : "bg-border"}`} />
+                <div
+                  className={`flex-1 h-px mx-2 transition-colors duration-300 ${i < activeStep ? "bg-primary" : "bg-border"}`}
+                />
               )}
             </div>
           ))}
@@ -427,322 +440,329 @@ export function TransactionForm({
 
         {/* Main Info Card */}
         <div ref={section0Ref}>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle>Informações Principais</CardTitle>
-            {type === "payable" && (
-              <button
-                type="button"
-                onClick={() => document.getElementById("file-upload")?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/25 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-500/20 transition-all duration-150"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Preencher com IA
-              </button>
-            )}
-          </CardHeader>
-          <CardContent className="grid grid-cols-12 gap-6">
-            <div className="col-span-12 md:col-span-8">
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-1.5">
-                      Descrição
-                      {aiFilledFields.has("description") && (
-                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
-                      )}
-                    </FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ex: Pagamento AWS" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="col-span-12 md:col-span-4">
-              <FormField
-                control={form.control}
-                name="amount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-1.5">
-                      Valor Total (R$)
-                      {aiFilledFields.has("amount") && (
-                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
-                      )}
-                    </FormLabel>
-                    <FormControl>
-                      <CurrencyInput
-                        value={field.value}
-                        onChange={field.onChange}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="col-span-12 md:col-span-6">
-              <FormField
-                control={form.control}
-                name="paymentMethod"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-1.5">
-                      Forma de Pagamento
-                      {aiFilledFields.has("paymentMethod") && (
-                        <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
-                      )}
-                    </FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle>Informações Principais</CardTitle>
+              {type === "payable" && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    document.getElementById("file-upload")?.click()
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/25 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-500/20 transition-all duration-150"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Preencher com IA
+                </button>
+              )}
+            </CardHeader>
+            <CardContent className="grid grid-cols-12 gap-6">
+              <div className="col-span-12 md:col-span-8">
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5">
+                        Descrição
+                        {aiFilledFields.has("description") && (
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                        )}
+                      </FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Selecione..." />
-                        </SelectTrigger>
+                        <Input placeholder="Ex: Pagamento AWS" {...field} />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="pix">PIX</SelectItem>
-                        <SelectItem value="boleto">Boleto</SelectItem>
-                        <SelectItem value="transfer">Transferência</SelectItem>
-                        <SelectItem value="credit_card">
-                          Cartão de Crédito
-                        </SelectItem>
-                        <SelectItem value="cash">Dinheiro</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="col-span-12 md:col-span-6">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <FormLabel className="flex items-center gap-1.5">
-                    {type === "payable" ? "Fornecedor" : "Cliente"}
-                    {aiFilledFields.has("supplierOrClient") && (
-                      <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
-                    )}
-                  </FormLabel>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="useEntity"
-                      checked={useEntity}
-                      onCheckedChange={(checked) => {
-                        setUseEntity(!!checked);
-                        if (checked) {
-                          form.setValue("supplierOrClient", "");
-                        } else {
-                          form.setValue("entityId", undefined);
-                        }
-                      }}
-                    />
-                    <label
-                      htmlFor="useEntity"
-                      className="text-xs text-muted-foreground cursor-pointer"
-                    >
-                      Usar Cadastros
-                    </label>
-                  </div>
-                </div>
-
-                {useEntity ? (
-                  <FormField
-                    control={form.control}
-                    name="entityId"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <Popover
-                          open={openEntityCombobox}
-                          onOpenChange={setOpenEntityCombobox}
-                        >
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                className={cn(
-                                  "w-full justify-between",
-                                  !field.value && "text-muted-foreground",
-                                )}
-                              >
-                                <span className="truncate">
-                                  {field.value
-                                    ? entities.find(
-                                        (entity) => entity.id === field.value,
-                                      )?.name
-                                    : "Selecione..."}
-                                </span>
-                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                            <Command>
-                              <CommandInput placeholder="Buscar..." />
-                              <CommandList
-                                onWheel={(e) => {
-                                  e.stopPropagation();
-                                  const target = e.currentTarget;
-                                  target.scrollTop += e.deltaY;
-                                }}
-                              >
-                                <CommandEmpty>
-                                  Nenhuma entidade encontrada.
-                                </CommandEmpty>
-                                <CommandGroup>
-                                  {entities.map((entity) => (
-                                    <CommandItem
-                                      value={entity.name}
-                                      key={entity.id}
-                                      onSelect={() => {
-                                        form.setValue("entityId", entity.id);
-                                        form.setValue(
-                                          "supplierOrClient",
-                                          entity.name,
-                                        );
-                                        setOpenEntityCombobox(false);
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          entity.id === field.value
-                                            ? "opacity-100"
-                                            : "opacity-0",
-                                        )}
-                                      />
-                                      {entity.name}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                ) : (
-                  <FormField
-                    control={form.control}
-                    name="supplierOrClient"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input
-                            placeholder="Nome da empresa ou pessoa"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
-            </div>
 
-            <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-              <FormField
-                control={form.control}
-                name="dueDate"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
+              <div className="col-span-12 md:col-span-4">
+                <FormField
+                  control={form.control}
+                  name="amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5">
+                        Valor Total (R$)
+                        {aiFilledFields.has("amount") && (
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <CurrencyInput
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="col-span-12 md:col-span-6">
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5">
+                        Forma de Pagamento
+                        {aiFilledFields.has("paymentMethod") && (
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                        )}
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Selecione..." />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="pix">PIX</SelectItem>
+                          <SelectItem value="boleto">Boleto</SelectItem>
+                          <SelectItem value="transfer">
+                            Transferência
+                          </SelectItem>
+                          <SelectItem value="credit_card">
+                            Cartão de Crédito
+                          </SelectItem>
+                          <SelectItem value="cash">Dinheiro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="col-span-12 md:col-span-6">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
                     <FormLabel className="flex items-center gap-1.5">
-                      Vencimento
-                      {aiFilledFields.has("dueDate") && (
+                      {type === "payable" ? "Fornecedor" : "Cliente"}
+                      {aiFilledFields.has("supplierOrClient") && (
                         <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
                       )}
                     </FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={"outline"}
-                            className={cn(
-                              "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground",
-                            )}
-                          >
-                            {field.value ? (
-                              format(field.value, "PPP", { locale: ptBR })
-                            ) : (
-                              <span>Selecione</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          defaultMonth={field.value}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="useEntity"
+                        checked={useEntity}
+                        onCheckedChange={(checked) => {
+                          setUseEntity(!!checked);
+                          if (checked) {
+                            form.setValue("supplierOrClient", "");
+                          } else {
+                            form.setValue("entityId", undefined);
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor="useEntity"
+                        className="text-xs text-muted-foreground cursor-pointer"
+                      >
+                        Usar Cadastros
+                      </label>
+                    </div>
+                  </div>
 
-              <FormField
-                control={form.control}
-                name="requestOrigin.type"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tipo Origem</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
+                  {useEntity ? (
+                    <FormField
+                      control={form.control}
+                      name="entityId"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-col">
+                          <Popover
+                            open={openEntityCombobox}
+                            onOpenChange={setOpenEntityCombobox}
+                          >
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn(
+                                    "w-full justify-between",
+                                    !field.value && "text-muted-foreground",
+                                  )}
+                                >
+                                  <span className="truncate">
+                                    {field.value
+                                      ? entities.find(
+                                          (entity) => entity.id === field.value,
+                                        )?.name
+                                      : "Selecione..."}
+                                  </span>
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                              <Command>
+                                <CommandInput placeholder="Buscar..." />
+                                <CommandList
+                                  onWheel={(e) => {
+                                    e.stopPropagation();
+                                    const target = e.currentTarget;
+                                    target.scrollTop += e.deltaY;
+                                  }}
+                                >
+                                  <CommandEmpty>
+                                    Nenhuma entidade encontrada.
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    {entities.map((entity) => (
+                                      <CommandItem
+                                        value={entity.name}
+                                        key={entity.id}
+                                        onSelect={() => {
+                                          form.setValue("entityId", entity.id);
+                                          form.setValue(
+                                            "supplierOrClient",
+                                            entity.name,
+                                          );
+                                          setOpenEntityCombobox(false);
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4",
+                                            entity.id === field.value
+                                              ? "opacity-100"
+                                              : "opacity-0",
+                                          )}
+                                        />
+                                        {entity.name}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : (
+                    <FormField
+                      control={form.control}
+                      name="supplierOrClient"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input
+                              placeholder="Nome da empresa ou pessoa"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <FormField
+                  control={form.control}
+                  name="dueDate"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel className="flex items-center gap-1.5">
+                        Vencimento
+                        {aiFilledFields.has("dueDate") && (
+                          <Sparkles className="h-3.5 w-3.5 text-violet-500 animate-pulse" />
+                        )}
+                      </FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant={"outline"}
+                              className={cn(
+                                "w-full pl-3 text-left font-normal",
+                                !field.value && "text-muted-foreground",
+                              )}
+                            >
+                              {field.value ? (
+                                format(field.value, "PPP", { locale: ptBR })
+                              ) : (
+                                <span>Selecione</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value}
+                            onSelect={field.onChange}
+                            defaultMonth={field.value}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="requestOrigin.type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo Origem</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Tipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="department">Depto.</SelectItem>
+                          <SelectItem value="sector">Setor</SelectItem>
+                          <SelectItem value="director">Diretoria</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="requestOrigin.name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nome Origem</FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Tipo" />
-                        </SelectTrigger>
+                        <Input placeholder="Ex: Marketing" {...field} />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="department">Depto.</SelectItem>
-                        <SelectItem value="sector">Setor</SelectItem>
-                        <SelectItem value="director">Diretoria</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="requestOrigin.name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nome Origem</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ex: Marketing" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </CardContent>
-        </Card>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div ref={section1Ref} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div
+          ref={section1Ref}
+          className="grid grid-cols-1 md:grid-cols-2 gap-6"
+        >
           {/* Repetition / Installments */}
           <Card className="flex flex-col h-full">
             <CardHeader>
@@ -867,8 +887,15 @@ export function TransactionForm({
               {/* Drag & drop zone */}
               {attachmentFields.length === 0 && (
                 <div
-                  onClick={() => !isUploading && !isExtracting && document.getElementById("file-upload")?.click()}
-                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onClick={() =>
+                    !isUploading &&
+                    !isExtracting &&
+                    document.getElementById("file-upload")?.click()
+                  }
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(true);
+                  }}
                   onDragLeave={() => setIsDragOver(false)}
                   onDrop={(e) => {
                     e.preventDefault();
@@ -877,10 +904,16 @@ export function TransactionForm({
                     if (file) {
                       const dt = new DataTransfer();
                       dt.items.add(file);
-                      const input = document.getElementById("file-upload") as HTMLInputElement;
+                      const input = document.getElementById(
+                        "file-upload",
+                      ) as HTMLInputElement;
                       if (input) {
-                        Object.defineProperty(input, "files", { value: dt.files });
-                        input.dispatchEvent(new Event("change", { bubbles: true }));
+                        Object.defineProperty(input, "files", {
+                          value: dt.files,
+                        });
+                        input.dispatchEvent(
+                          new Event("change", { bubbles: true }),
+                        );
                       }
                     }
                   }}
@@ -902,17 +935,22 @@ export function TransactionForm({
                   ) : isUploading ? (
                     <>
                       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Enviando...</span>
+                      <span className="text-sm text-muted-foreground">
+                        Enviando...
+                      </span>
                     </>
                   ) : (
                     <>
                       <Upload className="h-6 w-6 text-muted-foreground" />
                       <span className="text-sm font-medium text-muted-foreground">
-                        {isDragOver ? "Solte para enviar" : "Arraste ou clique para anexar"}
+                        {isDragOver
+                          ? "Solte para enviar"
+                          : "Arraste ou clique para anexar"}
                       </span>
                       {type === "payable" && (
                         <span className="text-xs text-muted-foreground/70 text-center">
-                          Boleto ou NF — campos preenchidos automaticamente com IA
+                          Boleto ou NF — campos preenchidos automaticamente com
+                          IA
                         </span>
                       )}
                     </>
@@ -927,7 +965,9 @@ export function TransactionForm({
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => document.getElementById("file-upload")?.click()}
+                  onClick={() =>
+                    document.getElementById("file-upload")?.click()
+                  }
                   disabled={isUploading || isExtracting}
                   loading={isUploading}
                 >
@@ -962,231 +1002,250 @@ export function TransactionForm({
 
         {/* Cost Center Allocation */}
         <div ref={section2Ref}>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-base">
-              Rateio por Centro de Custo
-            </CardTitle>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                append({ costCenterId: "", percentage: 0, amount: 0 })
-              }
-            >
-              <Plus className="mr-2 h-4 w-4" /> Adicionar
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {fields.map((field, index) => (
-                <div
-                  key={field.id}
-                  className="grid grid-cols-[1fr_1fr_auto] gap-4 items-end"
-                >
-                  <FormField
-                    control={form.control}
-                    name={`costCenterAllocation.${index}.costCenterId`}
-                    render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <FormLabel className={index !== 0 ? "sr-only" : ""}>
-                          Centro de Custo
-                        </FormLabel>
-                        <Popover
-                          open={openCostCenterCombobox === index}
-                          onOpenChange={(open) =>
-                            setOpenCostCenterCombobox(open ? index : null)
-                          }
-                        >
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                className={cn(
-                                  "w-full justify-between font-normal",
-                                  !field.value && "text-muted-foreground",
-                                )}
-                              >
-                                <span className="truncate">
-                                  {field.value
-                                    ? (() => {
-                                        const cc = hierarchicalCostCenters.find(
-                                          (c) => c.id === field.value,
-                                        );
-                                        if (!cc) return "Selecione...";
-                                        const balance =
-                                          costCenterBalances[cc.id];
-                                        return `${cc.level > 0 ? "↳ " : ""}${cc.name}${type === "payable" && balance !== undefined ? ` (${formatCurrency(balance)})` : ""}`;
-                                      })()
-                                    : "Selecione..."}
-                                </span>
-                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            className="w-[--radix-popover-trigger-width] p-0"
-                            align="start"
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-base">
+                Rateio por Centro de Custo
+              </CardTitle>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  append({ costCenterId: "", percentage: 0, amount: 0 })
+                }
+              >
+                <Plus className="mr-2 h-4 w-4" /> Adicionar
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {fields.map((field, index) => (
+                  <div
+                    key={field.id}
+                    className="grid grid-cols-[1fr_1fr_auto] gap-4 items-end"
+                  >
+                    <FormField
+                      control={form.control}
+                      name={`costCenterAllocation.${index}.costCenterId`}
+                      render={({ field }) => (
+                        <FormItem className="flex flex-col">
+                          <FormLabel className={index !== 0 ? "sr-only" : ""}>
+                            Centro de Custo
+                          </FormLabel>
+                          <Popover
+                            open={openCostCenterCombobox === index}
+                            onOpenChange={(open) =>
+                              setOpenCostCenterCombobox(open ? index : null)
+                            }
                           >
-                            <Command>
-                              <CommandInput placeholder="Buscar centro de custo..." />
-                              <CommandList
-                                onWheel={(e) => {
-                                  e.stopPropagation();
-                                  const target = e.currentTarget;
-                                  target.scrollTop += e.deltaY;
-                                }}
-                              >
-                                <CommandEmpty>
-                                  Nenhum centro de custo encontrado.
-                                </CommandEmpty>
-                                <CommandGroup>
-                                  {hierarchicalCostCenters.map((cc) => {
-                                    const balance = costCenterBalances[cc.id];
-                                    const isSelected = field.value === cc.id;
-                                    return (
-                                      <CommandItem
-                                        key={cc.id}
-                                        value={`${cc.name} ${cc.code}`}
-                                        onSelect={() => {
-                                          field.onChange(cc.id);
-                                          setOpenCostCenterCombobox(null);
-                                        }}
-                                        className="flex items-center gap-0"
-                                      >
-                                        <div
-                                          className="flex items-center gap-1.5 w-full"
-                                          style={{
-                                            paddingLeft: `${cc.level * 16}px`,
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn(
+                                    "w-full justify-between font-normal",
+                                    !field.value && "text-muted-foreground",
+                                  )}
+                                >
+                                  <span className="truncate">
+                                    {field.value
+                                      ? (() => {
+                                          const cc =
+                                            hierarchicalCostCenters.find(
+                                              (c) => c.id === field.value,
+                                            );
+                                          if (!cc) return "Selecione...";
+                                          const balance =
+                                            costCenterBalances[cc.id];
+                                          return `${cc.level > 0 ? "↳ " : ""}${cc.name}${type === "payable" && balance !== undefined ? ` (${formatCurrency(balance)})` : ""}`;
+                                        })()
+                                      : "Selecione..."}
+                                  </span>
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-[--radix-popover-trigger-width] p-0"
+                              align="start"
+                            >
+                              <Command>
+                                <CommandInput placeholder="Buscar centro de custo..." />
+                                <CommandList
+                                  onWheel={(e) => {
+                                    e.stopPropagation();
+                                    const target = e.currentTarget;
+                                    target.scrollTop += e.deltaY;
+                                  }}
+                                >
+                                  <CommandEmpty>
+                                    Nenhum centro de custo encontrado.
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    {hierarchicalCostCenters.map((cc) => {
+                                      const balance = costCenterBalances[cc.id];
+                                      const isSelected = field.value === cc.id;
+                                      return (
+                                        <CommandItem
+                                          key={cc.id}
+                                          value={`${cc.name} ${cc.code}`}
+                                          onSelect={() => {
+                                            field.onChange(cc.id);
+                                            setOpenCostCenterCombobox(null);
                                           }}
+                                          className="flex items-center gap-0"
                                         >
-                                          <Check
-                                            className={cn(
-                                              "h-4 w-4 shrink-0",
-                                              isSelected
-                                                ? "opacity-100"
-                                                : "opacity-0",
+                                          <div
+                                            className="flex items-center gap-1.5 w-full"
+                                            style={{
+                                              paddingLeft: `${cc.level * 16}px`,
+                                            }}
+                                          >
+                                            <Check
+                                              className={cn(
+                                                "h-4 w-4 shrink-0",
+                                                isSelected
+                                                  ? "opacity-100"
+                                                  : "opacity-0",
+                                              )}
+                                            />
+                                            {cc.level > 0 ? (
+                                              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                            ) : (
+                                              <FolderTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                                             )}
-                                          />
-                                          {cc.level > 0 ? (
-                                            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-                                          ) : (
-                                            <FolderTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                          )}
-                                          <span className="truncate">
-                                            {cc.name}
-                                          </span>
-                                          {type === "payable" &&
-                                            balance !== undefined && (
-                                              <span
-                                                className={cn(
-                                                  "ml-auto text-xs shrink-0 font-financial",
-                                                  balance > 0
-                                                    ? "text-green-600"
-                                                    : "text-muted-foreground",
-                                                )}
-                                              >
-                                                {formatCurrency(balance)}
-                                              </span>
-                                            )}
-                                        </div>
-                                      </CommandItem>
-                                    );
-                                  })}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name={`costCenterAllocation.${index}.percentage`}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className={index !== 0 ? "sr-only" : ""}>
-                          %
-                        </FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            {...field}
-                            onChange={(e) => {
-                              field.onChange(parseFloat(e.target.value));
-                            }}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                  <div className={cn("pb-0", index === 0 ? "pb-2" : "")}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => remove(index)}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
+                                            <span className="truncate">
+                                              {cc.name}
+                                            </span>
+                                            {type === "payable" &&
+                                              balance !== undefined && (
+                                                <span
+                                                  className={cn(
+                                                    "ml-auto text-xs shrink-0 font-financial",
+                                                    balance > 0
+                                                      ? "text-green-600"
+                                                      : "text-muted-foreground",
+                                                  )}
+                                                >
+                                                  {formatCurrency(balance)}
+                                                </span>
+                                              )}
+                                          </div>
+                                        </CommandItem>
+                                      );
+                                    })}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`costCenterAllocation.${index}.percentage`}
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className={index !== 0 ? "sr-only" : ""}>
+                            %
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              {...field}
+                              onChange={(e) => {
+                                field.onChange(parseFloat(e.target.value));
+                              }}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <div className={cn("pb-0", index === 0 ? "pb-2" : "")}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => remove(index)}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
-              {/* Barra proporcional de rateio */}
-              {fields.length > 1 && allocations.some(a => a.costCenterId) && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
-                    {allocations.map((alloc, i) => {
-                      const colors = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-violet-500", "bg-red-500"];
-                      return (
-                        <div
-                          key={i}
-                          className={`${colors[i % colors.length]} transition-all duration-300`}
-                          style={{ width: `${alloc.percentage || 0}%` }}
-                          title={`${costCenters.find(c => c.id === alloc.costCenterId)?.name ?? "—"}: ${alloc.percentage}%`}
-                        />
-                      );
-                    })}
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                    {allocations.map((alloc, i) => {
-                      const colors = ["text-blue-500", "text-emerald-500", "text-amber-500", "text-violet-500", "text-red-500"];
-                      const name = costCenters.find(c => c.id === alloc.costCenterId)?.name;
-                      if (!name) return null;
-                      return (
-                        <span key={i} className={`text-xs ${colors[i % colors.length]} tabular-nums`}>
-                          {name}: {alloc.percentage}%
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                ))}
+                {/* Barra proporcional de rateio */}
+                {fields.length > 1 &&
+                  allocations.some((a) => a.costCenterId) && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
+                        {allocations.map((alloc, i) => {
+                          const colors = [
+                            "bg-blue-500",
+                            "bg-emerald-500",
+                            "bg-amber-500",
+                            "bg-violet-500",
+                            "bg-red-500",
+                          ];
+                          return (
+                            <div
+                              key={i}
+                              className={`${colors[i % colors.length]} transition-all duration-300`}
+                              style={{ width: `${alloc.percentage || 0}%` }}
+                              title={`${costCenters.find((c) => c.id === alloc.costCenterId)?.name ?? "—"}: ${alloc.percentage}%`}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                        {allocations.map((alloc, i) => {
+                          const colors = [
+                            "text-blue-500",
+                            "text-emerald-500",
+                            "text-amber-500",
+                            "text-violet-500",
+                            "text-red-500",
+                          ];
+                          const name = costCenters.find(
+                            (c) => c.id === alloc.costCenterId,
+                          )?.name;
+                          if (!name) return null;
+                          return (
+                            <span
+                              key={i}
+                              className={`text-xs ${colors[i % colors.length]} tabular-nums`}
+                            >
+                              {name}: {alloc.percentage}%
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-              <FormMessage>
-                {form.formState.errors.costCenterAllocation?.root?.message}
-              </FormMessage>
+                <FormMessage>
+                  {form.formState.errors.costCenterAllocation?.root?.message}
+                </FormMessage>
 
-              {/* Balance Warning */}
-              {balanceWarning && (
-                <Alert variant="destructive" className="mt-4">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>
-                    {balanceWarning}
-                    <br />
-                    <span className="text-xs">
-                      Solicite alocação de recursos ao gestor financeiro para
-                      continuar.
-                    </span>
-                  </AlertDescription>
-                </Alert>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                {/* Balance Warning */}
+                {balanceWarning && (
+                  <Alert variant="destructive" className="mt-4">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      {balanceWarning}
+                      <br />
+                      <span className="text-xs">
+                        Solicite alocação de recursos ao gestor financeiro para
+                        continuar.
+                      </span>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="flex justify-end gap-2 pt-4">

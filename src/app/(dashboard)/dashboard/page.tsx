@@ -243,8 +243,7 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
                     {t.description}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {t.supplierOrClient} •{" "}
-                    {format(t.dueDate, "dd/MM/yyyy")}
+                    {t.supplierOrClient} • {format(t.dueDate, "dd/MM/yyyy")}
                   </p>
                 </div>
                 <div className="font-medium font-financial text-amber-600 shrink-0">

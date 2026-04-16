@@ -130,10 +130,7 @@ export function PaymentDialog({
             <Label>Valor {type === "pay" ? "Pago" : "Recebido"}</Label>
             {/* CurrencyInput aceita `number` e expõe `number` — sem parseFloat manual.
                 Formata automaticamente no padrão pt-BR (pontos de milhar, vírgula decimal). */}
-            <CurrencyInput
-              value={finalAmount}
-              onChange={setFinalAmount}
-            />
+            <CurrencyInput value={finalAmount} onChange={setFinalAmount} />
             <p className="text-xs text-muted-foreground font-financial">
               Valor original: {formatCurrency(transaction.amount)}
             </p>
@@ -147,7 +144,8 @@ export function PaymentDialog({
               )}
               {finalAmount > transaction.amount && (
                 <p className="text-red-600 font-financial">
-                  Juros/Multa: {formatCurrency(finalAmount - transaction.amount)}
+                  Juros/Multa:{" "}
+                  {formatCurrency(finalAmount - transaction.amount)}
                 </p>
               )}
             </div>
@@ -158,9 +156,7 @@ export function PaymentDialog({
             Cancelar
           </Button>
           <Button onClick={handleConfirm} disabled={isSubmitting}>
-            {isSubmitting && (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            )}
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Confirmar
           </Button>
         </DialogFooter>

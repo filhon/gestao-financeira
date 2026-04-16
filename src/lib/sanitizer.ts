@@ -42,7 +42,7 @@ export function stripHtml(html: string): string {
  */
 export function sanitizeHtml(
   html: string,
-  allowedTags: string[] = ["strong", "em", "b", "i"]
+  allowedTags: string[] = ["strong", "em", "b", "i"],
 ): string {
   const tagPattern = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
 

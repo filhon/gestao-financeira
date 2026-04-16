@@ -174,9 +174,10 @@ export const costCenterService = {
     receivablesSnapshot.docs.forEach((docSnap) => {
       const tx = docSnap.data();
       // Use effectiveDate to determine if this transaction belongs to the target year
-      const effDate: Date = tx.status === "paid" && tx.paymentDate
-        ? (tx.paymentDate as Timestamp).toDate()
-        : (tx.dueDate as Timestamp).toDate();
+      const effDate: Date =
+        tx.status === "paid" && tx.paymentDate
+          ? (tx.paymentDate as Timestamp).toDate()
+          : (tx.dueDate as Timestamp).toDate();
       if (effDate < yearStart || effDate > yearEnd) return;
       const allocations = tx.costCenterAllocation || [];
       if (allocations.length > 0) {
@@ -218,9 +219,10 @@ export const costCenterService = {
     payablesSnapshot.docs.forEach((docSnap) => {
       const tx = docSnap.data();
       // Use effectiveDate to determine if this transaction belongs to the target year
-      const effDate: Date = tx.status === "paid" && tx.paymentDate
-        ? (tx.paymentDate as Timestamp).toDate()
-        : (tx.dueDate as Timestamp).toDate();
+      const effDate: Date =
+        tx.status === "paid" && tx.paymentDate
+          ? (tx.paymentDate as Timestamp).toDate()
+          : (tx.dueDate as Timestamp).toDate();
       if (effDate < yearStart || effDate > yearEnd) return;
       const allocations = tx.costCenterAllocation || [];
       if (allocations.length > 0) {
@@ -314,9 +316,10 @@ export const costCenterService = {
     const transactions = transactionsSnapshot.docs
       .map((doc) => doc.data())
       .filter((tx) => {
-        const effDate: Date = tx.status === "paid" && tx.paymentDate
-          ? (tx.paymentDate as Timestamp).toDate()
-          : (tx.dueDate as Timestamp).toDate();
+        const effDate: Date =
+          tx.status === "paid" && tx.paymentDate
+            ? (tx.paymentDate as Timestamp).toDate()
+            : (tx.dueDate as Timestamp).toDate();
         return effDate >= yearStart && effDate <= yearEnd;
       });
 

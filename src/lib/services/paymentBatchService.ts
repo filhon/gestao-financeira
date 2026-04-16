@@ -857,7 +857,7 @@ export const paymentBatchService = {
       createdBy,
       status: "open",
       transactionIds,
-      totalAmount: 0,          // será recalculado abaixo
+      totalAmount: 0, // será recalculado abaixo
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       startDate: null,
@@ -902,4 +902,3 @@ export const paymentBatchService = {
     return { id: batchDocRef.id };
   },
 };
-

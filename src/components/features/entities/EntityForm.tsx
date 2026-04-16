@@ -25,7 +25,11 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { entityService } from "@/lib/services/entityService";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { ChevronDown, Loader2 } from "lucide-react";
 
 const BRAZILIAN_BANKS = [
@@ -319,177 +323,181 @@ export function EntityForm({
         </div>
 
         <Collapsible open={isBankOpen} onOpenChange={setIsBankOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center justify-between w-full px-4 py-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors text-left"
-          >
-            <span className="text-sm font-medium">Dados Bancários (Opcional)</span>
-            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isBankOpen ? "rotate-180" : ""}`} />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-        <Card className="mt-2 border-t-0 rounded-t-none">
-          <CardHeader className="sr-only">
-            <CardTitle className="text-base">
-              Dados Bancários (Opcional)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-12 gap-4">
-              <div className="col-span-12 md:col-span-6">
-                <FormField
-                  control={form.control}
-                  name="bankName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Banco</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selecione o banco" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {BRAZILIAN_BANKS.map((bank) => (
-                            <SelectItem
-                              key={bank.code}
-                              value={`${bank.code} - ${bank.name}`}
-                            >
-                              {bank.code} - {bank.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center justify-between w-full px-4 py-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors text-left"
+            >
+              <span className="text-sm font-medium">
+                Dados Bancários (Opcional)
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isBankOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Card className="mt-2 border-t-0 rounded-t-none">
+              <CardHeader className="sr-only">
+                <CardTitle className="text-base">
+                  Dados Bancários (Opcional)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-12 gap-4">
+                  <div className="col-span-12 md:col-span-6">
+                    <FormField
+                      control={form.control}
+                      name="bankName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Banco</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecione o banco" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {BRAZILIAN_BANKS.map((bank) => (
+                                <SelectItem
+                                  key={bank.code}
+                                  value={`${bank.code} - ${bank.name}`}
+                                >
+                                  {bank.code} - {bank.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
-              <div className="col-span-6 md:col-span-3">
-                <FormField
-                  control={form.control}
-                  name="agency"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Agência</FormLabel>
-                      <FormControl>
-                        <Input placeholder="0000" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+                  <div className="col-span-6 md:col-span-3">
+                    <FormField
+                      control={form.control}
+                      name="agency"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Agência</FormLabel>
+                          <FormControl>
+                            <Input placeholder="0000" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
-              <div className="col-span-6 md:col-span-3">
-                <FormField
-                  control={form.control}
-                  name="account"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Conta</FormLabel>
-                      <FormControl>
-                        <Input placeholder="00000-0" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+                  <div className="col-span-6 md:col-span-3">
+                    <FormField
+                      control={form.control}
+                      name="account"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Conta</FormLabel>
+                          <FormControl>
+                            <Input placeholder="00000-0" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
-              <div className="col-span-12 md:col-span-4">
-                <FormField
-                  control={form.control}
-                  name="accountType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tipo de Conta</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selecione..." />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="checking">Corrente</SelectItem>
-                          <SelectItem value="savings">Poupança</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+                  <div className="col-span-12 md:col-span-4">
+                    <FormField
+                      control={form.control}
+                      name="accountType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tipo de Conta</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecione..." />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="checking">Corrente</SelectItem>
+                              <SelectItem value="savings">Poupança</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
-              <div className="col-span-12 md:col-span-4">
-                <FormField
-                  control={form.control}
-                  name="pixKeyType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tipo de Chave PIX</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selecione..." />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="cpf">CPF</SelectItem>
-                          <SelectItem value="cnpj">CNPJ</SelectItem>
-                          <SelectItem value="email">E-mail</SelectItem>
-                          <SelectItem value="phone">Telefone</SelectItem>
-                          <SelectItem value="random">
-                            Chave Aleatória
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+                  <div className="col-span-12 md:col-span-4">
+                    <FormField
+                      control={form.control}
+                      name="pixKeyType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tipo de Chave PIX</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecione..." />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="cpf">CPF</SelectItem>
+                              <SelectItem value="cnpj">CNPJ</SelectItem>
+                              <SelectItem value="email">E-mail</SelectItem>
+                              <SelectItem value="phone">Telefone</SelectItem>
+                              <SelectItem value="random">
+                                Chave Aleatória
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
-              <div className="col-span-12 md:col-span-4">
-                <FormField
-                  control={form.control}
-                  name="pixKey"
-                  render={({ field }) => {
-                    const pixKeyType = form.watch("pixKeyType");
-                    const placeholder = pixKeyType
-                      ? pixPlaceholders[pixKeyType] ?? "Chave PIX"
-                      : "Selecione o tipo primeiro";
-                    return (
-                      <FormItem>
-                        <FormLabel>Chave PIX</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder={placeholder}
-                            disabled={!pixKeyType}
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    );
-                  }}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        </CollapsibleContent>
+                  <div className="col-span-12 md:col-span-4">
+                    <FormField
+                      control={form.control}
+                      name="pixKey"
+                      render={({ field }) => {
+                        const pixKeyType = form.watch("pixKeyType");
+                        const placeholder = pixKeyType
+                          ? (pixPlaceholders[pixKeyType] ?? "Chave PIX")
+                          : "Selecione o tipo primeiro";
+                        return (
+                          <FormItem>
+                            <FormLabel>Chave PIX</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder={placeholder}
+                                disabled={!pixKeyType}
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </CollapsibleContent>
         </Collapsible>
 
         <div className="flex justify-end gap-2 pt-4">

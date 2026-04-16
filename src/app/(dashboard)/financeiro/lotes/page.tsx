@@ -73,12 +73,7 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function PaymentBatchesPage() {
@@ -466,7 +461,9 @@ export default function PaymentBatchesPage() {
           cfg.color,
         )}
       >
-        <span className={cn("h-1.5 w-1.5 rounded-full flex-shrink-0", cfg.dot)} />
+        <span
+          className={cn("h-1.5 w-1.5 rounded-full flex-shrink-0", cfg.dot)}
+        />
         {cfg.label}
       </span>
     );
@@ -617,7 +614,13 @@ export default function PaymentBatchesPage() {
               </p>
             </CardContent>
           </Card>
-          <Card className={kpiData.pendingCount > 0 ? "border-amber-200 dark:border-amber-900" : ""}>
+          <Card
+            className={
+              kpiData.pendingCount > 0
+                ? "border-amber-200 dark:border-amber-900"
+                : ""
+            }
+          >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
                 Aguardando Ação
@@ -710,13 +713,27 @@ export default function PaymentBatchesPage() {
             <TableBody>
               {Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell><Skeleton className="h-4 w-36" /></TableCell>
-                  <TableCell><Skeleton className="h-6 w-24 rounded-full" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-28" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-8" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                  <TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-36" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-6 w-24 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-28" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-8" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Skeleton className="h-8 w-8 ml-auto" />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -785,7 +802,9 @@ export default function PaymentBatchesPage() {
                         {getResponsiblePerson(batch)}
                       </TableCell>
                       <TableCell>{batch.transactionIds.length}</TableCell>
-                      <TableCell className="font-financial">{formatCurrency(batch.totalAmount)}</TableCell>
+                      <TableCell className="font-financial">
+                        {formatCurrency(batch.totalAmount)}
+                      </TableCell>
                       <TableCell>
                         {format(batch.createdAt, "dd/MM/yyyy", {
                           locale: ptBR,
@@ -828,104 +847,106 @@ export default function PaymentBatchesPage() {
                                 Confirmar Pgto
                               </Button>
                             )}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                              <span className="sr-only">Open menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Ações</DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onClick={() => handleViewDetails(batch)}
-                            >
-                              Ver Detalhes
-                            </DropdownMenuItem>
-                            {canManageBatches && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Open menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuLabel>Ações</DropdownMenuLabel>
                               <DropdownMenuItem
-                                onClick={() => handleEditBatch(batch)}
+                                onClick={() => handleViewDetails(batch)}
                               >
-                                <Edit className="mr-2 h-4 w-4" />
-                                Editar
+                                Ver Detalhes
                               </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-
-                            {/* Status: Open - Manager can send for approval */}
-                            {batch.status === "open" && canManageBatches && (
-                              <DropdownMenuItem
-                                onClick={() => handleOpenSendForApproval(batch)}
-                              >
-                                Enviar para Aprovador
-                              </DropdownMenuItem>
-                            )}
-
-                            {/* Status: Pending Approval - Approver can approve */}
-                            {batch.status === "pending_approval" &&
-                              canApproveBatches && (
+                              {canManageBatches && (
                                 <DropdownMenuItem
-                                  onClick={() => handleOpenApproval(batch)}
+                                  onClick={() => handleEditBatch(batch)}
                                 >
-                                  Aprovar Lote
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Editar
                                 </DropdownMenuItem>
                               )}
+                              <DropdownMenuSeparator />
 
-                            {/* Status: Approved - Manager can send for authorization */}
-                            {batch.status === "approved" &&
-                              canManageBatches && (
+                              {/* Status: Open - Manager can send for approval */}
+                              {batch.status === "open" && canManageBatches && (
                                 <DropdownMenuItem
                                   onClick={() =>
-                                    handleOpenSendForAuthorization(batch)
+                                    handleOpenSendForApproval(batch)
                                   }
                                 >
-                                  Enviar para Autorização
+                                  Enviar para Aprovador
                                 </DropdownMenuItem>
                               )}
 
-                            {/* Status: Pending Authorization - Releaser can confirm */}
-                            {batch.status === "pending_authorization" &&
-                              canPayBatches && (
+                              {/* Status: Pending Approval - Approver can approve */}
+                              {batch.status === "pending_approval" &&
+                                canApproveBatches && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleOpenApproval(batch)}
+                                  >
+                                    Aprovar Lote
+                                  </DropdownMenuItem>
+                                )}
+
+                              {/* Status: Approved - Manager can send for authorization */}
+                              {batch.status === "approved" &&
+                                canManageBatches && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      handleOpenSendForAuthorization(batch)
+                                    }
+                                  >
+                                    Enviar para Autorização
+                                  </DropdownMenuItem>
+                                )}
+
+                              {/* Status: Pending Authorization - Releaser can confirm */}
+                              {batch.status === "pending_authorization" &&
+                                canPayBatches && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      handleConfirmAuthorization(batch)
+                                    }
+                                  >
+                                    Confirmar Autorização
+                                  </DropdownMenuItem>
+                                )}
+
+                              {/* Status: Authorized - Manager can confirm payments */}
+                              {batch.status === "authorized" &&
+                                canManageBatches && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleConfirmPayments(batch)}
+                                  >
+                                    Confirmar Pagamentos
+                                  </DropdownMenuItem>
+                                )}
+
+                              {/* Status: Paid - Manager can revert to open */}
+                              {batch.status === "paid" && canManageBatches && (
                                 <DropdownMenuItem
-                                  onClick={() =>
-                                    handleConfirmAuthorization(batch)
-                                  }
+                                  className="text-amber-600 focus:text-amber-700"
+                                  onClick={() => setRevertBatchId(batch.id)}
                                 >
-                                  Confirmar Autorização
+                                  Reverter para Aberto
                                 </DropdownMenuItem>
                               )}
-
-                            {/* Status: Authorized - Manager can confirm payments */}
-                            {batch.status === "authorized" &&
-                              canManageBatches && (
+                              <DropdownMenuSeparator />
+                              {batch.status === "open" && canManageBatches && (
                                 <DropdownMenuItem
-                                  onClick={() => handleConfirmPayments(batch)}
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => setDeleteBatchId(batch.id)}
                                 >
-                                  Confirmar Pagamentos
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Excluir Lote
                                 </DropdownMenuItem>
                               )}
-
-                            {/* Status: Paid - Manager can revert to open */}
-                            {batch.status === "paid" && canManageBatches && (
-                              <DropdownMenuItem
-                                className="text-amber-600 focus:text-amber-700"
-                                onClick={() => setRevertBatchId(batch.id)}
-                              >
-                                Reverter para Aberto
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-                            {batch.status === "open" && canManageBatches && (
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onClick={() => setDeleteBatchId(batch.id)}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Excluir Lote
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>

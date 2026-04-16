@@ -1,13 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Users,
-  ArrowUpRight,
-  Building2,
-  Tag,
-  LayoutGrid,
-} from "lucide-react";
+import { Users, ArrowUpRight, Building2, Tag, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Featured module ──────────────────────────────────────────────────────────
@@ -26,7 +20,9 @@ function EntidadesCard() {
           <ArrowUpRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-indigo-500" />
         </div>
 
-        <p className="text-sm font-medium text-muted-foreground mb-1">Entidades</p>
+        <p className="text-sm font-medium text-muted-foreground mb-1">
+          Entidades
+        </p>
         <p className="text-2xl font-bold tracking-tight text-foreground">
           Fornecedores & Clientes
         </p>
@@ -78,15 +74,24 @@ function PlannedCard({
   return (
     <div className="h-full rounded-xl border border-border border-dashed bg-card/50 p-5 opacity-60">
       <div className="flex items-start justify-between mb-4">
-        <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", bg)}>
+        <div
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-lg",
+            bg,
+          )}
+        >
           <Icon className={cn("h-4 w-4", accent)} />
         </div>
         <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           Em breve
         </span>
       </div>
-      <p className="text-sm font-semibold text-foreground leading-snug">{title}</p>
-      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{description}</p>
+      <p className="text-sm font-semibold text-foreground leading-snug">
+        {title}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+        {description}
+      </p>
     </div>
   );
 }
@@ -127,7 +132,10 @@ export default function CadastrosPage() {
           <div
             key={mod.title}
             className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-            style={{ animationDelay: `${80 + i * 60}ms`, animationFillMode: "both" }}
+            style={{
+              animationDelay: `${80 + i * 60}ms`,
+              animationFillMode: "both",
+            }}
           >
             <PlannedCard {...mod} />
           </div>

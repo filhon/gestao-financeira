@@ -16,7 +16,9 @@ export function DunningStatus({ status }: DunningStatusProps) {
     <div className="flex items-center gap-2">
       <div
         className={`flex items-center justify-center rounded-full p-1.5 ${
-          emailSent ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+          emailSent
+            ? "bg-green-100 text-green-600"
+            : "bg-gray-100 text-gray-400"
         }`}
         title={emailSent ? "E-mail de cobrança enviado" : "E-mail não enviado"}
       >
@@ -24,9 +26,13 @@ export function DunningStatus({ status }: DunningStatusProps) {
       </div>
       <div
         className={`flex items-center justify-center rounded-full p-1.5 ${
-          whatsappSent ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+          whatsappSent
+            ? "bg-green-100 text-green-600"
+            : "bg-gray-100 text-gray-400"
         }`}
-        title={whatsappSent ? "WhatsApp de cobrança enviado" : "WhatsApp não enviado"}
+        title={
+          whatsappSent ? "WhatsApp de cobrança enviado" : "WhatsApp não enviado"
+        }
       >
         <MessageCircle className="h-4 w-4" />
       </div>

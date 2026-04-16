@@ -11,7 +11,13 @@ import {
 import { RoadmapItem } from "./RoadmapItem";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Lightbulb, CalendarClock, Zap, CheckCircle2, MoveRight } from "lucide-react";
+import {
+  Lightbulb,
+  CalendarClock,
+  Zap,
+  CheckCircle2,
+  MoveRight,
+} from "lucide-react";
 
 interface RoadmapColumnProps {
   id: RoadmapStatus;
@@ -96,7 +102,12 @@ export function RoadmapColumn({
     >
       <div className="p-4 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className={cn("flex h-7 w-7 items-center justify-center rounded-md", config.iconBg)}>
+          <div
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-md",
+              config.iconBg,
+            )}
+          >
             <Icon className={cn("h-3.5 w-3.5", config.iconColor)} />
           </div>
           <h3 className="font-semibold text-sm">{title}</h3>

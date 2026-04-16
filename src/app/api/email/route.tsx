@@ -33,10 +33,10 @@ export async function POST(request: Request) {
         status: 429,
         headers: {
           "Retry-After": String(
-            Math.ceil((rateLimitResult.reset - new Date().getTime()) / 1000)
+            Math.ceil((rateLimitResult.reset - new Date().getTime()) / 1000),
           ),
         },
-      }
+      },
     );
   }
 
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
 
     if (!isEmailEnabled) {
       logger.warn(
-        "Email sending is disabled (EMAIL_ENABLED=false). Email simulation:"
+        "Email sending is disabled (EMAIL_ENABLED=false). Email simulation:",
       );
       logger.log("To:", to);
       logger.log("Subject:", subject);
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
     logger.error("Email API Internal Error:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -21,18 +21,18 @@ Adicionado suporte para **busca textual** de transações de duas formas complem
 
 Endpoint dedicado e leve para busca textual, projetado para uso em Typeahead/Combobox.
 
-| Característica        | `/api/v1/transactions?search=...`                | `/api/v1/transactions/search?q=...`                  |
-| --------------------- | ------------------------------------------------ | ---------------------------------------------------- |
-| **Payload**           | Transação completa (alocações, parcelas, etc.)    | Mínimo: `id`, `description`, `amount`, `type`, `status`, `dueDate`, `supplier`, `costCenter` |
-| **Paginação**         | Completa (page, totalItems, totalPages, etc.)     | Sem paginação — retorna até 20 resultados            |
-| **Rate limit**        | 30 req/min                                        | 60 req/min                                           |
-| **Cap de documentos** | 5.000 documentos escaneados                       | 5.000 documentos escaneados                          |
-| **Caso de uso**       | Listagens, relatórios, exportação                 | Typeahead, Combobox, vinculação rápida               |
+| Característica        | `/api/v1/transactions?search=...`              | `/api/v1/transactions/search?q=...`                                                          |
+| --------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Payload**           | Transação completa (alocações, parcelas, etc.) | Mínimo: `id`, `description`, `amount`, `type`, `status`, `dueDate`, `supplier`, `costCenter` |
+| **Paginação**         | Completa (page, totalItems, totalPages, etc.)  | Sem paginação — retorna até 20 resultados                                                    |
+| **Rate limit**        | 30 req/min                                     | 60 req/min                                                                                   |
+| **Cap de documentos** | 5.000 documentos escaneados                    | 5.000 documentos escaneados                                                                  |
+| **Caso de uso**       | Listagens, relatórios, exportação              | Typeahead, Combobox, vinculação rápida                                                       |
 
 ### Novo parâmetro `search` no endpoint existente
 
-| Parâmetro | Tipo   | Descrição                                                                                                             |
-| --------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| Parâmetro | Tipo   | Descrição                                                                                                              |
+| --------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
 | `search`  | string | Termo de busca textual (mín. 2, máx. 100 caracteres). Pesquisa case-insensitive em `description`, `notes` e `supplier` |
 
 ### Detalhes da implementação
@@ -44,11 +44,11 @@ Endpoint dedicado e leve para busca textual, projetado para uso em Typeahead/Com
 
 ### Campos pesquisados
 
-| Campo         | Descrição                                                 |
-| ------------- | --------------------------------------------------------- |
-| `description` | Descrição principal da transação                          |
-| `notes`       | Notas/observações (ex: referência de NF)                  |
-| `supplier`    | Nome do fornecedor ou cliente vinculado à transação       |
+| Campo         | Descrição                                           |
+| ------------- | --------------------------------------------------- |
+| `description` | Descrição principal da transação                    |
+| `notes`       | Notas/observações (ex: referência de NF)            |
+| `supplier`    | Nome do fornecedor ou cliente vinculado à transação |
 
 ---
 
@@ -93,11 +93,15 @@ GET /api/v1/transactions?search=treinamento&costCenterCodes=MKT-001,RH-001&allDa
 ```javascript
 // Frontend — Combobox com busca no financeiro (RECOMENDADO)
 const searchTransactions = async (query) => {
-  const response = await apiClient.request("GET", "/api/v1/transactions/search", {
-    q: query,
-    allDates: true,
-    limit: 10,
-  });
+  const response = await apiClient.request(
+    "GET",
+    "/api/v1/transactions/search",
+    {
+      q: query,
+      allDates: true,
+      limit: 10,
+    },
+  );
   return response.data; // Array leve para popular o combobox
 };
 ```
@@ -108,13 +112,13 @@ O endpoint `/api/v1/transactions?search=...` continua disponível para buscas co
 
 ## Validações
 
-| Endpoint                           | Parâmetro | Regra                           | Erro retornado                                                    |
-| ---------------------------------- | --------- | ------------------------------- | ----------------------------------------------------------------- |
-| `/api/v1/transactions`             | `search`  | Menos de 2 caracteres           | `400` — "Parameter 'search' must be at least 2 characters long."  |
-| `/api/v1/transactions`             | `search`  | Mais de 100 caracteres          | `400` — "Parameter 'search' must be at most 100 characters long." |
-| `/api/v1/transactions/search`      | `q`       | Ausente ou vazio                | `400` — "Parameter 'q' is required for search."                   |
-| `/api/v1/transactions/search`      | `q`       | Menos de 2 caracteres           | `400` — "Parameter 'q' must be at least 2 characters long."       |
-| `/api/v1/transactions/search`      | `q`       | Mais de 100 caracteres          | `400` — "Parameter 'q' must be at most 100 characters long."      |
+| Endpoint                      | Parâmetro | Regra                  | Erro retornado                                                    |
+| ----------------------------- | --------- | ---------------------- | ----------------------------------------------------------------- |
+| `/api/v1/transactions`        | `search`  | Menos de 2 caracteres  | `400` — "Parameter 'search' must be at least 2 characters long."  |
+| `/api/v1/transactions`        | `search`  | Mais de 100 caracteres | `400` — "Parameter 'search' must be at most 100 characters long." |
+| `/api/v1/transactions/search` | `q`       | Ausente ou vazio       | `400` — "Parameter 'q' is required for search."                   |
+| `/api/v1/transactions/search` | `q`       | Menos de 2 caracteres  | `400` — "Parameter 'q' must be at least 2 characters long."       |
+| `/api/v1/transactions/search` | `q`       | Mais de 100 caracteres | `400` — "Parameter 'q' must be at most 100 characters long."      |
 
 ---
 

@@ -15,11 +15,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { db } from "@/lib/firebase/client";
-import {
-  collection,
-  getDocs,
-  Timestamp,
-} from "firebase/firestore";
+import { collection, getDocs, Timestamp } from "firebase/firestore";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
@@ -59,7 +55,11 @@ interface SuggestedBatch {
 
 const REASON_META: Record<
   SuggestionReason,
-  { label: string; icon: React.ComponentType<{ className?: string }>; color: string }
+  {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    color: string;
+  }
 > = {
   same_supplier: {
     label: "Mesmo Fornecedor",
@@ -87,7 +87,9 @@ interface SmartBatchesCarouselProps {
   onBatchAccepted?: () => void;
 }
 
-export function SmartBatchesCarousel({ onBatchAccepted }: SmartBatchesCarouselProps) {
+export function SmartBatchesCarousel({
+  onBatchAccepted,
+}: SmartBatchesCarouselProps) {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
   const router = useRouter();
@@ -118,9 +120,7 @@ export function SmartBatchesCarousel({ onBatchAccepted }: SmartBatchesCarouselPr
             label: data.label ?? "",
             transactionIds: (data.transactionIds as string[]) ?? [],
             totalAmount: Number(data.totalAmount ?? 0),
-            dueDate: data.dueDate
-              ? (data.dueDate as Timestamp).toDate()
-              : null,
+            dueDate: data.dueDate ? (data.dueDate as Timestamp).toDate() : null,
             supplierOrClient: data.supplierOrClient ?? null,
             generatedAt: data.generatedAt
               ? (data.generatedAt as Timestamp).toDate()

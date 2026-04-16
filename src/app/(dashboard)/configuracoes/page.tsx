@@ -138,8 +138,7 @@ export default function SettingsPage() {
           show: canManageCompanies,
           color: "text-rose-600 dark:text-rose-400",
           iconBg: "bg-rose-50 dark:bg-rose-950/60",
-          iconBgDark:
-            "group-hover:bg-rose-100 dark:group-hover:bg-rose-900/60",
+          iconBgDark: "group-hover:bg-rose-100 dark:group-hover:bg-rose-900/60",
         },
       ],
     },
@@ -171,53 +170,56 @@ export default function SettingsPage() {
                 <div
                   key={item.href}
                   className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-                  style={{ animationDelay: `${idx * 60}ms`, animationFillMode: "both" }}
+                  style={{
+                    animationDelay: `${idx * 60}ms`,
+                    animationFillMode: "both",
+                  }}
                 >
-                <Link
-                  href={item.href}
-                  className="group outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-xl block h-full"
-                >
-                  <div
-                    className={cn(
-                      "relative flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-5",
-                      "transition-all duration-200",
-                      "hover:border-border/80 hover:shadow-md hover:-translate-y-0.5",
-                      "active:translate-y-0 active:shadow-sm"
-                    )}
+                  <Link
+                    href={item.href}
+                    className="group outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-xl block h-full"
                   >
-                    {/* Icon */}
                     <div
                       className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-lg transition-colors duration-200",
-                        item.iconBg,
-                        item.iconBgDark
+                        "relative flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-5",
+                        "transition-all duration-200",
+                        "hover:border-border/80 hover:shadow-md hover:-translate-y-0.5",
+                        "active:translate-y-0 active:shadow-sm",
                       )}
                     >
-                      <item.icon className={cn("h-5 w-5", item.color)} />
-                    </div>
+                      {/* Icon */}
+                      <div
+                        className={cn(
+                          "flex h-10 w-10 items-center justify-center rounded-lg transition-colors duration-200",
+                          item.iconBg,
+                          item.iconBgDark,
+                        )}
+                      >
+                        <item.icon className={cn("h-5 w-5", item.color)} />
+                      </div>
 
-                    {/* Text */}
-                    <div className="flex-1 space-y-1">
-                      <p className="text-sm font-medium leading-none text-foreground">
-                        {item.title}
-                      </p>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        {item.description}
-                      </p>
-                    </div>
+                      {/* Text */}
+                      <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none text-foreground">
+                          {item.title}
+                        </p>
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          {item.description}
+                        </p>
+                      </div>
 
-                    {/* CTA */}
-                    <div
-                      className={cn(
-                        "flex items-center gap-1 text-xs font-medium transition-colors duration-200",
-                        item.color
-                      )}
-                    >
-                      Acessar
-                      <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+                      {/* CTA */}
+                      <div
+                        className={cn(
+                          "flex items-center gap-1 text-xs font-medium transition-colors duration-200",
+                          item.color,
+                        )}
+                      >
+                        Acessar
+                        <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+                      </div>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
                 </div>
               ))}
             </div>

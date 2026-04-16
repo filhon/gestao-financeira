@@ -12,7 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
-import { Check, Plus, X, CheckCircle2, Zap, MinusCircle, Circle } from "lucide-react";
+import {
+  Check,
+  Plus,
+  X,
+  CheckCircle2,
+  Zap,
+  MinusCircle,
+  Circle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BankTransaction } from "@/lib/types";
 
@@ -125,7 +133,7 @@ export function ReconciliationTable({
               <TableCell>{getStatusBadge(tx.status)}</TableCell>
               <TableCell>
                 {tx.matchedTransactionIds &&
-                  tx.matchedTransactionIds.length > 0 ? (
+                tx.matchedTransactionIds.length > 0 ? (
                   <div className="flex flex-col gap-1 text-sm bg-muted/50 p-2 rounded">
                     <span className="font-medium text-green-700">
                       Combo ({tx.matchedTransactionIds.length} itens)
@@ -169,7 +177,9 @@ export function ReconciliationTable({
                           "dd/MM/yyyy",
                         )}
                       </span>
-                      <span className="font-financial">{formatCurrency(tx.matchedDetails.amount)}</span>
+                      <span className="font-financial">
+                        {formatCurrency(tx.matchedDetails.amount)}
+                      </span>
                     </div>
                     {/* Entity Name if available */}
                     {getMatchedEntityName(tx.matchedDetails) && (

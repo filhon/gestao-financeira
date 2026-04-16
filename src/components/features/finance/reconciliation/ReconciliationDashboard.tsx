@@ -363,7 +363,9 @@ export function ReconciliationDashboard() {
             </div>
             <div className="mt-2 space-y-1">
               <Progress
-                value={stats.total > 0 ? (stats.matched / stats.total) * 100 : 0}
+                value={
+                  stats.total > 0 ? (stats.matched / stats.total) * 100 : 0
+                }
                 className="h-1.5"
               />
               <p className="text-xs text-muted-foreground">
@@ -385,7 +387,9 @@ export function ReconciliationDashboard() {
             </div>
             <div className="mt-2 space-y-1">
               <Progress
-                value={stats.total > 0 ? (stats.potential / stats.total) * 100 : 0}
+                value={
+                  stats.total > 0 ? (stats.potential / stats.total) * 100 : 0
+                }
                 className="h-1.5 [&>div]:bg-yellow-500"
               />
               <p className="text-xs text-muted-foreground">
@@ -407,7 +411,9 @@ export function ReconciliationDashboard() {
             <div className="text-2xl font-bold text-blue-600">
               {systemPaidCount}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">no período do extrato</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              no período do extrato
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -442,7 +448,9 @@ export function ReconciliationDashboard() {
               checked={hideReconciled}
               onCheckedChange={(c) => setHideReconciled(!!c)}
             />
-            <Label htmlFor="hide-reconciled" className="cursor-pointer">Ocultar Conciliados</Label>
+            <Label htmlFor="hide-reconciled" className="cursor-pointer">
+              Ocultar Conciliados
+            </Label>
           </div>
         </div>
 

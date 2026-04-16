@@ -80,7 +80,7 @@ export default function ApprovalPage() {
         if (txData.status !== "pending_approval") {
           setStatus("error");
           setErrorMessage(
-            `Esta transação não está aguardando aprovação (status: ${txData.status}).`
+            `Esta transação não está aguardando aprovação (status: ${txData.status}).`,
           );
           return;
         }
@@ -169,7 +169,7 @@ export default function ApprovalPage() {
         token,
         "magic-link",
         comment || undefined,
-        amountChanged ? adjustedAmount : undefined
+        amountChanged ? adjustedAmount : undefined,
       );
 
       toast.success("Transação aprovada com sucesso!");

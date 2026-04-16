@@ -28,7 +28,13 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, Users, AlertCircle } from "lucide-react";
+import {
+  Loader2,
+  CheckCircle,
+  XCircle,
+  Users,
+  AlertCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -50,41 +56,39 @@ import { cn } from "@/lib/utils";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 
-const roleBadgeConfig: Record<
-  UserRole,
-  { label: string; className: string }
-> = {
-  admin: {
-    label: "Administrador",
-    className:
-      "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-400 dark:border-violet-800",
-  },
-  financial_manager: {
-    label: "Gerente Financeiro",
-    className:
-      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
-  },
-  approver: {
-    label: "Aprovador",
-    className:
-      "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800",
-  },
-  releaser: {
-    label: "Pagador/Baixador",
-    className:
-      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800",
-  },
-  auditor: {
-    label: "Auditor",
-    className:
-      "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-400 dark:border-orange-800",
-  },
-  user: {
-    label: "Usuário",
-    className:
-      "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700",
-  },
-};
+const roleBadgeConfig: Record<UserRole, { label: string; className: string }> =
+  {
+    admin: {
+      label: "Administrador",
+      className:
+        "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-400 dark:border-violet-800",
+    },
+    financial_manager: {
+      label: "Gerente Financeiro",
+      className:
+        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+    },
+    approver: {
+      label: "Aprovador",
+      className:
+        "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800",
+    },
+    releaser: {
+      label: "Pagador/Baixador",
+      className:
+        "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800",
+    },
+    auditor: {
+      label: "Auditor",
+      className:
+        "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-400 dark:border-orange-800",
+    },
+    user: {
+      label: "Usuário",
+      className:
+        "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700",
+    },
+  };
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
@@ -301,12 +305,15 @@ export default function UsersPage() {
                 {selectedCompany?.name}
               </span>
               {" · "}
-              <span>{activeUsers.length} ativo{activeUsers.length !== 1 ? "s" : ""}</span>
+              <span>
+                {activeUsers.length} ativo{activeUsers.length !== 1 ? "s" : ""}
+              </span>
               {pendingUsers.length > 0 && (
                 <>
                   {" · "}
                   <span className="text-amber-600 dark:text-amber-400 font-medium">
-                    {pendingUsers.length} pendente{pendingUsers.length !== 1 ? "s" : ""}
+                    {pendingUsers.length} pendente
+                    {pendingUsers.length !== 1 ? "s" : ""}
                   </span>
                 </>
               )}
@@ -320,7 +327,9 @@ export default function UsersPage() {
         <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>
-            <strong>{pendingUsers.length}</strong> solicitaç{pendingUsers.length > 1 ? "ões" : "ão"} de acesso aguardando aprovação.
+            <strong>{pendingUsers.length}</strong> solicitaç
+            {pendingUsers.length > 1 ? "ões" : "ão"} de acesso aguardando
+            aprovação.
           </span>
         </div>
       )}
@@ -395,7 +404,8 @@ export default function UsersPage() {
                     sortedActiveUsers.map((user, idx) => {
                       const currentRole = getRoleForCompany(user);
                       const isCurrentUser = currentUser?.uid === user.uid;
-                      const roleConfig = roleBadgeConfig[currentRole as UserRole];
+                      const roleConfig =
+                        roleBadgeConfig[currentRole as UserRole];
                       return (
                         <TableRow
                           key={user.uid}
@@ -546,7 +556,9 @@ export default function UsersPage() {
                             </Avatar>
                             <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-card" />
                           </div>
-                          <span className="font-medium">{user.displayName}</span>
+                          <span className="font-medium">
+                            {user.displayName}
+                          </span>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {user.email}
