@@ -34,12 +34,14 @@ import {
   BarChart3,
   Layers,
   Sparkles,
+  Sheet,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   startOfMonth,
   endOfMonth,
   subMonths,
+  subDays,
   format,
   addDays,
   addWeeks,
@@ -128,9 +130,9 @@ export default function ReportsPage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const { onlyOwnPayables } = usePermissions();
-  const [loadingFormat, setLoadingFormat] = useState<"pdf" | "csv" | null>(
-    null,
-  );
+  const [loadingFormat, setLoadingFormat] = useState<
+    "pdf" | "csv" | "excel" | null
+  >(null);
   const isLoading = loadingFormat !== null;
 
   const [startDate, setStartDate] = useState<Date>(startOfMonth(new Date()));
@@ -155,12 +157,16 @@ export default function ReportsPage() {
   const selectedReportType =
     REPORT_TYPES.find((r) => r.value === reportType) ?? REPORT_TYPES[0];
 
-  const handleGenerate = async (formatType: "pdf" | "csv") => {
+  const handleGenerate = async (formatType: "pdf" | "csv" | "excel") => {
     if (!selectedCompany || !user) return;
 
     try {
       setLoadingFormat(formatType);
 
+      // A query do Firestore filtra por dueDate. Para capturar transações com
+      // vencimento anterior ao período mas pagas dentro dele (ex: vencimento 26/02,
+      // pago em 03/03), alargamos a janela em 90 dias no passado. O filtro preciso
+      // pela data efetiva é feito em memória logo abaixo.
       const filter: {
         companyId: string;
         createdBy?: string;
@@ -169,7 +175,7 @@ export default function ReportsPage() {
         costCenterId?: string;
       } = {
         companyId: selectedCompany.id,
-        startDate: startDate,
+        startDate: subDays(startDate, 90),
         endDate: endDate,
       };
       if (onlyOwnPayables) {
@@ -262,6 +268,15 @@ export default function ReportsPage() {
       if (formatType === "csv") {
         reportService.exportToCSV(filtered);
         toast.success("Exportação CSV concluída!");
+      } else if (formatType === "excel") {
+        await reportService.exportToExcel(
+          filtered,
+          start,
+          end,
+          selectedCompany.name,
+          entities as Entity[],
+        );
+        toast.success("Exportação Excel concluída!");
       } else {
         if (reportType === "cash_flow") {
           await reportService.generateCashFlowPDF(
@@ -599,6 +614,16 @@ export default function ReportsPage() {
                 >
                   {loadingFormat !== "csv" && <Download className="h-4 w-4" />}
                   Exportar CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleGenerate("excel")}
+                  disabled={isLoading}
+                  loading={loadingFormat === "excel"}
+                  className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
+                >
+                  {loadingFormat !== "excel" && <Sheet className="h-4 w-4" />}
+                  Exportar Excel
                 </Button>
                 <Button
                   onClick={() => handleGenerate("pdf")}
