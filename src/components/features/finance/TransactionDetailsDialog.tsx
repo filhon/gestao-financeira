@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { transactionService } from "@/lib/services/transactionService";
+import { comprovanteService } from "@/lib/services/comprovanteService";
 import { emailService } from "@/lib/services/emailService";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -32,6 +33,8 @@ import {
   Copy,
   Barcode,
   MessageCircle,
+  FileCheck,
+  Download,
 } from "lucide-react";
 import { PaymentDialog } from "./PaymentDialog";
 import { formatCurrency } from "@/lib/utils";
@@ -94,6 +97,8 @@ export function TransactionDetailsDialog({
     useState<TransactionFormData | null>(null);
   // costCenterNames is now derived via useMemo
   const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
+  const [comprovanteId, setComprovanteId] = useState<string | null>(null);
 
   // Reset edit mode when dialog closes, but delayed to allow exit animations to complete cleanly
   // without mutating the DOM mid-animation. This prevents Radix safelyDetachRef crashes.
@@ -104,10 +109,37 @@ export function TransactionDetailsDialog({
         setPendingUpdateData(null);
         setIsRecurrenceUpdateDialogOpen(false);
         setActiveTab("details");
+        setComprovanteUrl(null);
+        setComprovanteId(null);
       }, 400);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  // Fetch comprovante from Firestore when dialog opens — the transaction prop may be stale
+  // (e.g. confirmed on the /comprovantes page but list cache not yet refreshed)
+  useEffect(() => {
+    if (!isOpen || !transaction) return;
+    if (transaction.comprovanteUrl) {
+      setComprovanteUrl(transaction.comprovanteUrl);
+      setComprovanteId(transaction.comprovanteId ?? null);
+      return;
+    }
+    if (
+      transaction.type !== "payable" ||
+      (transaction.status !== "paid" && transaction.status !== "authorized")
+    )
+      return;
+    comprovanteService
+      .getByTransactionId(transaction.id)
+      .then((c) => {
+        if (c?.matchStatus === "matched") {
+          setComprovanteUrl(c.storageUrl);
+          setComprovanteId(c.id);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen, transaction]);
 
   // Resolve cost center names from prop — zero extra DB reads and perfectly synchronous
   const costCenterNames = useMemo(() => {
@@ -492,6 +524,60 @@ export function TransactionDetailsDialog({
           </div>
         </>
       )}
+
+      {/* ── Comprovante de pagamento ─────────────────────────────────────── */}
+      {comprovanteUrl ? (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">
+              Comprovante de Pagamento
+            </h4>
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 shrink-0">
+                <FileCheck className="h-4 w-4 text-emerald-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Comprovante disponível</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {comprovanteId}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 shrink-0"
+                asChild
+              >
+                <a
+                  href={comprovanteUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Baixar
+                </a>
+              </Button>
+            </div>
+          </div>
+        </>
+      ) : transaction.type === "payable" &&
+        (transaction.status === "paid" ||
+          transaction.status === "authorized") ? (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">
+              Comprovante de Pagamento
+            </h4>
+            <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2.5 text-muted-foreground">
+              <FileCheck className="h-4 w-4 shrink-0" />
+              <p className="text-sm">Nenhum comprovante associado</p>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {transaction.barcode && (
         <>

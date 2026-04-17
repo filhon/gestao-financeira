@@ -149,6 +149,21 @@ service firebase.storage {
       allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
     }
 
+    // 8. Comprovantes (Payment Receipt PDFs)
+    // Path: comprovantes/{companyId}/{fileId}.pdf
+    match /comprovantes/{companyId}/{fileName} {
+      // READ: All authenticated roles in the company
+      allow read: if isAuthenticated() && canViewTransactions(companyId);
+
+      // WRITE (Upload): Admin and Financial Manager only
+      allow write: if isAuthenticated() && isManager(companyId)
+        && request.resource.size < 20 * 1024 * 1024 // Max 20MB
+        && request.resource.contentType.matches('application/pdf|application/octet-stream');
+
+      // DELETE: Admin and Financial Manager only
+      allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
+    }
+
     // Default: Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;

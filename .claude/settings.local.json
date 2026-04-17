@@ -4,7 +4,9 @@
       "Bash(find 'c:/Users/Filipe Honório/Documents/gestao-financeira' -type f -name .env* -o -name next.config*)",
       "Bash(ls -la \"c:/Users/Filipe Honório/Documents/gestao-financeira/src/app/\\(dashboard\\)/financeiro/\")",
       "Bash(find \"c:/Users/Filipe Honório/Documents/gestao-financeira/src/app/\\(dashboard\\)/financeiro\" -type f -name \"*.tsx\" -o -name \"*.ts\")",
-      "Bash(ls -laR \"c:/Users/Filipe Honório/Documents/gestao-financeira/src/app/\\(dashboard\\)/financeiro/contas-pagar\")"
+      "Bash(ls -laR \"c:/Users/Filipe Honório/Documents/gestao-financeira/src/app/\\(dashboard\\)/financeiro/contas-pagar\")",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

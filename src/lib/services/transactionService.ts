@@ -71,6 +71,16 @@ const stripUndefined = (obj: any): any => {
 };
 
 export const transactionService = {
+  getByIds: async (ids: string[]): Promise<Transaction[]> => {
+    if (!ids.length) return [];
+    const snaps = await Promise.all(
+      ids.map((id) => getDoc(doc(db, COLLECTION_NAME, id))),
+    );
+    return snaps
+      .filter((s) => s.exists())
+      .map((s) => convertDates({ id: s.id, ...s.data()! }));
+  },
+
   getAll: async (filter?: {
     type?: string;
     status?: string;

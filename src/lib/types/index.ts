@@ -228,6 +228,10 @@ export interface Transaction {
     emailSent: boolean;
     whatsappSent: boolean;
   };
+
+  // Comprovante de pagamento
+  comprovanteId?: string;
+  comprovanteUrl?: string;
 }
 
 export type PaymentBatchStatus =
@@ -383,6 +387,48 @@ export interface Feedback {
   respondedBy?: string;
   respondedByEmail?: string;
   respondedAt?: Date;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Comprovantes (Payment Receipts)
+
+export type ComprovanteMatchStatus =
+  | "matched"
+  | "pending_review"
+  | "unmatched"
+  | "rejected_match";
+
+export type ComprovanteConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
+
+export interface Comprovante {
+  id: string;
+  companyId: string;
+  uploadBatchId: string; // Groups all pages from the same PDF upload
+  pageNumber: number; // 1-based page index in the original PDF
+  totalPages: number; // Total pages in the original PDF
+  storageUrl: string; // Firebase Storage download URL
+  storagePath: string; // Firebase Storage full path
+  fileSize: number; // Size in bytes
+
+  // Match data
+  matchStatus: ComprovanteMatchStatus;
+  transactionId?: string;
+  suggestedTransactionId?: string; // Best match from upload algorithm (not yet confirmed)
+  matchConfidence?: number; // 0-100
+  matchConfidenceLevel?: ComprovanteConfidenceLevel;
+  matchedAmount?: number; // Amount found in extracted text
+  matchedDate?: Date; // Date found in extracted text
+  matchedEntity?: string; // Beneficiary found in extracted text
+  extractedText?: string; // Raw text extracted from the PDF page
+
+  // Metadata
+  uploadedBy: string; // User ID
+  uploadedAt: Date;
+  reviewedBy?: string;
+  reviewedAt?: Date;
+  notes?: string;
 
   createdAt: Date;
   updatedAt: Date;

@@ -20,6 +20,7 @@ import {
   Map as MapIcon,
   Scale,
   TrendingUp,
+  FileCheck,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -79,6 +80,12 @@ const allMenuItems: MenuItem[] = [
         href: "/financeiro/lotes",
         icon: Layers,
         permission: "canViewBatches",
+      },
+      {
+        title: "Comprovantes",
+        href: "/financeiro/comprovantes",
+        icon: FileCheck,
+        permission: "canViewPayables",
       },
     ],
   },

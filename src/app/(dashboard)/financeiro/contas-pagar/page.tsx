@@ -890,10 +890,10 @@ export default function AccountsPayablePage() {
     filterOptions.costCenterId !== "all";
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
       {/* Page header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Contas a Pagar</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Contas a Pagar</h1>
 
         <div className="flex gap-2">
           {canCreatePayables && (
@@ -1364,15 +1364,18 @@ export default function AccountsPayablePage() {
                 )}
                 {hasMore && !debouncedSearchTerm && (
                   <TableRow ref={targetRef}>
-                    <TableCell colSpan={8} className="h-14 text-center">
-                      <div className="flex justify-center items-center h-full text-muted-foreground gap-2">
-                        {isFetchingNextPage ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Carregando mais...
-                          </>
-                        ) : null}
-                      </div>
+                    <TableCell
+                      colSpan={8}
+                      className={
+                        isFetchingNextPage ? "py-3 text-center" : "h-px p-0"
+                      }
+                    >
+                      {isFetchingNextPage && (
+                        <div className="flex justify-center items-center text-muted-foreground gap-2">
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Carregando mais...
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 )}

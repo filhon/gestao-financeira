@@ -286,6 +286,23 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 16. Comprovantes (Payment Receipts)
+    match /comprovantes/{comprovanteId} {
+      function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+      // Read: All authenticated roles in the company
+      allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+
+      // Create: Admin and Financial Manager only
+      allow create: if isAuthenticated() && isManager(getCompanyId());
+
+      // Update: Admin and Financial Manager only (confirm/reject matches)
+      allow update: if isAuthenticated() && isManager(getCompanyId());
+
+      // Delete: Admin only (global admin or company admin)
+      allow delete: if isGlobalAdmin();
+    }
+
     // Default Deny
     match /{document=**} {
       allow read, write: if false;

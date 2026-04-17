@@ -34,7 +34,10 @@ function getAdminApp(): admin.app.App {
     credential = admin.credential.cert(serviceAccount);
   }
 
-  return admin.initializeApp({ credential });
+  return admin.initializeApp({
+    credential,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  });
 }
 
 // Lazy getters — the Admin SDK is only initialised on the first actual
@@ -58,6 +61,14 @@ export const adminDb = new Proxy({} as admin.firestore.Firestore, {
 export const adminAuth = new Proxy({} as admin.auth.Auth, {
   get(_target, prop) {
     return (getApp().auth() as unknown as Record<string | symbol, unknown>)[
+      prop
+    ];
+  },
+});
+
+export const adminStorage = new Proxy({} as admin.storage.Storage, {
+  get(_target, prop) {
+    return (getApp().storage() as unknown as Record<string | symbol, unknown>)[
       prop
     ];
   },
