@@ -8,6 +8,7 @@ import {
   isBefore,
   isSameDay,
 } from "date-fns";
+import { syncCompany } from "./sheetsSync";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -774,5 +775,55 @@ export const processRecurringTemplates = functions
     console.log(
       `processRecurringTemplates: concluído. ${generatedCount} transação(ões) gerada(s).`,
     );
+    return null;
+  });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// syncTransactionsToSheets
+//
+// Roda a cada hora via Cloud Scheduler.
+// Sincroniza todas as transações do Firestore com planilhas Google Sheets
+// configuradas por empresa (campo `sheetsSync` no documento da empresa).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const syncTransactionsToSheets = functions
+  .runWith({
+    timeoutSeconds: 540,
+    memory: "512MB",
+    secrets: ["SHEETS_SERVICE_ACCOUNT"],
+  })
+  .pubsub.schedule("0 * * * *")
+  .timeZone("America/Sao_Paulo")
+  .onRun(async () => {
+    console.log("syncTransactionsToSheets: iniciando...");
+
+    const serviceAccountJson = process.env.SHEETS_SERVICE_ACCOUNT;
+    if (!serviceAccountJson) {
+      console.error("SHEETS_SERVICE_ACCOUNT secret não configurado.");
+      return null;
+    }
+
+    const companiesSnap = await db
+      .collection("companies")
+      .where("sheetsSync", "!=", null)
+      .get();
+
+    if (companiesSnap.empty) {
+      console.log("syncTransactionsToSheets: nenhuma empresa configurada.");
+      return null;
+    }
+
+    for (const companyDoc of companiesSnap.docs) {
+      const { sheetsSync } = companyDoc.data();
+      if (!sheetsSync?.spreadsheetId || !sheetsSync?.sheetName) continue;
+
+      try {
+        await syncCompany(companyDoc.id, sheetsSync, serviceAccountJson);
+      } catch (err) {
+        console.error(`syncTransactionsToSheets [${companyDoc.id}]:`, err);
+      }
+    }
+
+    console.log("syncTransactionsToSheets: concluído.");
     return null;
   });

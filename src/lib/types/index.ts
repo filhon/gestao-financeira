@@ -28,6 +28,11 @@ export type AttachmentType = "invoice" | "demand_proof" | "other";
 
 export type RequestOriginType = "director" | "department" | "sector";
 
+export interface SheetsSyncConfig {
+  spreadsheetId: string;
+  sheetName: string;
+}
+
 export interface Company {
   id: string;
   name: string;
@@ -41,6 +46,9 @@ export interface Company {
   // Batch auto-creation settings
   batchFrequencyDays?: number; // Default: 7
   lastBatchCreatedAt?: Date;
+
+  // Google Sheets sync config
+  sheetsSync?: SheetsSyncConfig;
 }
 
 export interface UserProfile {
