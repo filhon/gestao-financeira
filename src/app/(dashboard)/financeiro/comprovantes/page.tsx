@@ -16,6 +16,9 @@ import {
   MoreHorizontal,
   RefreshCw,
   Share2,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,6 +137,38 @@ function KpiCard({
   );
 }
 
+// ── Sort header button ───────────────────────────────────────────────────────
+
+function SortHeader({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1 select-none hover:text-foreground transition-colors"
+    >
+      {label}
+      {active ? (
+        dir === "asc" ? (
+          <ChevronUp className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5" />
+        )
+      ) : (
+        <ChevronsUpDown className="h-3.5 w-3.5 opacity-40" />
+      )}
+    </button>
+  );
+}
+
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export default function ComprovantesPage() {
@@ -142,6 +177,21 @@ export default function ComprovantesPage() {
   const { isAdmin, isFinancialManager } = usePermissions();
 
   const canUpload = isAdmin || isFinancialManager;
+
+  // ── Sort ─────────────────────────────────────────────────────────────────────
+  type SortField = "date" | "amount" | "status" | "confidence";
+  type SortDir = "asc" | "desc";
+  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "date" ? "desc" : "asc");
+    }
+  };
 
   // ── Filters ──────────────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter] = useState<
@@ -248,20 +298,69 @@ export default function ComprovantesPage() {
       .catch(console.error);
   }, [items]);
 
-  // Client-side search filter
-  const filtered = debouncedSearch
-    ? items.filter((c) =>
-        [
-          c.extractedText ?? "",
-          c.matchedEntity ?? "",
-          txMap.get(c.transactionId ?? "")?.description ?? "",
-          txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(debouncedSearch.toLowerCase()),
-      )
-    : items;
+  // Client-side search filter + sort
+  const statusOrder: Record<string, number> = {
+    pending_review: 0,
+    unmatched: 1,
+    rejected_match: 2,
+    matched: 3,
+  };
+
+  const filtered = (
+    debouncedSearch
+      ? items.filter((c) =>
+          [
+            c.extractedText ?? "",
+            c.matchedEntity ?? "",
+            txMap.get(c.transactionId ?? "")?.description ?? "",
+            txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(debouncedSearch.toLowerCase()),
+        )
+      : items
+  )
+    .slice()
+    .sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "date") {
+        const aDate =
+          a.matchedDate ??
+          (a.transactionId
+            ? txMap.get(a.transactionId)?.paymentDate
+            : undefined);
+        const bDate =
+          b.matchedDate ??
+          (b.transactionId
+            ? txMap.get(b.transactionId)?.paymentDate
+            : undefined);
+        cmp = (aDate?.getTime() ?? 0) - (bDate?.getTime() ?? 0);
+      } else if (sortField === "amount") {
+        const aAmt =
+          a.matchedAmount ??
+          (a.transactionId
+            ? (txMap.get(a.transactionId)?.finalAmount ??
+              txMap.get(a.transactionId)?.amount ??
+              0)
+            : 0);
+        const bAmt =
+          b.matchedAmount ??
+          (b.transactionId
+            ? (txMap.get(b.transactionId)?.finalAmount ??
+              txMap.get(b.transactionId)?.amount ??
+              0)
+            : 0);
+        cmp = aAmt - bAmt;
+      } else if (sortField === "status") {
+        cmp =
+          (statusOrder[a.matchStatus] ?? 99) -
+          (statusOrder[b.matchStatus] ?? 99);
+      } else if (sortField === "confidence") {
+        cmp = (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0);
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
 
   // Infinite scroll sentinel
   const { targetRef: sentinelRef, isIntersecting } =
@@ -503,11 +602,39 @@ export default function ComprovantesPage() {
               <TableRow>
                 <TableHead className="w-20">Página</TableHead>
                 <TableHead>Transação Associada</TableHead>
-                <TableHead>Valor</TableHead>
-                <TableHead>Data</TableHead>
+                <TableHead>
+                  <SortHeader
+                    label="Valor"
+                    active={sortField === "amount"}
+                    dir={sortDir}
+                    onClick={() => handleSort("amount")}
+                  />
+                </TableHead>
+                <TableHead>
+                  <SortHeader
+                    label="Data"
+                    active={sortField === "date"}
+                    dir={sortDir}
+                    onClick={() => handleSort("date")}
+                  />
+                </TableHead>
                 <TableHead>Entidade</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Confiança</TableHead>
+                <TableHead>
+                  <SortHeader
+                    label="Status"
+                    active={sortField === "status"}
+                    dir={sortDir}
+                    onClick={() => handleSort("status")}
+                  />
+                </TableHead>
+                <TableHead>
+                  <SortHeader
+                    label="Confiança"
+                    active={sortField === "confidence"}
+                    dir={sortDir}
+                    onClick={() => handleSort("confidence")}
+                  />
+                </TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
@@ -643,7 +770,8 @@ export default function ComprovantesPage() {
                             <DropdownMenuItem asChild>
                               <a
                                 href={c.storageUrl}
-                                download
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="flex items-center gap-2 cursor-pointer"
                               >
                                 <Download className="h-4 w-4" />
