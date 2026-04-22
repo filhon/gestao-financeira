@@ -13,12 +13,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import {
   Card,
   CardContent,
@@ -291,25 +291,25 @@ export default function CompaniesPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
+      <ResponsiveModal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <ResponsiveModalContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>
               {selectedCompany ? "Editar Empresa" : "Nova Empresa"}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveModalTitle>
+            <ResponsiveModalDescription>
               {selectedCompany
                 ? "Atualize os dados da empresa."
                 : "Preencha os dados para criar uma nova empresa."}
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
           <CompanyForm
             defaultValues={selectedCompany || {}}
             onSubmit={selectedCompany ? handleUpdate : handleCreate}
             isLoading={isSubmitting}
           />
-        </DialogContent>
-      </Dialog>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       <ConfirmDialog
         open={!!deleteId}

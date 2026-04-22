@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalFooter,
+} from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/utils";
@@ -87,13 +87,13 @@ export function PaymentDialog({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>
+    <ResponsiveModal open={isOpen} onOpenChange={onClose}>
+      <ResponsiveModalContent className="sm:max-w-[425px]">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>
             {type === "pay" ? "Confirmar Pagamento" : "Confirmar Recebimento"}
-          </DialogTitle>
-        </DialogHeader>
+          </ResponsiveModalTitle>
+        </ResponsiveModalHeader>
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
             <Label>
@@ -151,7 +151,7 @@ export function PaymentDialog({
             </div>
           )}
         </div>
-        <DialogFooter>
+        <ResponsiveModalFooter>
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancelar
           </Button>
@@ -159,8 +159,8 @@ export function PaymentDialog({
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Confirmar
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveModalFooter>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

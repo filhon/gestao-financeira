@@ -77,18 +77,26 @@ export function CostCenterChart({ year }: { year?: number }) {
     : [];
 
   return (
-    <Card className="col-span-3">
+    <Card className="col-span-full md:col-span-3">
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-medium">
-            Orçamento por Centro de Custo
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm md:text-base font-medium leading-tight">
+            Orçamento por
+            <br className="sm:hidden" /> Centro de Custo
           </CardTitle>
-          <Tabs value={view} onValueChange={setView} className="w-[160px]">
-            <TabsList className="grid w-full grid-cols-2 h-8">
-              <TabsTrigger value="risk" className="text-xs h-6">
+          <Tabs
+            value={view}
+            onValueChange={setView}
+            className="w-[140px] shrink-0"
+          >
+            <TabsList className="grid w-full grid-cols-2 h-7">
+              <TabsTrigger value="risk" className="text-[10px] md:text-xs h-5">
                 Risco %
               </TabsTrigger>
-              <TabsTrigger value="volume" className="text-xs h-6">
+              <TabsTrigger
+                value="volume"
+                className="text-[10px] md:text-xs h-5"
+              >
                 Volume R$
               </TabsTrigger>
             </TabsList>
@@ -128,7 +136,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                           <div className="flex items-center gap-2">
                             {getStatusIcon(item.status)}
                             <span
-                              className="font-medium truncate max-w-[120px]"
+                              className="font-medium truncate max-w-[80px] md:max-w-[120px]"
                               title={item.name}
                             >
                               {item.name}

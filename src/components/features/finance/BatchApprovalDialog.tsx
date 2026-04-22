@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalFooter,
+} from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -215,11 +215,13 @@ export function BatchApprovalDialog({
   if (!batch) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Aprovar Lote: {batch.name}</DialogTitle>
-        </DialogHeader>
+    <ResponsiveModal open={isOpen} onOpenChange={handleOpenChange}>
+      <ResponsiveModalContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>
+            Aprovar Lote: {batch.name}
+          </ResponsiveModalTitle>
+        </ResponsiveModalHeader>
 
         <div className="space-y-4">
           {/* Summary */}
@@ -380,7 +382,7 @@ export function BatchApprovalDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <ResponsiveModalFooter>
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancelar
           </Button>
@@ -392,8 +394,8 @@ export function BatchApprovalDialog({
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Aprovar Lote
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveModalFooter>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

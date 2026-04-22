@@ -2,12 +2,12 @@
 
 import { useState, useCallback, useRef } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalDescription,
+} from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -271,15 +271,15 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Enviar Comprovantes</DialogTitle>
-          <DialogDescription>
+    <ResponsiveModal open={open} onOpenChange={handleClose}>
+      <ResponsiveModalContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>Enviar Comprovantes</ResponsiveModalTitle>
+          <ResponsiveModalDescription>
             Faça upload de um PDF com um ou mais comprovantes de pagamento. O
             sistema irá associar automaticamente cada página a uma transação.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
 
         {/* ── IDLE: drop zone ─────────────────────────────────────────────── */}
         {step === "idle" && (
@@ -498,7 +498,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
             <p className="text-sm font-medium">Comprovantes enviados!</p>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

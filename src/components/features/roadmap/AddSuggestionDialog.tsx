@@ -3,14 +3,14 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalTrigger,
+} from "@/components/ui/responsive-modal";
 import {
   Form,
   FormControl,
@@ -81,20 +81,20 @@ export function AddSuggestionDialog({ onSuccess }: AddSuggestionDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+    <ResponsiveModal open={open} onOpenChange={setOpen}>
+      <ResponsiveModalTrigger asChild>
         <Button size="sm" className="gap-2">
           <Plus className="h-4 w-4" />
           Nova Sugestão
         </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>Adicionar Sugestão</DialogTitle>
-          <DialogDescription>
+      </ResponsiveModalTrigger>
+      <ResponsiveModalContent className="sm:max-w-[425px]">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>Adicionar Sugestão</ResponsiveModalTitle>
+          <ResponsiveModalDescription>
             Compartilhe sua ideia para melhorar a plataforma.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
@@ -131,17 +131,17 @@ export function AddSuggestionDialog({ onSuccess }: AddSuggestionDialogProps) {
                 </FormItem>
               )}
             />
-            <DialogFooter>
+            <ResponsiveModalFooter>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
                 Enviar Sugestão
               </Button>
-            </DialogFooter>
+            </ResponsiveModalFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

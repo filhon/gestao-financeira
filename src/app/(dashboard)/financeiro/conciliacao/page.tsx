@@ -7,20 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function ConciliacaoPage() {
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">
-            Conciliação Bancária
-          </h2>
-          <p className="text-muted-foreground">
-            Importe extratos e identifique lançamentos automaticamente.
-          </p>
-        </div>
-      </div>
-
-      <ReconciliationDashboard />
-    </div>
-  );
+  return <ReconciliationDashboard />;
 }

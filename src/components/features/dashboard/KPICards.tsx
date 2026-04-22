@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { ArrowDownIcon, ArrowUpIcon, DollarSign, Wallet } from "lucide-react";
 import { DashboardMetrics } from "@/lib/services/dashboardService";
 import { AnimatedCounter } from "@/components/ui/animated-counter";
@@ -15,7 +15,7 @@ export function KPICards({ metrics }: KPICardsProps) {
     metrics.balance + metrics.shortTermReceivables - metrics.shortTermPayables;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
       {/* Receita Total */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -24,10 +24,18 @@ export function KPICards({ metrics }: KPICardsProps) {
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold text-green-600">
-            <AnimatedCounter
-              value={metrics.totalRevenue}
-              formatter={formatCurrency}
-            />
+            <span className="md:hidden">
+              <AnimatedCounter
+                value={metrics.totalRevenue}
+                formatter={formatCurrencyAbbr}
+              />
+            </span>
+            <span className="hidden md:inline">
+              <AnimatedCounter
+                value={metrics.totalRevenue}
+                formatter={formatCurrency}
+              />
+            </span>
           </div>
           <p className="text-xs text-muted-foreground">
             +{" "}
@@ -48,10 +56,18 @@ export function KPICards({ metrics }: KPICardsProps) {
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold text-red-600">
-            <AnimatedCounter
-              value={metrics.totalExpenses}
-              formatter={formatCurrency}
-            />
+            <span className="md:hidden">
+              <AnimatedCounter
+                value={metrics.totalExpenses}
+                formatter={formatCurrencyAbbr}
+              />
+            </span>
+            <span className="hidden md:inline">
+              <AnimatedCounter
+                value={metrics.totalExpenses}
+                formatter={formatCurrency}
+              />
+            </span>
           </div>
           <p className="text-xs text-muted-foreground">
             +{" "}
@@ -74,10 +90,18 @@ export function KPICards({ metrics }: KPICardsProps) {
           <div
             className={`text-2xl font-bold ${metrics.balance >= 0 ? "text-blue-600" : "text-red-600"}`}
           >
-            <AnimatedCounter
-              value={metrics.balance}
-              formatter={formatCurrency}
-            />
+            <span className="md:hidden">
+              <AnimatedCounter
+                value={metrics.balance}
+                formatter={formatCurrencyAbbr}
+              />
+            </span>
+            <span className="hidden md:inline">
+              <AnimatedCounter
+                value={metrics.balance}
+                formatter={formatCurrency}
+              />
+            </span>
           </div>
           <p className="text-xs text-muted-foreground">
             Receitas &minus; Despesas (pagas)
@@ -97,10 +121,18 @@ export function KPICards({ metrics }: KPICardsProps) {
           <div
             className={`text-2xl font-bold ${forecastBalance >= 0 ? "text-blue-600" : "text-red-600"}`}
           >
-            <AnimatedCounter
-              value={forecastBalance}
-              formatter={formatCurrency}
-            />
+            <span className="md:hidden">
+              <AnimatedCounter
+                value={forecastBalance}
+                formatter={formatCurrencyAbbr}
+              />
+            </span>
+            <span className="hidden md:inline">
+              <AnimatedCounter
+                value={forecastBalance}
+                formatter={formatCurrency}
+              />
+            </span>
           </div>
           <p className="text-xs text-muted-foreground">
             <span className="text-green-600">

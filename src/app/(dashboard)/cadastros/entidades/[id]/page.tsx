@@ -313,7 +313,7 @@ export default function EntityDashboard() {
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       {/* ── Header ── */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="max-w-7xl mx-auto px-6 py-5">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 md:py-5">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             {/* Left: back + entity identity */}
             <div className="flex items-center gap-4">
@@ -341,7 +341,7 @@ export default function EntityDashboard() {
 
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                  <h1 className="text-base md:text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                     {entity.name}
                   </h1>
                   <span
@@ -380,7 +380,7 @@ export default function EntityDashboard() {
           </div>
 
           {/* Tab bar */}
-          <div className="flex gap-1 mt-5 -mb-px">
+          <div className="flex gap-1 mt-4 md:mt-5 -mb-px">
             {(
               [
                 { id: "overview", label: "Visão Geral", icon: Activity },
@@ -405,19 +405,19 @@ export default function EntityDashboard() {
       </div>
 
       {/* ── Content ── */}
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 md:py-6 space-y-4 md:space-y-6">
         {activeTab === "overview" && (
           <>
             {/* KPI row */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 md:gap-4 grid-cols-2 lg:grid-cols-4">
               {/* A Pagar */}
-              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
                       Total a Pagar
                     </p>
-                    <p className="mt-1.5 text-2xl font-bold font-financial text-rose-600">
+                    <p className="mt-1.5 text-lg md:text-2xl font-bold font-financial text-rose-600">
                       {formatCurrency(totalPayables)}
                     </p>
                   </div>
@@ -436,13 +436,13 @@ export default function EntityDashboard() {
               </div>
 
               {/* A Receber */}
-              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
                       Total a Receber
                     </p>
-                    <p className="mt-1.5 text-2xl font-bold font-financial text-emerald-600">
+                    <p className="mt-1.5 text-lg md:text-2xl font-bold font-financial text-emerald-600">
                       {formatCurrency(totalReceivables)}
                     </p>
                   </div>
@@ -461,14 +461,14 @@ export default function EntityDashboard() {
               </div>
 
               {/* Saldo */}
-              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
                       Saldo
                     </p>
                     <p
-                      className={`mt-1.5 text-2xl font-bold font-financial ${balance >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                      className={`mt-1.5 text-lg md:text-2xl font-bold font-financial ${balance >= 0 ? "text-emerald-600" : "text-rose-600"}`}
                     >
                       {formatCurrency(balance)}
                     </p>
@@ -489,7 +489,7 @@ export default function EntityDashboard() {
               </div>
 
               {/* Transações */}
-              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
@@ -815,7 +815,7 @@ export default function EntityDashboard() {
         {activeTab === "info" && (
           <div className="grid gap-4 lg:grid-cols-3">
             {/* Contact */}
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
               <div className="flex items-center gap-2 mb-4">
                 <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800">
                   <User className="h-3.5 w-3.5 text-zinc-500" />
@@ -860,7 +860,7 @@ export default function EntityDashboard() {
             </div>
 
             {/* Bank */}
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
               <div className="flex items-center gap-2 mb-4">
                 <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800">
                   <Banknote className="h-3.5 w-3.5 text-zinc-500" />
@@ -927,7 +927,7 @@ export default function EntityDashboard() {
             </div>
 
             {/* General info */}
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
+            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 md:p-5">
               <div className="flex items-center gap-2 mb-4">
                 <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800">
                   <FileText className="h-3.5 w-3.5 text-zinc-500" />

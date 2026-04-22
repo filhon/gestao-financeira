@@ -177,7 +177,7 @@ export function Sidebar() {
   };
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card">
+    <div className="hidden md:flex h-full w-64 flex-col border-r bg-card">
       {/* Brand */}
       <div className="flex items-center gap-2.5 px-5 py-5 border-b">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">

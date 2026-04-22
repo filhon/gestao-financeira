@@ -45,7 +45,7 @@ import { Transaction } from "@/lib/types";
 
 function KPICardsSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
       {Array.from({ length: 4 }).map((_, i) => (
         <Card key={i}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -64,7 +64,7 @@ function KPICardsSkeleton() {
 
 function InsightsSkeleton() {
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {Array.from({ length: 2 }).map((_, i) => (
         <Skeleton key={i} className="h-24 rounded-xl" />
       ))}
@@ -141,7 +141,7 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
     <Card className="border-l-4 border-l-red-500">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2 text-red-600">
+          <CardTitle className="text-base flex items-center gap-2 text-red-600">
             <AlertCircle className="h-5 w-5" />
             Contas em Atraso
             {hasItems && (
@@ -178,7 +178,7 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
                 className="flex items-center justify-between py-2 border-b last:border-0"
               >
                 <div className="space-y-1 min-w-0 pr-2">
-                  <p className="text-sm font-medium leading-none truncate max-w-[200px]">
+                  <p className="text-sm font-medium leading-none truncate">
                     {t.description}
                   </p>
                   <p className="text-xs text-red-500 font-medium">
@@ -206,7 +206,7 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
     <Card className="border-l-4 border-l-amber-500">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2 text-amber-600">
+          <CardTitle className="text-base flex items-center gap-2 text-amber-600">
             <Clock className="h-5 w-5" />
             Pendentes de Aprovação
             {hasItems && (
@@ -239,7 +239,7 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
                 className="flex items-center justify-between py-2 border-b last:border-0"
               >
                 <div className="space-y-1 min-w-0 pr-2">
-                  <p className="text-sm font-medium leading-none truncate max-w-[200px]">
+                  <p className="text-sm font-medium leading-none truncate">
                     {t.description}
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -305,12 +305,12 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
             Dashboard Financeiro
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 capitalize">
+          <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
             {todayLabel}
           </p>
         </div>
@@ -381,7 +381,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Action Cards ───────────────────────────────────────────── */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         {isOverdueLoading ? (
           <ActionCardSkeleton />
         ) : isOverdueError ? (

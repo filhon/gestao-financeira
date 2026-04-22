@@ -27,13 +27,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -376,7 +376,7 @@ export default function ApiKeysPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-center gap-4">
           <Link href="/configuracoes">
             <Button variant="ghost" size="icon">
@@ -390,7 +390,7 @@ export default function ApiKeysPage() {
             </p>
           </div>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)}>
+        <Button onClick={() => setShowCreateDialog(true)} className="shrink-0">
           <Plus className="mr-2 h-4 w-4" />
           Nova Chave
         </Button>
@@ -559,14 +559,17 @@ export default function ApiKeysPage() {
       </Card>
 
       {/* Dialog — Criar chave */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Nova Chave de API</DialogTitle>
-            <DialogDescription>
+      <ResponsiveModal
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+      >
+        <ResponsiveModalContent className="sm:max-w-md">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>Nova Chave de API</ResponsiveModalTitle>
+            <ResponsiveModalDescription>
               Defina um nome e selecione as permissões para a nova chave.
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
 
           <div className="space-y-5 py-2">
             <div className="space-y-2">
@@ -598,7 +601,7 @@ export default function ApiKeysPage() {
             </div>
           </div>
 
-          <DialogFooter>
+          <ResponsiveModalFooter>
             <Button
               variant="outline"
               onClick={() => setShowCreateDialog(false)}
@@ -610,12 +613,12 @@ export default function ApiKeysPage() {
               {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Criar Chave
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {/* Dialog — Exibir chave criada (UMA VEZ) */}
-      <Dialog
+      <ResponsiveModal
         open={!!newKeyResult}
         onOpenChange={(open) => {
           if (!open) {
@@ -624,17 +627,17 @@ export default function ApiKeysPage() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-green-600 dark:text-green-400">
+        <ResponsiveModalContent className="sm:max-w-lg">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle className="flex items-center gap-2 text-green-600 dark:text-green-400">
               <Key className="h-5 w-5" />
               Chave criada com sucesso!
-            </DialogTitle>
-            <DialogDescription className="text-destructive font-medium">
+            </ResponsiveModalTitle>
+            <ResponsiveModalDescription className="text-destructive font-medium">
               Copie e guarde as credenciais abaixo agora. Elas não poderão ser
               recuperadas após fechar esta janela.
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
 
           {newKeyResult && (
             <div className="space-y-4 py-2">
@@ -691,7 +694,7 @@ export default function ApiKeysPage() {
             </div>
           )}
 
-          <DialogFooter>
+          <ResponsiveModalFooter>
             <Button
               onClick={() => {
                 setNewKeyResult(null);
@@ -700,9 +703,9 @@ export default function ApiKeysPage() {
             >
               Confirmar — já guardei as credenciais
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {/* ConfirmDialog — Revogar */}
       <ConfirmDialog

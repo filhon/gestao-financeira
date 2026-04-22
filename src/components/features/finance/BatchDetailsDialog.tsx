@@ -1,9 +1,9 @@
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { PaymentBatch, Transaction } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
 import { transactionService } from "@/lib/services/transactionService";
@@ -576,9 +576,9 @@ export function BatchDetailsDialog({
   const batchStatusLabel = batch.status === "open" ? "Aberto" : "Fechado";
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[90vw] w-full max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+    <ResponsiveModal open={isOpen} onOpenChange={onClose}>
+      <ResponsiveModalContent className="sm:max-w-[90vw] w-full max-h-[90vh] overflow-y-auto">
+        <ResponsiveModalHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1">
@@ -592,9 +592,9 @@ export function BatchDetailsDialog({
                   </span>
                 )}
               </div>
-              <DialogTitle className="text-xl leading-tight">
+              <ResponsiveModalTitle className="text-xl leading-tight">
                 {batch.name}
-              </DialogTitle>
+              </ResponsiveModalTitle>
             </div>
             <Button
               variant="outline"
@@ -638,7 +638,7 @@ export function BatchDetailsDialog({
               </p>
             </div>
           </div>
-        </DialogHeader>
+        </ResponsiveModalHeader>
 
         <div className="space-y-4">
           {missingTransactions.length > 0 &&
@@ -993,7 +993,7 @@ export function BatchDetailsDialog({
           variant="destructive"
           onConfirm={handleBulkRemove}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

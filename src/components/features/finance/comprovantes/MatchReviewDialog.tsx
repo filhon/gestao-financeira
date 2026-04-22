@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+} from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -166,15 +166,15 @@ export function MatchReviewDialog({
   if (!comprovante) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[780px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Revisar Comprovante</DialogTitle>
-          <DialogDescription>
+    <ResponsiveModal open={open} onOpenChange={onClose}>
+      <ResponsiveModalContent className="sm:max-w-[780px] max-h-[90vh] overflow-y-auto">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>Revisar Comprovante</ResponsiveModalTitle>
+          <ResponsiveModalDescription>
             Página {comprovante.pageNumber} de {comprovante.totalPages} ·{" "}
             <ComprovanteStatusBadge status={comprovante.matchStatus} />
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
           {/* ── PDF preview ─────────────────────────────────────────────── */}
@@ -365,7 +365,7 @@ export function MatchReviewDialog({
           </div>
         </div>
 
-        <DialogFooter className="mt-4 flex flex-wrap gap-2 sm:justify-between">
+        <ResponsiveModalFooter className="mt-4 flex flex-wrap gap-2 sm:justify-between">
           <Button
             variant="outline"
             onClick={handleReject}
@@ -412,8 +412,8 @@ export function MatchReviewDialog({
               </Button>
             )}
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveModalFooter>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

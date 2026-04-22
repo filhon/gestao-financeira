@@ -28,13 +28,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import {
   Eye,
   MessageCircle,
@@ -390,15 +390,18 @@ export function AdminFeedbackTable({
       </div>
 
       {/* Details Dialog */}
-      <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Detalhes do Feedback</DialogTitle>
-            <DialogDescription>
+      <ResponsiveModal
+        open={showDetailsDialog}
+        onOpenChange={setShowDetailsDialog}
+      >
+        <ResponsiveModalContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>Detalhes do Feedback</ResponsiveModalTitle>
+            <ResponsiveModalDescription>
               Enviado por {selectedFeedback?.userName} (
               {selectedFeedback?.userEmail})
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
           {selectedFeedback && (
             <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -515,18 +518,21 @@ export function AdminFeedbackTable({
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {/* Response Dialog */}
-      <Dialog open={showResponseDialog} onOpenChange={setShowResponseDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Responder Feedback</DialogTitle>
-            <DialogDescription>
+      <ResponsiveModal
+        open={showResponseDialog}
+        onOpenChange={setShowResponseDialog}
+      >
+        <ResponsiveModalContent>
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>Responder Feedback</ResponsiveModalTitle>
+            <ResponsiveModalDescription>
               Respondendo a: &quot;{selectedFeedback?.title}&quot;
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
           <div className="space-y-4">
             <Textarea
               placeholder="Escreva sua resposta para o usuário..."
@@ -535,7 +541,7 @@ export function AdminFeedbackTable({
               className="min-h-[150px]"
             />
           </div>
-          <DialogFooter>
+          <ResponsiveModalFooter>
             <Button
               variant="outline"
               onClick={() => setShowResponseDialog(false)}
@@ -551,9 +557,9 @@ export function AdminFeedbackTable({
               )}
               Enviar Resposta
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   ArrowDown,
   ArrowUpDown,
   GitBranch,
+  MoreHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -21,12 +22,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalTrigger,
+} from "@/components/ui/responsive-modal";
 import {
   Collapsible,
   CollapsibleContent,
@@ -34,6 +35,14 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CostCenter } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { budgetService } from "@/lib/services/budgetService";
@@ -352,6 +361,158 @@ function SortIcon({
   );
 }
 
+function MobileCardSkeleton() {
+  return (
+    <div className="divide-y">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-start gap-2 px-4 py-3.5">
+          <div className="w-8 shrink-0 mt-1" />
+          <div className="flex-1 space-y-2 min-w-0">
+            <Skeleton className="h-3 w-14" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-1 w-full rounded-full" />
+            <Skeleton className="h-3 w-32" />
+          </div>
+          <Skeleton className="h-9 w-9 rounded shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MobileCostCenterCard({
+  node,
+  level = 0,
+  onEdit,
+  onDelete,
+  canManage,
+  usages,
+}: {
+  node: CostCenterNode;
+  level?: number;
+  onEdit: (cc: CostCenter) => void;
+  onDelete: (id: string) => void;
+  canManage: boolean;
+  usages: Record<string, number>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const agg = aggregateNode(node, usages);
+  const hasChildren = node.children.length > 0;
+
+  return (
+    <>
+      <div
+        className={[
+          "flex items-start gap-2 py-3 border-b transition-colors",
+          level > 0 ? "bg-muted/20" : "",
+        ].join(" ")}
+        style={{ paddingLeft: `${level * 16 + 16}px`, paddingRight: "16px" }}
+      >
+        {/* Expand toggle — min 44×44 touch area */}
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center justify-center h-11 w-8 shrink-0 -ml-1 mt-0.5"
+          aria-label={expanded ? "Recolher filhos" : "Expandir filhos"}
+          disabled={!hasChildren}
+        >
+          {hasChildren && (
+            <ChevronRight
+              className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+            />
+          )}
+        </button>
+
+        {/* Main content — tap navigates to detail */}
+        <Link
+          href={`/centros-custo/${node.id}`}
+          className="flex-1 min-w-0 py-0.5"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <span className="text-[11px] font-mono text-muted-foreground">
+                {node.code}
+              </span>
+              <p className="text-sm font-medium leading-snug truncate">
+                {node.name}
+              </p>
+            </div>
+            {hasChildren && (
+              <Badge
+                variant="outline"
+                className="shrink-0 text-[10px] py-0 h-4 align-middle"
+              >
+                {node.children.length}
+              </Badge>
+            )}
+          </div>
+          {agg.total > 0 && (
+            <div className="mt-1.5">
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span className="font-financial">
+                  {formatCurrency(agg.used)}
+                </span>
+                <span className="font-financial">
+                  {formatCurrency(agg.total)}
+                </span>
+              </div>
+              <BudgetBar used={agg.used} total={agg.total} />
+            </div>
+          )}
+          {node.approverEmail && (
+            <p className="text-xs text-muted-foreground mt-1 truncate">
+              {node.approverEmail}
+            </p>
+          )}
+        </Link>
+
+        {/* Actions menu — min 44×44 touch area */}
+        {canManage && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="h-11 w-11 p-0 shrink-0 -mr-2"
+                aria-label="Ações do centro de custo"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Ações</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => onEdit(node)}>
+                <Pencil className="mr-2 h-4 w-4" /> Editar
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => onDelete(node.id)}
+                className="text-red-600 focus:text-red-700"
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Excluir
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+
+      {/* Recursive children */}
+      {hasChildren &&
+        expanded &&
+        node.children.map((child) => (
+          <MobileCostCenterCard
+            key={child.id}
+            node={child}
+            level={level + 1}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            canManage={canManage}
+            usages={usages}
+          />
+        ))}
+    </>
+  );
+}
+
 export default function CostCentersPage() {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
@@ -460,13 +621,13 @@ export default function CostCentersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
             Centros de Custo
           </h1>
           {!isLoading && costCenters.length > 0 && (
-            <div className="flex items-center gap-3 mt-2">
+            <div className="flex flex-wrap items-center gap-3 mt-2">
               <span className="text-sm text-muted-foreground flex items-center gap-1">
                 <span className="font-medium text-foreground">
                   {totalRoots}
@@ -503,21 +664,22 @@ export default function CostCentersPage() {
         </div>
 
         {canManageCostCenters && (
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
+          <ResponsiveModal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <ResponsiveModalTrigger asChild>
               <Button onClick={handleAddNew}>
                 <Plus className="mr-2 h-4 w-4" />
-                Novo Centro de Custo
+                <span className="hidden sm:inline">Novo Centro de Custo</span>
+                <span className="sm:hidden">Novo</span>
               </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>
+            </ResponsiveModalTrigger>
+            <ResponsiveModalContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+              <ResponsiveModalHeader>
+                <ResponsiveModalTitle>
                   {editingId
                     ? "Editar Centro de Custo"
                     : "Novo Centro de Custo"}
-                </DialogTitle>
-              </DialogHeader>
+                </ResponsiveModalTitle>
+              </ResponsiveModalHeader>
               <CostCenterForm
                 onSubmit={handleSubmit}
                 isLoading={isSubmitting}
@@ -545,8 +707,8 @@ export default function CostCentersPage() {
                     : undefined
                 }
               />
-            </DialogContent>
-          </Dialog>
+            </ResponsiveModalContent>
+          </ResponsiveModal>
         )}
       </div>
 
@@ -557,51 +719,93 @@ export default function CostCentersPage() {
             Liste e gerencie os centros de custo da organização.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
-            {/* Header */}
-            <div className="grid grid-cols-12 gap-4 py-3 border-b bg-muted/50 font-medium text-sm items-center">
-              <div
-                className="col-span-2 pl-4 cursor-pointer hover:text-primary flex items-center select-none"
-                onClick={() => requestSort("code")}
-              >
-                Código
-                <SortIcon columnKey="code" sortConfig={sortConfig} />
+        <CardContent className="p-0 md:p-6">
+          {/* ── Desktop: table view ───────────────────────────────── */}
+          <div className="hidden md:block overflow-x-auto rounded-md border">
+            <div className="min-w-[700px]">
+              {/* Header */}
+              <div className="grid grid-cols-12 gap-4 py-3 border-b bg-muted/50 font-medium text-sm items-center">
+                <div
+                  className="col-span-2 pl-4 cursor-pointer hover:text-primary flex items-center select-none"
+                  onClick={() => requestSort("code")}
+                >
+                  Código
+                  <SortIcon columnKey="code" sortConfig={sortConfig} />
+                </div>
+                <div
+                  className="col-span-3 cursor-pointer hover:text-primary flex items-center select-none"
+                  onClick={() => requestSort("name")}
+                >
+                  Nome
+                  <SortIcon columnKey="name" sortConfig={sortConfig} />
+                </div>
+                <div
+                  className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
+                  onClick={() => requestSort("budget")}
+                >
+                  Orçamento
+                  <SortIcon columnKey="budget" sortConfig={sortConfig} />
+                </div>
+                <div
+                  className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
+                  onClick={() => requestSort("approverEmail")}
+                >
+                  Aprovador
+                  <SortIcon columnKey="approverEmail" sortConfig={sortConfig} />
+                </div>
+                <div
+                  className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
+                  onClick={() => requestSort("releaserEmail")}
+                >
+                  Liberador
+                  <SortIcon columnKey="releaserEmail" sortConfig={sortConfig} />
+                </div>
+                <div className="col-span-1 text-right pr-4">Ações</div>
               </div>
-              <div
-                className="col-span-3 cursor-pointer hover:text-primary flex items-center select-none"
-                onClick={() => requestSort("name")}
-              >
-                Nome
-                <SortIcon columnKey="name" sortConfig={sortConfig} />
-              </div>
-              <div
-                className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
-                onClick={() => requestSort("budget")}
-              >
-                Orçamento
-                <SortIcon columnKey="budget" sortConfig={sortConfig} />
-              </div>
-              <div
-                className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
-                onClick={() => requestSort("approverEmail")}
-              >
-                Aprovador
-                <SortIcon columnKey="approverEmail" sortConfig={sortConfig} />
-              </div>
-              <div
-                className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
-                onClick={() => requestSort("releaserEmail")}
-              >
-                Liberador
-                <SortIcon columnKey="releaserEmail" sortConfig={sortConfig} />
-              </div>
-              <div className="col-span-1 text-right pr-4">Ações</div>
-            </div>
 
-            {/* Body */}
+              {/* Body */}
+              {isLoading ? (
+                <TableSkeleton />
+              ) : sortedCostCenters.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 px-4 text-center">
+                  <div className="rounded-full bg-muted p-4 mb-4">
+                    <GitBranch className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-base font-semibold mb-1">
+                    Nenhum centro de custo cadastrado
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-xs mb-4">
+                    Crie centros de custo para organizar despesas por área,
+                    projeto ou departamento.
+                  </p>
+                  {canManageCostCenters && (
+                    <Button size="sm" onClick={handleAddNew}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Criar primeiro centro de custo
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                buildTree(sortedCostCenters).map((node, idx, arr) => (
+                  <CostCenterRow
+                    key={node.id}
+                    node={node}
+                    level={0}
+                    isLast={idx === arr.length - 1}
+                    onEdit={handleEdit}
+                    onDelete={setDeleteId}
+                    canManage={canManageCostCenters}
+                    usages={usages}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* ── Mobile: card list ─────────────────────────────────── */}
+          <div className="md:hidden rounded-md border overflow-hidden">
             {isLoading ? (
-              <TableSkeleton />
+              <MobileCardSkeleton />
             ) : sortedCostCenters.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-14 px-4 text-center">
                 <div className="rounded-full bg-muted p-4 mb-4">
@@ -622,18 +826,27 @@ export default function CostCentersPage() {
                 )}
               </div>
             ) : (
-              buildTree(sortedCostCenters).map((node, idx, arr) => (
-                <CostCenterRow
-                  key={node.id}
-                  node={node}
-                  level={0}
-                  isLast={idx === arr.length - 1}
-                  onEdit={handleEdit}
-                  onDelete={setDeleteId}
-                  canManage={canManageCostCenters}
-                  usages={usages}
-                />
-              ))
+              <>
+                <div className="flex items-center px-4 py-2.5 border-b bg-muted/30">
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {sortedCostCenters.length} centro
+                    {sortedCostCenters.length !== 1 ? "s" : ""} de custo
+                  </span>
+                </div>
+                <div className="divide-y">
+                  {buildTree(sortedCostCenters).map((node) => (
+                    <MobileCostCenterCard
+                      key={node.id}
+                      node={node}
+                      level={0}
+                      onEdit={handleEdit}
+                      onDelete={setDeleteId}
+                      canManage={canManageCostCenters}
+                      usages={usages}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </CardContent>

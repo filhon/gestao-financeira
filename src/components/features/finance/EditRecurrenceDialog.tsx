@@ -8,12 +8,12 @@ import { RecurringTransactionTemplate } from "@/lib/types";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalFooter,
+} from "@/components/ui/responsive-modal";
 import {
   Form,
   FormControl,
@@ -128,11 +128,11 @@ export function EditRecurrenceDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>Editar Recorrência</DialogTitle>
-        </DialogHeader>
+    <ResponsiveModal open={open} onOpenChange={onOpenChange}>
+      <ResponsiveModalContent className="sm:max-w-[500px]">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>Editar Recorrência</ResponsiveModalTitle>
+        </ResponsiveModalHeader>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -297,7 +297,7 @@ export function EditRecurrenceDialog({
               />
             </div>
 
-            <DialogFooter>
+            <ResponsiveModalFooter>
               <Button
                 type="button"
                 variant="outline"
@@ -311,10 +311,10 @@ export function EditRecurrenceDialog({
                 )}
                 Salvar Alterações
               </Button>
-            </DialogFooter>
+            </ResponsiveModalFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

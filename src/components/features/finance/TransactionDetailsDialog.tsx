@@ -1,13 +1,13 @@
 "use client";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Transaction, TransactionStatus, CostCenter } from "@/lib/types";
 import { format } from "date-fns";
@@ -655,19 +655,21 @@ export function TransactionDetailsDialog({
   // the "Maximum update depth exceeded" loop (setState called inside safelyDetachRef).
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+      <ResponsiveModal open={isOpen} onOpenChange={onClose}>
+        <ResponsiveModalContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
           {transaction && selectedCompany ? (
             <>
-              <DialogHeader>
+              <ResponsiveModalHeader>
                 <div className="flex items-center justify-between pr-8">
-                  <DialogTitle>
+                  <ResponsiveModalTitle>
                     {isEditing ? "Editar Transação" : "Detalhes da Transação"}
-                  </DialogTitle>
+                  </ResponsiveModalTitle>
                   {!isEditing && getStatusBadge(transaction.status)}
                 </div>
-                <DialogDescription>ID: {transaction.id}</DialogDescription>
-              </DialogHeader>
+                <ResponsiveModalDescription>
+                  ID: {transaction.id}
+                </ResponsiveModalDescription>
+              </ResponsiveModalHeader>
 
               {isEditing ? (
                 <div className="py-4">
@@ -769,7 +771,7 @@ export function TransactionDetailsDialog({
               )}
 
               {!isEditing && (
-                <DialogFooter className="gap-2 sm:gap-2">
+                <ResponsiveModalFooter className="gap-2 sm:gap-2">
                   {canEdit && (
                     <Button
                       variant="outline"
@@ -853,17 +855,17 @@ export function TransactionDetailsDialog({
                   >
                     Fechar
                   </Button>
-                </DialogFooter>
+                </ResponsiveModalFooter>
               )}
             </>
           ) : (
             // Empty shell while dialog is opening/closing with no transaction yet
-            <DialogHeader>
-              <DialogTitle>Carregando...</DialogTitle>
-            </DialogHeader>
+            <ResponsiveModalHeader>
+              <ResponsiveModalTitle>Carregando...</ResponsiveModalTitle>
+            </ResponsiveModalHeader>
           )}
-        </DialogContent>
-      </Dialog>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {transaction && (
         <>

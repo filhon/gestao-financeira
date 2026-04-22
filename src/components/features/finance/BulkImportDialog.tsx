@@ -12,12 +12,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalDescription,
+} from "@/components/ui/responsive-modal";
 import {
   Table,
   TableBody,
@@ -788,15 +788,15 @@ export function BulkImportDialog({
   );
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[90vw] max-w-[1200px] max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <ResponsiveModal open={isOpen} onOpenChange={onClose}>
+      <ResponsiveModalContent className="sm:max-w-[90vw] max-w-[1200px] max-h-[90vh] overflow-hidden flex flex-col">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5" />
             Importar{" "}
             {type === "payable" ? "Contas a Pagar" : "Contas a Receber"}
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveModalTitle>
+          <ResponsiveModalDescription>
             {step === "upload" &&
               "Faça upload de um arquivo CSV ou Excel com as transações"}
             {step === "processing" && "Processando arquivo..."}
@@ -804,8 +804,8 @@ export function BulkImportDialog({
               "Revise os dados antes de confirmar a importação"}
             {step === "importing" && "Importando transações..."}
             {step === "result" && "Resultado da importação"}
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
 
         <div className="flex-1 overflow-auto">
           {step === "upload" && renderUploadStep()}
@@ -814,7 +814,7 @@ export function BulkImportDialog({
           {step === "importing" && renderImportingStep()}
           {step === "result" && renderResultStep()}
         </div>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

@@ -9,7 +9,7 @@ import { costCenterService } from "@/lib/services/costCenterService";
 import { transactionService } from "@/lib/services/transactionService";
 import { CostCenter, Transaction } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
@@ -286,14 +286,19 @@ export default function CostCenterDashboard() {
   ); // Current year - 2 to + 2
 
   return (
-    <div className="space-y-6 p-8 pt-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 p-4 sm:p-8 pt-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
+          <Button
+            variant="outline"
+            size="icon"
+            className="hidden md:flex"
+            onClick={() => router.back()}
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h2 className="text-3xl font-bold tracking-tight">
+            <h2 className="text-xl md:text-3xl font-bold tracking-tight">
               {costCenter.name}
             </h2>
             <p className="text-muted-foreground">
@@ -322,7 +327,7 @@ export default function CostCenterDashboard() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -331,8 +336,11 @@ export default function CostCenterDashboard() {
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-financial">
-              {formatCurrency(totalBudget)}
+            <div
+              className="text-2xl font-bold font-financial"
+              title={formatCurrency(totalBudget)}
+            >
+              {formatCurrencyAbbr(totalBudget)}
             </div>
             <p className="text-xs text-muted-foreground">
               Definido para este centro
@@ -349,8 +357,9 @@ export default function CostCenterDashboard() {
           <CardContent>
             <div
               className={`text-2xl font-bold font-financial ${remainingBalance < 0 ? "text-red-500" : "text-green-500"}`}
+              title={formatCurrency(remainingBalance)}
             >
-              {formatCurrency(remainingBalance)}
+              {formatCurrencyAbbr(remainingBalance)}
             </div>
             <p className="text-xs text-muted-foreground">
               {totalBudget > 0
@@ -368,8 +377,11 @@ export default function CostCenterDashboard() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-financial">
-              {formatCurrency(suggestedMonthlySpend)}
+            <div
+              className="text-2xl font-bold font-financial"
+              title={formatCurrency(suggestedMonthlySpend)}
+            >
+              {formatCurrencyAbbr(suggestedMonthlySpend)}
             </div>
             <p className="text-xs text-muted-foreground">
               Para os próximos {monthsRemaining} meses
@@ -384,8 +396,11 @@ export default function CostCenterDashboard() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-financial text-red-600">
-              {formatCurrency(directRealized)}
+            <div
+              className="text-2xl font-bold font-financial text-red-600"
+              title={formatCurrency(directRealized)}
+            >
+              {formatCurrencyAbbr(directRealized)}
             </div>
             <p className="text-xs text-muted-foreground">
               Pagamentos efetivados em {selectedYear}
@@ -400,8 +415,11 @@ export default function CostCenterDashboard() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-financial text-orange-500">
-              {formatCurrency(directPending)}
+            <div
+              className="text-2xl font-bold font-financial text-orange-500"
+              title={formatCurrency(directPending)}
+            >
+              {formatCurrencyAbbr(directPending)}
             </div>
             <p className="text-xs text-muted-foreground">
               Aprovado mas ainda não pago
@@ -523,7 +541,7 @@ export default function CostCenterDashboard() {
             <CardTitle>Tendência de Gastos ({selectedYear})</CardTitle>
           </CardHeader>
           <CardContent className="pl-2">
-            <div className="h-[300px]">
+            <div className="h-[220px] sm:h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={monthlyTrendData}
@@ -605,18 +623,18 @@ export default function CostCenterDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="col-span-3">
+        <Card className="col-span-4 lg:col-span-3">
           <CardHeader>
             <CardTitle>Distribuição do Orçamento</CardTitle>
           </CardHeader>
           <CardContent>
             {budgetDistributionData.length === 0 ? (
-              <div className="flex items-center justify-center h-[300px] text-sm text-muted-foreground text-center px-4">
+              <div className="flex items-center justify-center h-[220px] sm:h-[300px] text-sm text-muted-foreground text-center px-4">
                 Sem dados para exibir. Configure um orçamento para ver a
                 distribuição.
               </div>
             ) : (
-              <div className="flex flex-col h-[300px]">
+              <div className="flex flex-col h-[220px] sm:h-[300px]">
                 <div className="flex-1 min-h-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -670,40 +688,72 @@ export default function CostCenterDashboard() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         {/* Children Cost Centers */}
         <Card>
           <CardHeader>
             <CardTitle>Centros de Custo Filhos</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0 sm:p-6">
             {children.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Orçamento</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+              <>
+                {/* Desktop: table */}
+                <div className="hidden sm:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nome</TableHead>
+                        <TableHead>Orçamento</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {children.map((child) => (
+                        <TableRow
+                          key={child.id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() =>
+                            router.push(`/centros-custo/${child.id}`)
+                          }
+                        >
+                          <TableCell className="font-medium">
+                            {child.name}
+                          </TableCell>
+                          <TableCell className="font-financial">
+                            {formatCurrency(child.budget || 0)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {/* Mobile: card list */}
+                <div className="sm:hidden divide-y">
                   {children.map((child) => (
-                    <TableRow
+                    <button
                       key={child.id}
-                      className="cursor-pointer hover:bg-muted/50"
+                      type="button"
+                      className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-muted/50 transition-colors"
                       onClick={() => router.push(`/centros-custo/${child.id}`)}
                     >
-                      <TableCell className="font-medium">
-                        {child.name}
-                      </TableCell>
-                      <TableCell className="font-financial">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {child.name}
+                        </p>
+                        {child.code && (
+                          <p className="text-[11px] font-mono text-muted-foreground">
+                            {child.code}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-sm font-semibold font-financial shrink-0">
                         {formatCurrency(child.budget || 0)}
-                      </TableCell>
-                    </TableRow>
+                      </span>
+                    </button>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              </>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-8 text-muted-foreground px-6">
                 Nenhum centro de custo filho.
               </div>
             )}

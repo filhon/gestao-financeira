@@ -41,14 +41,14 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalTrigger,
+} from "@/components/ui/responsive-modal";
 import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -469,7 +469,7 @@ export default function UsersPage() {
                               }
                               disabled={isCurrentUser}
                             >
-                              <SelectTrigger className="w-[180px] ml-auto">
+                              <SelectTrigger className="w-full sm:w-[180px] ml-auto">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -597,8 +597,8 @@ export default function UsersPage() {
                               <XCircle className="h-4 w-4 mr-1" /> Rejeitar
                             </Button>
 
-                            <Dialog>
-                              <DialogTrigger asChild>
+                            <ResponsiveModal>
+                              <ResponsiveModalTrigger asChild>
                                 <Button
                                   size="sm"
                                   onClick={() => setSelectedUserToApprove(user)}
@@ -606,17 +606,19 @@ export default function UsersPage() {
                                   <CheckCircle className="h-4 w-4 mr-1" />{" "}
                                   Aprovar
                                 </Button>
-                              </DialogTrigger>
-                              <DialogContent>
-                                <DialogHeader>
-                                  <DialogTitle>Aprovar Usuário</DialogTitle>
-                                  <DialogDescription>
+                              </ResponsiveModalTrigger>
+                              <ResponsiveModalContent>
+                                <ResponsiveModalHeader>
+                                  <ResponsiveModalTitle>
+                                    Aprovar Usuário
+                                  </ResponsiveModalTitle>
+                                  <ResponsiveModalDescription>
                                     Defina a função inicial para{" "}
                                     <strong>{user.displayName}</strong> na
                                     empresa{" "}
                                     <strong>{selectedCompany?.name}</strong>.
-                                  </DialogDescription>
-                                </DialogHeader>
+                                  </ResponsiveModalDescription>
+                                </ResponsiveModalHeader>
                                 <div className="py-4">
                                   <Select
                                     value={approvalRole}
@@ -649,7 +651,7 @@ export default function UsersPage() {
                                     </SelectContent>
                                   </Select>
                                 </div>
-                                <DialogFooter>
+                                <ResponsiveModalFooter>
                                   <Button
                                     onClick={handleApproveUser}
                                     disabled={isApproving}
@@ -659,9 +661,9 @@ export default function UsersPage() {
                                     )}
                                     Confirmar Aprovação
                                   </Button>
-                                </DialogFooter>
-                              </DialogContent>
-                            </Dialog>
+                                </ResponsiveModalFooter>
+                              </ResponsiveModalContent>
+                            </ResponsiveModal>
                           </div>
                         </TableCell>
                       </TableRow>

@@ -11,3 +11,18 @@ export function formatCurrency(value: number) {
     currency: "BRL",
   }).format(value);
 }
+
+export function formatCurrencyAbbr(value: number) {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) {
+    return `${sign}R$\u00A0${(abs / 1_000_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}B`;
+  }
+  if (abs >= 1_000_000) {
+    return `${sign}R$\u00A0${(abs / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}M`;
+  }
+  if (abs >= 1_000) {
+    return `${sign}R$\u00A0${(abs / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}K`;
+  }
+  return formatCurrency(value);
+}

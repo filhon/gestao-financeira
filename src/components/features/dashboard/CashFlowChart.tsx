@@ -156,10 +156,10 @@ export function CashFlowChart({ year }: { year?: number }) {
   }
 
   return (
-    <Card className="col-span-4">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    <Card className="col-span-full md:col-span-4">
+      <CardHeader className="flex flex-col gap-2 pb-2 md:flex-row md:items-center md:justify-between md:gap-0 md:space-y-0">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-base font-medium">
+          <CardTitle className="text-sm md:text-base font-medium">
             Fluxo de Caixa Projetado
           </CardTitle>
           {isSimulating && (
@@ -169,17 +169,17 @@ export function CashFlowChart({ year }: { year?: number }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Simulation button + popover */}
           <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs border-dashed"
+                className="h-7 text-xs border-dashed px-2"
               >
-                <Plus className="mr-1 h-3 w-3" />
-                Adicionar Simulação
+                <Plus className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline">Adicionar Simulação</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-72 p-4" align="end">
@@ -322,7 +322,7 @@ export function CashFlowChart({ year }: { year?: number }) {
             variant={mode === "30days" ? "default" : "outline"}
             size="sm"
             onClick={() => setMode("30days")}
-            className="h-8 text-xs"
+            className="h-7 text-xs px-2.5"
           >
             <Calendar className="mr-1 h-3 w-3" />
             30 dias
@@ -331,14 +331,15 @@ export function CashFlowChart({ year }: { year?: number }) {
             variant={mode === "year" ? "default" : "outline"}
             size="sm"
             onClick={() => setMode("year")}
-            className="h-8 text-xs"
+            className="h-7 text-xs px-2.5"
           >
             {mode === "year" ? (
               <Minimize2 className="mr-1 h-3 w-3" />
             ) : (
               <Maximize2 className="mr-1 h-3 w-3" />
             )}
-            Ano Completo
+            <span className="hidden sm:inline">Ano Completo</span>
+            <span className="sm:hidden">Ano</span>
           </Button>
         </div>
       </CardHeader>
@@ -366,170 +367,184 @@ export function CashFlowChart({ year }: { year?: number }) {
           </div>
         )}
         {isLoading ? (
-          <div className="flex h-[350px] items-center justify-center">
+          <div className="flex h-[200px] md:h-[350px] items-center justify-center">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={350}>
-            <AreaChart
-              data={data}
-              margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-            >
-              <defs>
-                {/* Real balance gradient — always blue */}
-                <linearGradient id="cfGradientReal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.04} />
-                </linearGradient>
-                {/* Simulated balance gradient — violet, shown only when simulating */}
-                <linearGradient id="cfGradientSim" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis
-                dataKey="date"
-                stroke="#888888"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-                interval={mode === "year" ? 3 : 2}
-              />
-              <YAxis
-                stroke="#888888"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) => {
-                  if (Math.abs(value) >= 1000) {
-                    return `R$${(value / 1000).toFixed(0)}k`;
-                  }
-                  return `R$${value}`;
-                }}
-              />
-              <Tooltip
-                content={({ active, payload, label }) => {
-                  if (active && payload && payload.length) {
-                    const point = payload[0].payload as ChartPoint;
-                    return (
-                      <div className="rounded-lg border bg-popover p-3 shadow-md min-w-[176px]">
-                        <p className="text-sm font-medium text-popover-foreground mb-2">
-                          {label}
-                        </p>
-                        {/* Real balance row */}
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <span className="inline-block h-2 w-4 rounded-sm bg-blue-500" />
-                            Real
-                          </span>
-                          <span
-                            className={
-                              point.balance >= 0
-                                ? "text-emerald-600 font-medium text-xs font-financial"
-                                : "text-red-600 font-medium text-xs font-financial"
-                            }
-                          >
-                            {formatCurrency(point.balance)}
-                          </span>
-                        </div>
-                        {/* Simulated balance row — only when a simulation is active */}
-                        {isSimulating &&
-                          point.simulatedBalance !== undefined && (
-                            <div className="flex items-center justify-between gap-3 mt-1">
-                              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                <span
-                                  className="inline-block h-2 w-4 rounded-sm bg-violet-500 opacity-70"
-                                  style={{
-                                    background:
-                                      "repeating-linear-gradient(90deg,#8b5cf6 0,#8b5cf6 3px,transparent 3px,transparent 8px)",
-                                  }}
-                                />
-                                Simulado
-                              </span>
-                              <span
-                                className={
-                                  point.simulatedBalance >= 0
-                                    ? "text-violet-600 font-medium text-xs font-financial"
-                                    : "text-red-500 font-medium text-xs font-financial"
-                                }
-                              >
-                                {formatCurrency(point.simulatedBalance)}
-                              </span>
-                            </div>
-                          )}
-                        {/* Income / expense detail */}
-                        {(point.income > 0 || point.expense > 0) && (
-                          <div className="mt-2 pt-2 border-t space-y-0.5">
-                            {point.income > 0 && (
-                              <p className="text-xs text-emerald-600 font-financial">
-                                + {formatCurrency(point.income)} receitas
-                              </p>
-                            )}
-                            {point.expense > 0 && (
-                              <p className="text-xs text-red-600 font-financial">
-                                − {formatCurrency(point.expense)} despesas
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
-              />
-              <ReferenceLine y={0} stroke="#888888" strokeDasharray="3 3" />
-              {hasNegative && (
-                <ReferenceLine
-                  y={0}
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  label={{
-                    value: "Saldo Zero",
-                    position: "right",
-                    fill: "#ef4444",
-                    fontSize: 10,
+          <div className="h-[200px] md:h-[350px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={data}
+                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+              >
+                <defs>
+                  {/* Real balance gradient — always blue */}
+                  <linearGradient
+                    id="cfGradientReal"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.04} />
+                  </linearGradient>
+                  {/* Simulated balance gradient — violet, shown only when simulating */}
+                  <linearGradient
+                    id="cfGradientSim"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis
+                  dataKey="date"
+                  stroke="#888888"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  interval={mode === "year" ? 3 : 2}
+                />
+                <YAxis
+                  stroke="#888888"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => {
+                    if (Math.abs(value) >= 1000) {
+                      return `R$${(value / 1000).toFixed(0)}k`;
+                    }
+                    return `R$${value}`;
                   }}
                 />
-              )}
-              {/* ── Real balance line — always rendered, always blue ── */}
-              <Area
-                type="monotone"
-                dataKey="balance"
-                name="Real"
-                stroke="#3b82f6"
-                strokeWidth={2.5}
-                fill="url(#cfGradientReal)"
-                dot={false}
-                activeDot={{
-                  r: 5,
-                  fill: "#3b82f6",
-                  stroke: "#fff",
-                  strokeWidth: 2,
-                }}
-              />
-              {/* ── Simulated balance line — violet dashed, only when simulating ── */}
-              {isSimulating && (
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (active && payload && payload.length) {
+                      const point = payload[0].payload as ChartPoint;
+                      return (
+                        <div className="rounded-lg border bg-popover p-3 shadow-md min-w-[176px]">
+                          <p className="text-sm font-medium text-popover-foreground mb-2">
+                            {label}
+                          </p>
+                          {/* Real balance row */}
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <span className="inline-block h-2 w-4 rounded-sm bg-blue-500" />
+                              Real
+                            </span>
+                            <span
+                              className={
+                                point.balance >= 0
+                                  ? "text-emerald-600 font-medium text-xs font-financial"
+                                  : "text-red-600 font-medium text-xs font-financial"
+                              }
+                            >
+                              {formatCurrency(point.balance)}
+                            </span>
+                          </div>
+                          {/* Simulated balance row — only when a simulation is active */}
+                          {isSimulating &&
+                            point.simulatedBalance !== undefined && (
+                              <div className="flex items-center justify-between gap-3 mt-1">
+                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <span
+                                    className="inline-block h-2 w-4 rounded-sm bg-violet-500 opacity-70"
+                                    style={{
+                                      background:
+                                        "repeating-linear-gradient(90deg,#8b5cf6 0,#8b5cf6 3px,transparent 3px,transparent 8px)",
+                                    }}
+                                  />
+                                  Simulado
+                                </span>
+                                <span
+                                  className={
+                                    point.simulatedBalance >= 0
+                                      ? "text-violet-600 font-medium text-xs font-financial"
+                                      : "text-red-500 font-medium text-xs font-financial"
+                                  }
+                                >
+                                  {formatCurrency(point.simulatedBalance)}
+                                </span>
+                              </div>
+                            )}
+                          {/* Income / expense detail */}
+                          {(point.income > 0 || point.expense > 0) && (
+                            <div className="mt-2 pt-2 border-t space-y-0.5">
+                              {point.income > 0 && (
+                                <p className="text-xs text-emerald-600 font-financial">
+                                  + {formatCurrency(point.income)} receitas
+                                </p>
+                              )}
+                              {point.expense > 0 && (
+                                <p className="text-xs text-red-600 font-financial">
+                                  − {formatCurrency(point.expense)} despesas
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <ReferenceLine y={0} stroke="#888888" strokeDasharray="3 3" />
+                {hasNegative && (
+                  <ReferenceLine
+                    y={0}
+                    stroke="#ef4444"
+                    strokeWidth={2}
+                    label={{
+                      value: "Saldo Zero",
+                      position: "right",
+                      fill: "#ef4444",
+                      fontSize: 10,
+                    }}
+                  />
+                )}
+                {/* ── Real balance line — always rendered, always blue ── */}
                 <Area
                   type="monotone"
-                  dataKey="simulatedBalance"
-                  name="Simulado"
-                  stroke="#8b5cf6"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  fill="url(#cfGradientSim)"
+                  dataKey="balance"
+                  name="Real"
+                  stroke="#3b82f6"
+                  strokeWidth={2.5}
+                  fill="url(#cfGradientReal)"
                   dot={false}
                   activeDot={{
                     r: 5,
-                    fill: "#8b5cf6",
+                    fill: "#3b82f6",
                     stroke: "#fff",
                     strokeWidth: 2,
                   }}
                 />
-              )}
-            </AreaChart>
-          </ResponsiveContainer>
+                {/* ── Simulated balance line — violet dashed, only when simulating ── */}
+                {isSimulating && (
+                  <Area
+                    type="monotone"
+                    dataKey="simulatedBalance"
+                    name="Simulado"
+                    stroke="#8b5cf6"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    fill="url(#cfGradientSim)"
+                    dot={false}
+                    activeDot={{
+                      r: 5,
+                      fill: "#8b5cf6",
+                      stroke: "#fff",
+                      strokeWidth: 2,
+                    }}
+                  />
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
         )}
       </CardContent>
     </Card>

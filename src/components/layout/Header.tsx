@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { Search, LogOut, User, MessageSquare } from "lucide-react";
+import { Search, LogOut, User, MessageSquare, TrendingUp } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/components/providers/AuthProvider";
 import {
@@ -48,19 +48,30 @@ export function Header() {
     return role ? roleTranslations[role] || role : "Visitante";
   };
 
+  const openSearch = () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      bubbles: true,
+    });
+    document.dispatchEvent(event);
+  };
+
   return (
-    <header className="flex h-14 items-center justify-between border-b bg-card px-5 gap-4">
-      {/* Search */}
+    <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:px-5 gap-3">
+      {/* Mobile: Compact logo | Desktop: Search bar */}
+      <div className="flex items-center gap-2 md:hidden">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shrink-0">
+          <TrendingUp className="h-4 w-4 text-primary-foreground" />
+        </div>
+        <span className="text-sm font-semibold tracking-tight">
+          Fin Control
+        </span>
+      </div>
+
       <div
-        className="flex w-72 items-center gap-2 px-2.5 py-1.5 rounded-md border bg-muted/40 cursor-pointer hover:bg-muted/70 hover:border-border/80 transition-colors group"
-        onClick={() => {
-          const event = new KeyboardEvent("keydown", {
-            key: "k",
-            ctrlKey: true,
-            bubbles: true,
-          });
-          document.dispatchEvent(event);
-        }}
+        className="hidden md:flex w-72 items-center gap-2 px-2.5 py-1.5 rounded-md border bg-muted/40 cursor-pointer hover:bg-muted/70 hover:border-border/80 transition-colors group"
+        onClick={openSearch}
       >
         <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <span className="flex-1 text-sm text-muted-foreground/70">
@@ -72,11 +83,20 @@ export function Header() {
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5">
+        {/* Mobile: Search icon button */}
+        <button
+          onClick={openSearch}
+          className="md:hidden flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          aria-label="Buscar"
+        >
+          <Search className="h-4.5 w-4.5" />
+        </button>
+
         <ModeToggle />
         <NotificationBell />
 
-        <div className="flex items-center gap-2.5 border-l ml-1 pl-3">
+        <div className="flex items-center gap-2.5 border-l ml-1 pl-2.5">
           <div className="text-right hidden sm:block">
             <p className="text-sm font-medium leading-tight">
               {user?.displayName || "Usuário"}

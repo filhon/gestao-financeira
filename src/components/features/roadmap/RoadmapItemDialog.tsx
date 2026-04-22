@@ -3,13 +3,13 @@
 import { useAuth } from "@/components/providers/AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -107,19 +107,19 @@ export function RoadmapItemDialog({
   if (!item) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between gap-2">
+    <ResponsiveModal open={open} onOpenChange={onOpenChange}>
+      <ResponsiveModalContent className="sm:max-w-[500px]">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle className="flex items-center justify-between gap-2">
             {isEditing ? "Editar Item" : item.title}
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveModalTitle>
+          <ResponsiveModalDescription>
             Status:{" "}
             <span className="font-medium text-primary">
               {statusLabels[item.status]}
             </span>
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
 
         <div className="space-y-4 py-4">
           {isEditing ? (
@@ -149,7 +149,7 @@ export function RoadmapItemDialog({
           )}
         </div>
 
-        <DialogFooter className="flex justify-between sm:justify-between w-full">
+        <ResponsiveModalFooter className="flex justify-between sm:justify-between w-full">
           {/* Left side actions (Delete) */}
           <div>
             {isAdmin && (
@@ -218,8 +218,8 @@ export function RoadmapItemDialog({
               </>
             )}
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveModalFooter>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

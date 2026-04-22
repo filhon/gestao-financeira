@@ -12,6 +12,7 @@ import { recurrenceService } from "@/lib/services/recurrenceService";
 import { Transaction, Entity } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -26,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   FileText,
   Download,
@@ -34,7 +36,9 @@ import {
   BarChart3,
   Layers,
   Sparkles,
-  Sheet,
+  Sheet as SheetIcon,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -126,6 +130,14 @@ const QUICK_PERIODS = [
   },
 ];
 
+const STATUS_LABELS: Record<string, string> = {
+  all: "Todos os status",
+  paid: "Somente Pagas",
+  approved: "Somente Aprovadas",
+  pending_approval: "Somente Pendentes",
+  draft: "Somente Rascunhos",
+};
+
 export default function ReportsPage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
@@ -144,6 +156,7 @@ export default function ReportsPage() {
   const [activeQuickPeriod, setActiveQuickPeriod] = useState<string | null>(
     "Este mês",
   );
+  const [mobileConfigOpen, setMobileConfigOpen] = useState(false);
 
   const { costCenters, fetchCostCenters } = useCostCenterStore();
 
@@ -156,6 +169,9 @@ export default function ReportsPage() {
 
   const selectedReportType =
     REPORT_TYPES.find((r) => r.value === reportType) ?? REPORT_TYPES[0];
+
+  const activeConfigCount =
+    (statusFilter !== "all" ? 1 : 0) + (costCenterFilter !== "all" ? 1 : 0);
 
   const handleGenerate = async (formatType: "pdf" | "csv" | "excel") => {
     if (!selectedCompany || !user) return;
@@ -313,12 +329,14 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-28 md:pb-0">
       {/* Header — padrão do sistema */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Relatórios</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+            Relatórios
+          </h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
             Gere e exporte relatórios financeiros por período.
           </p>
         </div>
@@ -399,9 +417,77 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Period & Filters Card */}
+      {/* ── Mobile: compact config summary ──────────────────────────────── */}
       <div
-        className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+        className="md:hidden space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300"
+        style={{ animationDelay: "80ms", animationFillMode: "both" }}
+      >
+        {/* Active config chips — scrollable horizontal row */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {/* Period chip — always shown */}
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted pl-2.5 pr-3 py-1 text-xs font-medium text-foreground">
+            <CalendarIcon className="h-3 w-3 text-muted-foreground" />
+            {format(startDate, "dd MMM", { locale: ptBR })}
+            {" → "}
+            {format(endDate, "dd MMM yy", { locale: ptBR })}
+          </span>
+
+          {/* Status chip */}
+          {statusFilter !== "all" && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
+              {STATUS_LABELS[statusFilter] ?? statusFilter}
+              <button
+                onClick={() => setStatusFilter("all")}
+                className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                aria-label="Remover filtro de status"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          )}
+
+          {/* Cost center chip */}
+          {costCenterFilter !== "all" && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary max-w-[140px]">
+              <span className="truncate">
+                {costCenters.find((c) => c.id === costCenterFilter)?.name ??
+                  "CC"}
+              </span>
+              <button
+                onClick={() => setCostCenterFilter("all")}
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                aria-label="Remover filtro de centro de custo"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          )}
+        </div>
+
+        {/* Config button */}
+        <button
+          type="button"
+          onClick={() => setMobileConfigOpen(true)}
+          className={cn(
+            "relative flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
+            activeConfigCount > 0
+              ? "border-primary/40 bg-primary/5 text-primary"
+              : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          Configurar relatório
+          {activeConfigCount > 0 && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+              {activeConfigCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ── Desktop: Period & Filters Card ──────────────────────────────── */}
+      <div
+        className="hidden md:block animate-in fade-in slide-in-from-bottom-2 duration-300"
         style={{ animationDelay: "80ms", animationFillMode: "both" }}
       >
         <Card>
@@ -441,7 +527,7 @@ export default function ReportsPage() {
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-sm text-muted-foreground">
                     Data Inicial
@@ -519,7 +605,7 @@ export default function ReportsPage() {
             {/* Filtros */}
             <div className="space-y-3">
               <Label>Filtros</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-sm text-muted-foreground">
                     Status das Transações
@@ -580,7 +666,7 @@ export default function ReportsPage() {
                   <p className="text-sm text-muted-foreground -mt-1">
                     Saldo das contas no dia anterior ao início do período.
                   </p>
-                  <div className="max-w-[200px]">
+                  <div className="w-full sm:max-w-[200px]">
                     <CurrencyInput
                       value={initialBalance}
                       onChange={setInitialBalance}
@@ -593,7 +679,7 @@ export default function ReportsPage() {
 
             {/* Separator + Actions */}
             <div className="h-px bg-border" />
-            <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
                 <span className="font-medium text-foreground">
                   {format(startDate, "dd MMM", { locale: ptBR })}
@@ -605,12 +691,13 @@ export default function ReportsPage() {
                 {" · "}
                 {selectedReportType.label}
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <Button
                   variant="outline"
                   onClick={() => handleGenerate("csv")}
                   disabled={isLoading}
                   loading={loadingFormat === "csv"}
+                  className="w-full sm:w-auto"
                 >
                   {loadingFormat !== "csv" && <Download className="h-4 w-4" />}
                   Exportar CSV
@@ -620,15 +707,18 @@ export default function ReportsPage() {
                   onClick={() => handleGenerate("excel")}
                   disabled={isLoading}
                   loading={loadingFormat === "excel"}
-                  className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
+                  className="w-full sm:w-auto text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
                 >
-                  {loadingFormat !== "excel" && <Sheet className="h-4 w-4" />}
+                  {loadingFormat !== "excel" && (
+                    <SheetIcon className="h-4 w-4" />
+                  )}
                   Exportar Excel
                 </Button>
                 <Button
                   onClick={() => handleGenerate("pdf")}
                   disabled={isLoading}
                   loading={loadingFormat === "pdf"}
+                  className="w-full sm:w-auto"
                 >
                   {loadingFormat !== "pdf" && <FileText className="h-4 w-4" />}
                   Gerar PDF
@@ -638,6 +728,223 @@ export default function ReportsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Mobile: sticky export bar ───────────────────────────────────── */}
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] left-0 right-0 z-40 md:hidden border-t bg-background/95 backdrop-blur-sm px-4 py-3 space-y-2">
+        <p className="text-xs text-muted-foreground">
+          <span className={cn("font-medium", selectedReportType.accentClass)}>
+            {selectedReportType.label}
+          </span>
+          {" · "}
+          <span className="font-medium text-foreground">
+            {format(startDate, "dd MMM", { locale: ptBR })}
+            {" → "}
+            {format(endDate, "dd MMM yy", { locale: ptBR })}
+          </span>
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleGenerate("csv")}
+            disabled={isLoading}
+            loading={loadingFormat === "csv"}
+          >
+            {loadingFormat !== "csv" && <Download className="h-3.5 w-3.5" />}
+            CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleGenerate("excel")}
+            disabled={isLoading}
+            loading={loadingFormat === "excel"}
+            className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
+          >
+            {loadingFormat !== "excel" && <SheetIcon className="h-3.5 w-3.5" />}
+            Excel
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => handleGenerate("pdf")}
+            disabled={isLoading}
+            loading={loadingFormat === "pdf"}
+          >
+            {loadingFormat !== "pdf" && <FileText className="h-3.5 w-3.5" />}
+            PDF
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Mobile: config sheet ─────────────────────────────────────────── */}
+      <Sheet open={mobileConfigOpen} onOpenChange={setMobileConfigOpen}>
+        <SheetContent
+          side="bottom"
+          className="rounded-t-2xl max-h-[92dvh] overflow-y-auto px-4 pb-6 pt-3"
+        >
+          <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/25 shrink-0" />
+          <SheetTitle className="mb-4 text-base font-semibold">
+            Configurar Relatório
+          </SheetTitle>
+
+          <div className="space-y-5">
+            {/* Período rápido */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Período Rápido
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {QUICK_PERIODS.map((range) => (
+                  <button
+                    key={range.label}
+                    type="button"
+                    onClick={() => {
+                      setStartDate(range.start);
+                      setEndDate(range.end);
+                      setActiveQuickPeriod(range.label);
+                    }}
+                    className={cn(
+                      "text-xs px-3 py-1.5 rounded-md border transition-all duration-100 font-medium",
+                      activeQuickPeriod === range.label
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted",
+                    )}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Período personalizado — native date inputs (evita conflito Popover/Sheet) */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Período Personalizado
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">De</Label>
+                  <Input
+                    type="date"
+                    value={format(startDate, "yyyy-MM-dd")}
+                    onChange={(e) => {
+                      const d = e.target.valueAsDate;
+                      if (!d) return;
+                      const adjusted = new Date(
+                        d.getTime() + d.getTimezoneOffset() * 60000,
+                      );
+                      setStartDate(adjusted);
+                      setActiveQuickPeriod(null);
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Até</Label>
+                  <Input
+                    type="date"
+                    value={format(endDate, "yyyy-MM-dd")}
+                    onChange={(e) => {
+                      const d = e.target.valueAsDate;
+                      if (!d) return;
+                      const adjusted = new Date(
+                        d.getTime() + d.getTimezoneOffset() * 60000,
+                      );
+                      setEndDate(adjusted);
+                      setActiveQuickPeriod(null);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Status */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Status
+              </p>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os status</SelectItem>
+                  <SelectItem value="paid">Somente Pagas</SelectItem>
+                  <SelectItem value="approved">Somente Aprovadas</SelectItem>
+                  <SelectItem value="pending_approval">
+                    Somente Pendentes
+                  </SelectItem>
+                  <SelectItem value="draft">Somente Rascunhos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Centro de Custo */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Centro de Custo
+              </p>
+              <Select
+                value={costCenterFilter}
+                onValueChange={setCostCenterFilter}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os centros</SelectItem>
+                  {costCenters.map((cc) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Saldo Inicial (apenas para fluxo consolidado) */}
+            {reportType === "consolidated" && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Saldo Inicial
+                  </p>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-full px-2 py-0.5">
+                    <Sparkles className="h-2.5 w-2.5" />
+                    Projeção
+                  </span>
+                </div>
+                <CurrencyInput
+                  value={initialBalance}
+                  onChange={setInitialBalance}
+                  placeholder="R$ 0,00"
+                />
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3 pt-2">
+              {activeConfigCount > 0 && (
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setStatusFilter("all");
+                    setCostCenterFilter("all");
+                  }}
+                >
+                  Limpar filtros
+                </Button>
+              )}
+              <Button
+                className="flex-1"
+                onClick={() => setMobileConfigOpen(false)}
+              >
+                Aplicar
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { MobileNav } from "@/components/layout/MobileNav";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
@@ -86,10 +87,10 @@ export default function DashboardLayout({
   if (!mounted) {
     return (
       <div className="flex h-screen bg-background">
-        <div className="w-64 border-r bg-card" />
+        <div className="hidden md:block w-64 border-r bg-card" />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="h-16 border-b bg-card" />
-          <main className="flex-1 overflow-y-auto bg-muted/10 p-6">
+          <div className="h-14 border-b bg-card" />
+          <main className="flex-1 overflow-y-auto bg-muted/10 p-4 md:p-6">
             {children}
           </main>
         </div>
@@ -103,14 +104,15 @@ export default function DashboardLayout({
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main className="flex flex-1 flex-col overflow-hidden bg-muted/10">
-          <div className="flex-none p-6 pb-0">
+          <div className="hidden md:block flex-none px-6 pt-6">
             <Breadcrumbs />
           </div>
-          <div className="flex-1 overflow-y-auto p-6 min-h-0">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6 min-h-0">
             <ErrorBoundary>{children}</ErrorBoundary>
           </div>
         </main>
       </div>
+      <MobileNav />
       <GlobalSearch />
     </div>
   );
