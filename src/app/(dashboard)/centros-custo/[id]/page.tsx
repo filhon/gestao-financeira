@@ -287,7 +287,7 @@ export default function CostCenterDashboard() {
 
   return (
     <div className="space-y-6 p-4 sm:p-8 pt-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Button
             variant="outline"
@@ -340,7 +340,12 @@ export default function CostCenterDashboard() {
               className="text-2xl font-bold font-financial"
               title={formatCurrency(totalBudget)}
             >
-              {formatCurrencyAbbr(totalBudget)}
+              <span className="md:hidden">
+                {formatCurrencyAbbr(totalBudget)}
+              </span>
+              <span className="hidden md:inline">
+                {formatCurrency(totalBudget)}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">
               Definido para este centro
@@ -359,7 +364,12 @@ export default function CostCenterDashboard() {
               className={`text-2xl font-bold font-financial ${remainingBalance < 0 ? "text-red-500" : "text-green-500"}`}
               title={formatCurrency(remainingBalance)}
             >
-              {formatCurrencyAbbr(remainingBalance)}
+              <span className="md:hidden">
+                {formatCurrencyAbbr(remainingBalance)}
+              </span>
+              <span className="hidden md:inline">
+                {formatCurrency(remainingBalance)}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">
               {totalBudget > 0
@@ -381,7 +391,12 @@ export default function CostCenterDashboard() {
               className="text-2xl font-bold font-financial"
               title={formatCurrency(suggestedMonthlySpend)}
             >
-              {formatCurrencyAbbr(suggestedMonthlySpend)}
+              <span className="md:hidden">
+                {formatCurrencyAbbr(suggestedMonthlySpend)}
+              </span>
+              <span className="hidden md:inline">
+                {formatCurrency(suggestedMonthlySpend)}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">
               Para os próximos {monthsRemaining} meses
@@ -400,7 +415,12 @@ export default function CostCenterDashboard() {
               className="text-2xl font-bold font-financial text-red-600"
               title={formatCurrency(directRealized)}
             >
-              {formatCurrencyAbbr(directRealized)}
+              <span className="md:hidden">
+                {formatCurrencyAbbr(directRealized)}
+              </span>
+              <span className="hidden md:inline">
+                {formatCurrency(directRealized)}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">
               Pagamentos efetivados em {selectedYear}
@@ -419,7 +439,12 @@ export default function CostCenterDashboard() {
               className="text-2xl font-bold font-financial text-orange-500"
               title={formatCurrency(directPending)}
             >
-              {formatCurrencyAbbr(directPending)}
+              <span className="md:hidden">
+                {formatCurrencyAbbr(directPending)}
+              </span>
+              <span className="hidden md:inline">
+                {formatCurrency(directPending)}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">
               Aprovado mas ainda não pago

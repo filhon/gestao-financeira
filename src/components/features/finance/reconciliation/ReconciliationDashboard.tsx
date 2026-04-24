@@ -548,7 +548,7 @@ export function ReconciliationDashboard() {
   if (isStoreLoading && transactions.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight">
           Conciliação Bancária
         </h1>
         <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
@@ -581,7 +581,7 @@ export function ReconciliationDashboard() {
   if (transactions.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight">
           Conciliação Bancária
         </h1>
         <Card>
@@ -603,7 +603,7 @@ export function ReconciliationDashboard() {
     <div className="flex flex-col gap-4">
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight">
           Conciliação Bancária
         </h1>
         <div className="flex gap-2 shrink-0">

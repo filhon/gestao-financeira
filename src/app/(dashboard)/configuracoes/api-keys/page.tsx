@@ -376,7 +376,7 @@ export default function ApiKeysPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div className="flex items-center gap-4">
           <Link href="/configuracoes">
             <Button variant="ghost" size="icon">

@@ -695,7 +695,7 @@ export default function ComprovantesPage() {
   return (
     <div className="flex flex-col gap-4">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div>
           <h1 className="text-xl md:text-2xl font-bold tracking-tight flex items-center gap-2">
             <FileCheck className="h-6 w-6 text-primary" />
@@ -788,13 +788,71 @@ export default function ComprovantesPage() {
 
       {/* ── Table Card ───────────────────────────────────────────────────── */}
       <Card>
-        <CardHeader className="space-y-3">
-          {/* ── Title row ─────────────────────────────────────────── */}
-          <div className="flex items-center justify-between gap-2">
+        <CardHeader>
+          {/* ── Desktop: título + todos os filtros em uma linha ──── */}
+          <div className="hidden md:flex items-start justify-between gap-4 flex-wrap">
             <CardTitle>Comprovantes</CardTitle>
-            {/* Result count — mobile only */}
+            <div className="flex flex-wrap gap-3">
+              <Select
+                value={statusFilter}
+                onValueChange={(v) =>
+                  setStatusFilter(v as ComprovanteMatchStatus | "all")
+                }
+              >
+                <SelectTrigger className="w-[180px]">
+                  <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os Status</SelectItem>
+                  <SelectItem value="matched">Associados</SelectItem>
+                  <SelectItem value="pending_review">Pendentes</SelectItem>
+                  <SelectItem value="unmatched">Sem Associação</SelectItem>
+                  <SelectItem value="rejected_match">Rejeitados</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <DatePickerWithRange date={dateRange} setDate={setDateRange} />
+
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por descrição, fornecedor…"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 pr-8"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Limpar filtros
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Mobile: título ─────────────────────────────────────── */}
+          <div className="flex md:hidden items-center justify-between gap-2">
+            <CardTitle>Comprovantes</CardTitle>
             {!isLoading && (
-              <span className="md:hidden text-xs text-muted-foreground tabular-nums shrink-0">
+              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
                 {filtered.length}
                 {hasMore ? "+" : ""} resultado
                 {filtered.length !== 1 ? "s" : ""}
@@ -882,62 +940,6 @@ export default function ComprovantesPage() {
               </button>
             </div>
           )}
-
-          {/* ── Desktop: busca + todos os filtros em uma linha ──────── */}
-          <div className="hidden md:flex flex-wrap gap-3">
-            <Select
-              value={statusFilter}
-              onValueChange={(v) =>
-                setStatusFilter(v as ComprovanteMatchStatus | "all")
-              }
-            >
-              <SelectTrigger className="w-[180px]">
-                <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="matched">Associados</SelectItem>
-                <SelectItem value="pending_review">Pendentes</SelectItem>
-                <SelectItem value="unmatched">Sem Associação</SelectItem>
-                <SelectItem value="rejected_match">Rejeitados</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <DatePickerWithRange date={dateRange} setDate={setDateRange} />
-
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por descrição, fornecedor…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-8"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Limpar busca"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={clearFilters}
-              >
-                <X className="mr-1 h-3.5 w-3.5" />
-                Limpar filtros
-              </Button>
-            )}
-          </div>
         </CardHeader>
 
         <CardContent className="p-0 md:p-6">

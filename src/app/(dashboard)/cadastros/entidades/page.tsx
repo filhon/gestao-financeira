@@ -373,7 +373,7 @@ export default function EntitiesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div>
           <h1 className="text-xl md:text-3xl font-bold tracking-tight">
             Cadastros

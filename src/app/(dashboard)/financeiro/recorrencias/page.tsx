@@ -441,7 +441,7 @@ export default function RecorrenciasPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
             Recorrências
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -470,11 +470,20 @@ export default function RecorrenciasPage() {
                 className="text-2xl font-bold text-green-600 dark:text-green-400"
                 title={formatCurrency(kpis.mrr)}
               >
-                <AnimatedCounter
-                  value={kpis.mrr}
-                  formatter={formatCurrencyAbbr}
-                  duration={700}
-                />
+                <span className="md:hidden">
+                  <AnimatedCounter
+                    value={kpis.mrr}
+                    formatter={formatCurrencyAbbr}
+                    duration={700}
+                  />
+                </span>
+                <span className="hidden md:inline">
+                  <AnimatedCounter
+                    value={kpis.mrr}
+                    formatter={formatCurrency}
+                    duration={700}
+                  />
+                </span>
               </div>
             )}
             <p className="mt-1 text-xs text-muted-foreground">
@@ -501,11 +510,20 @@ export default function RecorrenciasPage() {
                 className="text-2xl font-bold text-red-600 dark:text-red-400"
                 title={formatCurrency(kpis.fixedCost)}
               >
-                <AnimatedCounter
-                  value={kpis.fixedCost}
-                  formatter={formatCurrencyAbbr}
-                  duration={700}
-                />
+                <span className="md:hidden">
+                  <AnimatedCounter
+                    value={kpis.fixedCost}
+                    formatter={formatCurrencyAbbr}
+                    duration={700}
+                  />
+                </span>
+                <span className="hidden md:inline">
+                  <AnimatedCounter
+                    value={kpis.fixedCost}
+                    formatter={formatCurrency}
+                    duration={700}
+                  />
+                </span>
               </div>
             )}
             <p className="mt-1 text-xs text-muted-foreground">
@@ -615,12 +633,43 @@ export default function RecorrenciasPage() {
 
       {/* Table card */}
       <Card>
-        <CardHeader className="space-y-3">
-          {/* ── Title row ─────────────────────────────────────────── */}
-          <div className="flex items-center justify-between gap-2">
+        <CardHeader>
+          {/* ── Desktop: título + descrição + filtros em uma linha ── */}
+          <div className="hidden md:flex flex-col gap-4 md:flex-row md:items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle>Modelos de Recorrência</CardTitle>
+              <CardDescription>
+                Lista de transações que são geradas automaticamente.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por descrição exata..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 w-[250px]"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="active">Ativos</SelectItem>
+                  <SelectItem value="paused">Pausados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* ── Mobile: título ─────────────────────────────────────── */}
+          <div className="flex md:hidden items-center justify-between gap-2">
             <CardTitle>Modelos de Recorrência</CardTitle>
             {!isLoading && (
-              <span className="md:hidden text-xs text-muted-foreground tabular-nums shrink-0">
+              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
                 {templates.length}
                 {hasMore ? "+" : ""} resultado
                 {templates.length !== 1 ? "s" : ""}
@@ -693,34 +742,6 @@ export default function RecorrenciasPage() {
               </button>
             </div>
           )}
-
-          {/* ── Desktop: descrição + busca + filtro de status ───────── */}
-          <div className="hidden md:flex flex-col gap-4 md:flex-row md:items-center justify-between">
-            <CardDescription>
-              Lista de transações que são geradas automaticamente.
-            </CardDescription>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por descrição exata..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8 w-[250px]"
-                />
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="active">Ativos</SelectItem>
-                  <SelectItem value="paused">Pausados</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
         </CardHeader>
 
         <CardContent className="p-0">

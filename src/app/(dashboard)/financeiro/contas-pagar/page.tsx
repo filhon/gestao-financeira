@@ -1128,7 +1128,7 @@ export default function AccountsPayablePage() {
   return (
     <div className="flex flex-col gap-4">
       {/* Page header */}
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <h1 className="text-xl md:text-2xl font-bold tracking-tight">
           Contas a Pagar
         </h1>
@@ -1201,10 +1201,20 @@ export default function AccountsPayablePage() {
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
-                <AnimatedNumber
-                  value={kpis.pendingAmount}
-                  formatter={formatCurrencyAbbr}
-                />
+                <>
+                  <span className="md:hidden">
+                    <AnimatedNumber
+                      value={kpis.pendingAmount}
+                      formatter={formatCurrencyAbbr}
+                    />
+                  </span>
+                  <span className="hidden md:inline">
+                    <AnimatedNumber
+                      value={kpis.pendingAmount}
+                      formatter={formatCurrency}
+                    />
+                  </span>
+                </>
               )}
             </div>
             <p className="text-xs text-muted-foreground">No período filtrado</p>
@@ -1236,7 +1246,14 @@ export default function AccountsPayablePage() {
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
-                formatCurrencyAbbr(kpis.overdueAmount)
+                <>
+                  <span className="md:hidden">
+                    {formatCurrencyAbbr(kpis.overdueAmount)}
+                  </span>
+                  <span className="hidden md:inline">
+                    {formatCurrency(kpis.overdueAmount)}
+                  </span>
+                </>
               )}
             </div>
           </CardContent>
@@ -1271,7 +1288,14 @@ export default function AccountsPayablePage() {
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
-                formatCurrencyAbbr(kpis.dueSoonAmount)
+                <>
+                  <span className="md:hidden">
+                    {formatCurrencyAbbr(kpis.dueSoonAmount)}
+                  </span>
+                  <span className="hidden md:inline">
+                    {formatCurrency(kpis.dueSoonAmount)}
+                  </span>
+                </>
               )}
             </div>
           </CardContent>
@@ -1290,10 +1314,20 @@ export default function AccountsPayablePage() {
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
-                <AnimatedNumber
-                  value={kpis.paidAmount}
-                  formatter={formatCurrencyAbbr}
-                />
+                <>
+                  <span className="md:hidden">
+                    <AnimatedNumber
+                      value={kpis.paidAmount}
+                      formatter={formatCurrencyAbbr}
+                    />
+                  </span>
+                  <span className="hidden md:inline">
+                    <AnimatedNumber
+                      value={kpis.paidAmount}
+                      formatter={formatCurrency}
+                    />
+                  </span>
+                </>
               )}
             </div>
             <p className="text-xs text-muted-foreground">No período filtrado</p>
@@ -1306,21 +1340,106 @@ export default function AccountsPayablePage() {
 
       {/* Main table card */}
       <Card>
-        <CardHeader className="space-y-3">
-          {/* ── Title row ─────────────────────────────────────────── */}
-          <div className="flex items-center justify-between gap-2">
+        <CardHeader>
+          {/* ── Desktop: título + todos os filtros em uma linha ──── */}
+          <div className="hidden md:flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <CardTitle>Transações</CardTitle>
+              <CardDescription>
+                Gerencie suas contas a pagar e fluxo de aprovação.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <DatePickerWithRange
+                date={filterOptions.dateRange}
+                setDate={(dateRange) =>
+                  setFilterOptions((prev) => ({ ...prev, dateRange }))
+                }
+              />
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar transações..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-[200px] pl-8 pr-8"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <Select
+                value={filterOptions.costCenterId}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, costCenterId: val }))
+                }
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Centro de Custo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os centros</SelectItem>
+                  {costCenters.map((cc) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={filterOptions.status}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, status: val }))
+                }
+              >
+                <SelectTrigger id="status-filter" className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="exclude-paid">Excluir Pagas</SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="draft">Rascunho</SelectItem>
+                  <SelectItem value="pending_approval">Pendente</SelectItem>
+                  <SelectItem value="approved">Aprovado</SelectItem>
+                  <SelectItem value="pending_authorization">
+                    Ag. Autorização
+                  </SelectItem>
+                  <SelectItem value="authorized">Autorizado</SelectItem>
+                  <SelectItem value="paid">Pago</SelectItem>
+                  <SelectItem value="rejected">Rejeitado</SelectItem>
+                </SelectContent>
+              </Select>
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Limpar filtros
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Mobile: título ─────────────────────────────────────── */}
+          <div className="flex md:hidden items-center justify-between gap-2">
             <CardTitle>Transações</CardTitle>
-            {/* Result count — mobile only */}
             {!isLoading && (
-              <span className="md:hidden text-xs text-muted-foreground tabular-nums shrink-0">
+              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
                 {sortedTransactions.length}
                 {hasMore ? "+" : ""} resultado
                 {sortedTransactions.length !== 1 ? "s" : ""}
               </span>
             )}
-            <CardDescription className="hidden sm:block sr-only">
-              Gerencie suas contas a pagar e fluxo de aprovação.
-            </CardDescription>
           </div>
 
           {/* ── Mobile: busca + botão de filtros numa linha ───────── */}
@@ -1438,91 +1557,6 @@ export default function AccountsPayablePage() {
               </button>
             </div>
           )}
-
-          {/* ── Desktop: busca + todos os filtros em uma linha ──────── */}
-          <div className="hidden md:flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar transações..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-8"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Limpar busca"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* ── Desktop: filtros de data / status / cc ─────────────── */}
-          <div className="hidden md:flex items-center gap-2 flex-wrap">
-            <DatePickerWithRange
-              date={filterOptions.dateRange}
-              setDate={(dateRange) =>
-                setFilterOptions((prev) => ({ ...prev, dateRange }))
-              }
-            />
-            <Select
-              value={filterOptions.costCenterId}
-              onValueChange={(val) =>
-                setFilterOptions((prev) => ({ ...prev, costCenterId: val }))
-              }
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Centro de Custo" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os centros</SelectItem>
-                {costCenters.map((cc) => (
-                  <SelectItem key={cc.id} value={cc.id}>
-                    {cc.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={filterOptions.status}
-              onValueChange={(val) =>
-                setFilterOptions((prev) => ({ ...prev, status: val }))
-              }
-            >
-              <SelectTrigger id="status-filter" className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="exclude-paid">Excluir Pagas</SelectItem>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="draft">Rascunho</SelectItem>
-                <SelectItem value="pending_approval">Pendente</SelectItem>
-                <SelectItem value="approved">Aprovado</SelectItem>
-                <SelectItem value="pending_authorization">
-                  Ag. Autorização
-                </SelectItem>
-                <SelectItem value="authorized">Autorizado</SelectItem>
-                <SelectItem value="paid">Pago</SelectItem>
-                <SelectItem value="rejected">Rejeitado</SelectItem>
-              </SelectContent>
-            </Select>
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={clearFilters}
-              >
-                <X className="mr-1 h-3.5 w-3.5" />
-                Limpar filtros
-              </Button>
-            )}
-          </div>
         </CardHeader>
         <CardContent className="p-0 md:p-6">
           {isLoading ? (
@@ -1901,10 +1935,10 @@ export default function AccountsPayablePage() {
 
       {/* Bulk action bar — floats at bottom when rows are selected */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] md:bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 w-[calc(100vw-2rem)] md:w-auto max-w-lg">
-          <div className="flex items-center gap-2 md:gap-3 rounded-xl border bg-background/95 backdrop-blur-sm px-3 md:px-4 py-2.5 shadow-lg w-full">
+        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] md:bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 w-[calc(100vw-2rem)] md:w-auto">
+          <div className="flex items-center gap-2 md:gap-3 rounded-xl border bg-background/95 backdrop-blur-sm px-3 md:px-4 py-2.5 md:py-3 shadow-lg w-full">
             {/* Count + total */}
-            <div className="flex items-center gap-1.5 mr-auto min-w-0">
+            <div className="flex items-center gap-1.5 mr-auto md:mr-0 min-w-0 md:pr-3 md:border-r">
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
               <span className="text-sm font-medium whitespace-nowrap">
                 {selectedIds.size}{" "}
@@ -1929,9 +1963,9 @@ export default function AccountsPayablePage() {
               <ResponsiveModalTrigger asChild>
                 <Button
                   size="sm"
-                  className="shrink-0 bg-green-600 hover:bg-green-700 text-white border-0"
+                  className="shrink-0 bg-green-600 hover:bg-green-700 text-white border-0 md:bg-transparent md:text-green-600 md:border md:border-green-600 md:hover:bg-green-50 dark:md:hover:bg-green-950 md:hover:text-green-700"
                 >
-                  <CheckCheck className="h-4 w-4 md:mr-1.5" />
+                  <CheckCheck className="h-4 w-4 md:hidden" />
                   <span className="hidden md:inline">Pagar</span>
                 </Button>
               </ResponsiveModalTrigger>

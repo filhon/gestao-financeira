@@ -87,15 +87,18 @@ export function CostCenterChart({ year }: { year?: number }) {
           <Tabs
             value={view}
             onValueChange={setView}
-            className="w-[140px] shrink-0"
+            className="w-[140px] md:w-[160px] shrink-0"
           >
-            <TabsList className="grid w-full grid-cols-2 h-7">
-              <TabsTrigger value="risk" className="text-[10px] md:text-xs h-5">
+            <TabsList className="grid w-full grid-cols-2 h-7 md:h-8">
+              <TabsTrigger
+                value="risk"
+                className="text-[10px] md:text-xs h-5 md:h-6"
+              >
                 Risco %
               </TabsTrigger>
               <TabsTrigger
                 value="volume"
-                className="text-[10px] md:text-xs h-5"
+                className="text-[10px] md:text-xs h-5 md:h-6"
               >
                 Volume R$
               </TabsTrigger>

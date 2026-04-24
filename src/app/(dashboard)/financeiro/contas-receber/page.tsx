@@ -755,8 +755,8 @@ export default function AccountsReceivablePage() {
   return (
     <div className="flex flex-col gap-4">
       {/* Page header */}
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight">
           Contas a Receber
         </h1>
         <div className="flex gap-2 shrink-0">
@@ -829,10 +829,20 @@ export default function AccountsReceivablePage() {
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
-                <AnimatedNumber
-                  value={kpis.pendingAmount}
-                  formatter={formatCurrencyAbbr}
-                />
+                <>
+                  <span className="md:hidden">
+                    <AnimatedNumber
+                      value={kpis.pendingAmount}
+                      formatter={formatCurrencyAbbr}
+                    />
+                  </span>
+                  <span className="hidden md:inline">
+                    <AnimatedNumber
+                      value={kpis.pendingAmount}
+                      formatter={formatCurrency}
+                    />
+                  </span>
+                </>
               )}
             </div>
             <p className="text-xs text-muted-foreground">No período filtrado</p>
@@ -864,7 +874,14 @@ export default function AccountsReceivablePage() {
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
-                formatCurrencyAbbr(kpis.overdueAmount)
+                <>
+                  <span className="md:hidden">
+                    {formatCurrencyAbbr(kpis.overdueAmount)}
+                  </span>
+                  <span className="hidden md:inline">
+                    {formatCurrency(kpis.overdueAmount)}
+                  </span>
+                </>
               )}
             </div>
           </CardContent>
@@ -899,7 +916,14 @@ export default function AccountsReceivablePage() {
               {isLoading ? (
                 <Skeleton className="h-3 w-24 mt-1" />
               ) : (
-                formatCurrencyAbbr(kpis.dueSoonAmount)
+                <>
+                  <span className="md:hidden">
+                    {formatCurrencyAbbr(kpis.dueSoonAmount)}
+                  </span>
+                  <span className="hidden md:inline">
+                    {formatCurrency(kpis.dueSoonAmount)}
+                  </span>
+                </>
               )}
             </div>
           </CardContent>
@@ -918,10 +942,20 @@ export default function AccountsReceivablePage() {
               {isLoading ? (
                 <Skeleton className="h-7 w-32" />
               ) : (
-                <AnimatedNumber
-                  value={kpis.receivedAmount}
-                  formatter={formatCurrencyAbbr}
-                />
+                <>
+                  <span className="md:hidden">
+                    <AnimatedNumber
+                      value={kpis.receivedAmount}
+                      formatter={formatCurrencyAbbr}
+                    />
+                  </span>
+                  <span className="hidden md:inline">
+                    <AnimatedNumber
+                      value={kpis.receivedAmount}
+                      formatter={formatCurrency}
+                    />
+                  </span>
+                </>
               )}
             </div>
             <p className="text-xs text-muted-foreground">No período filtrado</p>
@@ -931,21 +965,89 @@ export default function AccountsReceivablePage() {
 
       {/* Main table card */}
       <Card>
-        <CardHeader className="space-y-3">
-          {/* ── Title row ─────────────────────────────────────────── */}
-          <div className="flex items-center justify-between gap-2">
+        <CardHeader>
+          {/* ── Desktop: título + todos os filtros em uma linha ──── */}
+          <div className="hidden md:flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <CardTitle>Transações</CardTitle>
+              <CardDescription>Gerencie suas contas a receber.</CardDescription>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <DatePickerWithRange
+                date={filterOptions.dateRange}
+                setDate={(dateRange) =>
+                  setFilterOptions((prev) => ({ ...prev, dateRange }))
+                }
+              />
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="receivable-search"
+                  placeholder="Buscar transações..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-[200px] pl-8 pr-8"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <Select
+                value={filterOptions.status}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, status: val }))
+                }
+              >
+                <SelectTrigger id="status-filter" className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="exclude-paid">
+                    Excluir Recebidas
+                  </SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="draft">Rascunho</SelectItem>
+                  <SelectItem value="pending_approval">Pendente</SelectItem>
+                  <SelectItem value="approved">Ag. Recebimento</SelectItem>
+                  <SelectItem value="pending_authorization">
+                    Ag. Autorização
+                  </SelectItem>
+                  <SelectItem value="authorized">Autorizado</SelectItem>
+                  <SelectItem value="paid">Recebido</SelectItem>
+                  <SelectItem value="rejected">Rejeitado</SelectItem>
+                </SelectContent>
+              </Select>
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Limpar filtros
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Mobile: título ─────────────────────────────────────── */}
+          <div className="flex md:hidden items-center justify-between gap-2">
             <CardTitle>Transações</CardTitle>
-            {/* Result count — mobile only */}
             {!isLoading && (
-              <span className="md:hidden text-xs text-muted-foreground tabular-nums shrink-0">
+              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
                 {transactions.length}
                 {hasMore ? "+" : ""} resultado
                 {transactions.length !== 1 ? "s" : ""}
               </span>
             )}
-            <CardDescription className="hidden sm:block sr-only">
-              Gerencie suas contas a receber.
-            </CardDescription>
           </div>
 
           {/* ── Mobile: busca + botão de filtros ───────────────────── */}
@@ -1041,74 +1143,6 @@ export default function AccountsReceivablePage() {
               </button>
             </div>
           )}
-
-          {/* ── Desktop: busca ──────────────────────────────────────── */}
-          <div className="hidden md:flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                id="receivable-search"
-                placeholder="Buscar transações..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-8"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Limpar busca"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* ── Desktop: filtros de data / status ──────────────────── */}
-          <div className="hidden md:flex items-center gap-2 flex-wrap">
-            <DatePickerWithRange
-              date={filterOptions.dateRange}
-              setDate={(dateRange) =>
-                setFilterOptions((prev) => ({ ...prev, dateRange }))
-              }
-            />
-            <Select
-              value={filterOptions.status}
-              onValueChange={(val) =>
-                setFilterOptions((prev) => ({ ...prev, status: val }))
-              }
-            >
-              <SelectTrigger id="status-filter" className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="exclude-paid">Excluir Recebidas</SelectItem>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="draft">Rascunho</SelectItem>
-                <SelectItem value="pending_approval">Pendente</SelectItem>
-                <SelectItem value="approved">Ag. Recebimento</SelectItem>
-                <SelectItem value="pending_authorization">
-                  Ag. Autorização
-                </SelectItem>
-                <SelectItem value="authorized">Autorizado</SelectItem>
-                <SelectItem value="paid">Recebido</SelectItem>
-                <SelectItem value="rejected">Rejeitado</SelectItem>
-              </SelectContent>
-            </Select>
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={clearFilters}
-              >
-                <X className="mr-1 h-3.5 w-3.5" />
-                Limpar filtros
-              </Button>
-            )}
-          </div>
         </CardHeader>
 
         <CardContent className="p-0 md:p-6">

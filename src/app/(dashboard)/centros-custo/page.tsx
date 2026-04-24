@@ -621,7 +621,7 @@ export default function CostCentersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start md:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl md:text-3xl font-bold tracking-tight">
             Centros de Custo

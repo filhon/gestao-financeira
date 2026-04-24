@@ -176,7 +176,7 @@ export function CashFlowChart({ year }: { year?: number }) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 text-xs border-dashed px-2"
+                className="h-7 md:h-8 text-xs border-dashed px-2 md:px-2.5"
               >
                 <Plus className="h-3 w-3 sm:mr-1" />
                 <span className="hidden sm:inline">Adicionar Simulação</span>
@@ -322,7 +322,7 @@ export function CashFlowChart({ year }: { year?: number }) {
             variant={mode === "30days" ? "default" : "outline"}
             size="sm"
             onClick={() => setMode("30days")}
-            className="h-7 text-xs px-2.5"
+            className="h-7 md:h-8 text-xs px-2.5"
           >
             <Calendar className="mr-1 h-3 w-3" />
             30 dias
@@ -331,7 +331,7 @@ export function CashFlowChart({ year }: { year?: number }) {
             variant={mode === "year" ? "default" : "outline"}
             size="sm"
             onClick={() => setMode("year")}
-            className="h-7 text-xs px-2.5"
+            className="h-7 md:h-8 text-xs px-2.5"
           >
             {mode === "year" ? (
               <Minimize2 className="mr-1 h-3 w-3" />
@@ -375,7 +375,7 @@ export function CashFlowChart({ year }: { year?: number }) {
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={data}
-                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
               >
                 <defs>
                   {/* Real balance gradient — always blue */}

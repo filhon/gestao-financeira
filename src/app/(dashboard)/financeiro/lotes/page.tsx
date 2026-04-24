@@ -711,7 +711,7 @@ export default function PaymentBatchesPage() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* ── Page header ──────────────────────────────────────────────── */}
-      <div className="flex flex-wrap justify-between items-start gap-2">
+      <div className="flex flex-wrap justify-between items-start md:items-center gap-2">
         <div className="flex items-center gap-3">
           <h1 className="text-xl md:text-3xl font-bold tracking-tight">
             Lotes de Pagamento
@@ -888,7 +888,12 @@ export default function PaymentBatchesPage() {
                 className="text-xs text-muted-foreground font-financial"
                 title={formatCurrency(kpiData.openTotal)}
               >
-                {formatCurrencyAbbr(kpiData.openTotal)}
+                <span className="md:hidden">
+                  {formatCurrencyAbbr(kpiData.openTotal)}
+                </span>
+                <span className="hidden md:inline">
+                  {formatCurrency(kpiData.openTotal)}
+                </span>
               </p>
             </CardContent>
           </Card>
@@ -929,7 +934,12 @@ export default function PaymentBatchesPage() {
                 className="text-xs text-muted-foreground font-financial"
                 title={formatCurrency(kpiData.authorizedTotal)}
               >
-                {formatCurrencyAbbr(kpiData.authorizedTotal)}
+                <span className="md:hidden">
+                  {formatCurrencyAbbr(kpiData.authorizedTotal)}
+                </span>
+                <span className="hidden md:inline">
+                  {formatCurrency(kpiData.authorizedTotal)}
+                </span>
               </p>
             </CardContent>
           </Card>
@@ -943,7 +953,12 @@ export default function PaymentBatchesPage() {
                 className="text-xl md:text-2xl font-bold font-financial text-blue-600 dark:text-blue-400"
                 title={formatCurrency(kpiData.paidTotal)}
               >
-                {formatCurrencyAbbr(kpiData.paidTotal)}
+                <span className="md:hidden">
+                  {formatCurrencyAbbr(kpiData.paidTotal)}
+                </span>
+                <span className="hidden md:inline">
+                  {formatCurrency(kpiData.paidTotal)}
+                </span>
               </div>
               <p className="text-xs text-muted-foreground">no período</p>
             </CardContent>

@@ -141,7 +141,7 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
     <Card className="border-l-4 border-l-red-500">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2 text-red-600">
+          <CardTitle className="text-base md:text-lg flex items-center gap-2 text-red-600">
             <AlertCircle className="h-5 w-5" />
             Contas em Atraso
             {hasItems && (
@@ -206,7 +206,7 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
     <Card className="border-l-4 border-l-amber-500">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2 text-amber-600">
+          <CardTitle className="text-base md:text-lg flex items-center gap-2 text-amber-600">
             <Clock className="h-5 w-5" />
             Pendentes de Aprovação
             {hasItems && (
