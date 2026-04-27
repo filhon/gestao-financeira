@@ -336,10 +336,17 @@ function MobileTransactionCard({
       ].join(" ")}
     >
       {/* Checkbox — min 44×44 touch area */}
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggleSelect}
-        className="flex items-center justify-center -ml-1 h-11 w-11 shrink-0"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggleSelect();
+          }
+        }}
+        className="flex items-center justify-center -ml-1 h-11 w-11 shrink-0 cursor-pointer"
         aria-label={isSelected ? "Desmarcar transação" : "Selecionar transação"}
       >
         <Checkbox
@@ -348,7 +355,7 @@ function MobileTransactionCard({
           className="h-5 w-5 pointer-events-none"
           tabIndex={-1}
         />
-      </button>
+      </div>
 
       {/* Main content */}
       <button
@@ -686,16 +693,24 @@ export default function AccountsPayablePage() {
 
   const fetchTransactions = refreshTransactions;
 
-  const { targetRef, isIntersecting } =
+  const sentinelEnabled =
+    hasMore && !isFetchingNextPage && !debouncedSearchTerm && !searchTerm;
+
+  const { targetRef: desktopTargetRef, isIntersecting: isDesktopIntersecting } =
     useIntersectionObserver<HTMLTableRowElement>({
       threshold: 0.1,
-      enabled:
-        hasMore && !isFetchingNextPage && !debouncedSearchTerm && !searchTerm,
+      enabled: sentinelEnabled,
+    });
+
+  const { targetRef: mobileTargetRef, isIntersecting: isMobileIntersecting } =
+    useIntersectionObserver<HTMLDivElement>({
+      threshold: 0.1,
+      enabled: sentinelEnabled,
     });
 
   useEffect(() => {
     if (
-      isIntersecting &&
+      (isDesktopIntersecting || isMobileIntersecting) &&
       hasMore &&
       !debouncedSearchTerm &&
       !searchTerm &&
@@ -704,7 +719,8 @@ export default function AccountsPayablePage() {
       loadMore();
     }
   }, [
-    isIntersecting,
+    isDesktopIntersecting,
+    isMobileIntersecting,
     hasMore,
     debouncedSearchTerm,
     searchTerm,
@@ -1795,7 +1811,7 @@ export default function AccountsPayablePage() {
                       })
                     )}
                     {hasMore && !debouncedSearchTerm && (
-                      <TableRow ref={targetRef}>
+                      <TableRow ref={desktopTargetRef}>
                         <TableCell
                           colSpan={8}
                           className={
@@ -1912,7 +1928,7 @@ export default function AccountsPayablePage() {
 
                     {hasMore && !debouncedSearchTerm && (
                       <div
-                        ref={targetRef}
+                        ref={mobileTargetRef}
                         className={
                           isFetchingNextPage ? "py-4 text-center" : "h-px"
                         }
