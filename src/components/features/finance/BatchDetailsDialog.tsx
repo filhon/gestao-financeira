@@ -579,7 +579,7 @@ export function BatchDetailsDialog({
     <ResponsiveModal open={isOpen} onOpenChange={onClose}>
       <ResponsiveModalContent className="sm:max-w-[90vw] w-full max-h-[90vh] overflow-y-auto">
         <ResponsiveModalHeader>
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 pr-8">
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <Badge variant="outline" className="shrink-0">

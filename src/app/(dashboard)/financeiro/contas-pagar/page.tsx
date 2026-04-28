@@ -462,6 +462,7 @@ export default function AccountsPayablePage() {
     status: string;
     costCenterId: string;
     dateRange: DateRange | undefined;
+    batchFilter: string;
   }>({
     status: "exclude-paid",
     costCenterId: "all",
@@ -469,6 +470,7 @@ export default function AccountsPayablePage() {
       from: startOfDay(new Date()),
       to: addDays(startOfDay(new Date()), 7),
     },
+    batchFilter: "all",
   });
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -592,11 +594,29 @@ export default function AccountsPayablePage() {
   const transactions = searchResults ?? paginatedTransactions;
   const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
 
+  const batchFilteredTransactions = useMemo(() => {
+    if (filterOptions.batchFilter === "in_batch") {
+      return transactions.filter((t) => !!t.batchId);
+    }
+    if (filterOptions.batchFilter === "not_in_batch") {
+      return transactions.filter((t) => !t.batchId);
+    }
+    return transactions;
+  }, [transactions, filterOptions.batchFilter]);
+
+  // When batch filter is active and no visible results yet but more pages exist,
+  // keep auto-loading silently instead of showing a misleading empty state.
+  const isSeekingBatchResults =
+    filterOptions.batchFilter !== "all" &&
+    batchFilteredTransactions.length === 0 &&
+    !isLoading &&
+    (hasMore || isFetchingNextPage);
+
   const {
     items: sortedTransactions,
     requestSort,
     sortConfig,
-  } = useSortableData(transactions, {
+  } = useSortableData(batchFilteredTransactions, {
     key: "dueDate",
     direction: "asc",
   });
@@ -605,21 +625,23 @@ export default function AccountsPayablePage() {
   const kpis = useMemo(() => {
     const today = startOfDay(new Date());
 
-    const overdue = transactions.filter(
+    const overdue = batchFilteredTransactions.filter(
       (t) => UNPAID_STATUSES.includes(t.status) && isBefore(t.dueDate, today),
     );
 
-    const dueSoon = transactions.filter(
+    const dueSoon = batchFilteredTransactions.filter(
       (t) =>
         UNPAID_STATUSES.includes(t.status) &&
         (isToday(t.dueDate) || isTomorrow(t.dueDate)),
     );
 
-    const totalPending = transactions.filter((t) =>
+    const totalPending = batchFilteredTransactions.filter((t) =>
       UNPAID_STATUSES.includes(t.status),
     );
 
-    const totalPaid = transactions.filter((t) => t.status === "paid");
+    const totalPaid = batchFilteredTransactions.filter(
+      (t) => t.status === "paid",
+    );
 
     return {
       overdueCount: overdue.length,
@@ -629,7 +651,7 @@ export default function AccountsPayablePage() {
       pendingAmount: totalPending.reduce((acc, t) => acc + t.amount, 0),
       paidAmount: totalPaid.reduce((acc, t) => acc + t.amount, 0),
     };
-  }, [transactions]);
+  }, [batchFilteredTransactions]);
 
   const handleOpenPaymentConfirmation = async (t: Transaction) => {
     if (!user || !selectedCompany) return;
@@ -1095,7 +1117,7 @@ export default function AccountsPayablePage() {
     }
   };
 
-  const selectedTotal = transactions
+  const selectedTotal = batchFilteredTransactions
     .filter((t) => selectedIds.has(t.id))
     .reduce((acc, t) => acc + t.amount, 0);
 
@@ -1113,11 +1135,13 @@ export default function AccountsPayablePage() {
   const hasActiveFilters =
     filterOptions.status !== "exclude-paid" ||
     filterOptions.costCenterId !== "all" ||
+    filterOptions.batchFilter !== "all" ||
     !isDateRangeDefault;
 
   const activeFilterCount =
     (filterOptions.status !== "exclude-paid" ? 1 : 0) +
     (filterOptions.costCenterId !== "all" ? 1 : 0) +
+    (filterOptions.batchFilter !== "all" ? 1 : 0) +
     (!isDateRangeDefault ? 1 : 0);
 
   const statusLabels: Record<string, string> = {
@@ -1135,6 +1159,7 @@ export default function AccountsPayablePage() {
     setFilterOptions({
       status: "exclude-paid",
       costCenterId: "all",
+      batchFilter: "all",
       dateRange: {
         from: startOfDay(new Date()),
         to: addDays(startOfDay(new Date()), 7),
@@ -1366,12 +1391,6 @@ export default function AccountsPayablePage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <DatePickerWithRange
-                date={filterOptions.dateRange}
-                setDate={(dateRange) =>
-                  setFilterOptions((prev) => ({ ...prev, dateRange }))
-                }
-              />
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -1391,6 +1410,12 @@ export default function AccountsPayablePage() {
                   </button>
                 )}
               </div>
+              <DatePickerWithRange
+                date={filterOptions.dateRange}
+                setDate={(dateRange) =>
+                  setFilterOptions((prev) => ({ ...prev, dateRange }))
+                }
+              />
               <Select
                 value={filterOptions.costCenterId}
                 onValueChange={(val) =>
@@ -1407,6 +1432,21 @@ export default function AccountsPayablePage() {
                       {cc.name}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={filterOptions.batchFilter}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, batchFilter: val }))
+                }
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="in_batch">Em lote</SelectItem>
+                  <SelectItem value="not_in_batch">Sem lote</SelectItem>
                 </SelectContent>
               </Select>
               <Select
@@ -1565,6 +1605,26 @@ export default function AccountsPayablePage() {
                 </span>
               )}
 
+              {filterOptions.batchFilter !== "all" && (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
+                  {filterOptions.batchFilter === "in_batch"
+                    ? "Em lote"
+                    : "Sem lote"}
+                  <button
+                    onClick={() =>
+                      setFilterOptions((prev) => ({
+                        ...prev,
+                        batchFilter: "all",
+                      }))
+                    }
+                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                    aria-label="Remover filtro de lote"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              )}
+
               <button
                 onClick={clearFilters}
                 className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline hover:text-foreground transition-colors ml-1"
@@ -1644,7 +1704,14 @@ export default function AccountsPayablePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedTransactions.length === 0 ? (
+                    {sortedTransactions.length === 0 &&
+                    isSeekingBatchResults ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="p-0">
+                          <TableSkeleton />
+                        </TableCell>
+                      </TableRow>
+                    ) : sortedTransactions.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="h-36 text-center">
                           <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -1666,6 +1733,7 @@ export default function AccountsPayablePage() {
                                   setFilterOptions({
                                     status: "exclude-paid",
                                     costCenterId: "all",
+                                    batchFilter: "all",
                                     dateRange: {
                                       from: startOfDay(new Date()),
                                       to: addDays(startOfDay(new Date()), 7),
@@ -1815,10 +1883,12 @@ export default function AccountsPayablePage() {
                         <TableCell
                           colSpan={8}
                           className={
-                            isFetchingNextPage ? "py-3 text-center" : "h-px p-0"
+                            isFetchingNextPage && !isSeekingBatchResults
+                              ? "py-3 text-center"
+                              : "h-px p-0"
                           }
                         >
-                          {isFetchingNextPage && (
+                          {isFetchingNextPage && !isSeekingBatchResults && (
                             <div className="flex justify-center items-center text-muted-foreground gap-2">
                               <Loader2 className="w-5 h-5 animate-spin" />
                               Carregando mais...
@@ -1833,7 +1903,9 @@ export default function AccountsPayablePage() {
 
               {/* ── Mobile: Card list ────────────────────────────────── */}
               <div className="md:hidden">
-                {sortedTransactions.length === 0 ? (
+                {sortedTransactions.length === 0 && isSeekingBatchResults ? (
+                  <MobileCardSkeleton />
+                ) : sortedTransactions.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 py-10 px-4 text-muted-foreground">
                     <FileText className="h-8 w-8 opacity-40" />
                     <p className="text-sm font-medium text-center">
@@ -1853,6 +1925,7 @@ export default function AccountsPayablePage() {
                           setFilterOptions({
                             status: "exclude-paid",
                             costCenterId: "all",
+                            batchFilter: "all",
                             dateRange: {
                               from: startOfDay(new Date()),
                               to: addDays(startOfDay(new Date()), 7),
@@ -1930,10 +2003,12 @@ export default function AccountsPayablePage() {
                       <div
                         ref={mobileTargetRef}
                         className={
-                          isFetchingNextPage ? "py-4 text-center" : "h-px"
+                          isFetchingNextPage && !isSeekingBatchResults
+                            ? "py-4 text-center"
+                            : "h-px"
                         }
                       >
-                        {isFetchingNextPage && (
+                        {isFetchingNextPage && !isSeekingBatchResults && (
                           <div className="flex justify-center items-center text-muted-foreground gap-2">
                             <Loader2 className="w-4 h-4 animate-spin" />
                             <span className="text-sm">Carregando mais...</span>
@@ -2368,6 +2443,53 @@ export default function AccountsPayablePage() {
               </div>
             </div>
 
+            {/* Centro de Custo */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Centro de Custo
+              </p>
+              <Select
+                value={filterOptions.costCenterId}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, costCenterId: val }))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Centro de Custo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os centros</SelectItem>
+                  {costCenters.map((cc) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Lote */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Lote
+              </p>
+              <Select
+                value={filterOptions.batchFilter}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, batchFilter: val }))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="in_batch">Em lote</SelectItem>
+                  <SelectItem value="not_in_batch">Sem lote</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Status */}
             <div className="space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -2394,31 +2516,6 @@ export default function AccountsPayablePage() {
                   <SelectItem value="authorized">Autorizado</SelectItem>
                   <SelectItem value="paid">Pago</SelectItem>
                   <SelectItem value="rejected">Rejeitado</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Centro de Custo */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Centro de Custo
-              </p>
-              <Select
-                value={filterOptions.costCenterId}
-                onValueChange={(val) =>
-                  setFilterOptions((prev) => ({ ...prev, costCenterId: val }))
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Centro de Custo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os centros</SelectItem>
-                  {costCenters.map((cc) => (
-                    <SelectItem key={cc.id} value={cc.id}>
-                      {cc.name}
-                    </SelectItem>
-                  ))}
                 </SelectContent>
               </Select>
             </div>

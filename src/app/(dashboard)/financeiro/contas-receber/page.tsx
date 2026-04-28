@@ -414,9 +414,11 @@ export default function AccountsReceivablePage() {
   const [filterOptions, setFilterOptions] = useState<{
     status: string;
     dateRange: DateRange | undefined;
+    batchFilter: string;
   }>({
     status: "exclude-paid",
     dateRange: defaultDateRange,
+    batchFilter: "all",
   });
 
   // ── Search state ─────────────────────────────────────────────────────────
@@ -608,6 +610,24 @@ export default function AccountsReceivablePage() {
   const transactions = searchResults ?? paginatedTransactions;
   const isLoading = debouncedSearchTerm ? isSearching : isPaginatedLoading;
 
+  const batchFilteredTransactions = useMemo(() => {
+    if (filterOptions.batchFilter === "in_batch") {
+      return transactions.filter((t) => !!t.batchId);
+    }
+    if (filterOptions.batchFilter === "not_in_batch") {
+      return transactions.filter((t) => !t.batchId);
+    }
+    return transactions;
+  }, [transactions, filterOptions.batchFilter]);
+
+  // When batch filter is active and no visible results yet but more pages exist,
+  // keep auto-loading silently instead of showing a misleading empty state.
+  const isSeekingBatchResults =
+    filterOptions.batchFilter !== "all" &&
+    batchFilteredTransactions.length === 0 &&
+    !isLoading &&
+    (hasMore || isFetchingNextPage);
+
   // ── Filter state helpers ─────────────────────────────────────────────────
   const isDateRangeDefault =
     filterOptions.dateRange?.from?.toDateString() ===
@@ -616,10 +636,13 @@ export default function AccountsReceivablePage() {
       defaultDateRange.to.toDateString();
 
   const hasActiveFilters =
-    filterOptions.status !== "exclude-paid" || !isDateRangeDefault;
+    filterOptions.status !== "exclude-paid" ||
+    filterOptions.batchFilter !== "all" ||
+    !isDateRangeDefault;
 
   const activeFilterCount =
     (filterOptions.status !== "exclude-paid" ? 1 : 0) +
+    (filterOptions.batchFilter !== "all" ? 1 : 0) +
     (!isDateRangeDefault ? 1 : 0);
 
   const statusLabels: Record<string, string> = {
@@ -637,28 +660,31 @@ export default function AccountsReceivablePage() {
     setFilterOptions({
       status: "exclude-paid",
       dateRange: defaultDateRange,
+      batchFilter: "all",
     });
 
   // ── KPI calculations ─────────────────────────────────────────────────────
   const kpis = useMemo(() => {
     const today = startOfDay(new Date());
 
-    const overdue = transactions.filter(
+    const overdue = batchFilteredTransactions.filter(
       (t) =>
         UNRECEIVED_STATUSES.includes(t.status) && isBefore(t.dueDate, today),
     );
 
-    const dueSoon = transactions.filter(
+    const dueSoon = batchFilteredTransactions.filter(
       (t) =>
         UNRECEIVED_STATUSES.includes(t.status) &&
         (isToday(t.dueDate) || isTomorrow(t.dueDate)),
     );
 
-    const totalPending = transactions.filter((t) =>
+    const totalPending = batchFilteredTransactions.filter((t) =>
       UNRECEIVED_STATUSES.includes(t.status),
     );
 
-    const totalReceived = transactions.filter((t) => t.status === "paid");
+    const totalReceived = batchFilteredTransactions.filter(
+      (t) => t.status === "paid",
+    );
 
     return {
       overdueCount: overdue.length,
@@ -668,7 +694,7 @@ export default function AccountsReceivablePage() {
       pendingAmount: totalPending.reduce((acc, t) => acc + t.amount, 0),
       receivedAmount: totalReceived.reduce((acc, t) => acc + t.amount, 0),
     };
-  }, [transactions]);
+  }, [batchFilteredTransactions]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -973,12 +999,6 @@ export default function AccountsReceivablePage() {
               <CardDescription>Gerencie suas contas a receber.</CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <DatePickerWithRange
-                date={filterOptions.dateRange}
-                setDate={(dateRange) =>
-                  setFilterOptions((prev) => ({ ...prev, dateRange }))
-                }
-              />
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -999,6 +1019,27 @@ export default function AccountsReceivablePage() {
                   </button>
                 )}
               </div>
+              <DatePickerWithRange
+                date={filterOptions.dateRange}
+                setDate={(dateRange) =>
+                  setFilterOptions((prev) => ({ ...prev, dateRange }))
+                }
+              />
+              <Select
+                value={filterOptions.batchFilter}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, batchFilter: val }))
+                }
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="in_batch">Em lote</SelectItem>
+                  <SelectItem value="not_in_batch">Sem lote</SelectItem>
+                </SelectContent>
+              </Select>
               <Select
                 value={filterOptions.status}
                 onValueChange={(val) =>
@@ -1043,9 +1084,9 @@ export default function AccountsReceivablePage() {
             <CardTitle>Transações</CardTitle>
             {!isLoading && (
               <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                {transactions.length}
+                {batchFilteredTransactions.length}
                 {hasMore ? "+" : ""} resultado
-                {transactions.length !== 1 ? "s" : ""}
+                {batchFilteredTransactions.length !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -1111,6 +1152,26 @@ export default function AccountsReceivablePage() {
                     }
                     className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
                     aria-label="Remover filtro de período"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              )}
+
+              {filterOptions.batchFilter !== "all" && (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
+                  {filterOptions.batchFilter === "in_batch"
+                    ? "Em lote"
+                    : "Sem lote"}
+                  <button
+                    onClick={() =>
+                      setFilterOptions((prev) => ({
+                        ...prev,
+                        batchFilter: "all",
+                      }))
+                    }
+                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                    aria-label="Remover filtro de lote"
                   >
                     <X className="h-2.5 w-2.5" />
                   </button>
@@ -1222,7 +1283,14 @@ export default function AccountsReceivablePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {transactions.length === 0 ? (
+                    {batchFilteredTransactions.length === 0 &&
+                    isSeekingBatchResults ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="p-0">
+                          <TableSkeleton />
+                        </TableCell>
+                      </TableRow>
+                    ) : batchFilteredTransactions.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="h-36 text-center">
                           <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -1263,7 +1331,7 @@ export default function AccountsReceivablePage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      transactions.map((t) => {
+                      batchFilteredTransactions.map((t) => {
                         const isOverdue =
                           UNRECEIVED_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));
@@ -1333,10 +1401,12 @@ export default function AccountsReceivablePage() {
                         <TableCell
                           colSpan={7}
                           className={
-                            isFetchingNextPage ? "py-3 text-center" : "h-px p-0"
+                            isFetchingNextPage && !isSeekingBatchResults
+                              ? "py-3 text-center"
+                              : "h-px p-0"
                           }
                         >
-                          {isFetchingNextPage && (
+                          {isFetchingNextPage && !isSeekingBatchResults && (
                             <div className="flex justify-center items-center text-muted-foreground gap-2">
                               <Loader2 className="w-5 h-5 animate-spin" />
                               Carregando mais...
@@ -1351,7 +1421,10 @@ export default function AccountsReceivablePage() {
 
               {/* ── Mobile: Card list ────────────────────────────────── */}
               <div className="md:hidden">
-                {transactions.length === 0 ? (
+                {batchFilteredTransactions.length === 0 &&
+                isSeekingBatchResults ? (
+                  <MobileCardSkeleton />
+                ) : batchFilteredTransactions.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 py-10 px-4 text-muted-foreground">
                     <FileText className="h-8 w-8 opacity-40" />
                     <p className="text-sm font-medium text-center">
@@ -1390,7 +1463,7 @@ export default function AccountsReceivablePage() {
                 ) : (
                   <>
                     <div className="divide-y">
-                      {transactions.map((t) => {
+                      {batchFilteredTransactions.map((t) => {
                         const isOverdue =
                           UNRECEIVED_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));
@@ -1412,10 +1485,12 @@ export default function AccountsReceivablePage() {
                       <div
                         ref={targetRef}
                         className={
-                          isFetchingNextPage ? "py-4 text-center" : "h-px"
+                          isFetchingNextPage && !isSeekingBatchResults
+                            ? "py-4 text-center"
+                            : "h-px"
                         }
                       >
-                        {isFetchingNextPage && (
+                        {isFetchingNextPage && !isSeekingBatchResults && (
                           <div className="flex justify-center items-center text-muted-foreground gap-2">
                             <Loader2 className="w-4 h-4 animate-spin" />
                             <span className="text-sm">Carregando mais...</span>
@@ -1493,6 +1568,28 @@ export default function AccountsReceivablePage() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Lote */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Lote
+              </p>
+              <Select
+                value={filterOptions.batchFilter}
+                onValueChange={(val) =>
+                  setFilterOptions((prev) => ({ ...prev, batchFilter: val }))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="in_batch">Em lote</SelectItem>
+                  <SelectItem value="not_in_batch">Sem lote</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Status */}

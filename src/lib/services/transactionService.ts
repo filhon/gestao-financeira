@@ -404,6 +404,7 @@ export const transactionService = {
           companyId,
           createdBy: userId,
           status: status,
+          batchId: null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
@@ -466,6 +467,7 @@ export const transactionService = {
       companyId,
       createdBy: userId,
       status: status,
+      batchId: null,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
