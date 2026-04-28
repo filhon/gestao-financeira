@@ -213,10 +213,65 @@ export function getValueLabel(field: string, value: unknown): string {
     // Arrays
     if (Array.isArray(value)) {
       if (value.length === 0) return "(vazio)";
+      // Array of attachment objects
+      if (
+        value.length > 0 &&
+        typeof value[0] === "object" &&
+        value[0] !== null &&
+        ("name" in value[0] || "url" in value[0])
+      ) {
+        return value
+          .map((a: { name?: string }) => a.name || "anexo")
+          .join(", ");
+      }
       return `${value.length} item(s)`;
     }
-    // Objects - just indicate it's complex
-    return "(objeto complexo)";
+
+    // Known object fields with specific formatting
+    if (field === "costCenterAllocation") {
+      const entries = Object.entries(value as Record<string, number>);
+      if (entries.length === 0) return "(vazio)";
+      const parts = entries.map(([, pct]) => `${(pct * 100).toFixed(0)}%`);
+      return `${entries.length} centro(s): ${parts.join(", ")}`;
+    }
+
+    if (field === "installments") {
+      const obj = value as Record<string, unknown>;
+      const count = obj.count ?? obj.total ?? obj.installments;
+      const freq =
+        typeof obj.frequency === "string"
+          ? ({ monthly: "mensais", weekly: "semanais", yearly: "anuais" }[
+              obj.frequency
+            ] ?? obj.frequency)
+          : "";
+      if (count) return `${count} parcela(s)${freq ? ` ${freq}` : ""}`;
+    }
+
+    if (field === "recurrence") {
+      const obj = value as Record<string, unknown>;
+      const freqMap: Record<string, string> = {
+        daily: "diária",
+        weekly: "semanal",
+        monthly: "mensal",
+        yearly: "anual",
+      };
+      const freq =
+        typeof obj.frequency === "string"
+          ? (freqMap[obj.frequency] ?? obj.frequency)
+          : "";
+      if (freq) return `Recorrência ${freq}`;
+    }
+
+    if (field === "address") {
+      const obj = value as Record<string, unknown>;
+      const parts = [obj.street, obj.city, obj.state].filter(Boolean);
+      if (parts.length > 0) return parts.join(", ");
+    }
+
+    // Generic object fallback: show key count
+    const keys = Object.keys(value as object);
+    if (keys.length === 0) return "(vazio)";
+    return `${keys.length} campo(s)`;
   }
 
   return String(value);
@@ -318,12 +373,32 @@ export function getActionSummary(
     case "update":
       if (details.changes && Array.isArray(details.changes)) {
         const count = details.changes.length;
-        return `${entityLabel} atualizado(a) - ${count} campo(s) alterado(s)`;
+        return `${entityLabel} atualizado(a) — ${count} campo(s) alterado(s)`;
       }
       if (details.status) {
         const statusLabel =
           VALUE_LABELS.status?.[details.status as string] || details.status;
         return `Status da ${entityLabel.toLowerCase()} alterado para ${statusLabel}`;
+      }
+      // Legacy format: derive summary from the fields present
+      {
+        const relevantFields = Object.keys(details).filter(
+          (k) =>
+            ![
+              "id",
+              "createdAt",
+              "updatedAt",
+              "companyId",
+              "createdBy",
+            ].includes(k),
+        );
+        if (relevantFields.length > 0) {
+          const labels = relevantFields
+            .slice(0, 3)
+            .map((f) => FIELD_LABELS[f] || f)
+            .join(", ");
+          return `${entityLabel} atualizado(a) — ${labels}${relevantFields.length > 3 ? ` +${relevantFields.length - 3}` : ""}`;
+        }
       }
       return `${entityLabel} atualizado(a)`;
 

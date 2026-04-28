@@ -316,8 +316,26 @@ export interface AuditLog {
   companyId: string;
   userId: string;
   userEmail: string;
-  action: "create" | "update" | "delete" | "login" | "approve" | "reject";
-  entity: "transaction" | "company" | "user" | "cost_center" | "entity";
+  userName?: string;
+  action:
+    | "create"
+    | "update"
+    | "delete"
+    | "login"
+    | "approve"
+    | "reject"
+    | "pay"
+    | "authorize"
+    | "release";
+  entity:
+    | "transaction"
+    | "company"
+    | "user"
+    | "cost_center"
+    | "entity"
+    | "batch"
+    | "recurrence"
+    | "budget";
   entityId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details: Record<string, any>;

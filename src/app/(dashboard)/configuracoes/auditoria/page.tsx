@@ -511,9 +511,25 @@ export default function AuditLogsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="py-3">
-                        <span className="text-sm font-medium truncate block max-w-[180px]">
-                          {log.userEmail}
-                        </span>
+                        <div className="flex flex-col gap-0.5 max-w-[180px]">
+                          {log.userName && log.userName !== log.userEmail ? (
+                            <>
+                              <span className="text-sm font-medium truncate">
+                                {log.userName}
+                              </span>
+                              <span className="text-xs text-muted-foreground truncate">
+                                {log.userEmail}
+                              </span>
+                            </>
+                          ) : (
+                            <span
+                              className="text-sm font-medium truncate"
+                              title={log.userEmail}
+                            >
+                              {log.userEmail}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="py-3">
                         <ActionBadge action={log.action} />
