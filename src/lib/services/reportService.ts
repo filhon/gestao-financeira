@@ -1083,6 +1083,778 @@ export const reportService = {
   },
 
   // ─────────────────────────────────────────────────────────────────────────
+  // GUIA DE TRANSFERÊNCIAS — Excel com abas PIX, Boletos, Outros e Resumo
+  // ─────────────────────────────────────────────────────────────────────────
+  exportTransferGuide: async (
+    transactions: Transaction[],
+    startDate: Date,
+    endDate: Date,
+    companyName: string,
+    entities: Entity[] = [],
+  ) => {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "FinControl";
+    workbook.created = new Date();
+
+    const entitiesMap = entities.reduce(
+      (acc, e) => {
+        acc[e.id] = e;
+        return acc;
+      },
+      {} as Record<string, Entity>,
+    );
+
+    const eff = (t: Transaction) =>
+      t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
+
+    const payables = transactions.filter((t) => t.type === "payable");
+    const pixTransactions = payables.filter((t) => t.paymentMethod === "pix");
+    const boletoTransactions = payables.filter(
+      (t) => t.paymentMethod === "boleto",
+    );
+    const outrosTransactions = payables.filter(
+      (t) => t.paymentMethod !== "pix" && t.paymentMethod !== "boleto",
+    );
+
+    const PIX_KEY_TYPE_LABEL: Record<string, string> = {
+      cpf: "CPF",
+      cnpj: "CNPJ",
+      email: "E-mail",
+      phone: "Telefone",
+      random: "Aleatória",
+    };
+    const ACCOUNT_TYPE_LABEL: Record<string, string> = {
+      checking: "Corrente",
+      savings: "Poupança",
+    };
+    const PAYMENT_METHOD_LABEL: Record<string, string> = {
+      transfer: "Transferência",
+      credit_card: "Cartão de Crédito",
+      cash: "Dinheiro",
+    };
+
+    const BRL_FMT = '"R$" #,##0.00';
+    const MISSING_BG = { argb: "FFFEE2E2" };
+    const MISSING_FONT = { italic: true, color: { argb: "FFDC2626" } };
+
+    const styleHeaderRow = (row: import("exceljs").Row, cols: number) => {
+      row.height = 22;
+      for (let c = 1; c <= cols; c++) {
+        const cell = row.getCell(c);
+        cell.font = { bold: true, size: 9, color: { argb: "FFFFFFFF" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF0F172A" },
+        };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "center",
+          wrapText: false,
+        };
+        cell.border = {
+          bottom: { style: "medium", color: { argb: "FF16A34A" } },
+        };
+      }
+    };
+
+    const addTitleRows = (
+      sheet: import("exceljs").Worksheet,
+      subtitle: string,
+      totalCols: number,
+    ) => {
+      const colLetter = String.fromCharCode(64 + totalCols);
+      sheet.mergeCells(`A1:${colLetter}1`);
+      const r1 = sheet.getCell("A1");
+      r1.value = companyName;
+      r1.font = { bold: true, size: 13, color: { argb: "FF0F172A" } };
+      r1.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      r1.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+      sheet.getRow(1).height = 22;
+
+      sheet.mergeCells(`A2:${colLetter}2`);
+      const r2 = sheet.getCell("A2");
+      r2.value = `${subtitle}  ·  ${format(startDate, "dd/MM/yyyy")} — ${format(endDate, "dd/MM/yyyy")}  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
+      r2.font = { size: 9, color: { argb: "FF64748B" } };
+      r2.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      r2.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+      sheet.getRow(2).height = 16;
+      sheet.getRow(3).height = 4;
+    };
+
+    // Helper: linha de total
+    const addTotalRow = (
+      sheet: import("exceljs").Worksheet,
+      labelCol: number,
+      valueCol: number,
+      totalCols: number,
+      totalValue: number,
+      valueColor: string,
+    ) => {
+      const cells = Array.from({ length: totalCols }, (_, i) =>
+        i + 1 === labelCol ? "TOTAL" : i + 1 === valueCol ? totalValue : "",
+      );
+      const totRow = sheet.addRow(cells);
+      totRow.height = 20;
+      const tLabel = totRow.getCell(labelCol);
+      tLabel.font = { bold: true, size: 9, color: { argb: "FF0F172A" } };
+      tLabel.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      tLabel.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
+      const tVal = totRow.getCell(valueCol);
+      tVal.numFmt = BRL_FMT;
+      tVal.font = { bold: true, color: { argb: valueColor } };
+      tVal.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      tVal.alignment = { horizontal: "right" };
+      tVal.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
+    };
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ABA "PIX"  — grupos entidade+dia com sub-linhas de detalhe
+    // ════════════════════════════════════════════════════════════════════════
+    const pixSheet = workbook.addWorksheet("PIX", {
+      views: [{ state: "frozen", ySplit: 4 }],
+    });
+    pixSheet.columns = [
+      { width: 14 }, // A: Data
+      { width: 42 }, // B: Favorecido / Descrição sub-linha
+      { width: 20 }, // C: CNPJ/CPF
+      { width: 22 }, // D: Banco
+      { width: 12 }, // E: Agência
+      { width: 18 }, // F: Conta
+      { width: 14 }, // G: Tipo Conta
+      { width: 16 }, // H: Tipo Chave PIX
+      { width: 36 }, // I: Chave PIX
+      { width: 18 }, // J: Valor (R$)
+      { width: 8 }, //  K: Qtd.
+      { width: 12 }, // L: ✓ Conferido
+    ];
+
+    addTitleRows(pixSheet, "Guia de Transferências — PIX", 12);
+
+    const pixHeaders = [
+      "Data",
+      "Favorecido",
+      "CNPJ/CPF",
+      "Banco",
+      "Agência",
+      "Conta",
+      "Tipo Conta",
+      "Tipo Chave PIX",
+      "Chave PIX",
+      "Valor (R$)",
+      "Qtd.",
+      "✓ Conferido",
+    ];
+    styleHeaderRow(pixSheet.addRow(pixHeaders), pixHeaders.length);
+
+    // Agrupar por entidade + data — armazenando lançamentos individuais
+    type PixGroup = {
+      entityName: string;
+      entityDoc: string;
+      date: Date;
+      totalAmount: number;
+      count: number;
+      entity: Entity | undefined;
+      items: Array<{ description: string; amount: number }>;
+    };
+
+    const pixGroupsMap = new Map<string, PixGroup>();
+
+    pixTransactions.forEach((t) => {
+      const effDate =
+        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+      const dateKey = format(effDate, "yyyy-MM-dd");
+      const entityKey =
+        t.entityId || `name:${t.supplierOrClient ?? "desconhecido"}`;
+      const key = `${entityKey}|${dateKey}`;
+
+      const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+      const entityName = entity?.name || t.supplierOrClient || "-";
+      const entityDoc = entity?.document || "";
+
+      if (!pixGroupsMap.has(key)) {
+        pixGroupsMap.set(key, {
+          entityName,
+          entityDoc,
+          date: effDate,
+          totalAmount: 0,
+          count: 0,
+          entity,
+          items: [],
+        });
+      }
+      const g = pixGroupsMap.get(key)!;
+      g.totalAmount += eff(t);
+      g.count += 1;
+      g.items.push({
+        description: t.description || "(sem descrição)",
+        amount: eff(t),
+      });
+    });
+
+    const sortedPixGroups = Array.from(pixGroupsMap.values()).sort((a, b) => {
+      const diff = a.date.getTime() - b.date.getTime();
+      if (diff !== 0) return diff;
+      return a.entityName.localeCompare(b.entityName, "pt-BR", {
+        sensitivity: "base",
+      });
+    });
+
+    let missingPixKeyCount = 0;
+
+    sortedPixGroups.forEach((g, idx) => {
+      const missingKey = !g.entity?.pixKey;
+      if (missingKey) missingPixKeyCount++;
+
+      const groupBg = { argb: idx % 2 === 0 ? "FFE0F2FE" : "FFFFFFFF" };
+
+      // Linha de grupo (sumário da transferência)
+      const groupRow = pixSheet.addRow([
+        format(g.date, "dd/MM/yyyy"),
+        g.entityName,
+        g.entityDoc,
+        g.entity?.bankName || "",
+        g.entity?.agency || "",
+        g.entity?.account || "",
+        g.entity?.accountType
+          ? (ACCOUNT_TYPE_LABEL[g.entity.accountType] ?? "")
+          : "",
+        g.entity?.pixKeyType
+          ? (PIX_KEY_TYPE_LABEL[g.entity.pixKeyType] ?? "")
+          : "",
+        g.entity?.pixKey || "",
+        g.totalAmount,
+        g.count,
+        "",
+      ]);
+      groupRow.height = 18;
+
+      const cellVal = groupRow.getCell(10);
+      cellVal.numFmt = BRL_FMT;
+      cellVal.alignment = { horizontal: "right" };
+      cellVal.font = { bold: true, color: { argb: "FF0F172A" } };
+
+      // Alerta visual: chave PIX ausente
+      const cellPix = groupRow.getCell(9);
+      if (missingKey) {
+        cellPix.value = "⚠ Não cadastrada";
+        cellPix.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: MISSING_BG,
+        };
+        cellPix.font = MISSING_FONT;
+      }
+
+      for (let c = 1; c <= 12; c++) {
+        if (c !== 9 || !missingKey) {
+          groupRow.getCell(c).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: groupBg,
+          };
+        }
+        groupRow.getCell(c).border = {
+          bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
+        };
+      }
+
+      // Sub-linhas de detalhe (lançamentos individuais que compõem o grupo)
+      const subBg = { argb: "FFF8FAFC" };
+      g.items.forEach((item) => {
+        const subRow = pixSheet.addRow([
+          "",
+          `└ ${item.description}`,
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          item.amount,
+          "",
+          "",
+        ]);
+        subRow.height = 15;
+
+        const subB = subRow.getCell(2);
+        subB.font = { size: 8, color: { argb: "FF64748B" } };
+        subB.alignment = { indent: 2 };
+
+        const subJ = subRow.getCell(10);
+        subJ.numFmt = BRL_FMT;
+        subJ.alignment = { horizontal: "right" };
+        subJ.font = { size: 8, color: { argb: "FF64748B" } };
+
+        for (let c = 1; c <= 12; c++) {
+          subRow.getCell(c).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: subBg,
+          };
+          subRow.getCell(c).border = {
+            bottom: { style: "hair", color: { argb: "FFF1F5F9" } },
+          };
+        }
+      });
+    });
+
+    const totalPixAmount = sortedPixGroups.reduce(
+      (s, g) => s + g.totalAmount,
+      0,
+    );
+    if (sortedPixGroups.length > 0) {
+      addTotalRow(pixSheet, 9, 10, 12, totalPixAmount, "FF0F172A");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ABA "Boletos"  — individual com linha digitável e alerta de ausência
+    // ════════════════════════════════════════════════════════════════════════
+    const boletoSheet = workbook.addWorksheet("Boletos", {
+      views: [{ state: "frozen", ySplit: 4 }],
+    });
+    boletoSheet.columns = [
+      { width: 14 }, // A: Vencimento
+      { width: 30 }, // B: Favorecido
+      { width: 20 }, // C: CNPJ/CPF
+      { width: 22 }, // D: Banco
+      { width: 38 }, // E: Descrição
+      { width: 18 }, // F: Valor (R$)
+      { width: 60 }, // G: Linha Digitável
+      { width: 12 }, // H: ✓ Conferido
+    ];
+
+    addTitleRows(boletoSheet, "Guia de Transferências — Boletos", 8);
+
+    const boletoHeaders = [
+      "Vencimento",
+      "Favorecido",
+      "CNPJ/CPF",
+      "Banco",
+      "Descrição",
+      "Valor (R$)",
+      "Linha Digitável",
+      "✓ Conferido",
+    ];
+    styleHeaderRow(boletoSheet.addRow(boletoHeaders), boletoHeaders.length);
+
+    const sortedBoletos = [...boletoTransactions].sort((a, b) => {
+      const dA =
+        a.status === "paid" && a.paymentDate ? a.paymentDate : a.dueDate;
+      const dB =
+        b.status === "paid" && b.paymentDate ? b.paymentDate : b.dueDate;
+      const diff = dA.getTime() - dB.getTime();
+      if (diff !== 0) return diff;
+      const entA = a.entityId ? entitiesMap[a.entityId] : undefined;
+      const entB = b.entityId ? entitiesMap[b.entityId] : undefined;
+      return (entA?.name || a.supplierOrClient || "").localeCompare(
+        entB?.name || b.supplierOrClient || "",
+        "pt-BR",
+        { sensitivity: "base" },
+      );
+    });
+
+    let missingBarcodeCount = 0;
+
+    sortedBoletos.forEach((t, idx) => {
+      const effDate =
+        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+      const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+      const entityName = entity?.name || t.supplierOrClient || "-";
+      const amount = eff(t);
+      const missingBarcode = !t.barcode;
+      if (missingBarcode) missingBarcodeCount++;
+
+      const row = boletoSheet.addRow([
+        format(effDate, "dd/MM/yyyy"),
+        entityName,
+        entity?.document || "",
+        entity?.bankName || "",
+        t.description || "",
+        amount,
+        t.barcode || "",
+        "",
+      ]);
+      row.height = 18;
+
+      const cellAmt = row.getCell(6);
+      cellAmt.numFmt = BRL_FMT;
+      cellAmt.alignment = { horizontal: "right" };
+      cellAmt.font = { bold: true, color: { argb: "FFDC2626" } };
+
+      const cellBarcode = row.getCell(7);
+      if (missingBarcode) {
+        cellBarcode.value = "⚠ Linha digitável não cadastrada";
+        cellBarcode.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: MISSING_BG,
+        };
+        cellBarcode.font = { ...MISSING_FONT, name: "Courier New", size: 9 };
+      } else {
+        cellBarcode.font = { name: "Courier New", size: 9 };
+      }
+
+      const bg = { argb: idx % 2 === 0 ? "FFFFF7ED" : "FFFFFFFF" };
+      for (let c = 1; c <= 8; c++) {
+        if (c !== 7 || !missingBarcode) {
+          row.getCell(c).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: bg,
+          };
+        }
+        row.getCell(c).border = {
+          bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
+        };
+      }
+    });
+
+    const totalBoletoAmount = sortedBoletos.reduce((s, t) => s + eff(t), 0);
+    if (sortedBoletos.length > 0) {
+      addTotalRow(boletoSheet, 5, 6, 8, totalBoletoAmount, "FFDC2626");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ABA "Outros"  — demais formas de pagamento ou sem método definido
+    // ════════════════════════════════════════════════════════════════════════
+    if (outrosTransactions.length > 0) {
+      const outrosSheet = workbook.addWorksheet("Outros", {
+        views: [{ state: "frozen", ySplit: 4 }],
+      });
+      outrosSheet.columns = [
+        { width: 14 }, // A: Data
+        { width: 30 }, // B: Favorecido
+        { width: 20 }, // C: CNPJ/CPF
+        { width: 22 }, // D: Banco
+        { width: 12 }, // E: Agência
+        { width: 18 }, // F: Conta
+        { width: 20 }, // G: Forma Pagamento
+        { width: 38 }, // H: Descrição
+        { width: 18 }, // I: Valor (R$)
+        { width: 12 }, // J: ✓ Conferido
+      ];
+
+      addTitleRows(outrosSheet, "Guia de Transferências — Outros", 10);
+
+      const outrosHeaders = [
+        "Data",
+        "Favorecido",
+        "CNPJ/CPF",
+        "Banco",
+        "Agência",
+        "Conta",
+        "Forma Pagamento",
+        "Descrição",
+        "Valor (R$)",
+        "✓ Conferido",
+      ];
+      styleHeaderRow(outrosSheet.addRow(outrosHeaders), outrosHeaders.length);
+
+      const sortedOutros = [...outrosTransactions].sort((a, b) => {
+        const dA =
+          a.status === "paid" && a.paymentDate ? a.paymentDate : a.dueDate;
+        const dB =
+          b.status === "paid" && b.paymentDate ? b.paymentDate : b.dueDate;
+        const diff = dA.getTime() - dB.getTime();
+        if (diff !== 0) return diff;
+        const entA = a.entityId ? entitiesMap[a.entityId] : undefined;
+        const entB = b.entityId ? entitiesMap[b.entityId] : undefined;
+        return (entA?.name || a.supplierOrClient || "").localeCompare(
+          entB?.name || b.supplierOrClient || "",
+          "pt-BR",
+          { sensitivity: "base" },
+        );
+      });
+
+      sortedOutros.forEach((t, idx) => {
+        const effDate =
+          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+        const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+        const entityName = entity?.name || t.supplierOrClient || "-";
+        const amount = eff(t);
+        const methodLabel = t.paymentMethod
+          ? (PAYMENT_METHOD_LABEL[t.paymentMethod] ?? t.paymentMethod)
+          : "Não definida";
+
+        const row = outrosSheet.addRow([
+          format(effDate, "dd/MM/yyyy"),
+          entityName,
+          entity?.document || "",
+          entity?.bankName || "",
+          entity?.agency || "",
+          entity?.account || "",
+          methodLabel,
+          t.description || "",
+          amount,
+          "",
+        ]);
+        row.height = 18;
+
+        const cellAmt = row.getCell(9);
+        cellAmt.numFmt = BRL_FMT;
+        cellAmt.alignment = { horizontal: "right" };
+        cellAmt.font = { bold: true, color: { argb: "FF0F172A" } };
+
+        if (idx % 2 === 0) {
+          const bg = { argb: "FFF5F3FF" }; // violeta claro
+          for (let c = 1; c <= 10; c++) {
+            row.getCell(c).fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: bg,
+            };
+          }
+        }
+        for (let c = 1; c <= 10; c++) {
+          row.getCell(c).border = {
+            bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
+          };
+        }
+      });
+
+      const totalOutros = sortedOutros.reduce((s, t) => s + eff(t), 0);
+      addTotalRow(outrosSheet, 8, 9, 10, totalOutros, "FF0F172A");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ABA "Resumo"  — totais financeiros + alertas de dados faltando
+    // ════════════════════════════════════════════════════════════════════════
+    const resumoSheet = workbook.addWorksheet("Resumo");
+    resumoSheet.columns = [
+      { width: 42 }, // A: Label
+      { width: 22 }, // B: Lançamentos
+      { width: 22 }, // C: Transferências
+      { width: 18 }, // D: Total (R$)
+    ];
+
+    addTitleRows(resumoSheet, "Guia de Transferências — Resumo", 4);
+
+    const addResumoSectionTitle = (text: string) => {
+      const row = resumoSheet.addRow([text]);
+      resumoSheet.mergeCells(`A${row.number}:D${row.number}`);
+      row.getCell(1).font = {
+        bold: true,
+        size: 10,
+        color: { argb: "FF0F172A" },
+      };
+      row.getCell(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      row.height = 20;
+    };
+
+    const addResumoDataRow = (
+      label: string,
+      lancamentos: string,
+      transferencias: string,
+      total: number,
+      totalColor: string,
+    ) => {
+      const row = resumoSheet.addRow([
+        label,
+        lancamentos,
+        transferencias,
+        total,
+      ]);
+      row.height = 18;
+      row.getCell(1).font = { color: { argb: "FF475569" } };
+      row.getCell(2).alignment = { horizontal: "center" };
+      row.getCell(3).alignment = { horizontal: "center" };
+      row.getCell(4).numFmt = BRL_FMT;
+      row.getCell(4).alignment = { horizontal: "right" };
+      row.getCell(4).font = { bold: true, color: { argb: totalColor } };
+      for (let c = 1; c <= 4; c++) {
+        row.getCell(c).border = {
+          bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
+        };
+      }
+    };
+
+    addResumoSectionTitle("RESUMO FINANCEIRO");
+
+    // Cabeçalho da tabela
+    const resumoHeaderRow = resumoSheet.addRow([
+      "Categoria",
+      "Lançamentos",
+      "Transferências",
+      "Total (R$)",
+    ]);
+    resumoHeaderRow.height = 20;
+    for (let c = 1; c <= 4; c++) {
+      resumoHeaderRow.getCell(c).font = {
+        bold: true,
+        size: 9,
+        color: { argb: "FFFFFFFF" },
+      };
+      resumoHeaderRow.getCell(c).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      resumoHeaderRow.getCell(c).alignment = { horizontal: "center" };
+    }
+
+    const totalOutrosAmountFinal = outrosTransactions.reduce(
+      (s, t) => s + eff(t),
+      0,
+    );
+    const grandTotal =
+      totalPixAmount + totalBoletoAmount + totalOutrosAmountFinal;
+
+    addResumoDataRow(
+      "PIX",
+      `${pixTransactions.length} lançamentos`,
+      `${sortedPixGroups.length} transferências`,
+      totalPixAmount,
+      "FF0369A1",
+    );
+    addResumoDataRow(
+      "Boletos",
+      `${sortedBoletos.length} boletos`,
+      `${sortedBoletos.length} pagamentos`,
+      totalBoletoAmount,
+      "FFDC2626",
+    );
+    if (outrosTransactions.length > 0) {
+      addResumoDataRow(
+        "Outros",
+        `${outrosTransactions.length} lançamentos`,
+        "-",
+        totalOutrosAmountFinal,
+        "FF7C3AED",
+      );
+    }
+
+    // Linha de total geral
+    const grandTotRow = resumoSheet.addRow([
+      "TOTAL GERAL",
+      `${payables.length} lançamentos`,
+      "-",
+      grandTotal,
+    ]);
+    grandTotRow.height = 22;
+    grandTotRow.getCell(1).font = {
+      bold: true,
+      size: 10,
+      color: { argb: "FF0F172A" },
+    };
+    grandTotRow.getCell(2).alignment = { horizontal: "center" };
+    grandTotRow.getCell(3).alignment = { horizontal: "center" };
+    grandTotRow.getCell(4).numFmt = BRL_FMT;
+    grandTotRow.getCell(4).alignment = { horizontal: "right" };
+    grandTotRow.getCell(4).font = {
+      bold: true,
+      size: 11,
+      color: { argb: "FF0F172A" },
+    };
+    for (let c = 1; c <= 4; c++) {
+      grandTotRow.getCell(c).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF1F5F9" },
+      };
+      grandTotRow.getCell(c).border = {
+        top: { style: "medium", color: { argb: "FF0F172A" } },
+      };
+    }
+
+    // Alertas de dados faltando
+    if (missingPixKeyCount > 0 || missingBarcodeCount > 0) {
+      resumoSheet.addRow([]);
+      addResumoSectionTitle("⚠  ATENÇÃO: DADOS FALTANDO");
+
+      const alertHeaderRow = resumoSheet.addRow([
+        "Pendência",
+        "Quantidade",
+        "",
+        "",
+      ]);
+      alertHeaderRow.height = 18;
+      for (let c = 1; c <= 4; c++) {
+        alertHeaderRow.getCell(c).font = {
+          bold: true,
+          size: 9,
+          color: { argb: "FFFFFFFF" },
+        };
+        alertHeaderRow.getCell(c).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFDC2626" },
+        };
+        if (c <= 2) {
+          alertHeaderRow.getCell(c).alignment = { horizontal: "center" };
+        }
+      }
+
+      const addAlertRow = (label: string, count: number) => {
+        const row = resumoSheet.addRow([label, `${count}`, "", ""]);
+        row.height = 18;
+        for (let c = 1; c <= 2; c++) {
+          row.getCell(c).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: MISSING_BG,
+          };
+          row.getCell(c).border = {
+            bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
+          };
+        }
+        row.getCell(1).font = { color: { argb: "FFDC2626" } };
+        row.getCell(2).font = { bold: true, color: { argb: "FFDC2626" } };
+        row.getCell(2).alignment = { horizontal: "center" };
+      };
+
+      if (missingPixKeyCount > 0) {
+        addAlertRow(
+          "PIX sem chave cadastrada (aba PIX, coluna destacada em vermelho)",
+          missingPixKeyCount,
+        );
+      }
+      if (missingBarcodeCount > 0) {
+        addAlertRow(
+          "Boletos sem linha digitável (aba Boletos, coluna destacada em vermelho)",
+          missingBarcodeCount,
+        );
+      }
+    }
+
+    // Gerar e disparar download
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `guia_transferencias_${format(new Date(), "yyyyMMdd")}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
   // EXPORTAR CSV
   // ─────────────────────────────────────────────────────────────────────────
   exportToCSV: (transactions: Transaction[]) => {

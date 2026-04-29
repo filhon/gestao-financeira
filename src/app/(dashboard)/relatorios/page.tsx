@@ -39,6 +39,7 @@ import {
   Sheet as SheetIcon,
   SlidersHorizontal,
   X,
+  Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -97,6 +98,17 @@ const REPORT_TYPES = [
     stripClass: "bg-gradient-to-r from-violet-500 to-purple-400",
     dotClass: "bg-violet-500",
   },
+  {
+    value: "transfer_guide",
+    label: "Guia de Transferências",
+    description: "PIX agrupado por entidade/dia e boletos com linha digitável",
+    icon: Landmark,
+    accentClass: "text-amber-600 dark:text-amber-400",
+    bgClass: "bg-amber-50 dark:bg-amber-950",
+    borderClass: "border-amber-200 dark:border-amber-800",
+    stripClass: "bg-gradient-to-r from-amber-500 to-orange-400",
+    dotClass: "bg-amber-500",
+  },
 ];
 
 const QUICK_PERIODS = [
@@ -133,6 +145,7 @@ const QUICK_PERIODS = [
 const STATUS_LABELS: Record<string, string> = {
   all: "Todos os status",
   paid: "Somente Pagas",
+  authorized: "Somente Autorizadas",
   approved: "Somente Aprovadas",
   pending_approval: "Somente Pendentes",
   draft: "Somente Rascunhos",
@@ -166,6 +179,15 @@ export default function ReportsPage() {
       fetchCostCenters(selectedCompany.id, forUserId);
     }
   }, [selectedCompany, user, onlyOwnPayables, fetchCostCenters]);
+
+  // Ao selecionar o Guia de Transferências, pré-seleciona status "Autorizado"
+  // (apenas se o filtro ainda estiver no padrão "all")
+  useEffect(() => {
+    if (reportType === "transfer_guide" && statusFilter === "all") {
+      setStatusFilter("authorized");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportType]);
 
   const selectedReportType =
     REPORT_TYPES.find((r) => r.value === reportType) ?? REPORT_TYPES[0];
@@ -276,6 +298,35 @@ export default function ReportsPage() {
         filtered = filtered.filter((t) => t.status === statusFilter);
       }
 
+      // ── Guia de Transferências ──────────────────────────────────────────
+      if (reportType === "transfer_guide") {
+        if (formatType !== "excel") {
+          toast.info(
+            "O Guia de Transferências está disponível apenas no formato Excel.",
+          );
+          return;
+        }
+        const payablesForGuide = filtered.filter((t) => t.type === "payable");
+        const hasData = payablesForGuide.some(
+          (t) => t.paymentMethod === "pix" || t.paymentMethod === "boleto",
+        );
+        if (!hasData) {
+          toast.warning(
+            "Nenhuma transação com forma de pagamento PIX ou Boleto encontrada no período.",
+          );
+          return;
+        }
+        await reportService.exportTransferGuide(
+          payablesForGuide,
+          start,
+          end,
+          selectedCompany.name,
+          entities as Entity[],
+        );
+        toast.success("Guia de Transferências gerado!");
+        return;
+      }
+
       if (filtered.length === 0) {
         toast.warning("Nenhuma transação encontrada no período.");
         return;
@@ -347,7 +398,7 @@ export default function ReportsPage() {
         className="animate-in fade-in slide-in-from-bottom-2 duration-300"
         style={{ animationDelay: "0ms", animationFillMode: "both" }}
       >
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {REPORT_TYPES.map((type) => {
             const Icon = type.icon;
             const isSelected = reportType === type.value;
@@ -616,10 +667,13 @@ export default function ReportsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todos os status</SelectItem>
-                      <SelectItem value="paid">Somente Pagas</SelectItem>
+                      <SelectItem value="authorized">
+                        Somente Autorizadas
+                      </SelectItem>
                       <SelectItem value="approved">
                         Somente Aprovadas
                       </SelectItem>
+                      <SelectItem value="paid">Somente Pagas</SelectItem>
                       <SelectItem value="pending_approval">
                         Somente Pendentes
                       </SelectItem>
@@ -677,6 +731,38 @@ export default function ReportsPage() {
               </>
             )}
 
+            {/* Nota para Guia de Transferências */}
+            {reportType === "transfer_guide" && (
+              <>
+                <div className="h-px bg-border" />
+                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-semibold flex items-center gap-1.5">
+                    <Landmark className="h-4 w-4 shrink-0" />
+                    Guia de Transferências
+                  </p>
+                  <ul className="list-disc list-inside text-xs space-y-0.5 text-amber-700 dark:text-amber-400">
+                    <li>
+                      <strong>Aba PIX:</strong> transações agrupadas por
+                      entidade + dia — uma transferência por grupo.
+                    </li>
+                    <li>
+                      <strong>Aba Boletos:</strong> listagem individual com
+                      linha digitável para cada boleto.
+                    </li>
+                    <li>
+                      Recomenda-se filtrar por status{" "}
+                      <strong>Autorizado</strong> ou <strong>Aprovado</strong>{" "}
+                      para exibir apenas o que ainda precisa ser pago.
+                    </li>
+                    <li>
+                      Os dados bancários (banco, agência, conta, chave PIX) são
+                      carregados do cadastro da entidade.
+                    </li>
+                  </ul>
+                </div>
+              </>
+            )}
+
             {/* Separator + Actions */}
             <div className="h-px bg-border" />
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -692,37 +778,52 @@ export default function ReportsPage() {
                 {selectedReportType.label}
               </p>
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <Button
-                  variant="outline"
-                  onClick={() => handleGenerate("csv")}
-                  disabled={isLoading}
-                  loading={loadingFormat === "csv"}
-                  className="w-full sm:w-auto"
-                >
-                  {loadingFormat !== "csv" && <Download className="h-4 w-4" />}
-                  Exportar CSV
-                </Button>
+                {reportType !== "transfer_guide" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => handleGenerate("csv")}
+                    disabled={isLoading}
+                    loading={loadingFormat === "csv"}
+                    className="w-full sm:w-auto"
+                  >
+                    {loadingFormat !== "csv" && (
+                      <Download className="h-4 w-4" />
+                    )}
+                    Exportar CSV
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   onClick={() => handleGenerate("excel")}
                   disabled={isLoading}
                   loading={loadingFormat === "excel"}
-                  className="w-full sm:w-auto text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
+                  className={cn(
+                    "w-full sm:w-auto",
+                    reportType === "transfer_guide"
+                      ? "text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950"
+                      : "text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950",
+                  )}
                 >
                   {loadingFormat !== "excel" && (
                     <SheetIcon className="h-4 w-4" />
                   )}
-                  Exportar Excel
+                  {reportType === "transfer_guide"
+                    ? "Gerar Guia (Excel)"
+                    : "Exportar Excel"}
                 </Button>
-                <Button
-                  onClick={() => handleGenerate("pdf")}
-                  disabled={isLoading}
-                  loading={loadingFormat === "pdf"}
-                  className="w-full sm:w-auto"
-                >
-                  {loadingFormat !== "pdf" && <FileText className="h-4 w-4" />}
-                  Gerar PDF
-                </Button>
+                {reportType !== "transfer_guide" && (
+                  <Button
+                    onClick={() => handleGenerate("pdf")}
+                    disabled={isLoading}
+                    loading={loadingFormat === "pdf"}
+                    className="w-full sm:w-auto"
+                  >
+                    {loadingFormat !== "pdf" && (
+                      <FileText className="h-4 w-4" />
+                    )}
+                    Gerar PDF
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
@@ -742,38 +843,54 @@ export default function ReportsPage() {
             {format(endDate, "dd MMM yy", { locale: ptBR })}
           </span>
         </p>
-        <div className="grid grid-cols-3 gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleGenerate("csv")}
-            disabled={isLoading}
-            loading={loadingFormat === "csv"}
-          >
-            {loadingFormat !== "csv" && <Download className="h-3.5 w-3.5" />}
-            CSV
-          </Button>
+        {reportType === "transfer_guide" ? (
           <Button
             variant="outline"
             size="sm"
             onClick={() => handleGenerate("excel")}
             disabled={isLoading}
             loading={loadingFormat === "excel"}
-            className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
+            className="w-full text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950"
           >
             {loadingFormat !== "excel" && <SheetIcon className="h-3.5 w-3.5" />}
-            Excel
+            Gerar Guia (Excel)
           </Button>
-          <Button
-            size="sm"
-            onClick={() => handleGenerate("pdf")}
-            disabled={isLoading}
-            loading={loadingFormat === "pdf"}
-          >
-            {loadingFormat !== "pdf" && <FileText className="h-3.5 w-3.5" />}
-            PDF
-          </Button>
-        </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleGenerate("csv")}
+              disabled={isLoading}
+              loading={loadingFormat === "csv"}
+            >
+              {loadingFormat !== "csv" && <Download className="h-3.5 w-3.5" />}
+              CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleGenerate("excel")}
+              disabled={isLoading}
+              loading={loadingFormat === "excel"}
+              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
+            >
+              {loadingFormat !== "excel" && (
+                <SheetIcon className="h-3.5 w-3.5" />
+              )}
+              Excel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handleGenerate("pdf")}
+              disabled={isLoading}
+              loading={loadingFormat === "pdf"}
+            >
+              {loadingFormat !== "pdf" && <FileText className="h-3.5 w-3.5" />}
+              PDF
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ── Mobile: config sheet ─────────────────────────────────────────── */}
@@ -868,8 +985,11 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os status</SelectItem>
-                  <SelectItem value="paid">Somente Pagas</SelectItem>
+                  <SelectItem value="authorized">
+                    Somente Autorizadas
+                  </SelectItem>
                   <SelectItem value="approved">Somente Aprovadas</SelectItem>
+                  <SelectItem value="paid">Somente Pagas</SelectItem>
                   <SelectItem value="pending_approval">
                     Somente Pendentes
                   </SelectItem>
@@ -918,6 +1038,21 @@ export default function ReportsPage() {
                   onChange={setInitialBalance}
                   placeholder="R$ 0,00"
                 />
+              </div>
+            )}
+
+            {/* Nota para Guia de Transferências (mobile) */}
+            {reportType === "transfer_guide" && (
+              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400 space-y-1">
+                <p className="font-semibold text-amber-800 dark:text-amber-300">
+                  Guia de Transferências
+                </p>
+                <p>
+                  Gera um Excel com 2 abas: <strong>PIX</strong> (agrupado por
+                  entidade/dia) e <strong>Boletos</strong> (com linha
+                  digitável). Recomende filtrar por status{" "}
+                  <strong>Autorizado</strong>.
+                </p>
               </div>
             )}
 
