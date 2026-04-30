@@ -74,6 +74,8 @@ export const transactionSchema = z.object({
       whatsappSent: z.boolean(),
     })
     .optional(),
+
+  isReimbursement: z.boolean().optional(),
 });
 
 export type TransactionFormData = z.infer<typeof transactionSchema>;

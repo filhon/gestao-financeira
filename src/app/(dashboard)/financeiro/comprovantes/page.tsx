@@ -281,11 +281,18 @@ function MobileComprovanteCard({
       {/* Main content */}
       <div className="flex-1 min-w-0 py-0.5">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-medium leading-snug truncate flex-1">
-            {tx?.description ??
-              c.matchedEntity ??
-              `Pág. ${c.pageNumber}/${c.totalPages}`}
-          </p>
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <p className="text-sm font-medium leading-snug truncate">
+              {tx?.description ??
+                c.matchedEntity ??
+                `Pág. ${c.pageNumber}/${c.totalPages}`}
+            </p>
+            {c.isConsolidated && (c.transactionIds?.length ?? 0) > 1 && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                +{(c.transactionIds?.length ?? 1) - 1}
+              </span>
+            )}
+          </div>
           <span className="text-sm font-bold font-financial shrink-0">
             {c.matchedAmount
               ? formatCurrency(c.matchedAmount)
@@ -508,7 +515,12 @@ export default function ComprovantesPage() {
     const missingIds = [
       ...new Set(
         items
-          .flatMap((c) => [c.transactionId, c.suggestedTransactionId])
+          .flatMap((c) => [
+            c.transactionId,
+            c.suggestedTransactionId,
+            ...(c.transactionIds ?? []),
+            ...(c.suggestedTransactionIds ?? []),
+          ])
           .filter((id): id is string => !!id && !fetchedTxIds.current.has(id)),
       ),
     ];
@@ -619,8 +631,9 @@ export default function ComprovantesPage() {
     if (!removeId) return;
     const c = items.find((i) => i.id === removeId);
     if (!c?.transactionId) return;
+    const txIds = c.transactionIds ?? [c.transactionId];
     try {
-      await comprovanteService.removeMatch(c.id, c.transactionId);
+      await comprovanteService.removeMatch(c.id, txIds);
       toast.success("Associação removida.");
       refresh();
       loadStats();
@@ -633,17 +646,51 @@ export default function ComprovantesPage() {
 
   const handleShare = async (c: Comprovante) => {
     const tx = c.transactionId ? txMap.get(c.transactionId) : null;
-    const label = tx?.description ?? c.matchedEntity ?? c.id;
-    const title = `Comprovante — ${label}`;
-    const text = [
-      title,
-      c.matchedAmount ? `Valor: ${formatCurrency(c.matchedAmount)}` : null,
-      c.matchedDate
-        ? `Data: ${format(c.matchedDate, "dd/MM/yyyy", { locale: ptBR })}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const allTxs =
+      c.isConsolidated && (c.transactionIds?.length ?? 0) > 1
+        ? (c.transactionIds ?? [])
+            .map((id) => txMap.get(id))
+            .filter((t): t is Transaction => !!t)
+        : tx
+          ? [tx]
+          : [];
+
+    const entity = allTxs[0]?.supplierOrClient ?? c.matchedEntity ?? null;
+    const title =
+      allTxs.length > 1
+        ? `Comprovante${entity ? ` — ${entity}` : ""}`
+        : `Comprovante — ${allTxs[0]?.description ?? c.matchedEntity ?? c.id}`;
+
+    const dateStr = c.matchedDate
+      ? format(c.matchedDate, "dd/MM/yyyy", { locale: ptBR })
+      : allTxs[0]?.paymentDate
+        ? format(allTxs[0].paymentDate, "dd/MM/yyyy", { locale: ptBR })
+        : null;
+
+    const lines: string[] = [title];
+
+    if (entity) lines.push(`Beneficiário: ${entity}`);
+    if (dateStr) lines.push(`Data: ${dateStr}`);
+
+    if (allTxs.length > 1) {
+      // Consolidated: list each transaction with its individual amount
+      lines.push(`\nTransações incluídas (${allTxs.length}):`);
+      allTxs.forEach((t, i) => {
+        const amt = formatCurrency(t.finalAmount ?? t.amount);
+        lines.push(`  ${i + 1}. ${t.description} — ${amt}`);
+      });
+      if (c.matchedAmount) {
+        lines.push(`\nTotal: ${formatCurrency(c.matchedAmount)}`);
+      }
+    } else if (c.matchedAmount) {
+      lines.push(`Valor: ${formatCurrency(c.matchedAmount)}`);
+    } else if (allTxs[0]) {
+      lines.push(
+        `Valor: ${formatCurrency(allTxs[0].finalAmount ?? allTxs[0].amount)}`,
+      );
+    }
+
+    const text = lines.join("\n");
 
     if (!navigator.share) {
       try {
@@ -661,7 +708,8 @@ export default function ComprovantesPage() {
       const response = await fetch(proxyUrl);
       if (!response.ok) throw new Error("proxy_error");
       const blob = await response.blob();
-      const fileName = `comprovante-${label.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
+      const fileLabel = entity ?? allTxs[0]?.description ?? c.id;
+      const fileName = `comprovante-${fileLabel.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
       const file = new File([blob], fileName, { type: "application/pdf" });
 
       if (navigator.canShare?.({ files: [file] })) {
@@ -978,13 +1026,15 @@ export default function ComprovantesPage() {
           ) : (
             <>
               {/* ── Desktop: Table ───────────────────────────────────── */}
-              <div className="hidden md:block">
-                <Table>
+              <div className="hidden md:block overflow-hidden">
+                <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-20">Página</TableHead>
-                      <TableHead>Transação Associada</TableHead>
-                      <TableHead>
+                      <TableHead className="w-20 shrink-0">Página</TableHead>
+                      <TableHead className="min-w-0">
+                        Transação Associada
+                      </TableHead>
+                      <TableHead className="w-32 shrink-0">
                         <SortHeader
                           label="Valor"
                           active={sortField === "amount"}
@@ -992,7 +1042,7 @@ export default function ComprovantesPage() {
                           onClick={() => handleSort("amount")}
                         />
                       </TableHead>
-                      <TableHead>
+                      <TableHead className="w-28 shrink-0">
                         <SortHeader
                           label="Data"
                           active={sortField === "date"}
@@ -1000,8 +1050,8 @@ export default function ComprovantesPage() {
                           onClick={() => handleSort("date")}
                         />
                       </TableHead>
-                      <TableHead>Entidade</TableHead>
-                      <TableHead>
+                      <TableHead className="w-40 min-w-0">Entidade</TableHead>
+                      <TableHead className="w-36 shrink-0">
                         <SortHeader
                           label="Status"
                           active={sortField === "status"}
@@ -1009,7 +1059,7 @@ export default function ComprovantesPage() {
                           onClick={() => handleSort("status")}
                         />
                       </TableHead>
-                      <TableHead>
+                      <TableHead className="w-28 shrink-0">
                         <SortHeader
                           label="Confiança"
                           active={sortField === "confidence"}
@@ -1017,7 +1067,7 @@ export default function ComprovantesPage() {
                           onClick={() => handleSort("confidence")}
                         />
                       </TableHead>
-                      <TableHead className="w-10" />
+                      <TableHead className="w-10 shrink-0" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1062,26 +1112,34 @@ export default function ComprovantesPage() {
                         return (
                           <TableRow key={c.id} className="group">
                             {/* Page number */}
-                            <TableCell>
+                            <TableCell className="w-20">
                               <div className="flex items-center gap-2">
                                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
                                   <FileCheck className="h-4 w-4" />
                                 </div>
-                                <span className="text-sm font-medium">
+                                <span className="text-sm font-medium tabular-nums">
                                   {c.pageNumber}/{c.totalPages}
                                 </span>
                               </div>
                             </TableCell>
 
-                            {/* Linked transaction */}
-                            <TableCell>
+                            {/* Linked transaction — flexible, truncates */}
+                            <TableCell className="min-w-0 max-w-0">
                               {tx ? (
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {tx.description}
-                                  </p>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <p className="text-sm font-medium truncate">
+                                      {tx.description}
+                                    </p>
+                                    {c.isConsolidated &&
+                                      (c.transactionIds?.length ?? 0) > 1 && (
+                                        <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">
+                                          +{(c.transactionIds?.length ?? 1) - 1}
+                                        </span>
+                                      )}
+                                  </div>
                                   {tx.supplierOrClient && (
-                                    <p className="text-xs text-muted-foreground">
+                                    <p className="text-xs text-muted-foreground truncate">
                                       {tx.supplierOrClient}
                                     </p>
                                   )}
@@ -1093,8 +1151,8 @@ export default function ComprovantesPage() {
                               )}
                             </TableCell>
 
-                            {/* Amount */}
-                            <TableCell className="font-financial text-sm">
+                            {/* Amount — fixed, no wrap */}
+                            <TableCell className="w-32 font-financial text-sm whitespace-nowrap">
                               {c.matchedAmount
                                 ? formatCurrency(c.matchedAmount)
                                 : tx
@@ -1102,8 +1160,8 @@ export default function ComprovantesPage() {
                                   : "—"}
                             </TableCell>
 
-                            {/* Date */}
-                            <TableCell className="text-sm text-muted-foreground">
+                            {/* Date — fixed, no wrap */}
+                            <TableCell className="w-28 text-sm text-muted-foreground whitespace-nowrap">
                               {c.matchedDate
                                 ? format(c.matchedDate, "dd/MM/yyyy", {
                                     locale: ptBR,
@@ -1115,18 +1173,20 @@ export default function ComprovantesPage() {
                                   : "—"}
                             </TableCell>
 
-                            {/* Entity */}
-                            <TableCell className="text-sm text-muted-foreground">
-                              {c.matchedEntity ?? tx?.supplierOrClient ?? "—"}
+                            {/* Entity — fixed width, truncates */}
+                            <TableCell className="w-40 max-w-0">
+                              <p className="text-sm text-muted-foreground truncate">
+                                {c.matchedEntity ?? tx?.supplierOrClient ?? "—"}
+                              </p>
                             </TableCell>
 
-                            {/* Status */}
-                            <TableCell>
+                            {/* Status — fixed */}
+                            <TableCell className="w-36">
                               <ComprovanteStatusBadge status={c.matchStatus} />
                             </TableCell>
 
-                            {/* Confidence */}
-                            <TableCell>
+                            {/* Confidence — fixed */}
+                            <TableCell className="w-28">
                               {c.matchConfidenceLevel ? (
                                 <ConfidenceBadge
                                   level={c.matchConfidenceLevel}
@@ -1140,7 +1200,7 @@ export default function ComprovantesPage() {
                             </TableCell>
 
                             {/* Actions */}
-                            <TableCell>
+                            <TableCell className="w-10">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button

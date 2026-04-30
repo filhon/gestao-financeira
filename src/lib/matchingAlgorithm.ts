@@ -2,7 +2,9 @@ import { Transaction } from "@/lib/types";
 import { ComprovanteConfidenceLevel } from "@/lib/types";
 
 export interface MatchScore {
-  transactionId: string;
+  transactionId: string; // primary transaction ID
+  transactionIds: string[]; // all IDs (single-element for regular match, N for consolidated)
+  isConsolidated: boolean;
   score: number; // 0-100
   confidenceLevel: ComprovanteConfidenceLevel;
   matchedAmount?: number;
@@ -73,10 +75,17 @@ function datesMatch(a: Date, b: Date, toleranceDays = 3): boolean {
   return Math.abs(a.getTime() - b.getTime()) <= toleranceDays * 86_400_000;
 }
 
+// ── Day key (same calendar day regardless of time) ────────────────────────────
+
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
 // ── Main scoring function ──────────────────────────────────────────────────────
 
 /**
- * Scores each transaction against the text extracted from a comprovante.
+ * Scores each transaction (and consolidated same-entity same-day groups) against
+ * the text extracted from a comprovante.
  *
  * Scoring breakdown (max 100):
  *   - Amount match (±2 %): 40 pts
@@ -88,6 +97,12 @@ function datesMatch(a: Date, b: Date, toleranceDays = 3): boolean {
  *   HIGH   ≥ 80
  *   MEDIUM 50–79
  *   LOW    20–49
+ *
+ * Consolidated matching:
+ *   When multiple transactions from the same entity share the same payment date,
+ *   their amounts are summed and compared against the comprovante amount. This
+ *   handles the common practice of batching same-entity same-day payments into
+ *   a single bank transfer to reduce transaction costs.
  */
 export function matchTransactions(
   extractedText: string,
@@ -98,6 +113,8 @@ export function matchTransactions(
   const normText = normalizeText(extractedText);
 
   const scores: MatchScore[] = [];
+
+  // ── 1. Single-transaction scoring ─────────────────────────────────────────
 
   for (const tx of transactions) {
     let score = 0;
@@ -163,13 +180,86 @@ export function matchTransactions(
       }
     }
 
-    // Only include candidates with at least a minimal signal
     if (score >= 20) {
       scores.push({
         transactionId: tx.id,
+        transactionIds: [tx.id],
+        isConsolidated: false,
         score,
         confidenceLevel: score >= 80 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW",
         matchedAmount,
+        matchedDate,
+        matchedEntity,
+        reasons,
+      });
+    }
+  }
+
+  // ── 2. Consolidated same-entity same-day group scoring ────────────────────
+  //
+  // When the user batches multiple same-entity same-day payables into one bank
+  // transfer, the comprovante amount equals the SUM of those transactions.
+  // We group candidates by (normalised entity prefix + day) and test the sum.
+
+  const groups = new Map<string, Transaction[]>();
+  for (const tx of transactions) {
+    if (!tx.supplierOrClient) continue;
+    const txDate = tx.paymentDate ?? tx.dueDate;
+    const entityKey = normalizeText(tx.supplierOrClient).substring(0, 40);
+    const key = `${entityKey}|${dayKey(txDate)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(tx);
+  }
+
+  for (const [, txGroup] of groups) {
+    if (txGroup.length < 2) continue;
+
+    const groupTotal = txGroup.reduce(
+      (sum, tx) => sum + (tx.finalAmount ?? tx.amount),
+      0,
+    );
+    const foundAmt = textAmounts.find((a) => amountsMatch(a, groupTotal));
+    if (!foundAmt) continue;
+
+    let groupScore = 40; // amount match
+    let matchedDate: Date | undefined;
+    const reasons: string[] = [
+      `Soma consolidada de ${txGroup.length} transações: R$ ${groupTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`,
+    ];
+
+    // Date match – use the shared payment date of the group
+    const txDate = txGroup[0].paymentDate ?? txGroup[0].dueDate;
+    const foundDate = textDates.find((d) => datesMatch(d, txDate));
+    if (foundDate) {
+      groupScore += 30;
+      matchedDate = foundDate;
+      reasons.push(`Data ${foundDate.toLocaleDateString("pt-BR")} encontrada`);
+    }
+
+    // Entity name match
+    const entity = txGroup[0].supplierOrClient!;
+    const normEntity = normalizeText(entity);
+    const words = normEntity.split(" ").filter((w) => w.length > 3);
+    let matchedEntity: string | undefined;
+    if (words.length > 0) {
+      const hits = words.filter((w) => normText.includes(w));
+      if (hits.length > 0) {
+        const pts = Math.min(20, Math.round((hits.length / words.length) * 20));
+        groupScore += pts;
+        matchedEntity = entity;
+        reasons.push(`Beneficiário "${entity}" identificado`);
+      }
+    }
+
+    if (groupScore >= 20) {
+      scores.push({
+        transactionId: txGroup[0].id,
+        transactionIds: txGroup.map((tx) => tx.id),
+        isConsolidated: true,
+        score: groupScore,
+        confidenceLevel:
+          groupScore >= 80 ? "HIGH" : groupScore >= 50 ? "MEDIUM" : "LOW",
+        matchedAmount: foundAmt,
         matchedDate,
         matchedEntity,
         reasons,

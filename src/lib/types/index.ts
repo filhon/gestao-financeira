@@ -49,6 +49,9 @@ export interface Company {
 
   // Google Sheets sync config
   sheetsSync?: SheetsSyncConfig;
+
+  // Reimbursement report counter
+  rdCounter?: number;
 }
 
 export interface UserProfile {
@@ -240,6 +243,10 @@ export interface Transaction {
   // Comprovante de pagamento
   comprovanteId?: string;
   comprovanteUrl?: string;
+
+  // Reimbursement
+  isReimbursement?: boolean;
+  reimbursementReportId?: string;
 }
 
 export type PaymentBatchStatus =
@@ -440,8 +447,11 @@ export interface Comprovante {
 
   // Match data
   matchStatus: ComprovanteMatchStatus;
-  transactionId?: string;
-  suggestedTransactionId?: string; // Best match from upload algorithm (not yet confirmed)
+  transactionId?: string; // Primary linked transaction (first in group for consolidated)
+  transactionIds?: string[]; // All linked transaction IDs (multiple for consolidated matches)
+  suggestedTransactionId?: string; // Best single-match suggestion from algorithm
+  suggestedTransactionIds?: string[]; // All IDs in suggested consolidated group
+  isConsolidated?: boolean; // True when comprovante covers a sum of multiple transactions
   matchConfidence?: number; // 0-100
   matchConfidenceLevel?: ComprovanteConfidenceLevel;
   matchedAmount?: number; // Amount found in extracted text
@@ -510,6 +520,59 @@ export interface ReconciliationRule {
   actionEntityId?: string;
   actionDescription?: string;
 
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─── Reimbursement Reports ────────────────────────────────────────────────────
+
+export type ReimbursementReportStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "paid"
+  | "rejected";
+
+export interface ReimbursementReport {
+  id: string;
+  companyId: string;
+  rdNumber: string; // e.g., "RD-0001"
+  rdSequence: number;
+
+  // Employee (pessoa física entity)
+  employeeId: string;
+  employeeName: string;
+  employeeDocument?: string;
+  employeeEmail?: string;
+
+  // Period
+  periodStart: Date;
+  periodEnd: Date;
+
+  // Transactions
+  transactionIds: string[];
+  totalAmount: number;
+
+  // Status
+  status: ReimbursementReportStatus;
+  notes?: string;
+
+  // Approval via magic link
+  approvalToken?: string | null;
+  approvalTokenExpiresAt?: Date | null;
+  approverEmail?: string;
+  approvedBy?: string;
+  approvedAt?: Date;
+  rejectedBy?: string;
+  rejectedAt?: Date;
+  rejectionReason?: string;
+
+  // Payment confirmation
+  paidBy?: string;
+  paidAt?: Date;
+
+  // Audit
+  createdBy: string;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -81,11 +81,14 @@ service cloud.firestore {
     // 2. Companies Collection
     // - Read: Authenticated users.
     // - Create: Authenticated users (Invite-Only / Setup flow).
-    // - Update/Delete: Global Admin only.
+    // - Update/Delete: Global Admin only; Financial Manager can increment rdCounter.
     match /companies/{companyId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update, delete: if isGlobalAdmin();
+      allow delete: if isGlobalAdmin();
+      allow update: if isGlobalAdmin() ||
+        (hasCompanyRole(companyId, ['financial_manager', 'user']) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rdCounter']));
 
       // Subcoleção: sugestões de lotes geradas pela Cloud Function noturna.
       // Leitura: roles que gerenciam lotes de pagamento.
@@ -301,6 +304,31 @@ service cloud.firestore {
 
       // Delete: Admin only (global admin or company admin)
       allow delete: if isGlobalAdmin();
+    }
+
+    // 17. Reimbursement Reports (Relatórios de Despesas / RD)
+    match /reimbursement_reports/{reportId} {
+      function getCompanyId() {
+        return resource != null ? resource.data.companyId : request.resource.data.companyId;
+      }
+
+      // Read: all roles in the company
+      allow read: if isAuthenticated() &&
+        hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+
+      // Create: financial_manager and user (employees creating their own reports)
+      allow create: if isAuthenticated() &&
+        hasCompanyRole(getCompanyId(), ['financial_manager', 'user']);
+
+      // Update: financial_manager (approve/reject/pay), approver, releaser
+      // Also allow update via magic-link token path (unauthenticated) — handled server-side only
+      allow update: if isAuthenticated() &&
+        hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser']);
+
+      // Delete: financial_manager only, and only drafts
+      allow delete: if isAuthenticated() &&
+        hasCompanyRole(getCompanyId(), ['financial_manager']) &&
+        resource.data.status == 'draft';
     }
 
     // Default Deny

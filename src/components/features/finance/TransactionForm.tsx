@@ -143,6 +143,7 @@ export function TransactionForm({
       supplierOrClient: "",
       entityId: undefined,
       requestOrigin: { type: undefined, name: "" },
+      isReimbursement: false,
       ...defaultValues,
     },
   });
@@ -669,6 +670,37 @@ export function TransactionForm({
                   )}
                 </div>
               </div>
+
+              {type === "payable" && (
+                <div className="col-span-12">
+                  <FormField
+                    control={form.control}
+                    name="isReimbursement"
+                    render={({ field }) => (
+                      <FormItem className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-4 py-3">
+                        <div className="flex items-start gap-3">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value ?? false}
+                              onCheckedChange={field.onChange}
+                              className="mt-0.5 shrink-0"
+                            />
+                          </FormControl>
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-sm font-medium cursor-pointer leading-none">
+                              Despesa de reembolso
+                            </FormLabel>
+                            <p className="text-xs text-muted-foreground">
+                              Marque se esta despesa foi paga pelo funcionário e
+                              precisa ser reembolsada pela empresa.
+                            </p>
+                          </div>
+                        </div>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
 
               <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6">
                 <FormField

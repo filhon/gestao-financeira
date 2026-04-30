@@ -34,6 +34,7 @@ import {
   Loader2,
   ExternalLink,
   Download,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Comprovante, Transaction } from "@/lib/types";
@@ -68,20 +69,23 @@ export function MatchReviewDialog({
   const { selectedCompany } = useCompany();
 
   const [isProcessing, setIsProcessing] = useState(false);
-  const [manualTx, setManualTx] = useState<Transaction | null>(null);
+  const [manualTxs, setManualTxs] = useState<Transaction[]>([]);
   const [txSearch, setTxSearch] = useState("");
   const [txCandidates, setTxCandidates] = useState<Transaction[]>([]);
   const [isTxOpen, setIsTxOpen] = useState(false);
   const [isLoadingTx, setIsLoadingTx] = useState(false);
 
-  // Shown transaction: confirmed match (propTx) or the suggested one from the algorithm
-  const [suggestedTx, setSuggestedTx] = useState<Transaction | null>(null);
-  const shownTx = propTx ?? suggestedTx;
+  // Shown transaction(s): confirmed match (propTx / full group) or suggested
+  const [resolvedTxs, setResolvedTxs] = useState<Transaction[]>([]);
 
-  // Load paid/authorized payables for manual linking; resolve suggested tx
+  // Derive which transactions are "shown" as the current suggestion/match
+  const shownTxs: Transaction[] =
+    resolvedTxs.length > 0 ? resolvedTxs : propTx ? [propTx] : [];
+
+  // Load paid/authorized payables for manual linking; resolve tx IDs
   useEffect(() => {
     if (!open || !selectedCompany) return;
-    setSuggestedTx(null);
+    setResolvedTxs([]);
     setIsLoadingTx(true);
     transactionService
       .getAll({ companyId: selectedCompany.id, type: "payable" })
@@ -90,16 +94,45 @@ export function MatchReviewDialog({
           (t) => t.status === "paid" || t.status === "authorized",
         );
         setTxCandidates(candidates);
-        if (comprovante?.suggestedTransactionId) {
-          const found = candidates.find(
-            (t) => t.id === comprovante.suggestedTransactionId,
+
+        // For confirmed consolidated matches, show all linked transactions
+        if (
+          comprovante?.matchStatus === "matched" &&
+          comprovante.isConsolidated &&
+          (comprovante.transactionIds?.length ?? 0) > 1
+        ) {
+          const found = candidates.filter((t) =>
+            comprovante.transactionIds!.includes(t.id),
           );
-          if (found) setSuggestedTx(found);
+          if (found.length > 0) {
+            setResolvedTxs(found);
+            return;
+          }
+        }
+
+        // For pending_review: resolve suggested transaction IDs
+        const suggestedIds =
+          comprovante?.suggestedTransactionIds ??
+          (comprovante?.suggestedTransactionId
+            ? [comprovante.suggestedTransactionId]
+            : []);
+
+        if (suggestedIds.length > 0) {
+          const found = candidates.filter((t) => suggestedIds.includes(t.id));
+          if (found.length > 0) setResolvedTxs(found);
         }
       })
       .catch(console.error)
       .finally(() => setIsLoadingTx(false));
-  }, [open, selectedCompany, comprovante?.suggestedTransactionId]);
+  }, [
+    open,
+    selectedCompany,
+    comprovante?.matchStatus,
+    comprovante?.isConsolidated,
+    comprovante?.transactionIds,
+    comprovante?.suggestedTransactionId,
+    comprovante?.suggestedTransactionIds,
+  ]);
 
   const filtered = txCandidates.filter((t) =>
     [t.description, t.supplierOrClient ?? ""]
@@ -108,13 +141,19 @@ export function MatchReviewDialog({
       .includes(txSearch.toLowerCase()),
   );
 
+  // Effective transaction IDs to confirm (shown suggestion OR manual selection)
+  const effectiveTxIds =
+    manualTxs.length > 0
+      ? manualTxs.map((t) => t.id)
+      : shownTxs.map((t) => t.id);
+
   const handleConfirm = useCallback(async () => {
-    if (!user || !comprovante || !shownTx) return;
+    if (!user || !comprovante || effectiveTxIds.length === 0) return;
     try {
       setIsProcessing(true);
       await comprovanteService.confirmMatch(
         comprovante.id,
-        shownTx.id,
+        effectiveTxIds,
         comprovante.storageUrl,
         user.uid,
       );
@@ -126,7 +165,7 @@ export function MatchReviewDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [user, comprovante, shownTx, onUpdated, onClose]);
+  }, [user, comprovante, effectiveTxIds, onUpdated, onClose]);
 
   const handleReject = useCallback(async () => {
     if (!user || !comprovante) return;
@@ -143,27 +182,31 @@ export function MatchReviewDialog({
     }
   }, [user, comprovante, onUpdated, onClose]);
 
-  const handleManualLink = useCallback(async () => {
-    if (!user || !comprovante || !manualTx) return;
-    try {
-      setIsProcessing(true);
-      await comprovanteService.confirmMatch(
-        comprovante.id,
-        manualTx.id,
-        comprovante.storageUrl,
-        user.uid,
-      );
-      toast.success("Comprovante vinculado manualmente!");
-      onUpdated();
-      onClose();
-    } catch {
-      toast.error("Erro ao vincular comprovante.");
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [user, comprovante, manualTx, onUpdated, onClose]);
+  const toggleManualTx = (tx: Transaction) => {
+    setManualTxs((prev) => {
+      const exists = prev.find((t) => t.id === tx.id);
+      if (exists) return prev.filter((t) => t.id !== tx.id);
+      return [...prev, tx];
+    });
+  };
 
   if (!comprovante) return null;
+
+  const isConsolidatedSuggestion =
+    (comprovante.suggestedTransactionIds?.length ?? 0) > 1 ||
+    comprovante.isConsolidated;
+
+  const hasConfirmTarget = effectiveTxIds.length > 0;
+
+  // For the suggested transactions section
+  const suggestedTotal = shownTxs.reduce(
+    (sum, tx) => sum + (tx.finalAmount ?? tx.amount),
+    0,
+  );
+  const manualTotal = manualTxs.reduce(
+    (sum, tx) => sum + (tx.finalAmount ?? tx.amount),
+    0,
+  );
 
   return (
     <ResponsiveModal open={open} onOpenChange={onClose}>
@@ -221,11 +264,19 @@ export function MatchReviewDialog({
 
           {/* ── Right panel ────────────────────────────────────────────── */}
           <div className="space-y-4">
-            {/* Confidence & suggestion */}
+            {/* Confidence & extracted data */}
             {comprovante.matchConfidenceLevel && (
               <div className="rounded-lg border p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Sugestão automática</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Sugestão automática</p>
+                    {isConsolidatedSuggestion && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                        <Layers className="h-2.5 w-2.5" />
+                        Consolidada
+                      </span>
+                    )}
+                  </div>
                   <ConfidenceBadge
                     level={comprovante.matchConfidenceLevel}
                     score={comprovante.matchConfidence}
@@ -237,6 +288,14 @@ export function MatchReviewDialog({
                     <span className="font-medium text-foreground">
                       {formatCurrency(comprovante.matchedAmount)}
                     </span>
+                    {isConsolidatedSuggestion && (
+                      <span className="ml-1 text-blue-600 dark:text-blue-400">
+                        (soma de{" "}
+                        {comprovante.suggestedTransactionIds?.length ??
+                          shownTxs.length}{" "}
+                        transações)
+                      </span>
+                    )}
                   </p>
                 )}
                 {comprovante.matchedDate && (
@@ -260,33 +319,50 @@ export function MatchReviewDialog({
               </div>
             )}
 
-            {/* Matched transaction */}
-            {shownTx ? (
+            {/* Suggested transaction(s) */}
+            {shownTxs.length > 0 ? (
               <div className="rounded-lg border p-3 space-y-2">
-                <p className="text-sm font-medium">Transação sugerida</p>
-                <Separator />
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium">{shownTx.description}</p>
-                  {shownTx.supplierOrClient && (
-                    <p className="text-xs text-muted-foreground">
-                      {shownTx.supplierOrClient}
-                    </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">
+                    {shownTxs.length > 1
+                      ? `${shownTxs.length} transações sugeridas`
+                      : "Transação sugerida"}
+                  </p>
+                  {shownTxs.length > 1 && (
+                    <span className="text-xs font-medium text-foreground">
+                      Total: {formatCurrency(suggestedTotal)}
+                    </span>
                   )}
-                  <div className="flex gap-4 text-xs text-muted-foreground">
-                    <span>
-                      {formatCurrency(shownTx.finalAmount ?? shownTx.amount)}
-                    </span>
-                    <span>
-                      {format(
-                        shownTx.paymentDate ?? shownTx.dueDate,
-                        "dd/MM/yyyy",
-                        { locale: ptBR },
+                </div>
+                <Separator />
+                <div className="space-y-2 max-h-[180px] overflow-y-auto">
+                  {shownTxs.map((tx) => (
+                    <div key={tx.id} className="space-y-1">
+                      <p className="text-sm font-medium">{tx.description}</p>
+                      {tx.supplierOrClient && (
+                        <p className="text-xs text-muted-foreground">
+                          {tx.supplierOrClient}
+                        </p>
                       )}
-                    </span>
-                    <Badge variant="outline" className="h-4 text-[10px] px-1">
-                      {shownTx.status === "paid" ? "Pago" : "Autorizado"}
-                    </Badge>
-                  </div>
+                      <div className="flex gap-4 text-xs text-muted-foreground">
+                        <span>
+                          {formatCurrency(tx.finalAmount ?? tx.amount)}
+                        </span>
+                        <span>
+                          {format(tx.paymentDate ?? tx.dueDate, "dd/MM/yyyy", {
+                            locale: ptBR,
+                          })}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="h-4 text-[10px] px-1"
+                        >
+                          {tx.status === "paid" ? "Pago" : "Autorizado"}
+                        </Badge>
+                      </div>
+                      {shownTxs.length > 1 && <Separator className="mt-2" />}
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
@@ -298,9 +374,26 @@ export function MatchReviewDialog({
 
             <Separator />
 
-            {/* Manual link */}
+            {/* Manual link — supports multi-select for consolidated */}
             <div className="space-y-2">
-              <p className="text-sm font-medium">Vincular a outra transação</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Vincular a transação(ões)</p>
+                {manualTxs.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {manualTxs.length} selecionada
+                      {manualTxs.length !== 1 ? "s" : ""} ·{" "}
+                      {formatCurrency(manualTotal)}
+                    </span>
+                    <button
+                      onClick={() => setManualTxs([])}
+                      className="text-xs text-destructive hover:underline"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                )}
+              </div>
               <Popover open={isTxOpen} onOpenChange={setIsTxOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -314,8 +407,12 @@ export function MatchReviewDialog({
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         Carregando…
                       </span>
-                    ) : manualTx ? (
-                      <span className="truncate">{manualTx.description}</span>
+                    ) : manualTxs.length > 0 ? (
+                      <span className="truncate">
+                        {manualTxs.length === 1
+                          ? manualTxs[0].description
+                          : `${manualTxs.length} transações selecionadas`}
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">
                         Buscar transação…
@@ -334,33 +431,57 @@ export function MatchReviewDialog({
                     <CommandList>
                       <CommandEmpty>Nenhuma transação encontrada.</CommandEmpty>
                       <CommandGroup>
-                        {filtered.slice(0, 20).map((t) => (
-                          <CommandItem
-                            key={t.id}
-                            value={t.id}
-                            onSelect={() => {
-                              setManualTx(t);
-                              setIsTxOpen(false);
-                            }}
-                            className={cn(
-                              "flex flex-col items-start gap-0.5",
-                              manualTx?.id === t.id && "bg-primary/5",
-                            )}
-                          >
-                            <span className="text-sm font-medium">
-                              {t.description}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {t.supplierOrClient} ·{" "}
-                              {formatCurrency(t.finalAmount ?? t.amount)}
-                            </span>
-                          </CommandItem>
-                        ))}
+                        {filtered.slice(0, 20).map((t) => {
+                          const selected = !!manualTxs.find(
+                            (m) => m.id === t.id,
+                          );
+                          return (
+                            <CommandItem
+                              key={t.id}
+                              value={t.id}
+                              onSelect={() => {
+                                toggleManualTx(t);
+                              }}
+                              className={cn(
+                                "flex flex-col items-start gap-0.5",
+                                selected && "bg-primary/5",
+                              )}
+                            >
+                              <div className="flex items-center gap-2 w-full">
+                                <div
+                                  className={cn(
+                                    "h-3.5 w-3.5 shrink-0 rounded-sm border",
+                                    selected
+                                      ? "border-primary bg-primary"
+                                      : "border-muted-foreground",
+                                  )}
+                                >
+                                  {selected && (
+                                    <CheckCircle2 className="h-3 w-3 text-primary-foreground" />
+                                  )}
+                                </div>
+                                <span className="text-sm font-medium flex-1">
+                                  {t.description}
+                                </span>
+                              </div>
+                              <span className="text-xs text-muted-foreground pl-5">
+                                {t.supplierOrClient} ·{" "}
+                                {formatCurrency(t.finalAmount ?? t.amount)}
+                              </span>
+                            </CommandItem>
+                          );
+                        })}
                       </CommandGroup>
                     </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
+              {manualTxs.length > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Associação consolidada: este comprovante cobrirá{" "}
+                  {manualTxs.length} transações da mesma entidade.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -381,23 +502,7 @@ export function MatchReviewDialog({
               Fechar
             </Button>
 
-            {manualTx && (
-              <Button
-                variant="outline"
-                onClick={handleManualLink}
-                disabled={isProcessing}
-                className="gap-1.5"
-              >
-                {isProcessing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Link2 className="h-4 w-4" />
-                )}
-                Vincular manualmente
-              </Button>
-            )}
-
-            {shownTx && (
+            {hasConfirmTarget && (
               <Button
                 onClick={handleConfirm}
                 disabled={isProcessing}
@@ -406,9 +511,11 @@ export function MatchReviewDialog({
                 {isProcessing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <CheckCircle2 className="h-4 w-4" />
+                  <Link2 className="h-4 w-4" />
                 )}
-                Confirmar associação
+                {manualTxs.length > 0
+                  ? `Vincular ${manualTxs.length} transaç${manualTxs.length !== 1 ? "ões" : "ão"}`
+                  : "Confirmar associação"}
               </Button>
             )}
           </div>

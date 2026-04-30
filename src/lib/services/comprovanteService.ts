@@ -134,6 +134,7 @@ export const comprovanteService = {
   // ── By transaction ───────────────────────────────────────────────────────────
 
   async getByTransactionId(transactionId: string): Promise<Comprovante | null> {
+    // Check primary transactionId first (single or legacy matches)
     const snap = await getDocs(
       query(
         collection(db, COLLECTION),
@@ -141,8 +142,21 @@ export const comprovanteService = {
         limit(1),
       ),
     );
-    if (snap.empty) return null;
-    const d = snap.docs[0];
+    if (!snap.empty) {
+      const d = snap.docs[0];
+      return convertDates({ id: d.id, ...d.data() });
+    }
+
+    // Also check the transactionIds array (consolidated matches)
+    const snap2 = await getDocs(
+      query(
+        collection(db, COLLECTION),
+        where("transactionIds", "array-contains", transactionId),
+        limit(1),
+      ),
+    );
+    if (snap2.empty) return null;
+    const d = snap2.docs[0];
     return convertDates({ id: d.id, ...d.data() });
   },
 
@@ -182,25 +196,30 @@ export const comprovanteService = {
 
   async confirmMatch(
     comprovanteId: string,
-    transactionId: string,
+    transactionIds: string[],
     storageUrl: string,
     reviewedBy: string,
   ): Promise<void> {
     const batch = writeBatch(db);
+    const primaryId = transactionIds[0];
 
     batch.update(doc(db, COLLECTION, comprovanteId), {
       matchStatus: "matched",
-      transactionId,
+      transactionId: primaryId,
+      transactionIds,
+      isConsolidated: transactionIds.length > 1,
       reviewedBy,
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
-    batch.update(doc(db, "transactions", transactionId), {
-      comprovanteId,
-      comprovanteUrl: storageUrl,
-      updatedAt: serverTimestamp(),
-    });
+    for (const txId of transactionIds) {
+      batch.update(doc(db, "transactions", txId), {
+        comprovanteId,
+        comprovanteUrl: storageUrl,
+        updatedAt: serverTimestamp(),
+      });
+    }
 
     await batch.commit();
   },
@@ -209,6 +228,7 @@ export const comprovanteService = {
     await updateDoc(doc(db, COLLECTION, comprovanteId), {
       matchStatus: "rejected_match",
       transactionId: null,
+      transactionIds: null,
       reviewedBy,
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -217,23 +237,27 @@ export const comprovanteService = {
 
   async removeMatch(
     comprovanteId: string,
-    transactionId: string,
+    transactionIds: string[],
   ): Promise<void> {
     const batch = writeBatch(db);
 
     batch.update(doc(db, COLLECTION, comprovanteId), {
       matchStatus: "unmatched",
       transactionId: null,
+      transactionIds: null,
+      isConsolidated: false,
       reviewedBy: null,
       reviewedAt: null,
       updatedAt: serverTimestamp(),
     });
 
-    batch.update(doc(db, "transactions", transactionId), {
-      comprovanteId: null,
-      comprovanteUrl: null,
-      updatedAt: serverTimestamp(),
-    });
+    for (const txId of transactionIds) {
+      batch.update(doc(db, "transactions", txId), {
+        comprovanteId: null,
+        comprovanteUrl: null,
+        updatedAt: serverTimestamp(),
+      });
+    }
 
     await batch.commit();
   },
@@ -243,7 +267,12 @@ export const comprovanteService = {
     data: Partial<
       Pick<
         Comprovante,
-        "matchStatus" | "transactionId" | "notes" | "reviewedBy" | "reviewedAt"
+        | "matchStatus"
+        | "transactionId"
+        | "transactionIds"
+        | "notes"
+        | "reviewedBy"
+        | "reviewedAt"
       >
     >,
   ): Promise<void> {

@@ -156,6 +156,8 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
             fileSize: blob.size,
             matchStatus: best ? "pending_review" : "unmatched",
             suggestedTransactionId: best?.transactionId,
+            suggestedTransactionIds: best?.transactionIds,
+            isConsolidated: best?.isConsolidated ?? false,
             matchConfidence: best?.score,
             matchConfidenceLevel: best?.confidenceLevel,
             matchedAmount: best?.matchedAmount,
@@ -220,7 +222,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
       for (const page of toConfirm) {
         await comprovanteService.confirmMatch(
           page.comprovanteId,
-          page.bestMatch!.transactionId,
+          page.bestMatch!.transactionIds,
           page.storageUrl,
           user.uid,
         );
@@ -396,14 +398,25 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
                                 level={page.bestMatch.confidenceLevel}
                                 score={page.bestMatch.score}
                               />
+                              {page.bestMatch.isConsolidated && (
+                                <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                                  {page.bestMatch.transactionIds.length}{" "}
+                                  transações agrupadas
+                                </span>
+                              )}
                               <span className="text-sm font-medium truncate">
                                 {tx.description}
+                                {page.bestMatch.isConsolidated &&
+                                  page.bestMatch.transactionIds.length > 1 &&
+                                  ` e mais ${page.bestMatch.transactionIds.length - 1}`}
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">
                               {tx.supplierOrClient &&
                                 `${tx.supplierOrClient} · `}
-                              {formatCurrency(tx.finalAmount ?? tx.amount)}
+                              {page.bestMatch.matchedAmount
+                                ? formatCurrency(page.bestMatch.matchedAmount)
+                                : formatCurrency(tx.finalAmount ?? tx.amount)}
                               {tx.paymentDate &&
                                 ` · ${format(tx.paymentDate, "dd/MM/yyyy", { locale: ptBR })}`}
                             </p>

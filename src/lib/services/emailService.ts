@@ -1,4 +1,4 @@
-import { Transaction } from "@/lib/types";
+import { Transaction, ReimbursementReport } from "@/lib/types";
 
 interface EmailResponse {
   success?: boolean;
@@ -161,6 +161,85 @@ export const emailService = {
       return await response.json();
     } catch (error) {
       console.error("Error sending batch authorization email:", error);
+      return { error };
+    }
+  },
+
+  // ============================================
+  // Reimbursement Report Emails
+  // ============================================
+
+  sendReimbursementApprovalRequest: async (
+    report: ReimbursementReport,
+    approverEmail: string,
+    senderName: string,
+  ): Promise<EmailResponse> => {
+    try {
+      const appDomain = getAppDomain();
+      const token = report.approvalToken;
+      const period = `${new Intl.DateTimeFormat("pt-BR").format(report.periodStart)} — ${new Intl.DateTimeFormat("pt-BR").format(report.periodEnd)}`;
+      const totalAmount = new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(report.totalAmount);
+
+      const response = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reimbursement_approval",
+          to: [approverEmail],
+          data: {
+            rdNumber: report.rdNumber,
+            employeeName: report.employeeName,
+            period,
+            totalAmount,
+            transactionCount: report.transactionIds.length,
+            senderName,
+            approveLink: `${appDomain}/approve-reimbursement/${token}?action=approve`,
+            rejectLink: `${appDomain}/approve-reimbursement/${token}?action=reject`,
+          },
+        }),
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Error sending reimbursement approval email:", error);
+      return { error };
+    }
+  },
+
+  sendReimbursementApproved: async (
+    report: ReimbursementReport,
+    employeeEmail: string,
+    approvedByName: string,
+  ): Promise<EmailResponse> => {
+    try {
+      const appDomain = getAppDomain();
+      const period = `${new Intl.DateTimeFormat("pt-BR").format(report.periodStart)} — ${new Intl.DateTimeFormat("pt-BR").format(report.periodEnd)}`;
+      const totalAmount = new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(report.totalAmount);
+
+      const response = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reimbursement_approved",
+          to: [employeeEmail],
+          data: {
+            rdNumber: report.rdNumber,
+            employeeName: report.employeeName,
+            period,
+            totalAmount,
+            approvedBy: approvedByName,
+            systemLink: `${appDomain}/financeiro/reembolsos`,
+          },
+        }),
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Error sending reimbursement approved email:", error);
       return { error };
     }
   },

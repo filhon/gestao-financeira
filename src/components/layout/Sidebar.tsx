@@ -21,6 +21,7 @@ import {
   Scale,
   TrendingUp,
   FileCheck,
+  ReceiptText,
 } from "lucide-react";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -85,6 +86,12 @@ const allMenuItems: MenuItem[] = [
         title: "Comprovantes",
         href: "/financeiro/comprovantes",
         icon: FileCheck,
+        permission: "canViewPayables",
+      },
+      {
+        title: "Reembolsos",
+        href: "/financeiro/reembolsos",
+        icon: ReceiptText,
         permission: "canViewPayables",
       },
     ],

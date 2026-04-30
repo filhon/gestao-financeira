@@ -4,6 +4,8 @@ import {
   BatchApprovalEmail,
   BatchAuthorizationEmail,
   FeedbackNotificationEmail,
+  ReimbursementApprovalEmail,
+  ReimbursementApprovedEmail,
 } from "@/components/emails/EmailTemplates";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
@@ -67,6 +69,12 @@ export async function POST(request: Request) {
   } else if (type === "feedback_notification") {
     emailComponent = <FeedbackNotificationEmail {...data} />;
     subject = `Novo Feedback: ${data.feedbackTypeLabel} - ${data.title}`;
+  } else if (type === "reimbursement_approval") {
+    emailComponent = <ReimbursementApprovalEmail {...data} />;
+    subject = `Aprovação Necessária: ${data.rdNumber} — ${data.employeeName}`;
+  } else if (type === "reimbursement_approved") {
+    emailComponent = <ReimbursementApprovedEmail {...data} />;
+    subject = `Reembolso Aprovado: ${data.rdNumber}`;
   } else {
     return NextResponse.json({ error: "Invalid email type" }, { status: 400 });
   }
