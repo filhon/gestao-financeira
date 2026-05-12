@@ -1167,7 +1167,7 @@ export default function AccountsPayablePage() {
     });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {/* Page header */}
       <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <h1 className="text-xl md:text-2xl font-bold tracking-tight">
@@ -1227,153 +1227,163 @@ export default function AccountsPayablePage() {
         type="payable"
       />
 
-      {/* KPI cards — always visible */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total a Pagar</CardTitle>
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className="text-xl md:text-2xl font-bold font-financial"
-              title={formatCurrency(kpis.pendingAmount)}
-            >
-              {isLoading ? (
-                <Skeleton className="h-7 w-32" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    <AnimatedNumber
-                      value={kpis.pendingAmount}
-                      formatter={formatCurrencyAbbr}
-                    />
-                  </span>
-                  <span className="hidden md:inline">
-                    <AnimatedNumber
-                      value={kpis.pendingAmount}
-                      formatter={formatCurrency}
-                    />
-                  </span>
-                </>
-              )}
+      {/* Stats strip */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
+          {/* Total a Pagar */}
+          <div className="flex items-start gap-3 px-5 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
+              <TrendingDown className="h-4 w-4" />
             </div>
-            <p className="text-xs text-muted-foreground">No período filtrado</p>
-          </CardContent>
-        </Card>
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground leading-none mb-1.5">
+                Total a Pagar
+              </p>
+              <div
+                className="text-lg font-bold font-financial leading-none"
+                title={formatCurrency(kpis.pendingAmount)}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-28" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      <AnimatedNumber
+                        value={kpis.pendingAmount}
+                        formatter={formatCurrencyAbbr}
+                      />
+                    </span>
+                    <span className="hidden md:inline">
+                      <AnimatedNumber
+                        value={kpis.pendingAmount}
+                        formatter={formatCurrency}
+                      />
+                    </span>
+                  </>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                No período filtrado
+              </p>
+            </div>
+          </div>
 
-        <Card
-          className={
-            kpis.overdueCount > 0 ? "border-red-200 dark:border-red-900" : ""
-          }
-        >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Vencidas</CardTitle>
-            <AlertTriangle
-              className={`h-4 w-4 ${kpis.overdueCount > 0 ? "text-red-500" : "text-muted-foreground"}`}
-            />
-          </CardHeader>
-          <CardContent>
+          {/* Vencidas */}
+          <div
+            className={`flex items-start gap-3 px-5 py-4 transition-colors ${kpis.overdueCount > 0 ? "bg-red-50/60 dark:bg-red-900/10" : ""}`}
+          >
             <div
-              className={`text-xl md:text-2xl font-bold ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md mt-0.5 ${kpis.overdueCount > 0 ? "bg-red-500/10 text-red-500" : "bg-muted text-muted-foreground"}`}
             >
-              {isLoading ? (
-                <Skeleton className="h-7 w-16" />
-              ) : (
-                <AnimatedNumber value={kpis.overdueCount} />
-              )}
+              <AlertTriangle className="h-4 w-4" />
             </div>
-            <div className="text-xs text-muted-foreground font-financial">
-              {isLoading ? (
-                <Skeleton className="h-3 w-24 mt-1" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    {formatCurrencyAbbr(kpis.overdueAmount)}
-                  </span>
-                  <span className="hidden md:inline">
-                    {formatCurrency(kpis.overdueAmount)}
-                  </span>
-                </>
-              )}
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground leading-none mb-1.5">
+                Vencidas
+              </p>
+              <div
+                className={`text-lg font-bold leading-none ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-8" />
+                ) : (
+                  <AnimatedNumber value={kpis.overdueCount} />
+                )}
+              </div>
+              <div className="text-[11px] text-muted-foreground font-financial mt-1.5">
+                {isLoading ? (
+                  <Skeleton className="h-3 w-20" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      {formatCurrencyAbbr(kpis.overdueAmount)}
+                    </span>
+                    <span className="hidden md:inline">
+                      {formatCurrency(kpis.overdueAmount)}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card
-          className={
-            kpis.dueSoonCount > 0
-              ? "border-amber-200 dark:border-amber-900"
-              : ""
-          }
-        >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Vencem Hoje/Amanhã
-            </CardTitle>
-            <Clock
-              className={`h-4 w-4 ${kpis.dueSoonCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
-            />
-          </CardHeader>
-          <CardContent>
+          {/* Vencem Hoje/Amanhã */}
+          <div
+            className={`flex items-start gap-3 px-5 py-4 transition-colors ${kpis.dueSoonCount > 0 ? "bg-amber-50/60 dark:bg-amber-900/10" : ""}`}
+          >
             <div
-              className={`text-xl md:text-2xl font-bold ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md mt-0.5 ${kpis.dueSoonCount > 0 ? "bg-amber-500/10 text-amber-500" : "bg-muted text-muted-foreground"}`}
             >
-              {isLoading ? (
-                <Skeleton className="h-7 w-16" />
-              ) : (
-                <AnimatedNumber value={kpis.dueSoonCount} />
-              )}
+              <Clock className="h-4 w-4" />
             </div>
-            <div className="text-xs text-muted-foreground font-financial">
-              {isLoading ? (
-                <Skeleton className="h-3 w-24 mt-1" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    {formatCurrencyAbbr(kpis.dueSoonAmount)}
-                  </span>
-                  <span className="hidden md:inline">
-                    {formatCurrency(kpis.dueSoonAmount)}
-                  </span>
-                </>
-              )}
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground leading-none mb-1.5">
+                Vencem Hoje/Amanhã
+              </p>
+              <div
+                className={`text-lg font-bold leading-none ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-8" />
+                ) : (
+                  <AnimatedNumber value={kpis.dueSoonCount} />
+                )}
+              </div>
+              <div className="text-[11px] text-muted-foreground font-financial mt-1.5">
+                {isLoading ? (
+                  <Skeleton className="h-3 w-20" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      {formatCurrencyAbbr(kpis.dueSoonAmount)}
+                    </span>
+                    <span className="hidden md:inline">
+                      {formatCurrency(kpis.dueSoonAmount)}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pagas</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className="text-xl md:text-2xl font-bold font-financial text-blue-600 dark:text-blue-400"
-              title={formatCurrency(kpis.paidAmount)}
-            >
-              {isLoading ? (
-                <Skeleton className="h-7 w-32" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    <AnimatedNumber
-                      value={kpis.paidAmount}
-                      formatter={formatCurrencyAbbr}
-                    />
-                  </span>
-                  <span className="hidden md:inline">
-                    <AnimatedNumber
-                      value={kpis.paidAmount}
-                      formatter={formatCurrency}
-                    />
-                  </span>
-                </>
-              )}
+          {/* Pagas */}
+          <div className="flex items-start gap-3 px-5 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 mt-0.5">
+              <DollarSign className="h-4 w-4" />
             </div>
-            <p className="text-xs text-muted-foreground">No período filtrado</p>
-          </CardContent>
-        </Card>
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground leading-none mb-1.5">
+                Pagas
+              </p>
+              <div
+                className="text-lg font-bold font-financial leading-none text-blue-600 dark:text-blue-400"
+                title={formatCurrency(kpis.paidAmount)}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-28" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      <AnimatedNumber
+                        value={kpis.paidAmount}
+                        formatter={formatCurrencyAbbr}
+                      />
+                    </span>
+                    <span className="hidden md:inline">
+                      <AnimatedNumber
+                        value={kpis.paidAmount}
+                        formatter={formatCurrency}
+                      />
+                    </span>
+                  </>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                No período filtrado
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Sugestões automáticas de lotes */}
@@ -1382,13 +1392,17 @@ export default function AccountsPayablePage() {
       {/* Main table card */}
       <Card>
         <CardHeader>
-          {/* ── Desktop: título + todos os filtros em uma linha ──── */}
-          <div className="hidden md:flex items-start justify-between gap-4 flex-wrap">
-            <div>
+          {/* ── Desktop: título numa linha, filtros na linha abaixo ──── */}
+          <div className="hidden md:block space-y-3">
+            <div className="flex items-center justify-between gap-4">
               <CardTitle>Transações</CardTitle>
-              <CardDescription>
-                Gerencie suas contas a pagar e fluxo de aprovação.
-              </CardDescription>
+              {!isLoading && (
+                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                  {sortedTransactions.length}
+                  {hasMore ? "+" : ""} resultado
+                  {sortedTransactions.length !== 1 ? "s" : ""}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="relative">
@@ -1584,7 +1598,7 @@ export default function AccountsPayablePage() {
               )}
 
               {filterOptions.costCenterId !== "all" && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary max-w-40">
                   <span className="truncate">
                     {costCenters.find(
                       (c) => c.id === filterOptions.costCenterId,

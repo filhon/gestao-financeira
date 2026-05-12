@@ -149,7 +149,7 @@ export default function SettingsPage() {
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8 max-w-2xl">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
@@ -159,68 +159,38 @@ export default function SettingsPage() {
       </div>
 
       {/* Groups */}
-      <div className="space-y-8">
+      <div className="flex flex-col gap-8">
         {visibleGroups.map((group) => (
           <section key={group.label}>
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
               {group.label}
             </h2>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {group.items.map((item, idx) => (
-                <div
+            <div className="rounded-xl border bg-card divide-y overflow-hidden">
+              {group.items.map((item) => (
+                <Link
                   key={item.href}
-                  className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-                  style={{
-                    animationDelay: `${idx * 60}ms`,
-                    animationFillMode: "both",
-                  }}
+                  href={item.href}
+                  className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
-                  <Link
-                    href={item.href}
-                    className="group outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-xl block h-full"
+                  <div
+                    className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-150",
+                      item.iconBg,
+                      item.iconBgDark,
+                    )}
                   >
-                    <div
-                      className={cn(
-                        "relative flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-5",
-                        "transition-all duration-200",
-                        "hover:border-border/80 hover:shadow-md hover:-translate-y-0.5",
-                        "active:translate-y-0 active:shadow-sm",
-                      )}
-                    >
-                      {/* Icon */}
-                      <div
-                        className={cn(
-                          "flex h-10 w-10 items-center justify-center rounded-lg transition-colors duration-200",
-                          item.iconBg,
-                          item.iconBgDark,
-                        )}
-                      >
-                        <item.icon className={cn("h-5 w-5", item.color)} />
-                      </div>
-
-                      {/* Text */}
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm font-medium leading-none text-foreground">
-                          {item.title}
-                        </p>
-                        <p className="text-xs leading-relaxed text-muted-foreground">
-                          {item.description}
-                        </p>
-                      </div>
-
-                      {/* CTA */}
-                      <div
-                        className={cn(
-                          "flex items-center gap-1 text-xs font-medium transition-colors duration-200",
-                          item.color,
-                        )}
-                      >
-                        Acessar
-                        <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-                      </div>
-                    </div>
-                  </Link>
-                </div>
+                    <item.icon className={cn("h-4 w-4", item.color)} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-none mb-1">
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {item.description}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                </Link>
               ))}
             </div>
           </section>

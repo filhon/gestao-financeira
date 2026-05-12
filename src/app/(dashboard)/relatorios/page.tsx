@@ -13,13 +13,7 @@ import { Transaction, Entity } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -71,10 +65,9 @@ const REPORT_TYPES = [
     description: "Entradas e saídas por período com saldo acumulado",
     icon: TrendingUp,
     accentClass: "text-emerald-600 dark:text-emerald-400",
-    bgClass: "bg-emerald-50 dark:bg-emerald-950",
+    bgClass: "bg-emerald-50 dark:bg-emerald-950/60",
     borderClass: "border-emerald-200 dark:border-emerald-800",
-    stripClass: "bg-gradient-to-r from-emerald-500 to-teal-400",
-    dotClass: "bg-emerald-500",
+    iconBg: "bg-emerald-100 dark:bg-emerald-900/50",
   },
   {
     value: "consolidated",
@@ -82,10 +75,9 @@ const REPORT_TYPES = [
     description: "Inclui projeções de recorrências futuras",
     icon: Layers,
     accentClass: "text-blue-600 dark:text-blue-400",
-    bgClass: "bg-blue-50 dark:bg-blue-950",
+    bgClass: "bg-blue-50 dark:bg-blue-950/60",
     borderClass: "border-blue-200 dark:border-blue-800",
-    stripClass: "bg-gradient-to-r from-blue-500 to-indigo-400",
-    dotClass: "bg-blue-500",
+    iconBg: "bg-blue-100 dark:bg-blue-900/50",
   },
   {
     value: "dre",
@@ -93,10 +85,9 @@ const REPORT_TYPES = [
     description: "Demonstrativo de Resultados do Exercício",
     icon: BarChart3,
     accentClass: "text-violet-600 dark:text-violet-400",
-    bgClass: "bg-violet-50 dark:bg-violet-950",
+    bgClass: "bg-violet-50 dark:bg-violet-950/60",
     borderClass: "border-violet-200 dark:border-violet-800",
-    stripClass: "bg-gradient-to-r from-violet-500 to-purple-400",
-    dotClass: "bg-violet-500",
+    iconBg: "bg-violet-100 dark:bg-violet-900/50",
   },
   {
     value: "transfer_guide",
@@ -104,10 +95,9 @@ const REPORT_TYPES = [
     description: "PIX agrupado por entidade/dia e boletos com linha digitável",
     icon: Landmark,
     accentClass: "text-amber-600 dark:text-amber-400",
-    bgClass: "bg-amber-50 dark:bg-amber-950",
+    bgClass: "bg-amber-50 dark:bg-amber-950/60",
     borderClass: "border-amber-200 dark:border-amber-800",
-    stripClass: "bg-gradient-to-r from-amber-500 to-orange-400",
-    dotClass: "bg-amber-500",
+    iconBg: "bg-amber-100 dark:bg-amber-900/50",
   },
 ];
 
@@ -380,7 +370,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="space-y-6 pb-28 md:pb-0">
+    <div className="flex flex-col gap-6 pb-28 md:pb-0">
       {/* Header — padrão do sistema */}
       <div className="flex justify-between items-center">
         <div>
@@ -393,86 +383,57 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Report Type Cards */}
-      <div
-        className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-        style={{ animationDelay: "0ms", animationFillMode: "both" }}
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {REPORT_TYPES.map((type) => {
-            const Icon = type.icon;
-            const isSelected = reportType === type.value;
-            return (
-              <button
-                key={type.value}
-                type="button"
-                onClick={() => setReportType(type.value)}
+      {/* Report Type selector */}
+      <div className="rounded-xl border bg-card divide-y overflow-hidden">
+        {REPORT_TYPES.map((type) => {
+          const Icon = type.icon;
+          const isSelected = reportType === type.value;
+          return (
+            <button
+              key={type.value}
+              type="button"
+              onClick={() => setReportType(type.value)}
+              className={cn(
+                "w-full flex items-center gap-4 px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                isSelected ? type.bgClass : "hover:bg-accent",
+              )}
+            >
+              <div
                 className={cn(
-                  "relative text-left rounded-xl border transition-all duration-200 overflow-hidden",
-                  "hover:shadow-md hover:shadow-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isSelected
-                    ? cn(type.bgClass, type.borderClass)
-                    : "border-border bg-card hover:-translate-y-0.5",
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
+                  isSelected ? type.iconBg : "bg-muted",
                 )}
               >
-                {/* accent strip — igual ao CadastrosPage */}
-                {isSelected && (
-                  <div
-                    className={cn(
-                      "absolute top-0 left-0 h-1 w-full",
-                      type.stripClass,
-                    )}
-                  />
-                )}
-                <div className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div
-                      className={cn(
-                        "flex h-9 w-9 items-center justify-center rounded-lg",
-                        isSelected ? type.bgClass : "bg-muted",
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          "h-4 w-4",
-                          isSelected
-                            ? type.accentClass
-                            : "text-muted-foreground",
-                        )}
-                      />
-                    </div>
-                    {isSelected && (
-                      <div
-                        className={cn(
-                          "h-2 w-2 rounded-full mt-1",
-                          type.dotClass,
-                        )}
-                      />
-                    )}
-                  </div>
-                  <p
-                    className={cn(
-                      "text-sm font-semibold leading-tight",
-                      isSelected ? type.accentClass : "text-foreground",
-                    )}
-                  >
-                    {type.label}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1 leading-snug">
-                    {type.description}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                <Icon
+                  className={cn(
+                    "h-4 w-4",
+                    isSelected ? type.accentClass : "text-muted-foreground",
+                  )}
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p
+                  className={cn(
+                    "text-sm font-semibold leading-none mb-1",
+                    isSelected ? type.accentClass : "text-foreground",
+                  )}
+                >
+                  {type.label}
+                </p>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  {type.description}
+                </p>
+              </div>
+              {isSelected && (
+                <div className="h-1.5 w-1.5 rounded-full bg-current shrink-0 opacity-60" />
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Mobile: compact config summary ──────────────────────────────── */}
-      <div
-        className="md:hidden space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300"
-        style={{ animationDelay: "80ms", animationFillMode: "both" }}
-      >
+      <div className="md:hidden space-y-3">
         {/* Active config chips — scrollable horizontal row */}
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {/* Period chip — always shown */}
@@ -537,20 +498,10 @@ export default function ReportsPage() {
       </div>
 
       {/* ── Desktop: Period & Filters Card ──────────────────────────────── */}
-      <div
-        className="hidden md:block animate-in fade-in slide-in-from-bottom-2 duration-300"
-        style={{ animationDelay: "80ms", animationFillMode: "both" }}
-      >
+      <div className="hidden md:block">
         <Card>
           <CardHeader>
-            <div className="flex items-start justify-between">
-              <div>
-                <CardTitle>Configurar Relatório</CardTitle>
-                <CardDescription>
-                  Defina o período, filtros e formato de exportação.
-                </CardDescription>
-              </div>
-            </div>
+            <CardTitle>Configurar Relatório</CardTitle>
           </CardHeader>
 
           <CardContent className="space-y-6">

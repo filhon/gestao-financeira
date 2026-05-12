@@ -285,4 +285,23 @@ export const comprovanteService = {
   async delete(id: string): Promise<void> {
     await deleteDoc(doc(db, COLLECTION, id));
   },
+
+  // ── Deduplication ────────────────────────────────────────────────────────────
+
+  async findByHash(
+    companyId: string,
+    fileHash: string,
+  ): Promise<Comprovante | null> {
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTION),
+        where("companyId", "==", companyId),
+        where("fileHash", "==", fileHash),
+        limit(1),
+      ),
+    );
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return convertDates({ id: d.id, ...d.data() });
+  },
 };

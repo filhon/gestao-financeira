@@ -13,13 +13,7 @@ import { KPICards } from "@/components/features/dashboard/KPICards";
 import { CfoInsights } from "@/components/features/dashboard/CfoInsights";
 import { CashFlowChart } from "@/components/features/dashboard/CashFlowChart";
 import { CostCenterChart } from "@/components/features/dashboard/CostCenterChart";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -45,19 +39,19 @@ import { Transaction } from "@/lib/types";
 
 function KPICardsSkeleton() {
   return (
-    <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <Card key={i}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-4 w-4 rounded-full" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-8 w-32 mb-2" />
-            <Skeleton className="h-3 w-40" />
-          </CardContent>
-        </Card>
-      ))}
+    <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-start gap-3 px-5 py-4">
+            <Skeleton className="h-8 w-8 rounded-md shrink-0 mt-0.5" />
+            <div className="space-y-2 flex-1 min-w-0">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -138,15 +132,20 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
   const hasItems = transactions.length > 0;
 
   return (
-    <Card className="border-l-4 border-l-red-500">
+    <Card
+      className={
+        hasItems
+          ? "border-red-200 dark:border-red-900 bg-red-50/40 dark:bg-red-950/20"
+          : ""
+      }
+    >
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base md:text-lg flex items-center gap-2 text-red-600">
+          <CardTitle className="text-base md:text-lg flex items-center gap-2 text-red-600 dark:text-red-400">
             <AlertCircle className="h-5 w-5" />
             Contas em Atraso
             {hasItems && (
               <span className="relative inline-flex">
-                {/* Pulsing urgency ring */}
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-50" />
                 <span className="relative inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] px-1">
                   {transactions.length}
@@ -160,9 +159,6 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
             </Button>
           </Link>
         </div>
-        <CardDescription>
-          Pagamentos vencidos que requerem atenção imediata.
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-1">
@@ -203,10 +199,16 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
   const hasItems = transactions.length > 0;
 
   return (
-    <Card className="border-l-4 border-l-amber-500">
+    <Card
+      className={
+        hasItems
+          ? "border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20"
+          : ""
+      }
+    >
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base md:text-lg flex items-center gap-2 text-amber-600">
+          <CardTitle className="text-base md:text-lg flex items-center gap-2 text-amber-600 dark:text-amber-400">
             <Clock className="h-5 w-5" />
             Pendentes de Aprovação
             {hasItems && (
@@ -221,9 +223,6 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
             </Button>
           </Link>
         </div>
-        <CardDescription>
-          Transações aguardando sua aprovação ou do time.
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-1">
@@ -303,7 +302,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -375,13 +374,13 @@ export default function DashboardPage() {
       </section>
 
       {/* ── Charts ─────────────────────────────────────────────────── */}
-      <div className="grid gap-4 md:grid-cols-7">
+      <div className="grid gap-5 md:grid-cols-7">
         <CashFlowChart year={selectedYear} />
         <CostCenterChart year={selectedYear} />
       </div>
 
       {/* ── Action Cards ───────────────────────────────────────────── */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-2">
         {isOverdueLoading ? (
           <ActionCardSkeleton />
         ) : isOverdueError ? (

@@ -458,6 +458,7 @@ export interface Comprovante {
   matchedDate?: Date; // Date found in extracted text
   matchedEntity?: string; // Beneficiary found in extracted text
   extractedText?: string; // Raw text extracted from the PDF page
+  fileHash?: string; // SHA-256 of the page blob — used to detect duplicate uploads
 
   // Metadata
   uploadedBy: string; // User ID

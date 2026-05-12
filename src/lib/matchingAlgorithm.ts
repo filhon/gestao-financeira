@@ -66,9 +66,9 @@ function extractDates(text: string): Date[] {
 
 // ── Numeric comparators ────────────────────────────────────────────────────────
 
-function amountsMatch(a: number, b: number, tol = 0.02): boolean {
+function amountsMatch(a: number, b: number): boolean {
   if (a <= 0 || b <= 0) return false;
-  return Math.abs(a - b) / Math.max(a, b) <= tol;
+  return Math.abs(a - b) < 0.01; // exact centavo match (no tolerance)
 }
 
 function datesMatch(a: Date, b: Date, toleranceDays = 3): boolean {
@@ -201,11 +201,16 @@ export function matchTransactions(
   // transfer, the comprovante amount equals the SUM of those transactions.
   // We group candidates by (normalised entity prefix + day) and test the sum.
 
+  // Group by (normalised entity name + entityId when available + same day).
+  // entityId takes precedence over raw name so two entities with similar names
+  // but different entityIds are never merged into the same consolidated group.
   const groups = new Map<string, Transaction[]>();
   for (const tx of transactions) {
     if (!tx.supplierOrClient) continue;
     const txDate = tx.paymentDate ?? tx.dueDate;
-    const entityKey = normalizeText(tx.supplierOrClient).substring(0, 40);
+    const entityKey = tx.entityId
+      ? `eid:${tx.entityId}`
+      : normalizeText(tx.supplierOrClient).substring(0, 40);
     const key = `${entityKey}|${dayKey(txDate)}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(tx);

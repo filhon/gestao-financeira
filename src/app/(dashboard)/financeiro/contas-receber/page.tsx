@@ -30,13 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ResponsiveModal,
   ResponsiveModalContent,
@@ -313,10 +307,7 @@ function MobileTransactionCard({
       {...swipe}
       className={[
         "relative flex items-start gap-3 px-4 py-3.5 transition-colors select-none",
-        "border-l-4",
-        isOverdue
-          ? "border-l-red-500 bg-red-50 dark:bg-red-900/10"
-          : "border-l-transparent",
+        isOverdue ? "bg-red-50 dark:bg-red-900/10" : "",
       ].join(" ")}
     >
       {/* Main content */}
@@ -779,7 +770,7 @@ export default function AccountsReceivablePage() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {/* Page header */}
       <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <h1 className="text-xl md:text-3xl font-bold tracking-tight">
@@ -838,165 +829,195 @@ export default function AccountsReceivablePage() {
         type="receivable"
       />
 
-      {/* KPI cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total a Receber
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className="text-xl md:text-2xl font-bold font-financial"
-              title={formatCurrency(kpis.pendingAmount)}
-            >
-              {isLoading ? (
-                <Skeleton className="h-7 w-32" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    <AnimatedNumber
-                      value={kpis.pendingAmount}
-                      formatter={formatCurrencyAbbr}
-                    />
-                  </span>
-                  <span className="hidden md:inline">
-                    <AnimatedNumber
-                      value={kpis.pendingAmount}
-                      formatter={formatCurrency}
-                    />
-                  </span>
-                </>
-              )}
+      {/* Stats strip */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
+          {/* Total a Receber */}
+          <div className="flex items-start gap-3 px-5 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60 mt-0.5">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </div>
-            <p className="text-xs text-muted-foreground">No período filtrado</p>
-          </CardContent>
-        </Card>
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs text-muted-foreground">Total a Receber</p>
+              <p
+                className="text-lg font-bold font-financial leading-none"
+                title={formatCurrency(kpis.pendingAmount)}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-28" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      <AnimatedNumber
+                        value={kpis.pendingAmount}
+                        formatter={formatCurrencyAbbr}
+                      />
+                    </span>
+                    <span className="hidden md:inline">
+                      <AnimatedNumber
+                        value={kpis.pendingAmount}
+                        formatter={formatCurrency}
+                      />
+                    </span>
+                  </>
+                )}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                No período filtrado
+              </p>
+            </div>
+          </div>
 
-        <Card
-          className={
-            kpis.overdueCount > 0 ? "border-red-200 dark:border-red-900" : ""
-          }
-        >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Em Atraso</CardTitle>
-            <AlertTriangle
-              className={`h-4 w-4 ${kpis.overdueCount > 0 ? "text-red-500" : "text-muted-foreground"}`}
-            />
-          </CardHeader>
-          <CardContent>
+          {/* Em Atraso */}
+          <div
+            className={[
+              "flex items-start gap-3 px-5 py-4",
+              kpis.overdueCount > 0 ? "bg-red-50/60 dark:bg-red-950/20" : "",
+            ].join(" ")}
+          >
             <div
-              className={`text-xl md:text-2xl font-bold ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+              className={[
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-md mt-0.5",
+                kpis.overdueCount > 0
+                  ? "bg-red-100 dark:bg-red-900/40"
+                  : "bg-muted/60",
+              ].join(" ")}
             >
-              {isLoading ? (
-                <Skeleton className="h-7 w-16" />
-              ) : (
-                <AnimatedNumber value={kpis.overdueCount} />
-              )}
+              <AlertTriangle
+                className={`h-4 w-4 ${kpis.overdueCount > 0 ? "text-red-500" : "text-muted-foreground"}`}
+              />
             </div>
-            <div className="text-xs text-muted-foreground font-financial">
-              {isLoading ? (
-                <Skeleton className="h-3 w-24 mt-1" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    {formatCurrencyAbbr(kpis.overdueAmount)}
-                  </span>
-                  <span className="hidden md:inline">
-                    {formatCurrency(kpis.overdueAmount)}
-                  </span>
-                </>
-              )}
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs text-muted-foreground">Em Atraso</p>
+              <p
+                className={`text-lg font-bold leading-none ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-12" />
+                ) : (
+                  <AnimatedNumber value={kpis.overdueCount} />
+                )}
+              </p>
+              <p className="text-[11px] text-muted-foreground font-financial">
+                {isLoading ? (
+                  <Skeleton className="h-3 w-20 mt-0.5" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      {formatCurrencyAbbr(kpis.overdueAmount)}
+                    </span>
+                    <span className="hidden md:inline">
+                      {formatCurrency(kpis.overdueAmount)}
+                    </span>
+                  </>
+                )}
+              </p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card
-          className={
-            kpis.dueSoonCount > 0
-              ? "border-amber-200 dark:border-amber-900"
-              : ""
-          }
-        >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Vencem Hoje/Amanhã
-            </CardTitle>
-            <Clock
-              className={`h-4 w-4 ${kpis.dueSoonCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
-            />
-          </CardHeader>
-          <CardContent>
+          {/* Vencem Hoje/Amanhã */}
+          <div
+            className={[
+              "flex items-start gap-3 px-5 py-4",
+              kpis.dueSoonCount > 0
+                ? "bg-amber-50/60 dark:bg-amber-950/20"
+                : "",
+            ].join(" ")}
+          >
             <div
-              className={`text-xl md:text-2xl font-bold ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              className={[
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-md mt-0.5",
+                kpis.dueSoonCount > 0
+                  ? "bg-amber-100 dark:bg-amber-900/40"
+                  : "bg-muted/60",
+              ].join(" ")}
             >
-              {isLoading ? (
-                <Skeleton className="h-7 w-16" />
-              ) : (
-                <AnimatedNumber value={kpis.dueSoonCount} />
-              )}
+              <Clock
+                className={`h-4 w-4 ${kpis.dueSoonCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
+              />
             </div>
-            <div className="text-xs text-muted-foreground font-financial">
-              {isLoading ? (
-                <Skeleton className="h-3 w-24 mt-1" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    {formatCurrencyAbbr(kpis.dueSoonAmount)}
-                  </span>
-                  <span className="hidden md:inline">
-                    {formatCurrency(kpis.dueSoonAmount)}
-                  </span>
-                </>
-              )}
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs text-muted-foreground">
+                Vencem Hoje/Amanhã
+              </p>
+              <p
+                className={`text-lg font-bold leading-none ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-12" />
+                ) : (
+                  <AnimatedNumber value={kpis.dueSoonCount} />
+                )}
+              </p>
+              <p className="text-[11px] text-muted-foreground font-financial">
+                {isLoading ? (
+                  <Skeleton className="h-3 w-20 mt-0.5" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      {formatCurrencyAbbr(kpis.dueSoonAmount)}
+                    </span>
+                    <span className="hidden md:inline">
+                      {formatCurrency(kpis.dueSoonAmount)}
+                    </span>
+                  </>
+                )}
+              </p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Recebido</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className="text-xl md:text-2xl font-bold font-financial text-blue-600 dark:text-blue-400"
-              title={formatCurrency(kpis.receivedAmount)}
-            >
-              {isLoading ? (
-                <Skeleton className="h-7 w-32" />
-              ) : (
-                <>
-                  <span className="md:hidden">
-                    <AnimatedNumber
-                      value={kpis.receivedAmount}
-                      formatter={formatCurrencyAbbr}
-                    />
-                  </span>
-                  <span className="hidden md:inline">
-                    <AnimatedNumber
-                      value={kpis.receivedAmount}
-                      formatter={formatCurrency}
-                    />
-                  </span>
-                </>
-              )}
+          {/* Recebido */}
+          <div className="flex items-start gap-3 px-5 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 dark:bg-blue-950/40 mt-0.5">
+              <DollarSign className="h-4 w-4 text-blue-500" />
             </div>
-            <p className="text-xs text-muted-foreground">No período filtrado</p>
-          </CardContent>
-        </Card>
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs text-muted-foreground">Recebido</p>
+              <p
+                className="text-lg font-bold font-financial leading-none text-blue-600 dark:text-blue-400"
+                title={formatCurrency(kpis.receivedAmount)}
+              >
+                {isLoading ? (
+                  <Skeleton className="h-5 w-28" />
+                ) : (
+                  <>
+                    <span className="md:hidden">
+                      <AnimatedNumber
+                        value={kpis.receivedAmount}
+                        formatter={formatCurrencyAbbr}
+                      />
+                    </span>
+                    <span className="hidden md:inline">
+                      <AnimatedNumber
+                        value={kpis.receivedAmount}
+                        formatter={formatCurrency}
+                      />
+                    </span>
+                  </>
+                )}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                No período filtrado
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main table card */}
       <Card>
         <CardHeader>
-          {/* ── Desktop: título + todos os filtros em uma linha ──── */}
-          <div className="hidden md:flex items-start justify-between gap-4 flex-wrap">
-            <div>
+          {/* ── Desktop: título + filtros em bloco separado ──── */}
+          <div className="hidden md:block space-y-3">
+            <div className="flex items-center justify-between gap-2">
               <CardTitle>Transações</CardTitle>
-              <CardDescription>Gerencie suas contas a receber.</CardDescription>
+              {!isLoading && (
+                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                  {batchFilteredTransactions.length}
+                  {hasMore ? "+" : ""} resultado
+                  {batchFilteredTransactions.length !== 1 ? "s" : ""}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="relative">

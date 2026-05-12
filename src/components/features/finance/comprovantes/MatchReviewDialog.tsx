@@ -186,6 +186,23 @@ export function MatchReviewDialog({
     setManualTxs((prev) => {
       const exists = prev.find((t) => t.id === tx.id);
       if (exists) return prev.filter((t) => t.id !== tx.id);
+
+      // Consolidated matches must belong to the same entity
+      if (prev.length > 0) {
+        const refEntityId = prev[0].entityId ?? null;
+        const refName = prev[0].supplierOrClient ?? null;
+        const sameEntity =
+          refEntityId !== null
+            ? tx.entityId === refEntityId
+            : refName !== null && tx.supplierOrClient === refName;
+        if (!sameEntity) {
+          toast.error(
+            "Associação consolidada exige transações do mesmo fornecedor.",
+          );
+          return prev;
+        }
+      }
+
       return [...prev, tx];
     });
   };
@@ -479,7 +496,8 @@ export function MatchReviewDialog({
               {manualTxs.length > 1 && (
                 <p className="text-xs text-muted-foreground">
                   Associação consolidada: este comprovante cobrirá{" "}
-                  {manualTxs.length} transações da mesma entidade.
+                  {manualTxs.length} transações do mesmo fornecedor (
+                  {formatCurrency(manualTotal)}).
                 </p>
               )}
             </div>

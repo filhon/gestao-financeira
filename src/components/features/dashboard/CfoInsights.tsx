@@ -28,17 +28,15 @@ interface Insight {
 // ─── Style maps ──────────────────────────────────────────────────────────────
 const severityStyles: Record<
   InsightSeverity,
-  { bar: string; bg: string; title: string; icon: string; badge: string }
+  { bg: string; title: string; icon: string; badge: string }
 > = {
   critical: {
-    bar: "bg-red-500",
     bg: "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900",
     title: "text-red-700 dark:text-red-400",
     icon: "text-red-500",
     badge: "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300",
   },
   warning: {
-    bar: "bg-amber-500",
     bg: "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900",
     title: "text-amber-700 dark:text-amber-400",
     icon: "text-amber-500",
@@ -46,7 +44,6 @@ const severityStyles: Record<
       "bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300",
   },
   info: {
-    bar: "bg-blue-500",
     bg: "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900",
     title: "text-blue-700 dark:text-blue-400",
     icon: "text-blue-500",
@@ -182,13 +179,8 @@ export function CfoInsights({
           return (
             <div
               key={insight.id}
-              className={`relative flex gap-3 rounded-xl px-4 py-3.5 overflow-hidden ${styles.bg}`}
+              className={`flex gap-3 rounded-xl px-4 py-3.5 ${styles.bg}`}
             >
-              {/* Left accent bar */}
-              <div
-                className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${styles.bar}`}
-              />
-
               {/* Icon */}
               <div className={`mt-0.5 shrink-0 ${styles.icon}`}>
                 {insight.icon}

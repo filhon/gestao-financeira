@@ -119,6 +119,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
 
         const batchId = uuidv4();
         const results: PageResult[] = [];
+        let duplicatesSkipped = 0;
 
         for (let i = 0; i < splitResult.length; i++) {
           const { blob, pageNumber, totalPages } = splitResult[i];
@@ -127,14 +128,33 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           );
           setProgress(20 + Math.round((i / total) * 60));
 
-          // 3. Extract text
+          // 3. Compute SHA-256 hash for deduplication
+          const hashBuf = await crypto.subtle.digest(
+            "SHA-256",
+            await blob.arrayBuffer(),
+          );
+          const fileHash = Array.from(new Uint8Array(hashBuf))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+
+          // 4. Check for duplicate — skip page if already uploaded
+          const existing = await comprovanteService.findByHash(
+            selectedCompany.id,
+            fileHash,
+          );
+          if (existing) {
+            duplicatesSkipped++;
+            continue;
+          }
+
+          // 5. Extract text
           const text = await extractTextFromPdf(blob);
 
-          // 4. Match
+          // 6. Match
           const scores = matchTransactions(text, candidates);
           const best = scores[0] ?? null;
 
-          // 5. Upload page to Storage
+          // 7. Upload page to Storage
           const comprovanteId = uuidv4();
           const storageRef = ref(
             storage,
@@ -145,7 +165,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           });
           const storageUrl = await getDownloadURL(storageRef);
 
-          // 6. Save to Firestore (pending_review or unmatched)
+          // 8. Save to Firestore (pending_review or unmatched)
           const firestoreId = await comprovanteService.create({
             companyId: selectedCompany.id,
             uploadBatchId: batchId,
@@ -154,6 +174,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
             storageUrl,
             storagePath: storageRef.fullPath,
             fileSize: blob.size,
+            fileHash,
             matchStatus: best ? "pending_review" : "unmatched",
             suggestedTransactionId: best?.transactionId,
             suggestedTransactionIds: best?.transactionIds,
@@ -184,6 +205,21 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         }
 
         setProgress(100);
+
+        if (duplicatesSkipped > 0 && results.length === 0) {
+          toast.warning(
+            `Todas as ${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} deste PDF já foram enviadas anteriormente.`,
+          );
+          reset();
+          return;
+        }
+
+        if (duplicatesSkipped > 0) {
+          toast.info(
+            `${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} ignorada${duplicatesSkipped !== 1 ? "s" : ""} (já enviadas anteriormente).`,
+          );
+        }
+
         setProgressLabel("Análise concluída!");
         setPages(results);
         setStep("review");

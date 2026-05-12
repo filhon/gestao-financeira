@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -15,80 +16,105 @@ import {
   Sun,
   Moon,
 } from "lucide-react";
-import { DemoSection } from "@/components/features/landing/DemoSection";
 
-// ─── CSS-in-JSX (React 19 hoists <style> + <link> to <head>) ────────────────
+const DemoSection = dynamic(
+  () =>
+    import("@/components/features/landing/DemoSection").then((m) => ({
+      default: m.DemoSection,
+    })),
+  { ssr: false, loading: () => <div style={{ height: 480 }} /> },
+);
+
+// ─── CSS-in-JSX ──────────────────────────────────────────────────────────────
 const styles = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap');
-
   :root {
-    --fin-bg:           #06091A;
-    --fin-surface:      #0C1228;
-    --fin-surface-2:    #111B36;
-    --fin-border:       rgba(255,255,255,0.06);
-    --fin-border-2:     rgba(255,255,255,0.11);
-    --fin-gold:         #C8962A;
-    --fin-gold-lt:      #E5B44A;
-    --fin-gold-glow:    rgba(200,150,42,0.10);
-    --fin-blue:         #4478F5;
-    --fin-text:         #E8EFFF;
-    --fin-muted:        #7A889E;
-    --fin-success:      #10B981;
+    scroll-behavior: smooth;
+    --fin-bg:        #080D09;
+    --fin-surface:   #0E1511;
+    --fin-surface-2: #141E16;
+    --fin-border:    rgba(255,255,255,0.055);
+    --fin-border-2:  rgba(255,255,255,0.10);
+    --fin-gold:      #C9922A;
+    --fin-gold-lt:   #E8B84A;
+    --fin-gold-glow: rgba(201,146,42,0.10);
+    --fin-blue:      #4F86F7;
+    --fin-text:      #EDF3EE;
+    --fin-muted:     #7A9080;
+    --fin-success:   #10B981;
+  }
+
+  /* FOUC prevention: applied before React hydrates if localStorage had light theme */
+  :root.fin-theme-light-pending .fin-root {
+    --fin-bg:        #F3F7F3;
+    --fin-surface:   #FFFFFF;
+    --fin-surface-2: #E8EDE8;
+    --fin-border:    rgba(0,0,0,0.065);
+    --fin-border-2:  rgba(0,0,0,0.12);
+    --fin-gold:      #C9922A;
+    --fin-gold-lt:   #9C7118;
+    --fin-gold-glow: rgba(201,146,42,0.09);
+    --fin-blue:      #3A6EE0;
+    --fin-text:      #0D1510;
+    --fin-muted:     #637560;
+    --fin-success:   #059669;
+    background: var(--fin-bg);
+    color: var(--fin-text);
+  }
+  :root.fin-theme-light-pending .fin-header {
+    background: rgba(243,247,243,0.90);
+    border-bottom-color: rgba(0,0,0,0.09);
   }
 
   .fin-root {
     background: var(--fin-bg);
     color: var(--fin-text);
-    font-family: 'DM Sans', system-ui, sans-serif;
+    font-family: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
     min-height: 100vh;
     overflow-x: hidden;
   }
 
-  /* ── Grid background ─────────────────────────────────────────── */
+  /* ── Grid background ─────────────────────────────────────── */
   .fin-grid {
     background-image:
-      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
     background-size: 64px 64px;
   }
 
-  /* ── Typography ──────────────────────────────────────────────── */
-  .fin-serif { font-family: 'Cormorant Garamond', Georgia, serif; }
-
-  .fin-gold-gradient {
-    background: linear-gradient(135deg, #C8962A 0%, #E5B44A 50%, #C8962A 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  /* ── Typography ──────────────────────────────────────────── */
+  .fin-serif {
+    font-family: var(--font-cormorant), 'Cormorant Garamond', Georgia, serif;
   }
 
-  /* ── Header ──────────────────────────────────────────────────── */
+  /* ── Header ──────────────────────────────────────────────── */
   .fin-header {
     position: sticky; top: 0; z-index: 50;
     border-bottom: 1px solid var(--fin-border);
-    background: rgba(6,9,26,0.82);
+    background: rgba(8,13,9,0.84);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
   }
 
-  /* ── Buttons ─────────────────────────────────────────────────── */
+  /* ── Buttons ─────────────────────────────────────────────── */
   .fin-btn-primary {
     display: inline-flex; align-items: center; gap: 8px;
-    background: var(--fin-gold); color: #0A0C18;
-    font-family: 'DM Sans', sans-serif; font-weight: 600; font-size: 14px;
+    background: var(--fin-gold); color: #0A0C0A;
+    font-family: var(--font-dm-sans), 'DM Sans', sans-serif;
+    font-weight: 600; font-size: 14px;
     padding: 12px 24px; border-radius: 7px; text-decoration: none;
     transition: all 0.2s ease; letter-spacing: 0.01em; white-space: nowrap;
   }
   .fin-btn-primary:hover {
     background: var(--fin-gold-lt);
     transform: translateY(-1px);
-    box-shadow: 0 8px 28px rgba(200,150,42,0.28);
-    color: #0A0C18;
+    box-shadow: 0 8px 28px rgba(201,146,42,0.28);
+    color: #0A0C0A;
   }
   .fin-btn-ghost {
     display: inline-flex; align-items: center; gap: 8px;
     background: transparent; color: var(--fin-text);
-    font-family: 'DM Sans', sans-serif; font-weight: 400; font-size: 14px;
+    font-family: var(--font-dm-sans), 'DM Sans', sans-serif;
+    font-weight: 400; font-size: 14px;
     padding: 11px 22px; border-radius: 7px; text-decoration: none;
     transition: all 0.2s ease; border: 1px solid var(--fin-border-2);
     white-space: nowrap;
@@ -99,56 +125,84 @@ const styles = `
     background: var(--fin-gold-glow);
   }
 
-  /* ── Feature cards ───────────────────────────────────────────── */
-  .fin-card {
-    background: var(--fin-surface);
-    border: 1px solid var(--fin-border);
-    border-radius: 14px; padding: 28px;
-    position: relative; overflow: hidden;
-    transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  /* ── Feature list (editorial) ────────────────────────────── */
+  .fin-feat-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
   }
-  .fin-card::before {
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0; height: 1px;
-    background: linear-gradient(90deg, transparent, var(--fin-gold), transparent);
-    opacity: 0; transition: opacity 0.3s ease;
+  .fin-feat-item {
+    padding: 40px 0;
+    border-bottom: 1px solid var(--fin-border);
+    padding-right: 48px;
   }
-  .fin-card:hover {
-    transform: translateY(-5px);
-    border-color: rgba(200,150,42,0.22);
-    box-shadow: 0 24px 48px rgba(0,0,0,0.35);
+  .fin-feat-item:nth-child(even) {
+    padding-right: 0;
+    padding-left: 48px;
+    border-left: 1px solid var(--fin-border);
   }
-  .fin-card:hover::before { opacity: 1; }
+  .fin-feat-item:nth-child(5),
+  .fin-feat-item:nth-child(6) {
+    border-bottom: none;
+  }
 
-  /* ── Dashboard mock card ─────────────────────────────────────── */
+  /* ── Transaction feed mock ───────────────────────────────── */
   .fin-mock {
     background: var(--fin-surface);
     border: 1px solid var(--fin-border-2);
     border-radius: 18px; padding: 24px;
     box-shadow: 0 40px 90px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04);
   }
+  .fin-txn-row {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--fin-border);
+  }
+  .fin-txn-row:last-child {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+  }
 
-  /* ── Step chips (workflow) ───────────────────────────────────── */
+  /* ── Step chips (workflow) ───────────────────────────────── */
   .fin-step {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 7px 14px; border-radius: 100px;
     font-size: 12px; font-weight: 500;
-    font-family: 'DM Sans', sans-serif; white-space: nowrap;
+    font-family: var(--font-dm-sans), 'DM Sans', sans-serif;
+    white-space: nowrap;
   }
 
-  /* ── Dividers ────────────────────────────────────────────────── */
+  /* ── Dividers ────────────────────────────────────────────── */
   .fin-divider {
     height: 1px;
     background: linear-gradient(90deg, transparent, var(--fin-border-2), transparent);
   }
 
-  /* ── Glow orbs ───────────────────────────────────────────────── */
+  /* ── Glow orbs ───────────────────────────────────────────── */
   .fin-orb {
     position: absolute; border-radius: 50%;
     filter: blur(80px); pointer-events: none;
   }
 
-  /* ── Animations ──────────────────────────────────────────────── */
+  /* ── Footer nav links ────────────────────────────────────── */
+  .fin-footer-link {
+    font-size: 12px;
+    color: var(--fin-muted);
+    text-decoration: none;
+    transition: color 0.15s ease;
+    border-radius: 4px;
+    outline-offset: 3px;
+  }
+  .fin-footer-link:hover,
+  .fin-footer-link:focus-visible {
+    color: var(--fin-text);
+  }
+  .fin-footer-link:focus-visible {
+    outline: 2px solid var(--fin-gold);
+  }
+
+  /* ── Animations ──────────────────────────────────────────── */
   @keyframes fin-up {
     from { opacity: 0; transform: translateY(22px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -161,6 +215,10 @@ const styles = `
     0%,100% { opacity: 1; }
     50%     { opacity: 0.25; }
   }
+  @keyframes fin-stat-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
   .anim-up-0 { animation: fin-up 0.65s ease both; }
   .anim-up-1 { animation: fin-up 0.65s 0.14s ease both; }
@@ -169,22 +227,28 @@ const styles = `
   .anim-float { animation: fin-float 6.5s ease-in-out infinite; }
   .pulse-dot { animation: fin-pulse-dot 2.2s ease-in-out infinite; }
 
-  /* ── Light mode overrides ───────────────────────────────────── */
+  .stat-visible-0 { animation: fin-stat-in 0.5s 0.00s ease both; }
+  .stat-visible-1 { animation: fin-stat-in 0.5s 0.12s ease both; }
+  .stat-visible-2 { animation: fin-stat-in 0.5s 0.24s ease both; }
+  .stat-visible-3 { animation: fin-stat-in 0.5s 0.36s ease both; }
+
+  /* ── Light mode overrides ────────────────────────────────── */
   .fin-root.fin-light {
-    --fin-bg:        #F7F4EF;
+    --fin-bg:        #F3F7F3;
     --fin-surface:   #FFFFFF;
-    --fin-surface-2: #EEEAE1;
-    --fin-border:    rgba(0,0,0,0.07);
-    --fin-border-2:  rgba(0,0,0,0.13);
-    --fin-gold:      #C8962A;
-    --fin-gold-lt:   #9A7020;
-    --fin-gold-glow: rgba(200,150,42,0.09);
-    --fin-text:      #0F1523;
-    --fin-muted:     #6B7280;
+    --fin-surface-2: #E8EDE8;
+    --fin-border:    rgba(0,0,0,0.065);
+    --fin-border-2:  rgba(0,0,0,0.12);
+    --fin-gold:      #C9922A;
+    --fin-gold-lt:   #9C7118;
+    --fin-gold-glow: rgba(201,146,42,0.09);
+    --fin-blue:      #3A6EE0;
+    --fin-text:      #0D1510;
+    --fin-muted:     #637560;
     --fin-success:   #059669;
   }
   .fin-root.fin-light .fin-header {
-    background: rgba(247,244,239,0.90);
+    background: rgba(243,247,243,0.90);
     border-bottom-color: rgba(0,0,0,0.09);
   }
   .fin-root.fin-light .fin-grid {
@@ -193,72 +257,71 @@ const styles = `
       linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
     background-size: 64px 64px;
   }
-  .fin-root.fin-light .fin-gold-gradient {
-    background: linear-gradient(135deg, #7A5510 0%, #A8780F 50%, #7A5510 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  .fin-root.fin-light .fin-card {
-    box-shadow: 0 2px 10px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
-  }
   .fin-root.fin-light .fin-mock {
-    box-shadow: 0 24px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.09);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.08);
   }
   .fin-root.fin-light .fin-divider {
     background: linear-gradient(90deg, transparent, rgba(0,0,0,0.10), transparent);
   }
 
-  /* ── Responsive ──────────────────────────────────────────────── */
+  /* ── Responsive ──────────────────────────────────────────── */
   @media (max-width: 900px) {
     .fin-hero-grid  { grid-template-columns: 1fr !important; }
-    .fin-feat-grid  { grid-template-columns: 1fr 1fr !important; }
+    .fin-feat-list  { grid-template-columns: 1fr !important; }
     .fin-stats-grid { grid-template-columns: 1fr 1fr !important; }
     .fin-mock-wrap  { display: none !important; }
   }
+  @media (max-width: 680px) {
+    .fin-feat-item { padding-right: 0 !important; }
+    .fin-feat-item:nth-child(even) {
+      padding-left: 0 !important;
+      border-left: none !important;
+    }
+    .fin-feat-item:nth-child(5),
+    .fin-feat-item:nth-child(6) {
+      border-bottom: 1px solid var(--fin-border) !important;
+    }
+    .fin-feat-item:last-child {
+      border-bottom: none !important;
+    }
+  }
   @media (max-width: 580px) {
-    .fin-feat-grid  { grid-template-columns: 1fr !important; }
     .fin-stats-grid { grid-template-columns: 1fr 1fr !important; }
     .fin-workflow   { justify-content: flex-start !important; overflow-x: auto; padding-bottom: 8px; }
     .fin-footer-row { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
+    .fin-nav-secondary { display: none !important; }
   }
 `;
 
-// ─── Features data ───────────────────────────────────────────────────────────
+// ─── Features data ────────────────────────────────────────────────────────────
 const features = [
   {
-    icon: <BarChart3 size={22} />,
-    color: "#4478F5",
+    icon: <BarChart3 size={18} />,
     title: "Fluxo de Caixa em Tempo Real",
     desc: "Visualize entradas e saídas com gráficos interativos. Projeções automáticas com base em transações recorrentes e vencimentos.",
   },
   {
-    icon: <CheckCircle2 size={22} />,
-    color: "#C8962A",
+    icon: <CheckCircle2 size={18} />,
     title: "Workflow de Aprovações",
-    desc: "Fluxo multi-nível: rascunho → aprovação → autorização → pagamento. Controle granular por papel, limite e centro de custo.",
+    desc: "Fluxo multi-nível: rascunho, aprovação, autorização, pagamento. Controle granular por papel, limite e centro de custo.",
   },
   {
-    icon: <ShieldCheck size={22} />,
-    color: "#10B981",
+    icon: <ShieldCheck size={18} />,
     title: "Centros de Custo",
     desc: "Hierarquia por departamento ou projeto com drill-down de rentabilidade. Orçamentos com alertas de desvio em tempo real.",
   },
   {
-    icon: <TrendingUp size={22} />,
-    color: "#8B5CF6",
+    icon: <TrendingUp size={18} />,
     title: "Conciliação Bancária",
     desc: "Importe extratos OFX e concilie transações automaticamente. Sessões auditáveis com histórico completo de alterações.",
   },
   {
-    icon: <Layers size={22} />,
-    color: "#EF4444",
+    icon: <Layers size={18} />,
     title: "Multi-Empresa",
     desc: "Gerencie múltiplas empresas com isolamento total de dados. Cada tenant com RBAC e configuração de usuários independente.",
   },
   {
-    icon: <Zap size={22} />,
-    color: "#F59E0B",
+    icon: <Zap size={18} />,
     title: "API Pública REST",
     desc: "Integre via API autenticada por HMAC-SHA256 com rate limiting, sanitização de entrada e logs de auditoria completos.",
   },
@@ -268,10 +331,41 @@ const features = [
 const workflowSteps = [
   { label: "Rascunho", color: "#6B7280", bg: "rgba(107,114,128,0.12)" },
   { label: "Pend. Aprovação", color: "#F59E0B", bg: "rgba(245,158,11,0.12)" },
-  { label: "Aprovado", color: "#4478F5", bg: "rgba(68,120,245,0.12)" },
+  { label: "Aprovado", color: "#4F86F7", bg: "rgba(79,134,247,0.12)" },
   { label: "Pend. Autorização", color: "#8B5CF6", bg: "rgba(139,92,246,0.12)" },
   { label: "Autorizado", color: "#10B981", bg: "rgba(16,185,129,0.12)" },
-  { label: "Pago", color: "#C8962A", bg: "rgba(200,150,42,0.12)" },
+  { label: "Pago", color: "#C9922A", bg: "rgba(201,146,42,0.12)" },
+] as const;
+
+// ─── Mock transaction feed ────────────────────────────────────────────────────
+const mockTxns = [
+  {
+    id: "T-0291",
+    entity: "Fornecedor ABC Ltda",
+    desc: "NF-e 00438 — Materiais",
+    amount: "R$ 24.800",
+    statusLabel: "Pend. Aprovação",
+    statusColor: "#F59E0B",
+    meta: null,
+  },
+  {
+    id: "T-0290",
+    entity: "Folha DEZ/24",
+    desc: "Depto. Comercial",
+    amount: "R$ 128.400",
+    statusLabel: "Aprovado",
+    statusColor: "#4F86F7",
+    meta: "Ana Silva · há 12min",
+  },
+  {
+    id: "T-0289",
+    entity: "Locação Escritório",
+    desc: "Centro: Administrativo",
+    amount: "R$ 8.200",
+    statusLabel: "Autorizado",
+    statusColor: "#10B981",
+    meta: "Carlos M. · há 28min",
+  },
 ] as const;
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -286,6 +380,8 @@ export default function LandingPage() {
     const saved = localStorage.getItem("fin-theme") as "dark" | "light" | null;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved) setTheme(saved);
+    // Remove FOUC prevention class now that React controls theming
+    document.documentElement.classList.remove("fin-theme-light-pending");
   }, []);
 
   function toggleTheme() {
@@ -330,8 +426,11 @@ export default function LandingPage() {
     <>
       <style dangerouslySetInnerHTML={{ __html: styles }} />
 
-      <div className={`fin-root${theme === "light" ? " fin-light" : ""}`}>
-        {/* ── HEADER ─────────────────────────────────────────────────── */}
+      <div
+        className={`fin-root${theme === "light" ? " fin-light" : ""}`}
+        suppressHydrationWarning
+      >
+        {/* ── HEADER ──────────────────────────────────────────────── */}
         <header className="fin-header">
           <div
             style={{
@@ -369,14 +468,14 @@ export default function LandingPage() {
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                   <path
                     d="M2 12L6 8L10 10L14 4"
-                    stroke="#0A0C18"
+                    stroke="#0A0C0A"
                     strokeWidth="2.2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                   <path
                     d="M12 4H14V6"
-                    stroke="#0A0C18"
+                    stroke="#0A0C0A"
                     strokeWidth="2.2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -398,19 +497,23 @@ export default function LandingPage() {
 
             <div style={{ flex: 1 }} />
 
-            <nav style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <nav
+              style={{ display: "flex", alignItems: "center", gap: 8 }}
+              aria-label="Navegação principal"
+            >
               {/* Theme toggle */}
               <button
                 onClick={toggleTheme}
-                title={
+                aria-label={
                   theme === "dark"
                     ? "Mudar para modo claro"
                     : "Mudar para modo escuro"
                 }
+                aria-pressed={theme === "light"}
                 style={{
                   width: 46,
-                  height: 26,
-                  borderRadius: 13,
+                  height: 34,
+                  borderRadius: 17,
                   position: "relative",
                   border: "1px solid var(--fin-border-2)",
                   background:
@@ -426,12 +529,14 @@ export default function LandingPage() {
               >
                 {/* knob */}
                 <div
+                  aria-hidden="true"
                   style={{
                     position: "absolute",
-                    top: 3,
-                    left: theme === "light" ? "calc(100% - 22px)" : 3,
-                    width: 18,
-                    height: 18,
+                    top: "50%",
+                    left: theme === "light" ? "calc(100% - 26px)" : 4,
+                    transform: "translateY(-50%)",
+                    width: 22,
+                    height: 22,
                     borderRadius: "50%",
                     background:
                       theme === "light" ? "#FFFFFF" : "rgba(255,255,255,0.9)",
@@ -443,14 +548,14 @@ export default function LandingPage() {
                   }}
                 >
                   {theme === "light" ? (
-                    <Sun size={10} color="#C8962A" />
+                    <Sun size={11} color="#C9922A" />
                   ) : (
-                    <Moon size={10} color="#4478F5" />
+                    <Moon size={11} color="#4F86F7" />
                   )}
                 </div>
               </button>
 
-              <Link href="/login" className="fin-btn-ghost">
+              <Link href="/login" className="fin-btn-ghost fin-nav-secondary">
                 Entrar
               </Link>
 
@@ -461,498 +566,606 @@ export default function LandingPage() {
           </div>
         </header>
 
-        {/* ── HERO ───────────────────────────────────────────────────── */}
-        <section
-          className="fin-grid"
-          style={{
-            position: "relative",
-            padding: "96px 0 80px",
-            overflow: "hidden",
-            minHeight: "92vh",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          {/* Glow orbs */}
-          <div
-            className="fin-orb"
+        <main>
+          {/* ── HERO ──────────────────────────────────────────────── */}
+          <section
+            className="fin-grid"
+            aria-label="Introdução"
             style={{
-              width: 640,
-              height: 640,
-              background: "rgba(68,120,245,0.07)",
-              top: -220,
-              left: -220,
-            }}
-          />
-          <div
-            className="fin-orb"
-            style={{
-              width: 480,
-              height: 480,
-              background: "rgba(200,150,42,0.06)",
-              bottom: -120,
-              right: -160,
-            }}
-          />
-
-          <div
-            style={{
-              maxWidth: 1200,
-              margin: "0 auto",
-              padding: "0 24px",
-              width: "100%",
+              position: "relative",
+              padding: "96px 0 80px",
+              overflow: "hidden",
+              minHeight: "92vh",
+              display: "flex",
+              alignItems: "center",
             }}
           >
+            {/* Glow orbs */}
             <div
-              className="fin-hero-grid"
+              className="fin-orb"
+              aria-hidden="true"
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 64,
-                alignItems: "center",
+                width: 640,
+                height: 640,
+                background: "rgba(16,185,129,0.06)",
+                top: -220,
+                left: -220,
+              }}
+            />
+            <div
+              className="fin-orb"
+              aria-hidden="true"
+              style={{
+                width: 480,
+                height: 480,
+                background: "rgba(201,146,42,0.06)",
+                bottom: -120,
+                right: -160,
+              }}
+            />
+
+            <div
+              style={{
+                maxWidth: 1200,
+                margin: "0 auto",
+                padding: "0 24px",
+                width: "100%",
               }}
             >
-              {/* Left: copy */}
-              <div>
-                {/* Badge */}
-                <div
-                  className="anim-up-0"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 7,
-                    padding: "5px 14px",
-                    borderRadius: 100,
-                    border: "1px solid rgba(200,150,42,0.28)",
-                    background: "rgba(200,150,42,0.07)",
-                    marginBottom: 28,
-                  }}
-                >
-                  <span
-                    className="pulse-dot"
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "var(--fin-gold)",
-                      display: "inline-block",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: "var(--fin-gold-lt)",
-                      letterSpacing: "0.09em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    Gestão financeira empresarial
-                  </span>
-                </div>
-
-                {/* Headline */}
-                <h1
-                  className="fin-serif anim-up-1"
-                  style={{
-                    fontSize: "clamp(46px, 5.2vw, 74px)",
-                    fontWeight: 700,
-                    lineHeight: 1.08,
-                    letterSpacing: "-0.025em",
-                    marginBottom: 22,
-                  }}
-                >
-                  Controle Financeiro{" "}
-                  <em
-                    className="fin-gold-gradient"
-                    style={{ fontStyle: "italic" }}
-                  >
-                    Inteligente
-                  </em>{" "}
-                  para sua Empresa
-                </h1>
-
-                {/* Subtitle */}
-                <p
-                  className="anim-up-2"
-                  style={{
-                    fontSize: 16,
-                    lineHeight: 1.7,
-                    color: "var(--fin-muted)",
-                    marginBottom: 36,
-                    maxWidth: 470,
-                  }}
-                >
-                  Fluxo de caixa em tempo real, aprovações multi-nível e centros
-                  de custo — tudo em uma plataforma segura, multi-tenant e
-                  auditável.
-                </p>
-
-                {/* CTAs */}
-                <div
-                  className="anim-up-3"
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    marginBottom: 36,
-                  }}
-                >
-                  <Link
-                    href="/login"
-                    className="fin-btn-primary"
-                    style={{ fontSize: 15, padding: "13px 26px" }}
-                  >
-                    Acessar Plataforma <ArrowRight size={16} />
-                  </Link>
-                  <a
-                    href="#demonstracao"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      document
-                        .getElementById("demonstracao")
-                        ?.scrollIntoView({ behavior: "smooth" });
-                    }}
-                    className="fin-btn-ghost"
-                    style={{
-                      fontSize: 15,
-                      padding: "13px 22px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Ver demonstração
-                  </a>
-                </div>
-
-                {/* Trust strip */}
-                <div
-                  className="anim-up-3"
-                  style={{
-                    display: "flex",
-                    gap: 20,
-                    paddingTop: 28,
-                    borderTop: "1px solid var(--fin-border)",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {[
-                    { label: "SSL + Criptografia" },
-                    { label: "LGPD Compliance" },
-                    { label: "Cloud-native" },
-                  ].map(({ label }) => (
-                    <span
-                      key={label}
-                      style={{
-                        fontSize: 12,
-                        color: "var(--fin-muted)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 13 13"
-                        fill="none"
-                        style={{ flexShrink: 0 }}
-                      >
-                        <path
-                          d="M2 7L5 10L11 3"
-                          stroke="var(--fin-gold)"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Right: dashboard preview */}
               <div
-                className="fin-mock-wrap anim-up-2"
-                style={{ display: "flex", justifyContent: "center" }}
+                className="fin-hero-grid"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 64,
+                  alignItems: "center",
+                }}
               >
-                <div
-                  className="fin-mock anim-float"
-                  style={{ width: "100%", maxWidth: 420 }}
-                >
-                  {/* Card header */}
+                {/* Left: copy */}
+                <div>
+                  {/* Badge */}
                   <div
+                    className="anim-up-0"
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
+                      display: "inline-flex",
                       alignItems: "center",
-                      marginBottom: 20,
+                      gap: 7,
+                      padding: "5px 14px",
+                      borderRadius: 100,
+                      border: "1px solid rgba(201,146,42,0.28)",
+                      background: "rgba(201,146,42,0.07)",
+                      marginBottom: 28,
                     }}
                   >
                     <span
+                      className="pulse-dot"
+                      aria-hidden="true"
                       style={{
-                        fontSize: 13,
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: "var(--fin-gold)",
+                        display: "inline-block",
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 11,
                         fontWeight: 500,
-                        color: "var(--fin-muted)",
+                        color: "var(--fin-gold-lt)",
+                        letterSpacing: "0.09em",
+                        textTransform: "uppercase",
                       }}
                     >
-                      Fluxo de Caixa
+                      Gestão financeira empresarial
                     </span>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
-                    >
-                      <span
-                        className="pulse-dot"
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: "var(--fin-success)",
-                          display: "inline-block",
-                        }}
-                      />
-                      <span
-                        style={{ fontSize: 11, color: "var(--fin-success)" }}
-                      >
-                        Ao vivo
-                      </span>
-                    </div>
                   </div>
 
-                  {/* Balance */}
-                  <div style={{ marginBottom: 6 }}>
+                  {/* Headline */}
+                  <h1
+                    className="fin-serif anim-up-1"
+                    style={{
+                      fontSize: "clamp(46px, 5.2vw, 74px)",
+                      fontWeight: 700,
+                      lineHeight: 1.08,
+                      letterSpacing: "-0.025em",
+                      marginBottom: 22,
+                    }}
+                  >
+                    Controle Financeiro{" "}
+                    <em
+                      style={{
+                        fontStyle: "italic",
+                        color: "var(--fin-gold-lt)",
+                      }}
+                    >
+                      Inteligente
+                    </em>{" "}
+                    para sua Empresa
+                  </h1>
+
+                  {/* Subtitle */}
+                  <p
+                    className="anim-up-2"
+                    style={{
+                      fontSize: 16,
+                      lineHeight: 1.7,
+                      color: "var(--fin-muted)",
+                      marginBottom: 36,
+                      maxWidth: 470,
+                    }}
+                  >
+                    Fluxo de caixa em tempo real, aprovações multi-nível e
+                    centros de custo — tudo em uma plataforma segura,
+                    multi-tenant e auditável.
+                  </p>
+
+                  {/* CTAs */}
+                  <div
+                    className="anim-up-3"
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      flexWrap: "wrap",
+                      marginBottom: 36,
+                    }}
+                  >
+                    <Link
+                      href="/login"
+                      className="fin-btn-primary"
+                      style={{ fontSize: 15, padding: "13px 26px" }}
+                    >
+                      Acessar Plataforma <ArrowRight size={16} />
+                    </Link>
+                    <a
+                      href="#demonstracao"
+                      className="fin-btn-ghost"
+                      style={{
+                        fontSize: 15,
+                        padding: "13px 22px",
+                      }}
+                    >
+                      Ver demonstração
+                    </a>
+                  </div>
+
+                  {/* Trust strip */}
+                  <div
+                    className="anim-up-3"
+                    style={{
+                      display: "flex",
+                      gap: 20,
+                      paddingTop: 28,
+                      borderTop: "1px solid var(--fin-border)",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {[
+                      "SSL + Criptografia",
+                      "LGPD Compliance",
+                      "Cloud-native",
+                    ].map((label) => (
+                      <span
+                        key={label}
+                        style={{
+                          fontSize: 12,
+                          color: "var(--fin-muted)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 13 13"
+                          fill="none"
+                          aria-hidden="true"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <path
+                            d="M2 7L5 10L11 3"
+                            stroke="var(--fin-gold)"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right: transaction feed */}
+                <div
+                  className="fin-mock-wrap anim-up-2"
+                  style={{ display: "flex", justifyContent: "center" }}
+                >
+                  <div
+                    className="fin-mock anim-float"
+                    style={{ width: "100%", maxWidth: 420 }}
+                    aria-hidden="true"
+                  >
+                    {/* Card header */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 20,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: "var(--fin-muted)",
+                        }}
+                      >
+                        Fila de Aprovação
+                      </span>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span
+                          className="pulse-dot"
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: "var(--fin-success)",
+                            display: "inline-block",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "var(--fin-success)",
+                          }}
+                        >
+                          Ao vivo
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Transaction rows */}
+                    {mockTxns.map((tx) => (
+                      <div key={tx.id} className="fin-txn-row">
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 8,
+                            marginBottom: 4,
+                          }}
+                        >
+                          <span
+                            style={{ fontSize: 13, fontWeight: 500, flex: 1 }}
+                          >
+                            {tx.entity}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 600,
+                              color: tx.statusColor,
+                              padding: "2px 8px",
+                              borderRadius: 4,
+                              background: `${tx.statusColor}18`,
+                              flexShrink: 0,
+                              letterSpacing: "0.02em",
+                            }}
+                          >
+                            {tx.statusLabel}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: "var(--fin-muted)",
+                            }}
+                          >
+                            {tx.desc}
+                          </span>
+                          <span
+                            className="fin-serif"
+                            style={{
+                              fontSize: 17,
+                              fontWeight: 700,
+                              letterSpacing: "-0.02em",
+                            }}
+                          >
+                            {tx.amount}
+                          </span>
+                        </div>
+                        {tx.meta && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "var(--fin-muted)",
+                              marginTop: 4,
+                            }}
+                          >
+                            {tx.meta}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Workflow mini-indicator */}
+                    <div
+                      style={{
+                        marginTop: 4,
+                        paddingTop: 16,
+                        borderTop: "1px solid var(--fin-border)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        overflowX: "auto",
+                      }}
+                    >
+                      {workflowSteps.map(({ label, color }, i) => (
+                        <div
+                          key={label}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 500,
+                              color,
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            {label}
+                          </span>
+                          {i < workflowSteps.length - 1 && (
+                            <svg
+                              width="8"
+                              height="8"
+                              viewBox="0 0 8 8"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M1 4H7M7 4L5 2M7 4L5 6"
+                                stroke="var(--fin-muted)"
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ── STATS ──────────────────────────────────────────────── */}
+          <div className="fin-divider" />
+          <section
+            ref={statsRef}
+            aria-label="Números da plataforma"
+            style={{ padding: "56px 0", background: "var(--fin-surface)" }}
+          >
+            <div
+              style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}
+            >
+              <div
+                className="fin-stats-grid"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, 1fr)",
+                  gap: 32,
+                }}
+              >
+                {(
+                  [
+                    {
+                      value: "2,3bi",
+                      prefix: "R$",
+                      label: "em transações processadas",
+                    },
+                    {
+                      value: "1.200+",
+                      prefix: "",
+                      label: "empresas na plataforma",
+                    },
+                    {
+                      value: "99,9%",
+                      prefix: "",
+                      label: "uptime garantido por SLA",
+                    },
+                    {
+                      value: "6",
+                      prefix: "",
+                      label: "papéis RBAC configuráveis",
+                    },
+                  ] as const
+                ).map(({ value, prefix, label }, i) => (
+                  <div
+                    key={label}
+                    className={statsVisible ? `stat-visible-${i}` : ""}
+                    style={{
+                      textAlign: "center",
+                      opacity: statsVisible ? undefined : 0,
+                    }}
+                  >
                     <div
                       className="fin-serif"
                       style={{
-                        fontSize: 36,
+                        fontSize: "clamp(32px, 4vw, 48px)",
                         fontWeight: 700,
-                        letterSpacing: "-0.025em",
                         lineHeight: 1,
+                        letterSpacing: "-0.025em",
                       }}
                     >
-                      R$ 847.320
-                      <span style={{ fontSize: 20, color: "var(--fin-muted)" }}>
-                        ,00
-                      </span>
+                      {prefix && (
+                        <span
+                          style={{
+                            fontSize: "0.55em",
+                            fontFamily:
+                              "var(--font-dm-sans), 'DM Sans', sans-serif",
+                            fontWeight: 300,
+                            color: "var(--fin-muted)",
+                            verticalAlign: "middle",
+                            marginRight: 2,
+                          }}
+                        >
+                          {prefix}
+                        </span>
+                      )}
+                      {value}
                     </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--fin-muted)",
+                        marginTop: 6,
+                      }}
+                    >
+                      {label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+          <div className="fin-divider" />
+
+          {/* ── DEMO ───────────────────────────────────────────────── */}
+          <div id="demonstracao">
+            <DemoSection theme={theme} />
+          </div>
+
+          {/* ── FEATURES ───────────────────────────────────────────── */}
+          <section
+            aria-labelledby="features-heading"
+            style={{ padding: "96px 0" }}
+          >
+            <div
+              style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}
+            >
+              {/* Section label */}
+              <div style={{ marginBottom: 64 }}>
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "var(--fin-gold)",
+                    marginBottom: 12,
+                  }}
+                >
+                  Funcionalidades
+                </p>
+                <h2
+                  id="features-heading"
+                  className="fin-serif"
+                  style={{
+                    fontSize: "clamp(30px, 4vw, 50px)",
+                    fontWeight: 700,
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.1,
+                    maxWidth: 480,
+                  }}
+                >
+                  Tudo que sua empresa precisa
+                </h2>
+              </div>
+
+              {/* Editorial numbered list */}
+              <div className="fin-feat-list">
+                {features.map(({ icon, title, desc }, i) => (
+                  <div key={title} className="fin-feat-item">
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
-                        marginTop: 6,
+                        gap: 12,
+                        marginBottom: 12,
                       }}
                     >
-                      <span style={{ fontSize: 12, color: "var(--fin-muted)" }}>
-                        Saldo disponível
-                      </span>
                       <span
                         style={{
                           fontSize: 11,
                           fontWeight: 600,
-                          color: "var(--fin-success)",
-                          background: "rgba(16,185,129,0.1)",
-                          padding: "2px 8px",
-                          borderRadius: 4,
+                          letterSpacing: "0.10em",
+                          color: "var(--fin-gold)",
+                          fontVariantNumeric: "tabular-nums",
+                          flexShrink: 0,
                         }}
                       >
-                        ↑ +12,4%
+                        {String(i + 1).padStart(2, "0")}
                       </span>
-                    </div>
-                  </div>
-
-                  {/* Sparkline */}
-                  <div
-                    style={{
-                      margin: "18px 0",
-                      borderRadius: 8,
-                      background: "rgba(255,255,255,0.02)",
-                      padding: "10px 0 0",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <svg
-                      width="100%"
-                      height="60"
-                      viewBox="0 0 380 60"
-                      preserveAspectRatio="none"
-                    >
-                      <defs>
-                        <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
-                          <stop
-                            offset="0%"
-                            stopColor="var(--fin-gold)"
-                            stopOpacity="0.28"
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="var(--fin-gold)"
-                            stopOpacity="0"
-                          />
-                        </linearGradient>
-                      </defs>
-                      <path
-                        d="M0,50 L38,42 L76,46 L114,36 L152,30 L190,38 L228,20 L266,26 L304,14 L342,18 L380,10"
-                        fill="none"
-                        stroke="var(--fin-gold)"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M0,50 L38,42 L76,46 L114,36 L152,30 L190,38 L228,20 L266,26 L304,14 L342,18 L380,10 L380,60 L0,60 Z"
-                        fill="url(#sg)"
-                      />
-                    </svg>
-                  </div>
-
-                  {/* Status chips */}
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr 1fr",
-                      gap: 10,
-                    }}
-                  >
-                    {(
-                      [
-                        { label: "Pendentes", value: "12", color: "#F59E0B" },
-                        { label: "Aprovados", value: "8", color: "#4478F5" },
-                        { label: "Pagos", value: "147", color: "#10B981" },
-                      ] as const
-                    ).map(({ label, value, color }) => (
-                      <div
-                        key={label}
+                      <span
+                        aria-hidden="true"
+                        style={{ color: "var(--fin-muted)", flexShrink: 0 }}
+                      >
+                        {icon}
+                      </span>
+                      <h3
                         style={{
-                          padding: "12px 8px",
-                          borderRadius: 8,
-                          background: "rgba(255,255,255,0.025)",
-                          border: "1px solid var(--fin-border)",
-                          textAlign: "center",
+                          fontSize: 15,
+                          fontWeight: 600,
+                          lineHeight: 1.3,
                         }}
                       >
-                        <div
-                          className="fin-serif"
-                          style={{
-                            fontSize: 26,
-                            fontWeight: 700,
-                            color,
-                            lineHeight: 1,
-                          }}
-                        >
-                          {value}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "var(--fin-muted)",
-                            marginTop: 4,
-                          }}
-                        >
-                          {label}
-                        </div>
-                      </div>
-                    ))}
+                        {title}
+                      </h3>
+                    </div>
+                    <p
+                      style={{
+                        fontSize: 13,
+                        lineHeight: 1.65,
+                        color: "var(--fin-muted)",
+                        paddingLeft: 40,
+                      }}
+                    >
+                      {desc}
+                    </p>
                   </div>
-                </div>
+                ))}
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        {/* ── STATS ──────────────────────────────────────────────────── */}
-        <div className="fin-divider" />
-        <section
-          ref={statsRef}
-          style={{ padding: "56px 0", background: "var(--fin-surface)" }}
-        >
-          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}>
+          {/* ── WORKFLOW ────────────────────────────────────────────── */}
+          <section
+            aria-labelledby="workflow-heading"
+            style={{ padding: "80px 0", background: "var(--fin-surface)" }}
+          >
             <div
-              className="fin-stats-grid"
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, 1fr)",
-                gap: 32,
+                maxWidth: 1100,
+                margin: "0 auto",
+                padding: "0 24px",
+                textAlign: "center",
               }}
             >
-              {(
-                [
-                  {
-                    value: "2,3bi",
-                    prefix: "R$",
-                    label: "em transações processadas",
-                  },
-                  {
-                    value: "1.200+",
-                    prefix: "",
-                    label: "empresas na plataforma",
-                  },
-                  {
-                    value: "99,9%",
-                    prefix: "",
-                    label: "uptime garantido por SLA",
-                  },
-                  {
-                    value: "6",
-                    prefix: "",
-                    label: "papéis RBAC configuráveis",
-                  },
-                ] as const
-              ).map(({ value, prefix, label }) => (
-                <div key={label} style={{ textAlign: "center" }}>
-                  <div
-                    className={`fin-serif${statsVisible ? "" : ""}`}
-                    style={{
-                      fontSize: "clamp(32px, 4vw, 48px)",
-                      fontWeight: 700,
-                      lineHeight: 1,
-                      letterSpacing: "-0.025em",
-                      opacity: statsVisible ? 1 : 0,
-                      transition: "opacity 0.6s ease",
-                    }}
-                  >
-                    {prefix && (
-                      <span
-                        style={{
-                          fontSize: "0.55em",
-                          fontFamily: "'DM Sans', sans-serif",
-                          fontWeight: 300,
-                          color: "var(--fin-muted)",
-                          verticalAlign: "middle",
-                          marginRight: 2,
-                        }}
-                      >
-                        {prefix}
-                      </span>
-                    )}
-                    {value}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "var(--fin-muted)",
-                      marginTop: 6,
-                    }}
-                  >
-                    {label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-        <div className="fin-divider" />
-
-        {/* ── DEMO ───────────────────────────────────────────────────── */}
-        <div id="demonstracao">
-          <DemoSection theme={theme} />
-        </div>
-
-        {/* ── FEATURES ───────────────────────────────────────────────── */}
-        <section style={{ padding: "96px 0" }}>
-          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}>
-            {/* Section label */}
-            <div style={{ textAlign: "center", marginBottom: 56 }}>
               <p
                 style={{
                   fontSize: 11,
@@ -963,243 +1176,165 @@ export default function LandingPage() {
                   marginBottom: 12,
                 }}
               >
-                Funcionalidades
+                Fluxo de Transações
               </p>
+              <h2
+                id="workflow-heading"
+                className="fin-serif"
+                style={{
+                  fontSize: "clamp(28px, 3.5vw, 44px)",
+                  fontWeight: 700,
+                  letterSpacing: "-0.02em",
+                  marginBottom: 44,
+                }}
+              >
+                Do rascunho ao pagamento
+              </h2>
+
+              {/* Steps row */}
+              <div
+                className="fin-workflow"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexWrap: "wrap",
+                  gap: 6,
+                }}
+              >
+                {workflowSteps.map(({ label, color, bg }, i) => (
+                  <div
+                    key={label}
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    <div
+                      className="fin-step"
+                      style={{
+                        background: bg,
+                        border: `1px solid ${color}30`,
+                        color,
+                      }}
+                    >
+                      {label}
+                    </div>
+                    {i < workflowSteps.length - 1 && (
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 14 14"
+                        fill="none"
+                        aria-hidden="true"
+                        style={{ color: "var(--fin-muted)", flexShrink: 0 }}
+                      >
+                        <path
+                          d="M2 7H12M12 7L8 3M12 7L8 11"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--fin-muted)",
+                  marginTop: 24,
+                  maxWidth: 480,
+                  margin: "24px auto 0",
+                  lineHeight: 1.65,
+                }}
+              >
+                Workflow configurável com aprovação e autorização independentes.
+                Rejeição disponível em qualquer etapa com notificação automática
+                via e-mail.
+              </p>
+            </div>
+          </section>
+
+          {/* ── CTA FINAL ───────────────────────────────────────────── */}
+          <section
+            aria-label="Chamada para ação"
+            style={{
+              padding: "100px 0",
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              className="fin-orb"
+              aria-hidden="true"
+              style={{
+                width: 600,
+                height: 600,
+                background: "rgba(201,146,42,0.05)",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%,-50%)",
+              }}
+            />
+            <div
+              className="fin-grid"
+              aria-hidden="true"
+              style={{ position: "absolute", inset: 0, opacity: 0.5 }}
+            />
+            <div
+              style={{
+                maxWidth: 760,
+                margin: "0 auto",
+                padding: "0 24px",
+                textAlign: "center",
+                position: "relative",
+              }}
+            >
               <h2
                 className="fin-serif"
                 style={{
-                  fontSize: "clamp(30px, 4vw, 50px)",
+                  fontSize: "clamp(34px, 5vw, 62px)",
                   fontWeight: 700,
-                  letterSpacing: "-0.02em",
+                  letterSpacing: "-0.025em",
                   lineHeight: 1.1,
+                  marginBottom: 18,
                 }}
               >
-                Tudo que sua empresa precisa
-              </h2>
-            </div>
-
-            {/* Cards */}
-            <div
-              className="fin-feat-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: 22,
-              }}
-            >
-              {features.map(({ icon, color, title, desc }) => (
-                <div key={title} className="fin-card">
-                  <div
-                    style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: 10,
-                      marginBottom: 20,
-                      background: `${color}18`,
-                      border: `1px solid ${color}28`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color,
-                    }}
-                  >
-                    {icon}
-                  </div>
-                  <h3
-                    style={{
-                      fontSize: 15,
-                      fontWeight: 600,
-                      marginBottom: 10,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {title}
-                  </h3>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      lineHeight: 1.65,
-                      color: "var(--fin-muted)",
-                    }}
-                  >
-                    {desc}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── WORKFLOW ───────────────────────────────────────────────── */}
-        <section
-          style={{ padding: "80px 0", background: "var(--fin-surface)" }}
-        >
-          <div
-            style={{
-              maxWidth: 1100,
-              margin: "0 auto",
-              padding: "0 24px",
-              textAlign: "center",
-            }}
-          >
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--fin-gold)",
-                marginBottom: 12,
-              }}
-            >
-              Fluxo de Transações
-            </p>
-            <h2
-              className="fin-serif"
-              style={{
-                fontSize: "clamp(28px, 3.5vw, 44px)",
-                fontWeight: 700,
-                letterSpacing: "-0.02em",
-                marginBottom: 44,
-              }}
-            >
-              Do rascunho ao pagamento
-            </h2>
-
-            {/* Steps row */}
-            <div
-              className="fin-workflow"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexWrap: "wrap",
-                gap: 6,
-              }}
-            >
-              {workflowSteps.map(({ label, color, bg }, i) => (
-                <div
-                  key={label}
-                  style={{ display: "flex", alignItems: "center", gap: 6 }}
+                Pronto para ter{" "}
+                <em
+                  style={{
+                    fontStyle: "italic",
+                    color: "var(--fin-gold-lt)",
+                  }}
                 >
-                  <div
-                    className="fin-step"
-                    style={{
-                      background: bg,
-                      border: `1px solid ${color}30`,
-                      color,
-                    }}
-                  >
-                    {label}
-                  </div>
-                  {i < workflowSteps.length - 1 && (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 14 14"
-                      fill="none"
-                      style={{ color: "var(--fin-muted)", flexShrink: 0 }}
-                    >
-                      <path
-                        d="M2 7H12M12 7L8 3M12 7L8 11"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </div>
-              ))}
+                  controle total
+                </em>{" "}
+                das suas finanças?
+              </h2>
+              <p
+                style={{
+                  fontSize: 16,
+                  color: "var(--fin-muted)",
+                  marginBottom: 38,
+                  lineHeight: 1.65,
+                }}
+              >
+                Configure sua empresa em minutos. Sem contrato de fidelidade,
+                sem pegadinhas.
+              </p>
+              <Link
+                href="/login"
+                className="fin-btn-primary"
+                style={{ fontSize: 16, padding: "15px 32px" }}
+              >
+                Começar agora — é grátis <ArrowRight size={17} />
+              </Link>
             </div>
+          </section>
+        </main>
 
-            <p
-              style={{
-                fontSize: 13,
-                color: "var(--fin-muted)",
-                marginTop: 24,
-                maxWidth: 480,
-                margin: "24px auto 0",
-                lineHeight: 1.65,
-              }}
-            >
-              Workflow configurável com aprovação e autorização independentes.
-              Rejeição disponível em qualquer etapa com notificação automática
-              via e-mail.
-            </p>
-          </div>
-        </section>
-
-        {/* ── CTA FINAL ──────────────────────────────────────────────── */}
-        <section
-          style={{
-            padding: "100px 0",
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            className="fin-orb"
-            style={{
-              width: 600,
-              height: 600,
-              background: "rgba(200,150,42,0.05)",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%,-50%)",
-            }}
-          />
-          <div
-            className="fin-grid"
-            style={{ position: "absolute", inset: 0, opacity: 0.5 }}
-          />
-          <div
-            style={{
-              maxWidth: 760,
-              margin: "0 auto",
-              padding: "0 24px",
-              textAlign: "center",
-              position: "relative",
-            }}
-          >
-            <h2
-              className="fin-serif"
-              style={{
-                fontSize: "clamp(34px, 5vw, 62px)",
-                fontWeight: 700,
-                letterSpacing: "-0.025em",
-                lineHeight: 1.1,
-                marginBottom: 18,
-              }}
-            >
-              Pronto para ter{" "}
-              <em className="fin-gold-gradient" style={{ fontStyle: "italic" }}>
-                controle total
-              </em>{" "}
-              das suas finanças?
-            </h2>
-            <p
-              style={{
-                fontSize: 16,
-                color: "var(--fin-muted)",
-                marginBottom: 38,
-                lineHeight: 1.65,
-              }}
-            >
-              Configure sua empresa em minutos. Sem contrato de fidelidade, sem
-              pegadinhas.
-            </p>
-            <Link
-              href="/login"
-              className="fin-btn-primary"
-              style={{ fontSize: 16, padding: "15px 32px" }}
-            >
-              Começar agora — é grátis <ArrowRight size={17} />
-            </Link>
-          </div>
-        </section>
-
-        {/* ── FOOTER ─────────────────────────────────────────────────── */}
+        {/* ── FOOTER ──────────────────────────────────────────────── */}
         <footer
           style={{
             borderTop: "1px solid var(--fin-border)",
@@ -1228,11 +1363,14 @@ export default function LandingPage() {
             </span>
 
             <p style={{ fontSize: 12, color: "var(--fin-muted)" }}>
-              © {new Date().getFullYear()} FinControl. Todos os direitos
+              &copy; {new Date().getFullYear()} FinControl. Todos os direitos
               reservados.
             </p>
 
-            <nav style={{ display: "flex", gap: 24 }}>
+            <nav
+              aria-label="Links do rodapé"
+              style={{ display: "flex", gap: 24 }}
+            >
               {[
                 { label: "Termos de Uso", href: "/termos-uso" },
                 {
@@ -1240,23 +1378,7 @@ export default function LandingPage() {
                   href: "/politica-privacidade",
                 },
               ].map(({ label, href }) => (
-                <Link
-                  key={label}
-                  href={href}
-                  style={{
-                    fontSize: 12,
-                    color: "var(--fin-muted)",
-                    textDecoration: "none",
-                  }}
-                  onMouseOver={(e) => {
-                    (e.currentTarget as HTMLAnchorElement).style.color =
-                      "var(--fin-text)";
-                  }}
-                  onMouseOut={(e) => {
-                    (e.currentTarget as HTMLAnchorElement).style.color =
-                      "var(--fin-muted)";
-                  }}
-                >
+                <Link key={label} href={href} className="fin-footer-link">
                   {label}
                 </Link>
               ))}

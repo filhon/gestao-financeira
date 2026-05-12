@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, memo } from "react";
 import {
   FileCheck,
   Upload,
@@ -54,10 +54,11 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
-import { format, endOfDay } from "date-fns";
+import { format, endOfDay, startOfDay, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -73,6 +74,20 @@ import { ComprovanteStatusBadge } from "@/components/features/finance/comprovant
 import { ConfidenceBadge } from "@/components/features/finance/comprovantes/ConfidenceBadge";
 import { UploadComprovanteDialog } from "@/components/features/finance/comprovantes/UploadComprovanteDialog";
 import { MatchReviewDialog } from "@/components/features/finance/comprovantes/MatchReviewDialog";
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const STATUS_ORDER: Record<string, number> = {
+  pending_review: 0,
+  unmatched: 1,
+  rejected_match: 2,
+  matched: 3,
+};
+
+const STATS_QUERY_KEY = (companyId: string | undefined) => [
+  "comprovante-stats",
+  companyId,
+];
 
 // ── Animated number ──────────────────────────────────────────────────────────
 
@@ -103,9 +118,9 @@ function useAnimatedValue(target: number, duration = 600) {
   return current;
 }
 
-// ── KPI Card helper ──────────────────────────────────────────────────────────
+// ── Stat cell (used inside the unified stats strip) ──────────────────────────
 
-function KpiCard({
+function StatCell({
   title,
   value,
   icon: Icon,
@@ -120,27 +135,25 @@ function KpiCard({
 }) {
   const animated = useAnimatedValue(value);
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
+    <div className="flex items-center gap-3 px-5 py-4">
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${colorClass}`}
+      >
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground leading-none mb-1">
           {title}
-        </CardTitle>
-        <div
-          className={`flex h-8 w-8 items-center justify-center rounded-md ${colorClass}`}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
-      </CardHeader>
-      <CardContent>
+        </p>
         {loading ? (
-          <Skeleton className="h-8 w-16" />
+          <Skeleton className="h-6 w-12" />
         ) : (
-          <p className="text-2xl font-bold tabular-nums">
+          <p className="text-xl font-bold tabular-nums leading-none">
             {Math.round(animated)}
           </p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -233,13 +246,13 @@ interface MobileComprovanteCardProps {
   tx: Transaction | null;
   canUpload: boolean;
   sharingId: string | null;
-  onOpenReview: () => void;
-  onShare: () => void;
-  onSetRemoveId: () => void;
+  onOpenReview: (c: Comprovante) => void;
+  onShare: (c: Comprovante) => void;
+  onSetRemoveId: (id: string) => void;
   downloadUrl: string;
 }
 
-function MobileComprovanteCard({
+const MobileComprovanteCard = memo(function MobileComprovanteCard({
   comprovante: c,
   tx,
   canUpload,
@@ -257,7 +270,11 @@ function MobileComprovanteCard({
   const canRemove =
     c.matchStatus === "matched" && !!c.transactionId && canUpload;
 
-  const swipe = useSwipe(canReview ? onOpenReview : undefined, undefined, 60);
+  const swipe = useSwipe(
+    canReview ? () => onOpenReview(c) : undefined,
+    undefined,
+    60,
+  );
 
   const borderClass =
     c.matchStatus === "pending_review"
@@ -356,7 +373,7 @@ function MobileComprovanteCard({
             </a>
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={onShare}
+            onClick={() => onShare(c)}
             disabled={sharingId === c.id}
             className="gap-2"
           >
@@ -368,7 +385,7 @@ function MobileComprovanteCard({
             {sharingId === c.id ? "Preparando…" : "Enviar"}
           </DropdownMenuItem>
           {canReview && (
-            <DropdownMenuItem onClick={onOpenReview} className="gap-2">
+            <DropdownMenuItem onClick={() => onOpenReview(c)} className="gap-2">
               <Eye className="h-4 w-4" />
               Revisar associação
             </DropdownMenuItem>
@@ -376,7 +393,7 @@ function MobileComprovanteCard({
           {canRemove && <DropdownMenuSeparator />}
           {canRemove && (
             <DropdownMenuItem
-              onClick={onSetRemoveId}
+              onClick={() => onSetRemoveId(c.id)}
               className="gap-2 text-destructive focus:text-destructive"
             >
               <Link2Off className="h-4 w-4" />
@@ -387,7 +404,7 @@ function MobileComprovanteCard({
       </DropdownMenu>
     </div>
   );
-}
+});
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
@@ -417,13 +434,26 @@ export default function ComprovantesPage() {
   const [statusFilter, setStatusFilter] = useState<
     ComprovanteMatchStatus | "all"
   >("all");
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+
+  const defaultDateRange: DateRange = {
+    from: startOfDay(addDays(new Date(), -7)),
+    to: endOfDay(new Date()),
+  };
+
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(
+    defaultDateRange,
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 400);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
+  const isDateRangeDefault =
+    dateRange?.from?.toDateString() === defaultDateRange.from?.toDateString() &&
+    dateRange?.to?.toDateString() === defaultDateRange.to?.toDateString();
+
   const activeFilterCount =
-    (statusFilter !== "all" ? 1 : 0) + (dateRange ? 1 : 0);
+    (statusFilter !== "all" ? 1 : 0) +
+    (!isDateRangeDefault && !!dateRange ? 1 : 0);
   const hasActiveFilters = activeFilterCount > 0 || !!searchTerm;
 
   const statusLabels: Record<string, string> = {
@@ -436,39 +466,28 @@ export default function ComprovantesPage() {
 
   const clearFilters = () => {
     setStatusFilter("all");
-    setDateRange(undefined);
+    setDateRange(defaultDateRange);
     setSearchTerm("");
   };
 
+  const queryClient = useQueryClient();
+
   // ── Stats ────────────────────────────────────────────────────────────────────
-  const [stats, setStats] = useState({
-    total: 0,
-    matched: 0,
-    pendingReview: 0,
-    unmatched: 0,
-    rejectedMatch: 0,
+  const {
+    data: stats = {
+      total: 0,
+      matched: 0,
+      pendingReview: 0,
+      unmatched: 0,
+      rejectedMatch: 0,
+    },
+    isLoading: statsLoading,
+  } = useQuery({
+    queryKey: STATS_QUERY_KEY(selectedCompany?.id),
+    queryFn: () => comprovanteService.getStats(selectedCompany!.id),
+    enabled: !!selectedCompany,
+    staleTime: 60_000,
   });
-  const [statsLoading, setStatsLoading] = useState(true);
-
-  const loadStats = useCallback(async () => {
-    if (!selectedCompany) return;
-    setStatsLoading(true);
-    try {
-      const s = await comprovanteService.getStats(selectedCompany.id);
-      setStats(s);
-    } catch {
-      // stats are non-critical
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [selectedCompany]);
-
-  useEffect(() => {
-    loadStats();
-    const onFocus = () => loadStats();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [loadStats]);
 
   // ── Pagination ────────────────────────────────────────────────────────────────
   const {
@@ -484,8 +503,8 @@ export default function ComprovantesPage() {
       "comprovantes",
       selectedCompany?.id,
       statusFilter,
-      dateRange?.from?.toISOString(),
-      dateRange?.to?.toISOString(),
+      sortField,
+      sortDir,
     ],
     queryFn: async (pageSize, lastDoc) => {
       if (!selectedCompany) return { items: [], lastDoc: null, hasMore: false };
@@ -495,8 +514,6 @@ export default function ComprovantesPage() {
         lastDoc,
         {
           matchStatus: statusFilter,
-          startDate: dateRange?.from,
-          endDate: dateRange?.to ? endOfDay(dateRange.to) : undefined,
         },
       );
     },
@@ -538,82 +555,102 @@ export default function ComprovantesPage() {
       .catch(console.error);
   }, [items]);
 
-  // Client-side search filter + sort
-  const statusOrder: Record<string, number> = {
-    pending_review: 0,
-    unmatched: 1,
-    rejected_match: 2,
-    matched: 3,
-  };
+  // Client-side search + date filter + sort
+  const filtered = useMemo(
+    () =>
+      (debouncedSearch
+        ? items.filter((c) =>
+            [
+              c.extractedText ?? "",
+              c.matchedEntity ?? "",
+              txMap.get(c.transactionId ?? "")?.description ?? "",
+              txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
+            ]
+              .join(" ")
+              .toLowerCase()
+              .includes(debouncedSearch.toLowerCase()),
+          )
+        : items
+      )
+        .filter((c) => {
+          if (!dateRange?.from && !dateRange?.to) return true;
+          // Prefer matchedDate (date on the receipt); fall back to upload date
+          const date = c.matchedDate ?? c.uploadedAt ?? c.createdAt;
+          if (dateRange.from && date < startOfDay(dateRange.from)) return false;
+          if (dateRange.to && date > endOfDay(dateRange.to)) return false;
+          return true;
+        })
+        .slice()
+        .sort((a, b) => {
+          let cmp = 0;
+          if (sortField === "date") {
+            const aDate =
+              a.matchedDate ??
+              (a.transactionId
+                ? txMap.get(a.transactionId)?.paymentDate
+                : undefined);
+            const bDate =
+              b.matchedDate ??
+              (b.transactionId
+                ? txMap.get(b.transactionId)?.paymentDate
+                : undefined);
+            cmp = (aDate?.getTime() ?? 0) - (bDate?.getTime() ?? 0);
+          } else if (sortField === "amount") {
+            const aAmt =
+              a.matchedAmount ??
+              (a.transactionId
+                ? (txMap.get(a.transactionId)?.finalAmount ??
+                  txMap.get(a.transactionId)?.amount ??
+                  0)
+                : 0);
+            const bAmt =
+              b.matchedAmount ??
+              (b.transactionId
+                ? (txMap.get(b.transactionId)?.finalAmount ??
+                  txMap.get(b.transactionId)?.amount ??
+                  0)
+                : 0);
+            cmp = aAmt - bAmt;
+          } else if (sortField === "status") {
+            cmp =
+              (STATUS_ORDER[a.matchStatus] ?? 99) -
+              (STATUS_ORDER[b.matchStatus] ?? 99);
+          } else if (sortField === "confidence") {
+            cmp = (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0);
+          }
+          return sortDir === "asc" ? cmp : -cmp;
+        }),
+    [items, debouncedSearch, txMap, sortField, sortDir, dateRange],
+  );
 
-  const filtered = (
-    debouncedSearch
-      ? items.filter((c) =>
-          [
-            c.extractedText ?? "",
-            c.matchedEntity ?? "",
-            txMap.get(c.transactionId ?? "")?.description ?? "",
-            txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(debouncedSearch.toLowerCase()),
-        )
-      : items
-  )
-    .slice()
-    .sort((a, b) => {
-      let cmp = 0;
-      if (sortField === "date") {
-        const aDate =
-          a.matchedDate ??
-          (a.transactionId
-            ? txMap.get(a.transactionId)?.paymentDate
-            : undefined);
-        const bDate =
-          b.matchedDate ??
-          (b.transactionId
-            ? txMap.get(b.transactionId)?.paymentDate
-            : undefined);
-        cmp = (aDate?.getTime() ?? 0) - (bDate?.getTime() ?? 0);
-      } else if (sortField === "amount") {
-        const aAmt =
-          a.matchedAmount ??
-          (a.transactionId
-            ? (txMap.get(a.transactionId)?.finalAmount ??
-              txMap.get(a.transactionId)?.amount ??
-              0)
-            : 0);
-        const bAmt =
-          b.matchedAmount ??
-          (b.transactionId
-            ? (txMap.get(b.transactionId)?.finalAmount ??
-              txMap.get(b.transactionId)?.amount ??
-              0)
-            : 0);
-        cmp = aAmt - bAmt;
-      } else if (sortField === "status") {
-        cmp =
-          (statusOrder[a.matchStatus] ?? 99) -
-          (statusOrder[b.matchStatus] ?? 99);
-      } else if (sortField === "confidence") {
-        cmp = (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0);
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
+  // Infinite scroll sentinel — disabled while a search term is active
+  const sentinelEnabled =
+    hasMore && !isFetchingNextPage && !debouncedSearch && !searchTerm;
 
-  // Infinite scroll sentinel
   const { targetRef: sentinelRef, isIntersecting } =
     useIntersectionObserver<HTMLDivElement>({
       threshold: 0.1,
-      enabled: hasMore && !isFetchingNextPage,
+      enabled: sentinelEnabled,
     });
 
   useEffect(() => {
-    if (isIntersecting && hasMore && !isFetchingNextPage) {
+    if (
+      isIntersecting &&
+      hasMore &&
+      !isFetchingNextPage &&
+      !debouncedSearch &&
+      !searchTerm
+    ) {
       loadMore();
     }
-  }, [isIntersecting, hasMore, isFetchingNextPage, loadMore]);
+  }, [
+    isIntersecting,
+    hasMore,
+    isFetchingNextPage,
+    loadMore,
+    debouncedSearch,
+    searchTerm,
+  ]);
 
   // ── Dialogs ───────────────────────────────────────────────────────────────────
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -622,10 +659,10 @@ export default function ComprovantesPage() {
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
 
-  const handleOpenReview = (c: Comprovante) => {
+  const handleOpenReview = useCallback((c: Comprovante) => {
     setReviewing(c);
     setReviewOpen(true);
-  };
+  }, []);
 
   const handleRemoveMatch = async () => {
     if (!removeId) return;
@@ -636,7 +673,9 @@ export default function ComprovantesPage() {
       await comprovanteService.removeMatch(c.id, txIds);
       toast.success("Associação removida.");
       refresh();
-      loadStats();
+      queryClient.invalidateQueries({
+        queryKey: STATS_QUERY_KEY(selectedCompany?.id),
+      });
     } catch {
       toast.error("Erro ao remover associação.");
     } finally {
@@ -644,96 +683,105 @@ export default function ComprovantesPage() {
     }
   };
 
-  const handleShare = async (c: Comprovante) => {
-    const tx = c.transactionId ? txMap.get(c.transactionId) : null;
-    const allTxs =
-      c.isConsolidated && (c.transactionIds?.length ?? 0) > 1
-        ? (c.transactionIds ?? [])
-            .map((id) => txMap.get(id))
-            .filter((t): t is Transaction => !!t)
-        : tx
-          ? [tx]
-          : [];
+  const handleSetRemoveId = useCallback((id: string) => setRemoveId(id), []);
 
-    const entity = allTxs[0]?.supplierOrClient ?? c.matchedEntity ?? null;
-    const title =
-      allTxs.length > 1
-        ? `Comprovante${entity ? ` — ${entity}` : ""}`
-        : `Comprovante — ${allTxs[0]?.description ?? c.matchedEntity ?? c.id}`;
+  const handleShare = useCallback(
+    async (c: Comprovante) => {
+      const tx = c.transactionId ? txMap.get(c.transactionId) : null;
+      const allTxs =
+        c.isConsolidated && (c.transactionIds?.length ?? 0) > 1
+          ? (c.transactionIds ?? [])
+              .map((id) => txMap.get(id))
+              .filter((t): t is Transaction => !!t)
+          : tx
+            ? [tx]
+            : [];
 
-    const dateStr = c.matchedDate
-      ? format(c.matchedDate, "dd/MM/yyyy", { locale: ptBR })
-      : allTxs[0]?.paymentDate
-        ? format(allTxs[0].paymentDate, "dd/MM/yyyy", { locale: ptBR })
-        : null;
+      const entity = allTxs[0]?.supplierOrClient ?? c.matchedEntity ?? null;
+      const title =
+        allTxs.length > 1
+          ? `Comprovante${entity ? ` — ${entity}` : ""}`
+          : `Comprovante — ${allTxs[0]?.description ?? c.matchedEntity ?? c.id}`;
 
-    const lines: string[] = [title];
+      const dateStr = c.matchedDate
+        ? format(c.matchedDate, "dd/MM/yyyy", { locale: ptBR })
+        : allTxs[0]?.paymentDate
+          ? format(allTxs[0].paymentDate, "dd/MM/yyyy", { locale: ptBR })
+          : null;
 
-    if (entity) lines.push(`Beneficiário: ${entity}`);
-    if (dateStr) lines.push(`Data: ${dateStr}`);
+      const lines: string[] = [title];
 
-    if (allTxs.length > 1) {
-      // Consolidated: list each transaction with its individual amount
-      lines.push(`\nTransações incluídas (${allTxs.length}):`);
-      allTxs.forEach((t, i) => {
-        const amt = formatCurrency(t.finalAmount ?? t.amount);
-        lines.push(`  ${i + 1}. ${t.description} — ${amt}`);
-      });
-      if (c.matchedAmount) {
-        lines.push(`\nTotal: ${formatCurrency(c.matchedAmount)}`);
+      if (entity) lines.push(`Beneficiário: ${entity}`);
+      if (dateStr) lines.push(`Data: ${dateStr}`);
+
+      if (allTxs.length > 1) {
+        // Consolidated: list each transaction with its individual amount
+        lines.push(`\nTransações incluídas (${allTxs.length}):`);
+        allTxs.forEach((t, i) => {
+          const amt = formatCurrency(t.finalAmount ?? t.amount);
+          lines.push(`  ${i + 1}. ${t.description} — ${amt}`);
+        });
+        if (c.matchedAmount) {
+          lines.push(`\nTotal: ${formatCurrency(c.matchedAmount)}`);
+        }
+      } else if (c.matchedAmount) {
+        lines.push(`Valor: ${formatCurrency(c.matchedAmount)}`);
+      } else if (allTxs[0]) {
+        lines.push(
+          `Valor: ${formatCurrency(allTxs[0].finalAmount ?? allTxs[0].amount)}`,
+        );
       }
-    } else if (c.matchedAmount) {
-      lines.push(`Valor: ${formatCurrency(c.matchedAmount)}`);
-    } else if (allTxs[0]) {
-      lines.push(
-        `Valor: ${formatCurrency(allTxs[0].finalAmount ?? allTxs[0].amount)}`,
-      );
-    }
 
-    const text = lines.join("\n");
+      const text = lines.join("\n");
 
-    if (!navigator.share) {
+      if (!navigator.share) {
+        try {
+          await navigator.clipboard.writeText(c.storageUrl);
+          toast.success("Link copiado para a área de transferência.");
+        } catch {
+          toast.error("Compartilhamento não suportado neste navegador.");
+        }
+        return;
+      }
+
+      setSharingId(c.id);
       try {
-        await navigator.clipboard.writeText(c.storageUrl);
-        toast.success("Link copiado para a área de transferência.");
-      } catch {
-        toast.error("Compartilhamento não suportado neste navegador.");
-      }
-      return;
-    }
+        const proxyUrl = `/api/internal/storage-proxy?path=${encodeURIComponent(c.storagePath)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error("proxy_error");
+        const blob = await response.blob();
+        const fileLabel = entity ?? allTxs[0]?.description ?? c.id;
+        const fileName = `comprovante-${fileLabel.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
+        const file = new File([blob], fileName, { type: "application/pdf" });
 
-    setSharingId(c.id);
-    try {
-      const proxyUrl = `/api/internal/storage-proxy?path=${encodeURIComponent(c.storagePath)}`;
-      const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error("proxy_error");
-      const blob = await response.blob();
-      const fileLabel = entity ?? allTxs[0]?.description ?? c.id;
-      const fileName = `comprovante-${fileLabel.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
-      const file = new File([blob], fileName, { type: "application/pdf" });
-
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ title, text, files: [file] });
-      } else {
-        await navigator.share({ title, text, url: c.storageUrl });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ title, text, files: [file] });
+        } else {
+          await navigator.share({ title, text, url: c.storageUrl });
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name !== "AbortError") {
+          toast.error("Não foi possível compartilhar.");
+        }
+      } finally {
+        setSharingId(null);
       }
-    } catch (err) {
-      if (err instanceof Error && err.name !== "AbortError") {
-        toast.error("Não foi possível compartilhar.");
-      }
-    } finally {
-      setSharingId(null);
-    }
-  };
+    },
+    [txMap],
+  );
 
   const onUploadSuccess = () => {
     refresh();
-    loadStats();
+    queryClient.invalidateQueries({
+      queryKey: STATS_QUERY_KEY(selectedCompany?.id),
+    });
   };
 
   const onReviewUpdated = () => {
     refresh();
-    loadStats();
+    queryClient.invalidateQueries({
+      queryKey: STATS_QUERY_KEY(selectedCompany?.id),
+    });
   };
 
   const pendingCount = stats.pendingReview;
@@ -741,7 +789,7 @@ export default function ComprovantesPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div>
@@ -759,7 +807,9 @@ export default function ComprovantesPage() {
             size="icon"
             onClick={() => {
               refresh();
-              loadStats();
+              queryClient.invalidateQueries({
+                queryKey: STATS_QUERY_KEY(selectedCompany?.id),
+              });
             }}
             title="Atualizar"
           >
@@ -802,44 +852,55 @@ export default function ComprovantesPage() {
         </div>
       )}
 
-      {/* ── KPI cards ────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <KpiCard
-          title="Total"
-          value={stats.total}
-          icon={FileCheck}
-          colorClass="bg-primary/10 text-primary"
-          loading={statsLoading}
-        />
-        <KpiCard
-          title="Associados"
-          value={stats.matched}
-          icon={CheckCircle2}
-          colorClass="bg-emerald-500/10 text-emerald-500"
-          loading={statsLoading}
-        />
-        <KpiCard
-          title="Pendentes"
-          value={stats.pendingReview}
-          icon={Clock}
-          colorClass="bg-amber-500/10 text-amber-500"
-          loading={statsLoading}
-        />
-        <KpiCard
-          title="Sem associação"
-          value={stats.unmatched}
-          icon={FileX}
-          colorClass="bg-red-500/10 text-red-500"
-          loading={statsLoading}
-        />
+      {/* ── Stats strip ──────────────────────────────────────────────────── */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
+          <StatCell
+            title="Total"
+            value={stats.total}
+            icon={FileCheck}
+            colorClass="bg-primary/10 text-primary"
+            loading={statsLoading}
+          />
+          <StatCell
+            title="Associados"
+            value={stats.matched}
+            icon={CheckCircle2}
+            colorClass="bg-emerald-500/10 text-emerald-500"
+            loading={statsLoading}
+          />
+          <StatCell
+            title="Pendentes"
+            value={stats.pendingReview}
+            icon={Clock}
+            colorClass="bg-amber-500/10 text-amber-500"
+            loading={statsLoading}
+          />
+          <StatCell
+            title="Sem associação"
+            value={stats.unmatched}
+            icon={FileX}
+            colorClass="bg-red-500/10 text-red-500"
+            loading={statsLoading}
+          />
+        </div>
       </div>
 
       {/* ── Table Card ───────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          {/* ── Desktop: título + todos os filtros em uma linha ──── */}
-          <div className="hidden md:flex items-start justify-between gap-4 flex-wrap">
-            <CardTitle>Comprovantes</CardTitle>
+          {/* ── Desktop: título numa linha, filtros na linha abaixo ──── */}
+          <div className="hidden md:block space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <CardTitle>Comprovantes</CardTitle>
+              {!isLoading && (
+                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                  {filtered.length}
+                  {hasMore ? "+" : ""} resultado
+                  {filtered.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-3">
               <Select
                 value={statusFilter}
@@ -965,14 +1026,14 @@ export default function ComprovantesPage() {
                   </button>
                 </span>
               )}
-              {dateRange?.from && (
+              {!isDateRangeDefault && dateRange?.from && (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
                   <span>
                     {format(dateRange.from, "dd/MM")}
                     {dateRange.to && ` – ${format(dateRange.to, "dd/MM")}`}
                   </span>
                   <button
-                    onClick={() => setDateRange(undefined)}
+                    onClick={() => setDateRange(defaultDateRange)}
                     className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
                     aria-label="Remover filtro de período"
                   >
@@ -1317,9 +1378,9 @@ export default function ComprovantesPage() {
                           tx={tx}
                           canUpload={canUpload}
                           sharingId={sharingId}
-                          onOpenReview={() => handleOpenReview(c)}
-                          onShare={() => handleShare(c)}
-                          onSetRemoveId={() => setRemoveId(c.id)}
+                          onOpenReview={handleOpenReview}
+                          onShare={handleShare}
+                          onSetRemoveId={handleSetRemoveId}
                           downloadUrl={c.storageUrl}
                         />
                       );

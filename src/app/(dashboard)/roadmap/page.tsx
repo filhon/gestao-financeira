@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function RoadmapPage() {
   return (
-    <div className="flex h-full flex-col space-y-6">
+    <div className="flex h-full flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
@@ -24,7 +24,7 @@ export default function RoadmapPage() {
               Beta
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground pl-[42px]">
+          <p className="text-sm text-muted-foreground ml-[42px]">
             Acompanhe o que está sendo desenvolvido e vote nas próximas
             funcionalidades.
           </p>

@@ -152,9 +152,14 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  const queryKeyRef = useRef(queryKey);
+  useEffect(() => {
+    queryKeyRef.current = queryKey;
+  });
+
   const refresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey });
-  }, [queryClient, queryKey]);
+    await queryClient.invalidateQueries({ queryKey: queryKeyRef.current });
+  }, [queryClient]);
 
   const updateItem = useCallback(
     (id: string, updater: (item: T) => T) => {
