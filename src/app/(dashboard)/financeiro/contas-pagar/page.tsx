@@ -61,17 +61,9 @@ import { Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
-import { SmartBatchesCarousel } from "@/components/features/finance/SmartBatchesCarousel";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { useAuth } from "@/components/providers/AuthProvider";
-import {
-  format,
-  addDays,
-  isBefore,
-  startOfDay,
-  isToday,
-  isTomorrow,
-} from "date-fns";
+import { format, addDays, isBefore, startOfDay } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -612,6 +604,14 @@ export default function AccountsPayablePage() {
     !isLoading &&
     (hasMore || isFetchingNextPage);
 
+  // Auto-load next pages while seeking batch-filtered results, since the
+  // intersection-observer sentinel isn't rendered during the skeleton state.
+  useEffect(() => {
+    if (isSeekingBatchResults && hasMore && !isFetchingNextPage) {
+      loadMore();
+    }
+  }, [isSeekingBatchResults, hasMore, isFetchingNextPage, loadMore]);
+
   const {
     items: sortedTransactions,
     requestSort,
@@ -621,37 +621,72 @@ export default function AccountsPayablePage() {
     direction: "asc",
   });
 
-  // KPI calculations
-  const kpis = useMemo(() => {
+  // Overdue transactions pinned to the top, preserving the existing sort for the rest
+  const displayTransactions = useMemo(() => {
     const today = startOfDay(new Date());
-
-    const overdue = batchFilteredTransactions.filter(
+    const overdue = sortedTransactions.filter(
       (t) => UNPAID_STATUSES.includes(t.status) && isBefore(t.dueDate, today),
     );
-
-    const dueSoon = batchFilteredTransactions.filter(
+    const rest = sortedTransactions.filter(
       (t) =>
-        UNPAID_STATUSES.includes(t.status) &&
-        (isToday(t.dueDate) || isTomorrow(t.dueDate)),
+        !(UNPAID_STATUSES.includes(t.status) && isBefore(t.dueDate, today)),
     );
+    return [...overdue, ...rest];
+  }, [sortedTransactions]);
 
-    const totalPending = batchFilteredTransactions.filter((t) =>
-      UNPAID_STATUSES.includes(t.status),
-    );
+  // KPI aggregation — fetched via server-side aggregation, independent of pagination
+  const [kpis, setKpis] = useState({
+    pendingAmount: 0,
+    overdueCount: 0,
+    overdueAmount: 0,
+    dueSoonCount: 0,
+    dueSoonAmount: 0,
+    paidAmount: 0,
+  });
+  const [isKpisLoading, setIsKpisLoading] = useState(true);
 
-    const totalPaid = batchFilteredTransactions.filter(
-      (t) => t.status === "paid",
-    );
+  useEffect(() => {
+    if (!selectedCompany || !user) return;
 
-    return {
-      overdueCount: overdue.length,
-      overdueAmount: overdue.reduce((acc, t) => acc + t.amount, 0),
-      dueSoonCount: dueSoon.length,
-      dueSoonAmount: dueSoon.reduce((acc, t) => acc + t.amount, 0),
-      pendingAmount: totalPending.reduce((acc, t) => acc + t.amount, 0),
-      paidAmount: totalPaid.reduce((acc, t) => acc + t.amount, 0),
+    let cancelled = false;
+    setIsKpisLoading(true);
+
+    const targetCostCenterIds =
+      filterOptions.costCenterId !== "all" && costCenters.length > 0
+        ? getDescendantIds(filterOptions.costCenterId, costCenters)
+        : undefined;
+
+    transactionService
+      .getPayableKpis(selectedCompany.id, {
+        startDate: filterOptions.dateRange?.from,
+        endDate: filterOptions.dateRange?.to,
+        costCenterIds: targetCostCenterIds,
+        createdBy: onlyOwnPayables ? user.uid : undefined,
+      })
+      .then((result) => {
+        if (!cancelled) {
+          setKpis(result);
+          setIsKpisLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error("Error fetching KPIs:", err);
+        if (!cancelled) setIsKpisLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
     };
-  }, [batchFilteredTransactions]);
+  }, [
+    selectedCompany,
+    user,
+    filterOptions.dateRange?.from,
+    filterOptions.dateRange?.to,
+    filterOptions.costCenterId,
+    costCenters,
+    onlyOwnPayables,
+    getDescendantIds,
+  ]);
 
   const handleOpenPaymentConfirmation = async (t: Transaction) => {
     if (!user || !selectedCompany) return;
@@ -770,9 +805,23 @@ export default function AccountsPayablePage() {
             q: debouncedSearchTerm,
             companyId: selectedCompany.id,
             type: "payable",
-            allDates: "true",
             limit: "50",
           });
+
+          // Pass date range to server so it narrows the Firestore scan
+          if (filterOptions.dateRange?.from) {
+            params.set("startDate", filterOptions.dateRange.from.toISOString());
+          }
+          if (filterOptions.dateRange?.to) {
+            params.set("endDate", filterOptions.dateRange.to.toISOString());
+          }
+
+          // Pass status filter to server
+          if (filterOptions.status === "exclude-paid") {
+            params.set("excludeStatus", "paid");
+          } else if (filterOptions.status !== "all") {
+            params.set("status", filterOptions.status);
+          }
 
           if (onlyOwnPayables) {
             params.set("createdBy", user.uid);
@@ -814,28 +863,8 @@ export default function AccountsPayablePage() {
             }),
           ) as Transaction[];
 
+          // Cost center filtering remains client-side (API doesn't support it)
           let filteredResults = mapped;
-
-          if (filterOptions.status === "exclude-paid") {
-            filteredResults = filteredResults.filter(
-              (t) => t.status !== "paid",
-            );
-          } else if (filterOptions.status !== "all") {
-            filteredResults = filteredResults.filter(
-              (t) => t.status === filterOptions.status,
-            );
-          }
-
-          if (filterOptions.dateRange?.from) {
-            filteredResults = filteredResults.filter(
-              (t) => t.dueDate >= filterOptions.dateRange!.from!,
-            );
-          }
-          if (filterOptions.dateRange?.to) {
-            filteredResults = filteredResults.filter(
-              (t) => t.dueDate <= filterOptions.dateRange!.to!,
-            );
-          }
 
           if (filterOptions.costCenterId !== "all" && costCenters.length > 0) {
             const descendantIds = getDescendantIds(
@@ -880,7 +909,7 @@ export default function AccountsPayablePage() {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(sortedTransactions.map((t) => t.id)));
+      setSelectedIds(new Set(displayTransactions.map((t) => t.id)));
     } else {
       setSelectedIds(new Set());
     }
@@ -1243,7 +1272,7 @@ export default function AccountsPayablePage() {
                 className="text-lg font-bold font-financial leading-none"
                 title={formatCurrency(kpis.pendingAmount)}
               >
-                {isLoading ? (
+                {isKpisLoading ? (
                   <Skeleton className="h-5 w-28" />
                 ) : (
                   <>
@@ -1284,14 +1313,14 @@ export default function AccountsPayablePage() {
               <div
                 className={`text-lg font-bold leading-none ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
               >
-                {isLoading ? (
+                {isKpisLoading ? (
                   <Skeleton className="h-5 w-8" />
                 ) : (
                   <AnimatedNumber value={kpis.overdueCount} />
                 )}
               </div>
               <div className="text-[11px] text-muted-foreground font-financial mt-1.5">
-                {isLoading ? (
+                {isKpisLoading ? (
                   <Skeleton className="h-3 w-20" />
                 ) : (
                   <>
@@ -1323,14 +1352,14 @@ export default function AccountsPayablePage() {
               <div
                 className={`text-lg font-bold leading-none ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
               >
-                {isLoading ? (
+                {isKpisLoading ? (
                   <Skeleton className="h-5 w-8" />
                 ) : (
                   <AnimatedNumber value={kpis.dueSoonCount} />
                 )}
               </div>
               <div className="text-[11px] text-muted-foreground font-financial mt-1.5">
-                {isLoading ? (
+                {isKpisLoading ? (
                   <Skeleton className="h-3 w-20" />
                 ) : (
                   <>
@@ -1359,7 +1388,7 @@ export default function AccountsPayablePage() {
                 className="text-lg font-bold font-financial leading-none text-blue-600 dark:text-blue-400"
                 title={formatCurrency(kpis.paidAmount)}
               >
-                {isLoading ? (
+                {isKpisLoading ? (
                   <Skeleton className="h-5 w-28" />
                 ) : (
                   <>
@@ -1386,9 +1415,6 @@ export default function AccountsPayablePage() {
         </div>
       </div>
 
-      {/* Sugestões automáticas de lotes */}
-      <SmartBatchesCarousel onBatchAccepted={refreshTransactions} />
-
       {/* Main table card */}
       <Card>
         <CardHeader>
@@ -1398,9 +1424,9 @@ export default function AccountsPayablePage() {
               <CardTitle>Transações</CardTitle>
               {!isLoading && (
                 <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                  {sortedTransactions.length}
+                  {displayTransactions.length}
                   {hasMore ? "+" : ""} resultado
-                  {sortedTransactions.length !== 1 ? "s" : ""}
+                  {displayTransactions.length !== 1 ? "s" : ""}
                 </span>
               )}
             </div>
@@ -1505,9 +1531,9 @@ export default function AccountsPayablePage() {
             <CardTitle>Transações</CardTitle>
             {!isLoading && (
               <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                {sortedTransactions.length}
+                {displayTransactions.length}
                 {hasMore ? "+" : ""} resultado
-                {sortedTransactions.length !== 1 ? "s" : ""}
+                {displayTransactions.length !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -1668,8 +1694,8 @@ export default function AccountsPayablePage() {
                       <TableHead className="w-[50px]">
                         <Checkbox
                           checked={
-                            sortedTransactions.length > 0 &&
-                            sortedTransactions.every((t) =>
+                            displayTransactions.length > 0 &&
+                            displayTransactions.every((t) =>
                               selectedIds.has(t.id),
                             )
                           }
@@ -1718,14 +1744,14 @@ export default function AccountsPayablePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedTransactions.length === 0 &&
+                    {displayTransactions.length === 0 &&
                     isSeekingBatchResults ? (
                       <TableRow>
                         <TableCell colSpan={7} className="p-0">
                           <TableSkeleton />
                         </TableCell>
                       </TableRow>
-                    ) : sortedTransactions.length === 0 ? (
+                    ) : displayTransactions.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="h-36 text-center">
                           <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -1774,7 +1800,7 @@ export default function AccountsPayablePage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedTransactions.map((t) => {
+                      displayTransactions.map((t) => {
                         const isOverdue =
                           UNPAID_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));
@@ -1782,7 +1808,9 @@ export default function AccountsPayablePage() {
                           <TableRow
                             key={t.id}
                             className={
-                              isOverdue ? "bg-red-50 dark:bg-red-900/10" : ""
+                              isOverdue
+                                ? "bg-red-50/80 dark:bg-red-950/20 border-l-2 border-l-red-400 dark:border-l-red-600"
+                                : ""
                             }
                           >
                             <TableCell>
@@ -1792,18 +1820,19 @@ export default function AccountsPayablePage() {
                               />
                             </TableCell>
                             <TableCell>
-                              <div
-                                className={
-                                  isOverdue
-                                    ? "font-medium text-red-600 dark:text-red-400"
-                                    : ""
-                                }
-                              >
-                                {format(t.dueDate, "dd MMM yyyy")}
+                              <div>
+                                <div
+                                  className={`flex items-center gap-1.5 ${isOverdue ? "text-red-600 dark:text-red-400 font-semibold" : ""}`}
+                                >
+                                  {isOverdue && (
+                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                  )}
+                                  {format(t.dueDate, "dd MMM yyyy")}
+                                </div>
                                 {isOverdue && (
-                                  <div className="text-[10px] font-bold uppercase text-red-600 dark:text-red-400">
+                                  <span className="mt-0.5 inline-flex items-center rounded bg-red-100 dark:bg-red-900/50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
                                     Vencida
-                                  </div>
+                                  </span>
                                 )}
                               </div>
                             </TableCell>
@@ -1828,7 +1857,9 @@ export default function AccountsPayablePage() {
                             <TableCell className="text-muted-foreground text-sm">
                               {t.supplierOrClient}
                             </TableCell>
-                            <TableCell className="text-right font-semibold font-financial">
+                            <TableCell
+                              className={`text-right font-semibold font-financial ${isOverdue ? "text-red-600 dark:text-red-400" : ""}`}
+                            >
                               {new Intl.NumberFormat("pt-BR", {
                                 style: "currency",
                                 currency: "BRL",
@@ -1917,9 +1948,9 @@ export default function AccountsPayablePage() {
 
               {/* ── Mobile: Card list ────────────────────────────────── */}
               <div className="md:hidden">
-                {sortedTransactions.length === 0 && isSeekingBatchResults ? (
+                {displayTransactions.length === 0 && isSeekingBatchResults ? (
                   <MobileCardSkeleton />
-                ) : sortedTransactions.length === 0 ? (
+                ) : displayTransactions.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 py-10 px-4 text-muted-foreground">
                     <FileText className="h-8 w-8 opacity-40" />
                     <p className="text-sm font-medium text-center">
@@ -1969,19 +2000,21 @@ export default function AccountsPayablePage() {
                     <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-muted/30">
                       <Checkbox
                         checked={
-                          sortedTransactions.length > 0 &&
-                          sortedTransactions.every((t) => selectedIds.has(t.id))
+                          displayTransactions.length > 0 &&
+                          displayTransactions.every((t) =>
+                            selectedIds.has(t.id),
+                          )
                         }
                         onCheckedChange={toggleSelectAll}
                         className="h-5 w-5"
                       />
                       <span className="text-xs text-muted-foreground">
-                        Selecionar todas ({sortedTransactions.length})
+                        Selecionar todas ({displayTransactions.length})
                       </span>
                     </div>
 
                     <div className="divide-y">
-                      {sortedTransactions.map((t) => {
+                      {displayTransactions.map((t) => {
                         const isOverdue =
                           UNPAID_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));

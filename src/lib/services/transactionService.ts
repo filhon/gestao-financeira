@@ -16,6 +16,8 @@ import {
   limit,
   QueryDocumentSnapshot,
   getCountFromServer,
+  getAggregateFromServer,
+  sum,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
@@ -214,6 +216,243 @@ export const transactionService = {
     return snapshot.data().count;
   },
 
+  /**
+   * Aggregate KPIs for the payables page using server-side aggregation.
+   * Returns accurate totals independent of how many pages have been loaded.
+   *
+   * When multiple cost center IDs are selected, Firestore prohibits combining
+   * `array-contains-any` with `in`/`not-in`. In that case we fall back to:
+   *   - paidAmount via aggregate (status equality is OK with array-contains-any)
+   *   - pendingAmount = totalAmount − paidAmount (avoids `in`)
+   *   - overdue/dueSoon via a small doc fetch (narrow date ranges)
+   */
+  getPayableKpis: async (
+    companyId: string,
+    filters: {
+      startDate?: Date;
+      endDate?: Date;
+      costCenterIds?: string[];
+      createdBy?: string;
+    },
+  ): Promise<{
+    pendingAmount: number;
+    overdueCount: number;
+    overdueAmount: number;
+    dueSoonCount: number;
+    dueSoonAmount: number;
+    paidAmount: number;
+  }> => {
+    const UNPAID = [
+      "draft",
+      "pending_approval",
+      "approved",
+      "pending_authorization",
+      "authorized",
+      "rejected",
+    ];
+
+    const hasMultipleCostCenters = (filters.costCenterIds?.length ?? 0) > 1;
+
+    // Base query: payable transactions in the selected company
+    const baseConstraints = [
+      where("companyId", "==", companyId),
+      where("type", "==", "payable"),
+    ];
+
+    if (filters.createdBy) {
+      baseConstraints.push(where("createdBy", "==", filters.createdBy));
+    }
+
+    // Cost center filter (Firestore limits array-contains-any to 10 items)
+    if (filters.costCenterIds && filters.costCenterIds.length > 0) {
+      if (filters.costCenterIds.length === 1) {
+        baseConstraints.push(
+          where("costCenterIds", "array-contains", filters.costCenterIds[0]),
+        );
+      } else {
+        baseConstraints.push(
+          where(
+            "costCenterIds",
+            "array-contains-any",
+            filters.costCenterIds.slice(0, 10),
+          ),
+        );
+      }
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayAfterTomorrow = new Date(today);
+    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+
+    // ── Paid in date range (works in all cases — equality status) ──────
+    const paidConstraints = [...baseConstraints, where("status", "==", "paid")];
+    if (filters.startDate) {
+      paidConstraints.push(
+        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
+      );
+    }
+    if (filters.endDate) {
+      paidConstraints.push(
+        where("dueDate", "<=", Timestamp.fromDate(filters.endDate)),
+      );
+    }
+    const paidQuery = query(
+      collection(db, COLLECTION_NAME),
+      ...paidConstraints,
+    );
+
+    // ── Branch: array-contains-any can't combine with `in` ─────────────
+    if (hasMultipleCostCenters) {
+      // Total amount in date range (no status filter → no `in` conflict)
+      const totalConstraints = [...baseConstraints];
+      if (filters.startDate) {
+        totalConstraints.push(
+          where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
+        );
+      }
+      if (filters.endDate) {
+        totalConstraints.push(
+          where("dueDate", "<=", Timestamp.fromDate(filters.endDate)),
+        );
+      }
+      const totalQuery = query(
+        collection(db, COLLECTION_NAME),
+        ...totalConstraints,
+      );
+
+      // Overdue docs: narrow range (startDate..today), fetch docs & filter status in memory
+      const overdueConstraints = [
+        ...baseConstraints,
+        where("dueDate", "<", Timestamp.fromDate(today)),
+      ];
+      if (filters.startDate) {
+        overdueConstraints.push(
+          where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
+        );
+      }
+      const overdueDocsQuery = query(
+        collection(db, COLLECTION_NAME),
+        ...overdueConstraints,
+        limit(2000),
+      );
+
+      // Due soon docs: today..dayAfterTomorrow (very narrow)
+      const dueSoonDocsQuery = query(
+        collection(db, COLLECTION_NAME),
+        ...baseConstraints,
+        where("dueDate", ">=", Timestamp.fromDate(today)),
+        where("dueDate", "<", Timestamp.fromDate(dayAfterTomorrow)),
+        limit(500),
+      );
+
+      const [totalSnap, paidSnap, overdueDocs, dueSoonDocs] = await Promise.all(
+        [
+          getAggregateFromServer(totalQuery, { total: sum("amount") }),
+          getAggregateFromServer(paidQuery, { total: sum("amount") }),
+          getDocs(overdueDocsQuery),
+          getDocs(dueSoonDocsQuery),
+        ],
+      );
+
+      const totalAmount = totalSnap.data().total || 0;
+      const paidAmount = paidSnap.data().total || 0;
+
+      // Filter unpaid statuses in memory
+      const overdueItems = overdueDocs.docs
+        .map((d) => d.data())
+        .filter((d) => UNPAID.includes(d.status));
+      const dueSoonItems = dueSoonDocs.docs
+        .map((d) => d.data())
+        .filter((d) => UNPAID.includes(d.status));
+
+      return {
+        pendingAmount: totalAmount - paidAmount,
+        overdueCount: overdueItems.length,
+        overdueAmount: overdueItems.reduce(
+          (acc, d) => acc + (d.amount || 0),
+          0,
+        ),
+        dueSoonCount: dueSoonItems.length,
+        dueSoonAmount: dueSoonItems.reduce(
+          (acc, d) => acc + (d.amount || 0),
+          0,
+        ),
+        paidAmount,
+      };
+    }
+
+    // ── Standard path: array-contains (single) or no CC filter ─────────
+    // `status in [...]` is safe here.
+    const pendingConstraints = [
+      ...baseConstraints,
+      where("status", "in", UNPAID),
+    ];
+    if (filters.startDate) {
+      pendingConstraints.push(
+        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
+      );
+    }
+    if (filters.endDate) {
+      pendingConstraints.push(
+        where("dueDate", "<=", Timestamp.fromDate(filters.endDate)),
+      );
+    }
+    const pendingQuery = query(
+      collection(db, COLLECTION_NAME),
+      ...pendingConstraints,
+    );
+
+    const overdueConstraints = [
+      ...baseConstraints,
+      where("status", "in", UNPAID),
+      where("dueDate", "<", Timestamp.fromDate(today)),
+    ];
+    if (filters.startDate) {
+      overdueConstraints.push(
+        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
+      );
+    }
+    const overdueQuery = query(
+      collection(db, COLLECTION_NAME),
+      ...overdueConstraints,
+    );
+
+    const dueSoonQuery = query(
+      collection(db, COLLECTION_NAME),
+      ...baseConstraints,
+      where("status", "in", UNPAID),
+      where("dueDate", ">=", Timestamp.fromDate(today)),
+      where("dueDate", "<", Timestamp.fromDate(dayAfterTomorrow)),
+    );
+
+    // Run all aggregations in parallel (sums + counts)
+    const [
+      pendingSnap,
+      overdueSnap,
+      overdueCountSnap,
+      dueSoonSnap,
+      dueSoonCountSnap,
+      paidSnap,
+    ] = await Promise.all([
+      getAggregateFromServer(pendingQuery, { total: sum("amount") }),
+      getAggregateFromServer(overdueQuery, { total: sum("amount") }),
+      getCountFromServer(overdueQuery),
+      getAggregateFromServer(dueSoonQuery, { total: sum("amount") }),
+      getCountFromServer(dueSoonQuery),
+      getAggregateFromServer(paidQuery, { total: sum("amount") }),
+    ]);
+
+    return {
+      pendingAmount: pendingSnap.data().total || 0,
+      overdueCount: overdueCountSnap.data().count,
+      overdueAmount: overdueSnap.data().total || 0,
+      dueSoonCount: dueSoonCountSnap.data().count,
+      dueSoonAmount: dueSoonSnap.data().total || 0,
+      paidAmount: paidSnap.data().total || 0,
+    };
+  },
+
   getPaginated: async (
     companyId: string,
     pageSize: number,
@@ -318,26 +557,37 @@ export const transactionService = {
     q = query(q, limit(fetchSize));
 
     const snapshot = await getDocs(q);
-    let transactions = snapshot.docs.map((doc) =>
-      convertDates({ id: doc.id, ...doc.data() }),
-    );
+
+    // Keep doc references paired with their transactions for correct cursor tracking
+    const docsWithData = snapshot.docs.map((snapshotDoc) => ({
+      doc: snapshotDoc,
+      transaction: convertDates({ id: snapshotDoc.id, ...snapshotDoc.data() }),
+    }));
 
     // Apply client-side filtering if needed
-    if (clientSideStatusFilter) {
-      transactions = transactions.filter(
-        (t) => !clientSideStatusFilter!.includes(t.status),
-      );
-    }
+    const filtered = clientSideStatusFilter
+      ? docsWithData.filter(
+          ({ transaction }) =>
+            !clientSideStatusFilter!.includes(transaction.status),
+        )
+      : docsWithData;
 
     // Truncate to pageSize after client-side filtering
-    const truncated = transactions.slice(0, pageSize);
+    const truncated = filtered.slice(0, pageSize);
+
+    // Cursor must point to the last doc we actually included so the next page
+    // starts right after it. When all fetched docs were filtered out, advance
+    // past them so the next page doesn't re-fetch the same batch.
+    const cursorDoc =
+      truncated.length > 0
+        ? truncated[truncated.length - 1].doc
+        : snapshot.docs.length > 0
+          ? snapshot.docs[snapshot.docs.length - 1]
+          : null;
 
     return {
-      transactions: truncated,
-      lastDoc:
-        snapshot.docs.length > 0
-          ? snapshot.docs[snapshot.docs.length - 1]
-          : null,
+      transactions: truncated.map(({ transaction }) => transaction),
+      lastDoc: cursorDoc,
     };
   },
 

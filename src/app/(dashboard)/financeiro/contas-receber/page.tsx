@@ -611,6 +611,20 @@ export default function AccountsReceivablePage() {
     return transactions;
   }, [transactions, filterOptions.batchFilter]);
 
+  // Overdue transactions pinned to the top, preserving the existing sort for the rest
+  const displayTransactions = useMemo(() => {
+    const today = startOfDay(new Date());
+    const overdue = batchFilteredTransactions.filter(
+      (t) =>
+        UNRECEIVED_STATUSES.includes(t.status) && isBefore(t.dueDate, today),
+    );
+    const rest = batchFilteredTransactions.filter(
+      (t) =>
+        !(UNRECEIVED_STATUSES.includes(t.status) && isBefore(t.dueDate, today)),
+    );
+    return [...overdue, ...rest];
+  }, [batchFilteredTransactions]);
+
   // When batch filter is active and no visible results yet but more pages exist,
   // keep auto-loading silently instead of showing a misleading empty state.
   const isSeekingBatchResults =
@@ -839,7 +853,7 @@ export default function AccountsReceivablePage() {
             </div>
             <div className="min-w-0 space-y-1">
               <p className="text-xs text-muted-foreground">Total a Receber</p>
-              <p
+              <div
                 className="text-lg font-bold font-financial leading-none"
                 title={formatCurrency(kpis.pendingAmount)}
               >
@@ -861,7 +875,7 @@ export default function AccountsReceivablePage() {
                     </span>
                   </>
                 )}
-              </p>
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 No período filtrado
               </p>
@@ -889,7 +903,7 @@ export default function AccountsReceivablePage() {
             </div>
             <div className="min-w-0 space-y-1">
               <p className="text-xs text-muted-foreground">Em Atraso</p>
-              <p
+              <div
                 className={`text-lg font-bold leading-none ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
               >
                 {isLoading ? (
@@ -897,8 +911,8 @@ export default function AccountsReceivablePage() {
                 ) : (
                   <AnimatedNumber value={kpis.overdueCount} />
                 )}
-              </p>
-              <p className="text-[11px] text-muted-foreground font-financial">
+              </div>
+              <div className="text-[11px] text-muted-foreground font-financial">
                 {isLoading ? (
                   <Skeleton className="h-3 w-20 mt-0.5" />
                 ) : (
@@ -911,7 +925,7 @@ export default function AccountsReceivablePage() {
                     </span>
                   </>
                 )}
-              </p>
+              </div>
             </div>
           </div>
 
@@ -940,7 +954,7 @@ export default function AccountsReceivablePage() {
               <p className="text-xs text-muted-foreground">
                 Vencem Hoje/Amanhã
               </p>
-              <p
+              <div
                 className={`text-lg font-bold leading-none ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
               >
                 {isLoading ? (
@@ -948,8 +962,8 @@ export default function AccountsReceivablePage() {
                 ) : (
                   <AnimatedNumber value={kpis.dueSoonCount} />
                 )}
-              </p>
-              <p className="text-[11px] text-muted-foreground font-financial">
+              </div>
+              <div className="text-[11px] text-muted-foreground font-financial">
                 {isLoading ? (
                   <Skeleton className="h-3 w-20 mt-0.5" />
                 ) : (
@@ -962,7 +976,7 @@ export default function AccountsReceivablePage() {
                     </span>
                   </>
                 )}
-              </p>
+              </div>
             </div>
           </div>
 
@@ -973,7 +987,7 @@ export default function AccountsReceivablePage() {
             </div>
             <div className="min-w-0 space-y-1">
               <p className="text-xs text-muted-foreground">Recebido</p>
-              <p
+              <div
                 className="text-lg font-bold font-financial leading-none text-blue-600 dark:text-blue-400"
                 title={formatCurrency(kpis.receivedAmount)}
               >
@@ -995,7 +1009,7 @@ export default function AccountsReceivablePage() {
                     </span>
                   </>
                 )}
-              </p>
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 No período filtrado
               </p>
@@ -1013,9 +1027,9 @@ export default function AccountsReceivablePage() {
               <CardTitle>Transações</CardTitle>
               {!isLoading && (
                 <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                  {batchFilteredTransactions.length}
+                  {displayTransactions.length}
                   {hasMore ? "+" : ""} resultado
-                  {batchFilteredTransactions.length !== 1 ? "s" : ""}
+                  {displayTransactions.length !== 1 ? "s" : ""}
                 </span>
               )}
             </div>
@@ -1105,9 +1119,9 @@ export default function AccountsReceivablePage() {
             <CardTitle>Transações</CardTitle>
             {!isLoading && (
               <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                {batchFilteredTransactions.length}
+                {displayTransactions.length}
                 {hasMore ? "+" : ""} resultado
-                {batchFilteredTransactions.length !== 1 ? "s" : ""}
+                {displayTransactions.length !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -1304,14 +1318,14 @@ export default function AccountsReceivablePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {batchFilteredTransactions.length === 0 &&
+                    {displayTransactions.length === 0 &&
                     isSeekingBatchResults ? (
                       <TableRow>
                         <TableCell colSpan={7} className="p-0">
                           <TableSkeleton />
                         </TableCell>
                       </TableRow>
-                    ) : batchFilteredTransactions.length === 0 ? (
+                    ) : displayTransactions.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="h-36 text-center">
                           <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -1352,7 +1366,7 @@ export default function AccountsReceivablePage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      batchFilteredTransactions.map((t) => {
+                      displayTransactions.map((t) => {
                         const isOverdue =
                           UNRECEIVED_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));
@@ -1361,22 +1375,25 @@ export default function AccountsReceivablePage() {
                           <TableRow
                             key={t.id}
                             className={
-                              isOverdue ? "bg-red-50 dark:bg-red-900/10" : ""
+                              isOverdue
+                                ? "bg-red-50/80 dark:bg-red-950/20 border-l-2 border-l-red-400 dark:border-l-red-600"
+                                : ""
                             }
                           >
                             <TableCell>
-                              <div
-                                className={
-                                  isOverdue
-                                    ? "font-medium text-red-600 dark:text-red-400"
-                                    : ""
-                                }
-                              >
-                                {format(t.dueDate, "dd MMM yyyy")}
+                              <div>
+                                <div
+                                  className={`flex items-center gap-1.5 ${isOverdue ? "text-red-600 dark:text-red-400 font-semibold" : ""}`}
+                                >
+                                  {isOverdue && (
+                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                  )}
+                                  {format(t.dueDate, "dd MMM yyyy")}
+                                </div>
                                 {isOverdue && (
-                                  <div className="text-[10px] font-bold uppercase text-red-600 dark:text-red-400">
+                                  <span className="mt-0.5 inline-flex items-center rounded bg-red-100 dark:bg-red-900/50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
                                     Em atraso
-                                  </div>
+                                  </span>
                                 )}
                               </div>
                             </TableCell>
@@ -1384,7 +1401,9 @@ export default function AccountsReceivablePage() {
                             <TableCell className="text-muted-foreground text-sm">
                               {t.supplierOrClient}
                             </TableCell>
-                            <TableCell className="text-right font-semibold font-financial">
+                            <TableCell
+                              className={`text-right font-semibold font-financial ${isOverdue ? "text-red-600 dark:text-red-400" : ""}`}
+                            >
                               {formatCurrency(t.amount)}
                             </TableCell>
                             <TableCell>{getStatusBadge(t.status)}</TableCell>
@@ -1442,10 +1461,9 @@ export default function AccountsReceivablePage() {
 
               {/* ── Mobile: Card list ────────────────────────────────── */}
               <div className="md:hidden">
-                {batchFilteredTransactions.length === 0 &&
-                isSeekingBatchResults ? (
+                {displayTransactions.length === 0 && isSeekingBatchResults ? (
                   <MobileCardSkeleton />
-                ) : batchFilteredTransactions.length === 0 ? (
+                ) : displayTransactions.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 py-10 px-4 text-muted-foreground">
                     <FileText className="h-8 w-8 opacity-40" />
                     <p className="text-sm font-medium text-center">
@@ -1484,7 +1502,7 @@ export default function AccountsReceivablePage() {
                 ) : (
                   <>
                     <div className="divide-y">
-                      {batchFilteredTransactions.map((t) => {
+                      {displayTransactions.map((t) => {
                         const isOverdue =
                           UNRECEIVED_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));

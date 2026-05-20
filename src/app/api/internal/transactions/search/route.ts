@@ -10,12 +10,16 @@
  * sobrecarga de memória e custo de leitura excessivo.
  *
  * Query params:
- *   q           (obrigatório): termo de busca (mín. 2, máx. 100 chars)
- *   companyId   (obrigatório): ID da empresa
- *   type        (opcional):   payable | receivable
- *   createdBy   (opcional):   filtra pelo UID do criador (para role "user")
- *   allDates    (opcional):   "true" para desabilitar filtro de data
- *   limit       (opcional):   máx. resultados (1–50, default 25)
+ *   q             (obrigatório): termo de busca (mín. 2, máx. 100 chars)
+ *   companyId     (obrigatório): ID da empresa
+ *   type          (opcional):   payable | receivable
+ *   createdBy     (opcional):   filtra pelo UID do criador (para role "user")
+ *   startDate     (opcional):   ISO date — limite inferior de dueDate
+ *   endDate       (opcional):   ISO date — limite superior de dueDate
+ *   status        (opcional):   filtra por status exato
+ *   excludeStatus (opcional):   CSV de statuses a excluir (ex: "paid")
+ *   allDates      (opcional):   "true" para desabilitar filtro de data padrão
+ *   limit         (opcional):   máx. resultados (1–50, default 25)
  */
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
@@ -59,6 +63,10 @@ export async function GET(request: NextRequest) {
   const typeParam = searchParams.get("type");
   const createdByParam = searchParams.get("createdBy");
   const allDates = searchParams.get("allDates") === "true";
+  const startDateParam = searchParams.get("startDate");
+  const endDateParam = searchParams.get("endDate");
+  const excludeStatusParam = searchParams.get("excludeStatus");
+  const statusParam = searchParams.get("status");
   const limitRaw = parseInt(searchParams.get("limit") ?? "25", 10);
   const resultLimit =
     isNaN(limitRaw) || limitRaw < 1 ? 25 : Math.min(limitRaw, 50);
@@ -95,12 +103,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 403 });
   }
 
-  // ── Intervalo de datas padrão (últimos 2 anos + próximos 7 dias) ──────────
-  // Quando allDates=false, limitamos o escaneamento para reduzir custo de leitura.
+  // ── Intervalo de datas ─────────────────────────────────────────────────────
+  // When explicit startDate/endDate params are provided, use them to narrow the
+  // Firestore scan. Otherwise fall back to a wide default (unless allDates=true).
   let startDate: Date | null = null;
   let endDate: Date | null = null;
 
-  if (!allDates) {
+  if (startDateParam) {
+    startDate = new Date(startDateParam);
+    if (isNaN(startDate.getTime())) startDate = null;
+  }
+  if (endDateParam) {
+    endDate = new Date(endDateParam);
+    if (isNaN(endDate.getTime())) endDate = null;
+  }
+
+  // If no explicit dates and not allDates, use a wide default to cap cost
+  if (!startDate && !endDate && !allDates) {
     startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 2);
     startDate.setHours(0, 0, 0, 0);
@@ -109,6 +128,12 @@ export async function GET(request: NextRequest) {
     endDate.setDate(endDate.getDate() + 365);
     endDate.setHours(23, 59, 59, 999);
   }
+
+  // ── Status filtering (server-side) ───────────────────────────────────────
+  const excludeStatuses = excludeStatusParam
+    ? excludeStatusParam.split(",").filter(Boolean)
+    : [];
+  const filterStatus = statusParam || null;
 
   const searchTerm = qParam.toLowerCase();
 
@@ -151,6 +176,13 @@ export async function GET(request: NextRequest) {
       if (results.length >= resultLimit) break;
 
       const data = docSnap.data();
+
+      // Status filtering (server-side) — avoids sending unwanted docs to client
+      const docStatus: string = data.status ?? "";
+      if (filterStatus && docStatus !== filterStatus) continue;
+      if (excludeStatuses.length > 0 && excludeStatuses.includes(docStatus))
+        continue;
+
       const description: string = (data.description ?? "").toLowerCase();
       const notes: string = (data.notes ?? "").toLowerCase();
       const supplier: string = (data.supplierOrClient ?? "").toLowerCase();
