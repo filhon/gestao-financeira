@@ -573,10 +573,12 @@ export const reportService = {
       { width: 18 }, // I: Valor Final
       { width: 24 }, // J: Forma de Pagamento
       { width: 30 }, // K: Observações
+      { width: 18 }, // L: NF
+      { width: 18 }, // M: Comprovante
     ];
 
     // ── Linha 1: Empresa ──────────────────────────────────────────────────
-    sheet.mergeCells("A1:K1");
+    sheet.mergeCells("A1:M1");
     const r1 = sheet.getCell("A1");
     r1.value = companyName;
     r1.font = { bold: true, size: 13, color: { argb: "FF0F172A" } };
@@ -589,7 +591,7 @@ export const reportService = {
     sheet.getRow(1).height = 22;
 
     // ── Linha 2: Subtítulo ────────────────────────────────────────────────
-    sheet.mergeCells("A2:K2");
+    sheet.mergeCells("A2:M2");
     const r2 = sheet.getCell("A2");
     r2.value = `Extrato de Fluxo de Caixa  ·  ${format(startDate, "dd/MM/yyyy")} — ${format(endDate, "dd/MM/yyyy")}  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
     r2.font = { size: 9, color: { argb: "FF64748B" } };
@@ -617,6 +619,8 @@ export const reportService = {
       "Valor Final (R$)",
       "Forma de Pagamento",
       "Observações",
+      "NF",
+      "Comprovante",
     ];
     const headerRow = sheet.addRow(headers);
     headerRow.height = 22;
@@ -647,6 +651,13 @@ export const reportService = {
       const isIncome = t.type === "receivable";
       const effAmount = eff(t);
 
+      // Localizar URL da NF (anexo com categoria "invoice")
+      const invoiceAttachment = t.attachments?.find(
+        (a) => a.category === "invoice",
+      );
+      const nfUrl = invoiceAttachment?.url || "";
+      const comprovanteUrl = t.comprovanteUrl || "";
+
       const row = sheet.addRow([
         format(effectiveDate, "dd/MM/yyyy"),
         format(t.dueDate, "dd/MM/yyyy"),
@@ -659,9 +670,44 @@ export const reportService = {
         isIncome ? effAmount : -effAmount,
         t.paymentMethod || "",
         t.notes || "",
+        "", // NF (preenchido abaixo como hyperlink)
+        "", // Comprovante (preenchido abaixo como hyperlink)
       ]);
 
       row.height = 18;
+
+      // Hyperlink da NF
+      const cellNF = row.getCell(12);
+      if (nfUrl) {
+        cellNF.value = { text: "Baixar NF", hyperlink: nfUrl };
+        cellNF.font = {
+          color: { argb: "FF2563EB" },
+          underline: true,
+          size: 9,
+        };
+      } else {
+        cellNF.value = "-";
+        cellNF.font = { color: { argb: "FF94A3B8" }, size: 9 };
+      }
+      cellNF.alignment = { horizontal: "center", vertical: "middle" };
+
+      // Hyperlink do Comprovante
+      const cellComp = row.getCell(13);
+      if (comprovanteUrl) {
+        cellComp.value = {
+          text: "Baixar Comprovante",
+          hyperlink: comprovanteUrl,
+        };
+        cellComp.font = {
+          color: { argb: "FF2563EB" },
+          underline: true,
+          size: 9,
+        };
+      } else {
+        cellComp.value = "-";
+        cellComp.font = { color: { argb: "FF94A3B8" }, size: 9 };
+      }
+      cellComp.alignment = { horizontal: "center", vertical: "middle" };
 
       // Formatação das células de valor
       const cellOrig = row.getCell(8);
@@ -680,7 +726,7 @@ export const reportService = {
       // Zebra striping alternado por linha
       if (idx % 2 === 0) {
         const bgColor = { argb: isIncome ? "FFF0FDF4" : "FFFEF2F2" };
-        for (let c = 1; c <= 11; c++) {
+        for (let c = 1; c <= 13; c++) {
           const cell = row.getCell(c);
           if (
             !cell.fill ||
@@ -692,7 +738,7 @@ export const reportService = {
       }
 
       // Borda inferior suave
-      for (let c = 1; c <= 11; c++) {
+      for (let c = 1; c <= 13; c++) {
         row.getCell(c).border = {
           bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
         };
@@ -710,6 +756,8 @@ export const reportService = {
       "TOTAL",
       totalIn,
       netBal,
+      "",
+      "",
       "",
       "",
     ]);
@@ -826,6 +874,32 @@ export const reportService = {
     Object.entries(byStatus).forEach(([status, total]) => {
       addSummaryRow(STATUS_LABEL[status] || status, total, BRL_FMT);
     });
+    summary.addRow([]);
+
+    // ── Aviso de confidencialidade ────────────────────────────────────────
+    addSummaryTitle("Aviso de Confidencialidade");
+    const warningRow = summary.addRow([
+      "Este documento contém links de acesso direto a notas fiscais e comprovantes de pagamento. " +
+        "Qualquer pessoa com acesso a esta planilha poderá baixar os arquivos através dos links " +
+        "nas colunas NF e Comprovante da aba Extrato. Não compartilhe este arquivo com pessoas " +
+        "não autorizadas.",
+    ]);
+    summary.mergeCells(`A${warningRow.number}:B${warningRow.number}`);
+    warningRow.getCell(1).font = {
+      color: { argb: "FFDC2626" },
+      size: 9,
+      italic: true,
+    };
+    warningRow.getCell(1).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFFEF2F2" },
+    };
+    warningRow.getCell(1).alignment = {
+      wrapText: true,
+      vertical: "top",
+    };
+    warningRow.height = 48;
 
     // ── Gerar arquivo e disparar download ─────────────────────────────────
     const buffer = await workbook.xlsx.writeBuffer();

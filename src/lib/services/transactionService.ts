@@ -136,6 +136,44 @@ export const transactionService = {
     );
   },
 
+  /**
+   * Busca transações pagas (status === "paid") filtrando pelo campo paymentDate.
+   * Usado em conjunto com getAll (que filtra por dueDate) para garantir que
+   * transações pagas dentro do período sejam incluídas nos relatórios mesmo
+   * quando o vencimento cai fora do período solicitado.
+   */
+  getByPaymentDate: async (filter: {
+    companyId: string;
+    startDate: Date;
+    endDate: Date;
+    createdBy?: string;
+    costCenterId?: string;
+  }): Promise<Transaction[]> => {
+    let q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", filter.companyId),
+      where("status", "==", "paid"),
+      orderBy("paymentDate", "asc"),
+      where("paymentDate", ">=", Timestamp.fromDate(filter.startDate)),
+      where("paymentDate", "<=", Timestamp.fromDate(filter.endDate)),
+    );
+
+    if (filter.createdBy) {
+      q = query(q, where("createdBy", "==", filter.createdBy));
+    }
+    if (filter.costCenterId) {
+      q = query(
+        q,
+        where("costCenterIds", "array-contains", filter.costCenterId),
+      );
+    }
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) =>
+      convertDates({ id: doc.id, ...doc.data() }),
+    );
+  },
+
   getCount: async (filter?: {
     type?: string;
     status?: string;

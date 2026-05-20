@@ -40,7 +40,6 @@ import {
   startOfMonth,
   endOfMonth,
   subMonths,
-  subDays,
   format,
   addDays,
   addWeeks,
@@ -191,11 +190,12 @@ export default function ReportsPage() {
     try {
       setLoadingFormat(formatType);
 
-      // A query do Firestore filtra por dueDate. Para capturar transações com
-      // vencimento anterior ao período mas pagas dentro dele (ex: vencimento 26/02,
-      // pago em 03/03), alargamos a janela em 90 dias no passado. O filtro preciso
-      // pela data efetiva é feito em memória logo abaixo.
-      const filter: {
+      // Duas queries paralelas para capturar todas as transações do período:
+      // 1. Por dueDate — transações não-pagas cuja data de vencimento cai no período
+      // 2. Por paymentDate — transações pagas cuja data de pagamento cai no período
+      //    (independente da data de vencimento)
+      // Depois mesclamos e deduplicamos por ID.
+      const dueDateFilter: {
         companyId: string;
         createdBy?: string;
         startDate?: Date;
@@ -203,25 +203,61 @@ export default function ReportsPage() {
         costCenterId?: string;
       } = {
         companyId: selectedCompany.id,
-        startDate: subDays(startDate, 90),
+        startDate: startDate,
         endDate: endDate,
       };
       if (onlyOwnPayables) {
-        filter.createdBy = user.uid;
+        dueDateFilter.createdBy = user.uid;
       }
       if (costCenterFilter !== "all") {
-        filter.costCenterId = costCenterFilter;
+        dueDateFilter.costCenterId = costCenterFilter;
       }
 
-      const [allTransactions, entities] = await Promise.all([
-        transactionService.getAll(filter),
+      const paymentDateFilter: {
+        companyId: string;
+        startDate: Date;
+        endDate: Date;
+        createdBy?: string;
+        costCenterId?: string;
+      } = {
+        companyId: selectedCompany.id,
+        startDate: startDate,
+        endDate: endDate,
+      };
+      if (onlyOwnPayables) {
+        paymentDateFilter.createdBy = user.uid;
+      }
+      if (costCenterFilter !== "all") {
+        paymentDateFilter.costCenterId = costCenterFilter;
+      }
+
+      const [byDueDate, byPaymentDate, entities] = await Promise.all([
+        transactionService.getAll(dueDateFilter),
+        transactionService.getByPaymentDate(paymentDateFilter),
         entityService.getAll(selectedCompany.id),
       ]);
+
+      // Mesclar e deduplicar por ID
+      const seen = new Set<string>();
+      const allTransactions: Transaction[] = [];
+      for (const t of byDueDate) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id);
+          allTransactions.push(t);
+        }
+      }
+      for (const t of byPaymentDate) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id);
+          allTransactions.push(t);
+        }
+      }
 
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
 
+      // Filtro em memória pela data efetiva (paymentDate p/ pagas, dueDate p/ demais)
       let filtered = allTransactions.filter((t) => {
         const dateToCheck =
           t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
