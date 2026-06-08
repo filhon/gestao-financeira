@@ -257,32 +257,22 @@ export function BatchDetailsDialog({
             : "1/1",
       }));
 
-      // 3. Sort Data
+      // 3. Sort Data — mesma ordenação usada no Google Sheets:
+      // Data ASC → Favorecido ASC → Descrição ASC → Valor DESC
       data.sort((a, b) => {
-        // Group by Cost Center
-        if (a.costCenterName !== b.costCenterName) {
-          return a.costCenterName.localeCompare(b.costCenterName);
-        }
-        // Value (Desc)
-        if (b.amount !== a.amount) {
-          return b.amount - a.amount;
-        }
-        // Description (A-Z)
-        if (a.description !== b.description) {
-          return a.description.localeCompare(b.description);
-        }
-        // Status
-        if (a.status !== b.status) {
-          return a.status.localeCompare(b.status);
-        }
-        // Supplier (A-Z)
+        const dateA = new Date(a.dueDate).getTime();
+        const dateB = new Date(b.dueDate).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+
         const supplierA = a.supplierOrClient || "";
         const supplierB = b.supplierOrClient || "";
-        if (supplierA !== supplierB) {
-          return supplierA.localeCompare(supplierB);
-        }
-        // Due Date (Asc)
-        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+        const supplierCmp = supplierA.localeCompare(supplierB, "pt-BR");
+        if (supplierCmp !== 0) return supplierCmp;
+
+        const descCmp = a.description.localeCompare(b.description, "pt-BR");
+        if (descCmp !== 0) return descCmp;
+
+        return b.effectiveAmount - a.effectiveAmount;
       });
 
       // 4. Create Workbook
@@ -346,16 +336,9 @@ export function BatchDetailsDialog({
       });
 
       // Add Data
-      let currentCostCenter = "";
       let currentRowIndex = 6;
 
       data.forEach((item) => {
-        if (currentCostCenter && item.costCenterName !== currentCostCenter) {
-          // Add blank line
-          currentRowIndex++;
-        }
-        currentCostCenter = item.costCenterName;
-
         const row = worksheet.getRow(currentRowIndex);
         row.values = {
           supplier: item.supplierOrClient,
@@ -656,7 +639,7 @@ export function BatchDetailsDialog({
                         não foram adicionadas ao lote.
                       </p>
                     </div>
-                    <ChevronDown className="h-4 w-4 text-amber-700 dark:text-amber-300 shrink-0 ml-2 transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+                    <ChevronDown className="h-4 w-4 text-amber-700 dark:text-amber-300 shrink-0 ml-2 transition-transform duration-200 in-data-[state=open]:rotate-180" />
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <Table>

@@ -149,7 +149,7 @@ function getStatusBadge(status: string) {
         cfg.color,
       )}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full flex-shrink-0", cfg.dot)} />
+      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", cfg.dot)} />
       {cfg.label}
     </span>
   );
