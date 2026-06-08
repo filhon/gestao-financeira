@@ -131,7 +131,7 @@ export function TransactionDetailsDialog({
     )
       return;
     comprovanteService
-      .getByTransactionId(transaction.id)
+      .getByTransactionId(transaction.companyId, transaction.id)
       .then((c) => {
         if (c?.matchStatus === "matched") {
           setComprovanteUrl(c.storageUrl);

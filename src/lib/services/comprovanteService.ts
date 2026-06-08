@@ -133,11 +133,15 @@ export const comprovanteService = {
 
   // ── By transaction ───────────────────────────────────────────────────────────
 
-  async getByTransactionId(transactionId: string): Promise<Comprovante | null> {
+  async getByTransactionId(
+    companyId: string,
+    transactionId: string,
+  ): Promise<Comprovante | null> {
     // Check primary transactionId first (single or legacy matches)
     const snap = await getDocs(
       query(
         collection(db, COLLECTION),
+        where("companyId", "==", companyId),
         where("transactionId", "==", transactionId),
         limit(1),
       ),
@@ -151,6 +155,7 @@ export const comprovanteService = {
     const snap2 = await getDocs(
       query(
         collection(db, COLLECTION),
+        where("companyId", "==", companyId),
         where("transactionIds", "array-contains", transactionId),
         limit(1),
       ),
@@ -208,6 +213,8 @@ export const comprovanteService = {
       transactionId: primaryId,
       transactionIds,
       isConsolidated: transactionIds.length > 1,
+      suggestedTransactionId: null,
+      suggestedTransactionIds: null,
       reviewedBy,
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -303,5 +310,31 @@ export const comprovanteService = {
     if (snap.empty) return null;
     const d = snap.docs[0];
     return convertDates({ id: d.id, ...d.data() });
+  },
+
+  // Returns the set of hashes that already exist for the company (batch dedup)
+  async findExistingHashes(
+    companyId: string,
+    fileHashes: string[],
+  ): Promise<Set<string>> {
+    if (fileHashes.length === 0) return new Set();
+    const existing = new Set<string>();
+    // Firestore `in` operator supports up to 30 values per query
+    const BATCH = 30;
+    for (let i = 0; i < fileHashes.length; i += BATCH) {
+      const chunk = fileHashes.slice(i, i + BATCH);
+      const snap = await getDocs(
+        query(
+          collection(db, COLLECTION),
+          where("companyId", "==", companyId),
+          where("fileHash", "in", chunk),
+        ),
+      );
+      snap.docs.forEach((d) => {
+        const h = d.data().fileHash as string | undefined;
+        if (h) existing.add(h);
+      });
+    }
+    return existing;
   },
 };

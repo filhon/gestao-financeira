@@ -86,6 +86,8 @@ export const transactionService = {
   getAll: async (filter?: {
     type?: string;
     status?: string;
+    /** Filter by multiple statuses using Firestore `in` (max 30). Takes precedence over `status`. */
+    statuses?: string[];
     companyId?: string;
     batchId?: string | null;
     createdBy?: string;
@@ -102,7 +104,9 @@ export const transactionService = {
     if (filter?.type) {
       q = query(q, where("type", "==", filter.type));
     }
-    if (filter?.status) {
+    if (filter?.statuses && filter.statuses.length > 0) {
+      q = query(q, where("status", "in", filter.statuses));
+    } else if (filter?.status) {
       q = query(q, where("status", "==", filter.status));
     }
     if (filter?.batchId !== undefined) {

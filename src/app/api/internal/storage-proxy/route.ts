@@ -8,8 +8,8 @@
  *   - Requer cookie `auth_token` válido (Firebase ID Token).
  *   - `path` deve começar com "comprovantes/<companyId>/" para evitar
  *     path traversal.
- *   - Acesso verificado via custom claims do token; se ausentes (token
- *     stale), cai back para consulta no Firestore (mesmo padrão do app).
+ *   - Acesso verificado via custom claims do token; se claims negam o acesso
+ *     (ausentes ou desatualizadas), cai back para consulta no Firestore.
  */
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
@@ -57,9 +57,9 @@ export async function GET(req: NextRequest) {
     claimsRole === "admin" ||
     (claimsCompanyRoles != null && companyId in claimsCompanyRoles);
 
-  // 2nd: if claims are absent/stale, fall back to Firestore (same pattern as
-  //      the rest of the app — "DB fallback when claims are stale")
-  if (!hasAccess && !claimsCompanyRoles && !claimsRole) {
+  // 2nd: always fall back to Firestore when claims deny access — covers both
+  //      absent claims and stale claims (e.g. user added/removed from company).
+  if (!hasAccess) {
     try {
       const userDoc = await adminDb.collection("users").doc(decoded.uid).get();
       if (userDoc.exists) {

@@ -88,11 +88,12 @@ export function MatchReviewDialog({
     setResolvedTxs([]);
     setIsLoadingTx(true);
     transactionService
-      .getAll({ companyId: selectedCompany.id, type: "payable" })
-      .then((all) => {
-        const candidates = all.filter(
-          (t) => t.status === "paid" || t.status === "authorized",
-        );
+      .getAll({
+        companyId: selectedCompany.id,
+        type: "payable",
+        statuses: ["paid", "authorized"],
+      })
+      .then((candidates) => {
         setTxCandidates(candidates);
 
         // For confirmed consolidated matches, show all linked transactions

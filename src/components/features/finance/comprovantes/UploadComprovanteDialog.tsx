@@ -22,7 +22,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+} from "firebase/storage";
 import { storage } from "@/lib/firebase/client";
 import { splitPdfPages, extractTextFromPdf } from "@/lib/pdfUtils";
 import { matchTransactions, MatchScore } from "@/lib/matchingAlgorithm";
@@ -105,111 +110,149 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         const splitResult = await splitPdfPages(file);
         const total = splitResult.length;
         setProgressLabel(`Extraindo ${total} página${total > 1 ? "s" : ""}...`);
-        setProgress(20);
+        setProgress(15);
 
-        // 2. Load candidate transactions (paid or authorized payables)
-        const allTx = await transactionService.getAll({
+        // 2. Load candidate transactions (paid or authorized payables) — filtered server-side
+        const candidates = await transactionService.getAll({
           companyId: selectedCompany.id,
           type: "payable",
+          statuses: ["paid", "authorized"],
         });
-        const candidates = allTx.filter(
-          (t) => t.status === "paid" || t.status === "authorized",
-        );
         setTransactions(candidates);
+        setProgress(20);
+
+        // 3. Compute all SHA-256 hashes upfront for batch dedup
+        setProgressLabel("Verificando duplicados...");
+        const hashEntries = await Promise.all(
+          splitResult.map(async ({ blob, pageNumber, totalPages }) => {
+            const hashBuf = await crypto.subtle.digest(
+              "SHA-256",
+              await blob.arrayBuffer(),
+            );
+            const fileHash = Array.from(new Uint8Array(hashBuf))
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
+            return { blob, pageNumber, totalPages, fileHash };
+          }),
+        );
+
+        // 4. Single batch query to find all already-uploaded hashes
+        const allHashes = hashEntries.map((e) => e.fileHash);
+        const existingHashes = await comprovanteService.findExistingHashes(
+          selectedCompany.id,
+          allHashes,
+        );
+
+        const toProcess = hashEntries.filter(
+          (e) => !existingHashes.has(e.fileHash),
+        );
+        const duplicatesSkipped = hashEntries.length - toProcess.length;
+        setProgress(25);
 
         const batchId = uuidv4();
         const results: PageResult[] = [];
-        let duplicatesSkipped = 0;
+        const pageFailures: number[] = [];
 
-        for (let i = 0; i < splitResult.length; i++) {
-          const { blob, pageNumber, totalPages } = splitResult[i];
+        for (let i = 0; i < toProcess.length; i++) {
+          const { blob, pageNumber, totalPages, fileHash } = toProcess[i];
           setProgressLabel(
             `Processando página ${pageNumber} de ${totalPages}...`,
           );
-          setProgress(20 + Math.round((i / total) * 60));
+          setProgress(25 + Math.round((i / toProcess.length) * 65));
 
-          // 3. Compute SHA-256 hash for deduplication
-          const hashBuf = await crypto.subtle.digest(
-            "SHA-256",
-            await blob.arrayBuffer(),
-          );
-          const fileHash = Array.from(new Uint8Array(hashBuf))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
+          let storageRef: ReturnType<typeof ref> | null = null;
+          try {
+            // 5. Extract text
+            const text = await extractTextFromPdf(blob);
 
-          // 4. Check for duplicate — skip page if already uploaded
-          const existing = await comprovanteService.findByHash(
-            selectedCompany.id,
-            fileHash,
-          );
-          if (existing) {
-            duplicatesSkipped++;
-            continue;
+            // 6. Match
+            const scores = matchTransactions(text, candidates);
+            const best = scores[0] ?? null;
+
+            // 7. Upload page to Storage
+            const comprovanteId = uuidv4();
+            storageRef = ref(
+              storage,
+              `comprovantes/${selectedCompany.id}/${comprovanteId}.pdf`,
+            );
+            await uploadBytes(storageRef, blob, {
+              contentType: "application/pdf",
+            });
+            const storageUrl = await getDownloadURL(storageRef);
+
+            // 8. Save to Firestore — if this fails, roll back the Storage upload
+            let firestoreId: string;
+            try {
+              firestoreId = await comprovanteService.create({
+                companyId: selectedCompany.id,
+                uploadBatchId: batchId,
+                pageNumber,
+                totalPages,
+                storageUrl,
+                storagePath: storageRef.fullPath,
+                fileSize: blob.size,
+                fileHash,
+                matchStatus: best ? "pending_review" : "unmatched",
+                suggestedTransactionId: best?.transactionId,
+                suggestedTransactionIds: best?.transactionIds,
+                isConsolidated: best?.isConsolidated ?? false,
+                matchConfidence: best?.score,
+                matchConfidenceLevel: best?.confidenceLevel,
+                matchedAmount: best?.matchedAmount,
+                matchedDate: best?.matchedDate,
+                matchedEntity: best?.matchedEntity,
+                extractedText: text,
+                uploadedBy: user.uid,
+                uploadedAt: new Date(),
+              });
+            } catch (firestoreErr) {
+              // Roll back the orphaned Storage object
+              deleteObject(storageRef).catch(() => {});
+              throw firestoreErr;
+            }
+
+            results.push({
+              pageNumber,
+              totalPages,
+              blob,
+              extractedText: text,
+              storageUrl,
+              storagePath: storageRef.fullPath,
+              fileSize: blob.size,
+              comprovanteId: firestoreId,
+              bestMatch: best,
+              decision: best?.confidenceLevel === "HIGH" ? "confirm" : null,
+            });
+          } catch (pageErr) {
+            console.error(
+              `[UploadComprovanteDialog] página ${pageNumber} falhou:`,
+              pageErr,
+            );
+            pageFailures.push(pageNumber);
           }
-
-          // 5. Extract text
-          const text = await extractTextFromPdf(blob);
-
-          // 6. Match
-          const scores = matchTransactions(text, candidates);
-          const best = scores[0] ?? null;
-
-          // 7. Upload page to Storage
-          const comprovanteId = uuidv4();
-          const storageRef = ref(
-            storage,
-            `comprovantes/${selectedCompany.id}/${comprovanteId}.pdf`,
-          );
-          await uploadBytes(storageRef, blob, {
-            contentType: "application/pdf",
-          });
-          const storageUrl = await getDownloadURL(storageRef);
-
-          // 8. Save to Firestore (pending_review or unmatched)
-          const firestoreId = await comprovanteService.create({
-            companyId: selectedCompany.id,
-            uploadBatchId: batchId,
-            pageNumber,
-            totalPages,
-            storageUrl,
-            storagePath: storageRef.fullPath,
-            fileSize: blob.size,
-            fileHash,
-            matchStatus: best ? "pending_review" : "unmatched",
-            suggestedTransactionId: best?.transactionId,
-            suggestedTransactionIds: best?.transactionIds,
-            isConsolidated: best?.isConsolidated ?? false,
-            matchConfidence: best?.score,
-            matchConfidenceLevel: best?.confidenceLevel,
-            matchedAmount: best?.matchedAmount,
-            matchedDate: best?.matchedDate,
-            matchedEntity: best?.matchedEntity,
-            extractedText: text,
-            uploadedBy: user.uid,
-            uploadedAt: new Date(),
-          });
-
-          results.push({
-            pageNumber,
-            totalPages,
-            blob,
-            extractedText: text,
-            storageUrl,
-            storagePath: storageRef.fullPath,
-            fileSize: blob.size,
-            comprovanteId: firestoreId,
-            bestMatch: best,
-            // auto-confirm HIGH confidence matches for admin review
-            decision: best?.confidenceLevel === "HIGH" ? "confirm" : null,
-          });
         }
 
         setProgress(100);
 
-        if (duplicatesSkipped > 0 && results.length === 0) {
+        if (pageFailures.length > 0) {
+          toast.error(
+            `${pageFailures.length} página${pageFailures.length !== 1 ? "s" : ""} falharam ao enviar (página${pageFailures.length !== 1 ? "s" : ""} ${pageFailures.join(", ")}).`,
+          );
+        }
+
+        if (
+          duplicatesSkipped > 0 &&
+          results.length === 0 &&
+          pageFailures.length === 0
+        ) {
           toast.warning(
             `Todas as ${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} deste PDF já foram enviadas anteriormente.`,
           );
+          reset();
+          return;
+        }
+
+        if (results.length === 0) {
           reset();
           return;
         }

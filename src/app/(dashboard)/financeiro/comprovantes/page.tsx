@@ -505,6 +505,8 @@ export default function ComprovantesPage() {
       statusFilter,
       sortField,
       sortDir,
+      dateRange?.from?.toISOString(),
+      dateRange?.to?.toISOString(),
     ],
     queryFn: async (pageSize, lastDoc) => {
       if (!selectedCompany) return { items: [], lastDoc: null, hasMore: false };
@@ -514,6 +516,8 @@ export default function ComprovantesPage() {
         lastDoc,
         {
           matchStatus: statusFilter,
+          startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
+          endDate: dateRange?.to ? endOfDay(dateRange.to) : undefined,
         },
       );
     },
@@ -542,10 +546,10 @@ export default function ComprovantesPage() {
       ),
     ];
     if (!missingIds.length) return;
-    missingIds.forEach((id) => fetchedTxIds.current.add(id));
     transactionService
       .getByIds(missingIds)
       .then((txs) => {
+        missingIds.forEach((id) => fetchedTxIds.current.add(id));
         setTxMap((prev) => {
           const next = new Map(prev);
           txs.forEach((t) => next.set(t.id, t));
@@ -555,7 +559,7 @@ export default function ComprovantesPage() {
       .catch(console.error);
   }, [items]);
 
-  // Client-side search + date filter + sort
+  // Client-side search + sort (date filter is now server-side via getPaginated)
   const filtered = useMemo(
     () =>
       (debouncedSearch
@@ -572,14 +576,6 @@ export default function ComprovantesPage() {
           )
         : items
       )
-        .filter((c) => {
-          if (!dateRange?.from && !dateRange?.to) return true;
-          // Prefer matchedDate (date on the receipt); fall back to upload date
-          const date = c.matchedDate ?? c.uploadedAt ?? c.createdAt;
-          if (dateRange.from && date < startOfDay(dateRange.from)) return false;
-          if (dateRange.to && date > endOfDay(dateRange.to)) return false;
-          return true;
-        })
         .slice()
         .sort((a, b) => {
           let cmp = 0;
@@ -620,7 +616,7 @@ export default function ComprovantesPage() {
           }
           return sortDir === "asc" ? cmp : -cmp;
         }),
-    [items, debouncedSearch, txMap, sortField, sortDir, dateRange],
+    [items, debouncedSearch, txMap, sortField, sortDir],
   );
 
   // Infinite scroll sentinel — disabled while a search term is active
@@ -1138,8 +1134,8 @@ export default function ComprovantesPage() {
                           colSpan={8}
                           className="h-32 text-center text-destructive"
                         >
-                          Erro ao carregar comprovantes. Verifique o console
-                          para mais detalhes.
+                          Erro ao carregar comprovantes. Tente novamente ou
+                          recarregue a página.
                         </TableCell>
                       </TableRow>
                     ) : filtered.length === 0 ? (
@@ -1537,10 +1533,7 @@ export default function ComprovantesPage() {
               </Button>
               <Button
                 className="flex-1"
-                onClick={() => {
-                  setMobileFiltersOpen(false);
-                  toast.success("Filtros aplicados");
-                }}
+                onClick={() => setMobileFiltersOpen(false)}
               >
                 Aplicar
               </Button>
