@@ -299,11 +299,17 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
       );
 
       for (const page of toConfirm) {
+        const matchTxs = page
+          .bestMatch!.transactionIds.map((id) =>
+            transactions.find((t) => t.id === id),
+          )
+          .filter((t): t is Transaction => !!t);
         await comprovanteService.confirmMatch(
           page.comprovanteId,
           page.bestMatch!.transactionIds,
-          page.storageUrl,
+          matchTxs,
           user.uid,
+          page.storageUrl,
         );
       }
 

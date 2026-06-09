@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ResponsiveModal,
   ResponsiveModalContent,
@@ -79,8 +79,10 @@ export function MatchReviewDialog({
   const [resolvedTxs, setResolvedTxs] = useState<Transaction[]>([]);
 
   // Derive which transactions are "shown" as the current suggestion/match
-  const shownTxs: Transaction[] =
-    resolvedTxs.length > 0 ? resolvedTxs : propTx ? [propTx] : [];
+  const shownTxs = useMemo<Transaction[]>(
+    () => (resolvedTxs.length > 0 ? resolvedTxs : propTx ? [propTx] : []),
+    [resolvedTxs, propTx],
+  );
 
   // Load paid/authorized payables for manual linking; resolve tx IDs
   useEffect(() => {
@@ -150,13 +152,15 @@ export function MatchReviewDialog({
 
   const handleConfirm = useCallback(async () => {
     if (!user || !comprovante || effectiveTxIds.length === 0) return;
+    const effectiveTxs = manualTxs.length > 0 ? manualTxs : shownTxs;
     try {
       setIsProcessing(true);
       await comprovanteService.confirmMatch(
         comprovante.id,
         effectiveTxIds,
-        comprovante.storageUrl,
+        effectiveTxs,
         user.uid,
+        comprovante.storageUrl,
       );
       toast.success("Associação confirmada com sucesso!");
       onUpdated();
@@ -166,7 +170,15 @@ export function MatchReviewDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [user, comprovante, effectiveTxIds, onUpdated, onClose]);
+  }, [
+    user,
+    comprovante,
+    effectiveTxIds,
+    manualTxs,
+    shownTxs,
+    onUpdated,
+    onClose,
+  ]);
 
   const handleReject = useCallback(async () => {
     if (!user || !comprovante) return;

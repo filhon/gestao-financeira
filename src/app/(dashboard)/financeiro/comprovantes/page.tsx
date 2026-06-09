@@ -503,6 +503,9 @@ export default function ComprovantesPage() {
       "comprovantes",
       selectedCompany?.id,
       statusFilter,
+      dateRange?.from?.toISOString(),
+      dateRange?.to?.toISOString(),
+      debouncedSearch,
     ],
     queryFn: async (pageSize, lastDoc) => {
       if (!selectedCompany) return { items: [], lastDoc: null, hasMore: false };
@@ -512,6 +515,9 @@ export default function ComprovantesPage() {
         lastDoc,
         {
           matchStatus: statusFilter,
+          startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
+          endDate: dateRange?.to ? endOfDay(dateRange.to) : undefined,
+          searchText: debouncedSearch || undefined,
         },
       );
     },
@@ -554,78 +560,52 @@ export default function ComprovantesPage() {
       .catch(console.error);
   }, [items]);
 
-  // Client-side search + date + sort
+  // Client-side sort only (filtering is done server-side)
   const filtered = useMemo(
     () =>
-      items
-        .filter((c) => {
-          // Date filter against createdAt (upload date)
-          const itemDate = c.createdAt ?? c.uploadedAt;
-          if (dateRange?.from && itemDate && itemDate < startOfDay(dateRange.from))
-            return false;
-          if (dateRange?.to && itemDate && itemDate > endOfDay(dateRange.to))
-            return false;
-          return true;
-        })
-        .filter((c) =>
-          debouncedSearch
-            ? [
-                c.extractedText ?? "",
-                c.matchedEntity ?? "",
-                txMap.get(c.transactionId ?? "")?.description ?? "",
-                txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
-              ]
-                .join(" ")
-                .toLowerCase()
-                .includes(debouncedSearch.toLowerCase())
-            : true,
-        )
-        .slice()
-        .sort((a, b) => {
-          let cmp = 0;
-          if (sortField === "date") {
-            const aDate =
-              a.matchedDate ??
-              (a.transactionId
-                ? txMap.get(a.transactionId)?.paymentDate
-                : undefined);
-            const bDate =
-              b.matchedDate ??
-              (b.transactionId
-                ? txMap.get(b.transactionId)?.paymentDate
-                : undefined);
-            cmp = (aDate?.getTime() ?? 0) - (bDate?.getTime() ?? 0);
-          } else if (sortField === "amount") {
-            const aAmt =
-              a.matchedAmount ??
-              (a.transactionId
-                ? (txMap.get(a.transactionId)?.finalAmount ??
-                  txMap.get(a.transactionId)?.amount ??
-                  0)
-                : 0);
-            const bAmt =
-              b.matchedAmount ??
-              (b.transactionId
-                ? (txMap.get(b.transactionId)?.finalAmount ??
-                  txMap.get(b.transactionId)?.amount ??
-                  0)
-                : 0);
-            cmp = aAmt - bAmt;
-          } else if (sortField === "status") {
-            cmp =
-              (STATUS_ORDER[a.matchStatus] ?? 99) -
-              (STATUS_ORDER[b.matchStatus] ?? 99);
-          } else if (sortField === "confidence") {
-            cmp = (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0);
-          }
-          return sortDir === "asc" ? cmp : -cmp;
-        }),
-    [items, debouncedSearch, txMap, sortField, sortDir, dateRange],
+      items.slice().sort((a, b) => {
+        let cmp = 0;
+        if (sortField === "date") {
+          const aDate =
+            a.matchedDate ??
+            (a.transactionId
+              ? txMap.get(a.transactionId)?.paymentDate
+              : undefined);
+          const bDate =
+            b.matchedDate ??
+            (b.transactionId
+              ? txMap.get(b.transactionId)?.paymentDate
+              : undefined);
+          cmp = (aDate?.getTime() ?? 0) - (bDate?.getTime() ?? 0);
+        } else if (sortField === "amount") {
+          const aAmt =
+            a.matchedAmount ??
+            (a.transactionId
+              ? (txMap.get(a.transactionId)?.finalAmount ??
+                txMap.get(a.transactionId)?.amount ??
+                0)
+              : 0);
+          const bAmt =
+            b.matchedAmount ??
+            (b.transactionId
+              ? (txMap.get(b.transactionId)?.finalAmount ??
+                txMap.get(b.transactionId)?.amount ??
+                0)
+              : 0);
+          cmp = aAmt - bAmt;
+        } else if (sortField === "status") {
+          cmp =
+            (STATUS_ORDER[a.matchStatus] ?? 99) -
+            (STATUS_ORDER[b.matchStatus] ?? 99);
+        } else if (sortField === "confidence") {
+          cmp = (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0);
+        }
+        return sortDir === "asc" ? cmp : -cmp;
+      }),
+    [items, txMap, sortField, sortDir],
   );
 
-  // Infinite scroll sentinel — disabled while a search term is active
-  const sentinelEnabled =
-    hasMore && !isFetchingNextPage && !debouncedSearch && !searchTerm;
+  const sentinelEnabled = hasMore && !isFetchingNextPage;
 
   const { targetRef: sentinelRef, isIntersecting } =
     useIntersectionObserver<HTMLDivElement>({
@@ -634,23 +614,10 @@ export default function ComprovantesPage() {
     });
 
   useEffect(() => {
-    if (
-      isIntersecting &&
-      hasMore &&
-      !isFetchingNextPage &&
-      !debouncedSearch &&
-      !searchTerm
-    ) {
+    if (isIntersecting && hasMore && !isFetchingNextPage) {
       loadMore();
     }
-  }, [
-    isIntersecting,
-    hasMore,
-    isFetchingNextPage,
-    loadMore,
-    debouncedSearch,
-    searchTerm,
-  ]);
+  }, [isIntersecting, hasMore, isFetchingNextPage, loadMore]);
 
   // ── Dialogs ───────────────────────────────────────────────────────────────────
   const [uploadOpen, setUploadOpen] = useState(false);

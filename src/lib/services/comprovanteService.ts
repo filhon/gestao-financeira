@@ -22,6 +22,39 @@ import { Comprovante, ComprovanteMatchStatus } from "@/lib/types";
 
 const COLLECTION = "comprovantes";
 
+const normalizeSearch = (s: string) =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+const tokenize = (text: string): string[] => {
+  const normalized = normalizeSearch(text);
+  const words = normalized.split(/\s+/).filter((w) => w.length >= 2);
+  const tokens = new Set<string>(words);
+  // Add all prefix substrings of length ≥ 2 for each word (prefix search)
+  for (const word of words) {
+    for (let i = 2; i <= word.length; i++) {
+      tokens.add(word.slice(0, i));
+    }
+  }
+  return [...tokens];
+};
+
+const buildSearchText = (fields: {
+  matchedEntity?: string;
+  extractedText?: string;
+  transactionDescriptions?: (string | undefined)[];
+  transactionEntities?: (string | undefined)[];
+}): string => {
+  return [
+    fields.matchedEntity ?? "",
+    fields.extractedText ?? "",
+    ...(fields.transactionDescriptions ?? []),
+    ...(fields.transactionEntities ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 1000); // guard against very large extractedText
+};
+
 const convertDates = (data: DocumentData): Comprovante => ({
   ...(data as Comprovante),
   uploadedAt: (data.uploadedAt as Timestamp)?.toDate?.() ?? new Date(),
@@ -52,6 +85,7 @@ export type ComprovanteFilter = {
   startDate?: Date;
   endDate?: Date;
   uploadBatchId?: string;
+  searchText?: string;
 };
 
 export const comprovanteService = {
@@ -60,10 +94,16 @@ export const comprovanteService = {
   async create(
     data: Omit<Comprovante, "id" | "createdAt" | "updatedAt">,
   ): Promise<string> {
+    const searchText = buildSearchText({
+      matchedEntity: data.matchedEntity,
+      extractedText: data.extractedText,
+    });
     const docRef = await addDoc(
       collection(db, COLLECTION),
       stripUndefined({
         ...data,
+        searchText,
+        searchTokens: tokenize(searchText),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }),
@@ -91,6 +131,23 @@ export const comprovanteService = {
     }
     if (filters?.uploadBatchId) {
       constraints.push(where("uploadBatchId", "==", filters.uploadBatchId));
+    }
+    if (filters?.searchText) {
+      // array-contains cannot be combined with range filters on a different field
+      // without a composite index — omit date range when searching by text
+      const token = normalizeSearch(filters.searchText);
+      constraints.push(where("searchTokens", "array-contains", token));
+    } else {
+      if (filters?.startDate) {
+        constraints.push(
+          where("createdAt", ">=", Timestamp.fromDate(filters.startDate)),
+        );
+      }
+      if (filters?.endDate) {
+        constraints.push(
+          where("createdAt", "<=", Timestamp.fromDate(filters.endDate)),
+        );
+      }
     }
 
     constraints.push(orderBy("createdAt", "desc"));
@@ -192,11 +249,21 @@ export const comprovanteService = {
   async confirmMatch(
     comprovanteId: string,
     transactionIds: string[],
-    storageUrl: string,
+    transactions: Array<{
+      id: string;
+      description?: string;
+      supplierOrClient?: string;
+    }>,
     reviewedBy: string,
+    storageUrl: string,
   ): Promise<void> {
     const batch = writeBatch(db);
     const primaryId = transactionIds[0];
+
+    const searchText = buildSearchText({
+      transactionDescriptions: transactions.map((t) => t.description),
+      transactionEntities: transactions.map((t) => t.supplierOrClient),
+    });
 
     batch.update(doc(db, COLLECTION, comprovanteId), {
       matchStatus: "matched",
@@ -207,6 +274,8 @@ export const comprovanteService = {
       suggestedTransactionIds: null,
       reviewedBy,
       reviewedAt: serverTimestamp(),
+      searchText,
+      searchTokens: tokenize(searchText),
       updatedAt: serverTimestamp(),
     });
 
@@ -226,6 +295,9 @@ export const comprovanteService = {
       matchStatus: "rejected_match",
       transactionId: null,
       transactionIds: null,
+      isConsolidated: false,
+      suggestedTransactionId: null,
+      suggestedTransactionIds: null,
       reviewedBy,
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -243,6 +315,8 @@ export const comprovanteService = {
       transactionId: null,
       transactionIds: null,
       isConsolidated: false,
+      suggestedTransactionId: null,
+      suggestedTransactionIds: null,
       reviewedBy: null,
       reviewedAt: null,
       updatedAt: serverTimestamp(),
@@ -269,7 +343,6 @@ export const comprovanteService = {
         | "transactionIds"
         | "notes"
         | "reviewedBy"
-        | "reviewedAt"
       >
     >,
   ): Promise<void> {
