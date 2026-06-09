@@ -92,16 +92,6 @@ export const comprovanteService = {
     if (filters?.uploadBatchId) {
       constraints.push(where("uploadBatchId", "==", filters.uploadBatchId));
     }
-    if (filters?.startDate) {
-      constraints.push(
-        where("createdAt", ">=", Timestamp.fromDate(filters.startDate)),
-      );
-    }
-    if (filters?.endDate) {
-      constraints.push(
-        where("createdAt", "<=", Timestamp.fromDate(filters.endDate)),
-      );
-    }
 
     constraints.push(orderBy("createdAt", "desc"));
     if (lastDoc != null) constraints.push(startAfter(lastDoc));

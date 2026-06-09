@@ -436,7 +436,7 @@ export default function ComprovantesPage() {
   >("all");
 
   const defaultDateRange: DateRange = {
-    from: startOfDay(addDays(new Date(), -7)),
+    from: startOfDay(addDays(new Date(), -90)),
     to: endOfDay(new Date()),
   };
 
@@ -503,10 +503,6 @@ export default function ComprovantesPage() {
       "comprovantes",
       selectedCompany?.id,
       statusFilter,
-      sortField,
-      sortDir,
-      dateRange?.from?.toISOString(),
-      dateRange?.to?.toISOString(),
     ],
     queryFn: async (pageSize, lastDoc) => {
       if (!selectedCompany) return { items: [], lastDoc: null, hasMore: false };
@@ -516,11 +512,10 @@ export default function ComprovantesPage() {
         lastDoc,
         {
           matchStatus: statusFilter,
-          startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
-          endDate: dateRange?.to ? endOfDay(dateRange.to) : undefined,
         },
       );
     },
+    enabled: !!selectedCompany,
   });
 
   // ── Transaction index for inline display ─────────────────────────────────────
@@ -559,23 +554,32 @@ export default function ComprovantesPage() {
       .catch(console.error);
   }, [items]);
 
-  // Client-side search + sort (date filter is now server-side via getPaginated)
+  // Client-side search + date + sort
   const filtered = useMemo(
     () =>
-      (debouncedSearch
-        ? items.filter((c) =>
-            [
-              c.extractedText ?? "",
-              c.matchedEntity ?? "",
-              txMap.get(c.transactionId ?? "")?.description ?? "",
-              txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
-            ]
-              .join(" ")
-              .toLowerCase()
-              .includes(debouncedSearch.toLowerCase()),
-          )
-        : items
-      )
+      items
+        .filter((c) => {
+          // Date filter against createdAt (upload date)
+          const itemDate = c.createdAt ?? c.uploadedAt;
+          if (dateRange?.from && itemDate && itemDate < startOfDay(dateRange.from))
+            return false;
+          if (dateRange?.to && itemDate && itemDate > endOfDay(dateRange.to))
+            return false;
+          return true;
+        })
+        .filter((c) =>
+          debouncedSearch
+            ? [
+                c.extractedText ?? "",
+                c.matchedEntity ?? "",
+                txMap.get(c.transactionId ?? "")?.description ?? "",
+                txMap.get(c.transactionId ?? "")?.supplierOrClient ?? "",
+              ]
+                .join(" ")
+                .toLowerCase()
+                .includes(debouncedSearch.toLowerCase())
+            : true,
+        )
         .slice()
         .sort((a, b) => {
           let cmp = 0;
@@ -616,7 +620,7 @@ export default function ComprovantesPage() {
           }
           return sortDir === "asc" ? cmp : -cmp;
         }),
-    [items, debouncedSearch, txMap, sortField, sortDir],
+    [items, debouncedSearch, txMap, sortField, sortDir, dateRange],
   );
 
   // Infinite scroll sentinel — disabled while a search term is active
