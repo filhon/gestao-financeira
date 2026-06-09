@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ResponsiveModal,
   ResponsiveModalContent,
@@ -78,9 +79,7 @@ export function MatchReviewDialog({
   const [isProcessing, setIsProcessing] = useState(false);
   const [manualTxs, setManualTxs] = useState<Transaction[]>([]);
   const [txSearch, setTxSearch] = useState("");
-  const [txCandidates, setTxCandidates] = useState<Transaction[]>([]);
   const [isTxOpen, setIsTxOpen] = useState(false);
-  const [isLoadingTx, setIsLoadingTx] = useState(false);
 
   // Shown transaction(s): confirmed match (propTx / full group) or suggested
   const [resolvedTxs, setResolvedTxs] = useState<Transaction[]>([]);
@@ -91,52 +90,53 @@ export function MatchReviewDialog({
     [resolvedTxs, propTx],
   );
 
-  // Load paid/authorized payables for manual linking; resolve tx IDs
-  useEffect(() => {
-    if (!open || !selectedCompany) return;
-    setResolvedTxs([]);
-    setIsLoadingTx(true);
-    transactionService
-      .getAll({
-        companyId: selectedCompany.id,
+  // Cached list of paid/authorized payables — shared across modal opens
+  const { data: txCandidates = [], isLoading: isLoadingTx } = useQuery({
+    queryKey: ["tx-candidates", selectedCompany?.id],
+    queryFn: () =>
+      transactionService.getAll({
+        companyId: selectedCompany!.id,
         type: "payable",
         statuses: ["paid", "authorized"],
-      })
-      .then((candidates) => {
-        setTxCandidates(candidates);
+      }),
+    enabled: open && !!selectedCompany,
+    staleTime: 5 * 60 * 1000,
+  });
 
-        // For confirmed consolidated matches, show all linked transactions
-        if (
-          comprovante?.matchStatus === "matched" &&
-          comprovante.isConsolidated &&
-          (comprovante.transactionIds?.length ?? 0) > 1
-        ) {
-          const found = candidates.filter((t) =>
-            comprovante.transactionIds!.includes(t.id),
-          );
-          if (found.length > 0) {
-            setResolvedTxs(found);
-            return;
-          }
-        }
+  // Resolve suggested/confirmed transaction IDs from the cached list
+  useEffect(() => {
+    if (!open || txCandidates.length === 0) return;
+    setResolvedTxs([]);
 
-        // For pending_review: resolve suggested transaction IDs
-        const suggestedIds =
-          comprovante?.suggestedTransactionIds ??
-          (comprovante?.suggestedTransactionId
-            ? [comprovante.suggestedTransactionId]
-            : []);
+    // For confirmed consolidated matches, show all linked transactions
+    if (
+      comprovante?.matchStatus === "matched" &&
+      comprovante.isConsolidated &&
+      (comprovante.transactionIds?.length ?? 0) > 1
+    ) {
+      const found = txCandidates.filter((t) =>
+        comprovante.transactionIds!.includes(t.id),
+      );
+      if (found.length > 0) {
+        setResolvedTxs(found);
+        return;
+      }
+    }
 
-        if (suggestedIds.length > 0) {
-          const found = candidates.filter((t) => suggestedIds.includes(t.id));
-          if (found.length > 0) setResolvedTxs(found);
-        }
-      })
-      .catch(console.error)
-      .finally(() => setIsLoadingTx(false));
+    // For pending_review: resolve suggested transaction IDs
+    const suggestedIds =
+      comprovante?.suggestedTransactionIds ??
+      (comprovante?.suggestedTransactionId
+        ? [comprovante.suggestedTransactionId]
+        : []);
+
+    if (suggestedIds.length > 0) {
+      const found = txCandidates.filter((t) => suggestedIds.includes(t.id));
+      if (found.length > 0) setResolvedTxs(found);
+    }
   }, [
     open,
-    selectedCompany,
+    txCandidates,
     comprovante?.matchStatus,
     comprovante?.isConsolidated,
     comprovante?.transactionIds,
@@ -272,13 +272,27 @@ export function MatchReviewDialog({
             <p className="text-sm font-medium text-muted-foreground">
               Comprovante
             </p>
-            <div className="rounded-lg border overflow-hidden bg-muted/30 h-[360px] flex flex-col">
+            <div className="rounded-lg border overflow-hidden bg-muted/30 h-[480px] flex flex-col">
               {previewUrl && (
-                <iframe
-                  src={previewUrl}
+                <object
+                  data={previewUrl}
+                  type="application/pdf"
                   className="flex-1 w-full"
                   title={`Comprovante página ${comprovante.pageNumber}`}
-                />
+                >
+                  <div className="flex flex-col items-center justify-center gap-2 h-full text-muted-foreground">
+                    <FileText className="h-8 w-8 opacity-40" />
+                    <p className="text-sm">Pré-visualização não disponível.</p>
+                    <a
+                      href={previewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary underline"
+                    >
+                      Abrir PDF
+                    </a>
+                  </div>
+                </object>
               )}
             </div>
             <div className="flex gap-2">

@@ -337,7 +337,8 @@ export interface AuditLog {
     | "release"
     | "confirm_match"
     | "reject_match"
-    | "remove_match";
+    | "remove_match"
+    | "delete_comprovante";
   entity:
     | "transaction"
     | "company"

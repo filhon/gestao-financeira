@@ -18,7 +18,8 @@ import {
   writeBatch,
   getCountFromServer,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { ref, deleteObject } from "firebase/storage";
+import { db, storage } from "@/lib/firebase/client";
 import { Comprovante, ComprovanteMatchStatus } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
 
@@ -410,8 +411,26 @@ export const comprovanteService = {
     );
   },
 
-  async delete(id: string): Promise<void> {
+  async delete(
+    id: string,
+    storagePath?: string,
+    actor?: { companyId: string; userId: string; userEmail: string },
+  ): Promise<void> {
     await deleteDoc(doc(db, COLLECTION, id));
+    if (storagePath) {
+      await deleteObject(ref(storage, storagePath)).catch(() => {});
+    }
+    if (actor) {
+      await auditService.log({
+        companyId: actor.companyId,
+        userId: actor.userId,
+        userEmail: actor.userEmail,
+        action: "delete_comprovante",
+        entity: "comprovante",
+        entityId: id,
+        details: { storagePath },
+      });
+    }
   },
 
   // ── Deduplication ────────────────────────────────────────────────────────────

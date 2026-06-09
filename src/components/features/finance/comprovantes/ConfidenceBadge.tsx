@@ -17,7 +17,7 @@ const CONFIG: Record<
   },
   LOW: {
     label: "Baixa",
-    className: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
+    className: "bg-muted text-muted-foreground border-border",
   },
 };
 

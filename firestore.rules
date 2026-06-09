@@ -311,8 +311,10 @@ service cloud.firestore {
           'fileHash', 'storagePath', 'uploadedBy', 'companyId'
         ]);
 
-      // Delete: Admin only (global admin or company admin)
-      allow delete: if isGlobalAdmin();
+      // Delete: Admin always; Manager can delete unmatched/rejected/unreadable receipts
+      allow delete: if isGlobalAdmin() ||
+        (isAuthenticated() && isManager(getCompanyId()) &&
+          resource.data.matchStatus in ['unmatched', 'rejected_match', 'needs_manual']);
     }
 
     // 17. Reimbursement Reports (Relatórios de Despesas / RD)

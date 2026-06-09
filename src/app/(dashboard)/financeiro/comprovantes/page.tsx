@@ -23,6 +23,7 @@ import {
   X,
   Loader2,
   FileText,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -148,9 +149,17 @@ function StatCell({
         {loading ? (
           <Skeleton className="h-6 w-12" />
         ) : (
-          <p className="text-xl font-bold tabular-nums leading-none">
-            {Math.round(animated)}
-          </p>
+          <>
+            <p
+              className="text-xl font-bold tabular-nums leading-none"
+              aria-hidden
+            >
+              {Math.round(animated)}
+            </p>
+            <span className="sr-only" aria-live="polite" aria-atomic>
+              {value}
+            </span>
+          </>
         )}
       </div>
     </div>
@@ -249,6 +258,7 @@ interface MobileComprovanteCardProps {
   onOpenReview: (c: Comprovante) => void;
   onShare: (c: Comprovante) => void;
   onSetRemoveId: (id: string) => void;
+  onSetDeleteId: (id: string) => void;
   downloadUrl: string;
 }
 
@@ -260,6 +270,7 @@ const MobileComprovanteCard = memo(function MobileComprovanteCard({
   onOpenReview,
   onShare,
   onSetRemoveId,
+  onSetDeleteId,
   downloadUrl,
 }: MobileComprovanteCardProps) {
   const canReview =
@@ -269,6 +280,11 @@ const MobileComprovanteCard = memo(function MobileComprovanteCard({
     canUpload;
   const canRemove =
     c.matchStatus === "matched" && !!c.transactionId && canUpload;
+  const canDelete =
+    (c.matchStatus === "unmatched" ||
+      c.matchStatus === "rejected_match" ||
+      c.matchStatus === "needs_manual") &&
+    canUpload;
 
   const swipe = useSwipe(
     canReview ? () => onOpenReview(c) : undefined,
@@ -276,19 +292,10 @@ const MobileComprovanteCard = memo(function MobileComprovanteCard({
     60,
   );
 
-  const borderClass =
-    c.matchStatus === "pending_review"
-      ? "border-l-amber-500"
-      : c.matchStatus === "unmatched" || c.matchStatus === "rejected_match"
-        ? "border-l-red-500"
-        : c.matchStatus === "matched"
-          ? "border-l-emerald-500"
-          : "border-l-transparent";
-
   return (
     <div
       {...swipe}
-      className={`relative flex items-start gap-3 px-4 py-3.5 transition-colors select-none border-l-4 ${borderClass}`}
+      className="relative flex items-start gap-3 px-4 py-3.5 transition-colors select-none"
     >
       {/* File icon */}
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
@@ -398,6 +405,16 @@ const MobileComprovanteCard = memo(function MobileComprovanteCard({
             >
               <Link2Off className="h-4 w-4" />
               Remover associação
+            </DropdownMenuItem>
+          )}
+          {canDelete && <DropdownMenuSeparator />}
+          {canDelete && (
+            <DropdownMenuItem
+              onClick={() => onSetDeleteId(c.id)}
+              className="gap-2 text-destructive focus:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir comprovante
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -624,6 +641,7 @@ export default function ComprovantesPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState<Comprovante | null>(null);
   const [removeId, setRemoveId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
 
   const handleOpenReview = useCallback((c: Comprovante) => {
@@ -658,6 +676,35 @@ export default function ComprovantesPage() {
   };
 
   const handleSetRemoveId = useCallback((id: string) => setRemoveId(id), []);
+  const handleSetDeleteId = useCallback((id: string) => setDeleteId(id), []);
+
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    const c = items.find((i) => i.id === deleteId);
+    if (!c) return;
+    try {
+      await comprovanteService.delete(
+        c.id,
+        c.storagePath,
+        selectedCompany && user
+          ? {
+              companyId: selectedCompany.id,
+              userId: user.uid,
+              userEmail: user.email ?? "",
+            }
+          : undefined,
+      );
+      toast.success("Comprovante excluído.");
+      refresh();
+      queryClient.invalidateQueries({
+        queryKey: STATS_QUERY_KEY(selectedCompany?.id),
+      });
+    } catch {
+      toast.error("Erro ao excluir comprovante.");
+    } finally {
+      setDeleteId(null);
+    }
+  };
 
   const handleShare = useCallback(
     async (c: Comprovante) => {
@@ -674,8 +721,8 @@ export default function ComprovantesPage() {
       const entity = allTxs[0]?.supplierOrClient ?? c.matchedEntity ?? null;
       const title =
         allTxs.length > 1
-          ? `Comprovante${entity ? ` — ${entity}` : ""}`
-          : `Comprovante — ${allTxs[0]?.description ?? c.matchedEntity ?? c.id}`;
+          ? `Comprovante${entity ? ` · ${entity}` : ""}`
+          : `Comprovante · ${allTxs[0]?.description ?? c.matchedEntity ?? c.id}`;
 
       const dateStr = c.matchedDate
         ? format(c.matchedDate, "dd/MM/yyyy", { locale: ptBR })
@@ -1079,7 +1126,16 @@ export default function ComprovantesPage() {
                       <TableHead className="min-w-0">
                         Transação Associada
                       </TableHead>
-                      <TableHead className="w-32 shrink-0">
+                      <TableHead
+                        className="w-32 shrink-0"
+                        aria-sort={
+                          sortField === "amount"
+                            ? sortDir === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : "none"
+                        }
+                      >
                         <SortHeader
                           label="Valor"
                           active={sortField === "amount"}
@@ -1087,7 +1143,16 @@ export default function ComprovantesPage() {
                           onClick={() => handleSort("amount")}
                         />
                       </TableHead>
-                      <TableHead className="w-28 shrink-0">
+                      <TableHead
+                        className="w-28 shrink-0"
+                        aria-sort={
+                          sortField === "date"
+                            ? sortDir === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : "none"
+                        }
+                      >
                         <SortHeader
                           label="Data"
                           active={sortField === "date"}
@@ -1096,7 +1161,16 @@ export default function ComprovantesPage() {
                         />
                       </TableHead>
                       <TableHead className="w-40 min-w-0">Entidade</TableHead>
-                      <TableHead className="w-36 shrink-0">
+                      <TableHead
+                        className="w-36 shrink-0"
+                        aria-sort={
+                          sortField === "status"
+                            ? sortDir === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : "none"
+                        }
+                      >
                         <SortHeader
                           label="Status"
                           active={sortField === "status"}
@@ -1104,7 +1178,16 @@ export default function ComprovantesPage() {
                           onClick={() => handleSort("status")}
                         />
                       </TableHead>
-                      <TableHead className="w-28 shrink-0">
+                      <TableHead
+                        className="w-28 shrink-0"
+                        aria-sort={
+                          sortField === "confidence"
+                            ? sortDir === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : "none"
+                        }
+                      >
                         <SortHeader
                           label="Confiança"
                           active={sortField === "confidence"}
@@ -1128,23 +1211,46 @@ export default function ComprovantesPage() {
                       </TableRow>
                     ) : filtered.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="h-36 text-center">
-                          <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                            <FileText className="h-8 w-8 opacity-40" />
-                            <p className="text-sm font-medium">
-                              {debouncedSearch || hasActiveFilters
-                                ? "Nenhum comprovante encontrado para os filtros selecionados."
-                                : "Nenhum comprovante cadastrado."}
-                            </p>
-                            {(debouncedSearch || hasActiveFilters) && (
-                              <Button
-                                variant="link"
-                                size="sm"
-                                className="h-auto p-0 text-xs"
-                                onClick={clearFilters}
-                              >
-                                Limpar filtros
-                              </Button>
+                        <TableCell colSpan={8} className="h-48 text-center">
+                          <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                            <FileText className="h-10 w-10 opacity-30" />
+                            {debouncedSearch || hasActiveFilters ? (
+                              <>
+                                <p className="text-sm font-medium">
+                                  Nenhum comprovante encontrado para os filtros
+                                  selecionados.
+                                </p>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="h-auto p-0 text-xs"
+                                  onClick={clearFilters}
+                                >
+                                  Limpar filtros
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-foreground">
+                                    Nenhum comprovante cadastrado.
+                                  </p>
+                                  <p className="text-xs">
+                                    Cada página do PDF enviado vira um
+                                    comprovante indexado.
+                                  </p>
+                                </div>
+                                {canUpload && (
+                                  <Button
+                                    size="sm"
+                                    className="gap-2 mt-1"
+                                    onClick={() => setUploadOpen(true)}
+                                  >
+                                    <Upload className="h-4 w-4" />
+                                    Enviar Comprovantes
+                                  </Button>
+                                )}
+                              </>
                             )}
                           </div>
                         </TableCell>
@@ -1311,6 +1417,22 @@ export default function ComprovantesPage() {
                                         Remover associação
                                       </DropdownMenuItem>
                                     )}
+                                  {(c.matchStatus === "unmatched" ||
+                                    c.matchStatus === "rejected_match" ||
+                                    c.matchStatus === "needs_manual") &&
+                                    canUpload && <DropdownMenuSeparator />}
+                                  {(c.matchStatus === "unmatched" ||
+                                    c.matchStatus === "rejected_match" ||
+                                    c.matchStatus === "needs_manual") &&
+                                    canUpload && (
+                                      <DropdownMenuItem
+                                        onClick={() => setDeleteId(c.id)}
+                                        className="gap-2 text-destructive focus:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        Excluir comprovante
+                                      </DropdownMenuItem>
+                                    )}
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </TableCell>
@@ -1331,22 +1453,45 @@ export default function ComprovantesPage() {
                     </p>
                   </div>
                 ) : filtered.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-10 px-4 text-muted-foreground">
-                    <FileText className="h-8 w-8 opacity-40" />
-                    <p className="text-sm font-medium text-center">
-                      {debouncedSearch || hasActiveFilters
-                        ? "Nenhum comprovante encontrado para os filtros selecionados."
-                        : "Nenhum comprovante cadastrado."}
-                    </p>
-                    {(debouncedSearch || hasActiveFilters) && (
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="h-auto p-0 text-xs"
-                        onClick={clearFilters}
-                      >
-                        Limpar filtros
-                      </Button>
+                  <div className="flex flex-col items-center gap-3 py-12 px-4 text-muted-foreground">
+                    <FileText className="h-10 w-10 opacity-30" />
+                    {debouncedSearch || hasActiveFilters ? (
+                      <>
+                        <p className="text-sm font-medium text-center">
+                          Nenhum comprovante encontrado para os filtros
+                          selecionados.
+                        </p>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0 text-xs"
+                          onClick={clearFilters}
+                        >
+                          Limpar filtros
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="space-y-1 text-center">
+                          <p className="text-sm font-medium text-foreground">
+                            Nenhum comprovante cadastrado.
+                          </p>
+                          <p className="text-xs">
+                            Cada página do PDF enviado vira um comprovante
+                            indexado.
+                          </p>
+                        </div>
+                        {canUpload && (
+                          <Button
+                            size="sm"
+                            className="gap-2 mt-1"
+                            onClick={() => setUploadOpen(true)}
+                          >
+                            <Upload className="h-4 w-4" />
+                            Enviar Comprovantes
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 ) : (
@@ -1365,6 +1510,7 @@ export default function ComprovantesPage() {
                           onOpenReview={handleOpenReview}
                           onShare={handleShare}
                           onSetRemoveId={handleSetRemoveId}
+                          onSetDeleteId={handleSetDeleteId}
                           downloadUrl={comprovanteProxyUrl(c.storagePath)}
                         />
                       );
@@ -1419,6 +1565,16 @@ export default function ComprovantesPage() {
         confirmText="Remover"
         variant="destructive"
         onConfirm={handleRemoveMatch}
+      />
+
+      <ConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(o) => !o && setDeleteId(null)}
+        title="Excluir comprovante"
+        description="Tem certeza que deseja excluir permanentemente este comprovante? O arquivo será removido do sistema e esta ação não pode ser desfeita."
+        confirmText="Excluir"
+        variant="destructive"
+        onConfirm={handleDelete}
       />
 
       {/* ── Mobile filter sheet ──────────────────────────────────── */}
@@ -1523,7 +1679,7 @@ export default function ComprovantesPage() {
                 className="flex-1"
                 onClick={() => setMobileFiltersOpen(false)}
               >
-                Aplicar
+                Ver resultados
               </Button>
             </div>
           </div>
