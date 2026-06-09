@@ -4,6 +4,7 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   query,
   orderBy,
@@ -134,21 +135,27 @@ export const comprovanteService = {
       constraints.push(where("uploadBatchId", "==", filters.uploadBatchId));
     }
     if (filters?.searchText) {
-      // array-contains cannot be combined with range filters on a different field
-      // without a composite index — omit date range when searching by text
-      const token = normalizeSearch(filters.searchText);
-      constraints.push(where("searchTokens", "array-contains", token));
-    } else {
-      if (filters?.startDate) {
-        constraints.push(
-          where("createdAt", ">=", Timestamp.fromDate(filters.startDate)),
-        );
-      }
-      if (filters?.endDate) {
-        constraints.push(
-          where("createdAt", "<=", Timestamp.fromDate(filters.endDate)),
-        );
-      }
+      // Multi-word queries: pick the longest word for best precision.
+      // Composite index (companyId + searchTokens + createdAt) supports
+      // array-contains combined with the date range below.
+      const words = normalizeSearch(filters.searchText)
+        .split(/\s+/)
+        .filter((w) => w.length >= 2);
+      const primaryToken =
+        words.sort((a, b) => b.length - a.length)[0] ??
+        normalizeSearch(filters.searchText);
+      constraints.push(where("searchTokens", "array-contains", primaryToken));
+    }
+    // Date range applies regardless of search text — composite index supports it
+    if (filters?.startDate) {
+      constraints.push(
+        where("createdAt", ">=", Timestamp.fromDate(filters.startDate)),
+      );
+    }
+    if (filters?.endDate) {
+      constraints.push(
+        where("createdAt", "<=", Timestamp.fromDate(filters.endDate)),
+      );
     }
 
     constraints.push(orderBy("createdAt", "desc"));
@@ -262,7 +269,12 @@ export const comprovanteService = {
     const batch = writeBatch(db);
     const primaryId = transactionIds[0];
 
+    // Preserve the original OCR text so searches by content still work after matching
+    const existingSnap = await getDoc(doc(db, COLLECTION, comprovanteId));
+    const existingData = existingSnap.data();
     const searchText = buildSearchText({
+      matchedEntity: existingData?.matchedEntity,
+      extractedText: existingData?.extractedText,
       transactionDescriptions: transactions.map((t) => t.description),
       transactionEntities: transactions.map((t) => t.supplierOrClient),
     });

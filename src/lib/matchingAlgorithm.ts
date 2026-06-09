@@ -88,8 +88,8 @@ function dayKey(d: Date): string {
  * the text extracted from a comprovante.
  *
  * Scoring breakdown (max 100):
- *   - Amount match (±2 %): 40 pts
- *   - Date match (±3 days): 30 pts
+ *   - Amount match (exact centavo, |diff| < R$0.01): 40 pts
+ *   - Date match (±3 days, closest date wins): 30 pts
  *   - Entity name in text: up to 20 pts
  *   - Description keywords: up to 10 pts
  *
@@ -136,7 +136,17 @@ export function matchTransactions(
 
     // ── Date (30 pts) ────────────────────────────────────────────────────────
     const txDate = tx.paymentDate ?? tx.dueDate;
-    const foundDate = textDates.find((d) => datesMatch(d, txDate));
+    // Pick the date closest to the transaction date (not just the first match),
+    // so that payment dates win over ancillary dates like issue or due dates.
+    const candidateDates = textDates.filter((d) => datesMatch(d, txDate));
+    const foundDate =
+      candidateDates.length > 0
+        ? candidateDates.sort(
+            (a, b) =>
+              Math.abs(a.getTime() - txDate.getTime()) -
+              Math.abs(b.getTime() - txDate.getTime()),
+          )[0]
+        : undefined;
     if (foundDate) {
       score += 30;
       matchedDate = foundDate;
@@ -232,9 +242,17 @@ export function matchTransactions(
       `Soma consolidada de ${txGroup.length} transações: R$ ${groupTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`,
     ];
 
-    // Date match – use the shared payment date of the group
+    // Date match – use the shared payment date of the group; pick closest date
     const txDate = txGroup[0].paymentDate ?? txGroup[0].dueDate;
-    const foundDate = textDates.find((d) => datesMatch(d, txDate));
+    const candidateDates = textDates.filter((d) => datesMatch(d, txDate));
+    const foundDate =
+      candidateDates.length > 0
+        ? candidateDates.sort(
+            (a, b) =>
+              Math.abs(a.getTime() - txDate.getTime()) -
+              Math.abs(b.getTime() - txDate.getTime()),
+          )[0]
+        : undefined;
     if (foundDate) {
       groupScore += 30;
       matchedDate = foundDate;

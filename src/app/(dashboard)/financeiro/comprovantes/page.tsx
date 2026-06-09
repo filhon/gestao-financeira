@@ -833,6 +833,11 @@ export default function ComprovantesPage() {
 
       {/* ── Stats strip ──────────────────────────────────────────────────── */}
       <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="px-5 pt-3 pb-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+            Totais gerais
+          </p>
+        </div>
         <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
           <StatCell
             title="Total"
