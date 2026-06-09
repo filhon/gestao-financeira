@@ -296,11 +296,20 @@ service cloud.firestore {
       // Read: All authenticated roles in the company
       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
 
-      // Create: Admin and Financial Manager only
-      allow create: if isAuthenticated() && isManager(getCompanyId());
+      // Create: bloqueado para o client — somente Admin SDK (via /api/internal/comprovantes/process)
+      // garante que campos derivados (extractedText, matchConfidence, etc.) são server-authored.
+      allow create: if false;
 
-      // Update: Admin and Financial Manager only (confirm/reject matches)
-      allow update: if isAuthenticated() && isManager(getCompanyId());
+      // Update: Admin e Financial Manager (confirmar/rejeitar/remover match)
+      // Campos derivados do servidor (extractedText, matchConfidence, suggestedTransaction*) não
+      // podem ser alterados pelo client — a regra abaixo protege esses campos.
+      allow update: if isAuthenticated() && isManager(getCompanyId()) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'extractedText', 'matchConfidence', 'matchConfidenceLevel',
+          'matchedAmount', 'matchedDate', 'matchedEntity',
+          'suggestedTransactionId', 'suggestedTransactionIds',
+          'fileHash', 'storagePath', 'uploadedBy', 'companyId'
+        ]);
 
       // Delete: Admin only (global admin or company admin)
       allow delete: if isGlobalAdmin();

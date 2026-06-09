@@ -44,7 +44,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { ComprovanteStatusBadge } from "./ComprovanteStatusBadge";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -67,6 +67,13 @@ export function MatchReviewDialog({
 }: Props) {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
+
+  const previewUrl = comprovante
+    ? comprovanteProxyUrl(comprovante.storagePath, "inline")
+    : null;
+  const downloadUrl = comprovante
+    ? comprovanteProxyUrl(comprovante.storagePath, "download")
+    : null;
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [manualTxs, setManualTxs] = useState<Transaction[]>([]);
@@ -160,7 +167,10 @@ export function MatchReviewDialog({
         effectiveTxIds,
         effectiveTxs,
         user.uid,
-        comprovante.storageUrl,
+        comprovante.storagePath,
+        selectedCompany
+          ? { companyId: selectedCompany.id, userEmail: user.email ?? "" }
+          : undefined,
       );
       toast.success("Associação confirmada com sucesso!");
       onUpdated();
@@ -178,13 +188,20 @@ export function MatchReviewDialog({
     shownTxs,
     onUpdated,
     onClose,
+    selectedCompany,
   ]);
 
   const handleReject = useCallback(async () => {
     if (!user || !comprovante) return;
     try {
       setIsProcessing(true);
-      await comprovanteService.rejectMatch(comprovante.id, user.uid);
+      await comprovanteService.rejectMatch(
+        comprovante.id,
+        user.uid,
+        selectedCompany
+          ? { companyId: selectedCompany.id, userEmail: user.email ?? "" }
+          : undefined,
+      );
       toast.info("Sugestão rejeitada. Comprovante permanece na fila.");
       onUpdated();
       onClose();
@@ -193,7 +210,7 @@ export function MatchReviewDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [user, comprovante, onUpdated, onClose]);
+  }, [user, comprovante, onUpdated, onClose, selectedCompany]);
 
   const toggleManualTx = (tx: Transaction) => {
     setManualTxs((prev) => {
@@ -256,11 +273,13 @@ export function MatchReviewDialog({
               Comprovante
             </p>
             <div className="rounded-lg border overflow-hidden bg-muted/30 h-[360px] flex flex-col">
-              <iframe
-                src={comprovante.storageUrl}
-                className="flex-1 w-full"
-                title={`Comprovante página ${comprovante.pageNumber}`}
-              />
+              {previewUrl && (
+                <iframe
+                  src={previewUrl}
+                  className="flex-1 w-full"
+                  title={`Comprovante página ${comprovante.pageNumber}`}
+                />
+              )}
             </div>
             <div className="flex gap-2">
               <Button
@@ -270,7 +289,7 @@ export function MatchReviewDialog({
                 asChild
               >
                 <a
-                  href={comprovante.storageUrl}
+                  href={previewUrl ?? ""}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -284,7 +303,7 @@ export function MatchReviewDialog({
                 className="gap-1.5 flex-1"
                 asChild
               >
-                <a href={comprovante.storageUrl} download>
+                <a href={downloadUrl ?? ""} download>
                   <Download className="h-3.5 w-3.5" />
                   Baixar
                 </a>

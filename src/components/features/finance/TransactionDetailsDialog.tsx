@@ -37,7 +37,7 @@ import {
   Download,
 } from "lucide-react";
 import { PaymentDialog } from "./PaymentDialog";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { db } from "@/lib/firebase/client";
 import {
   doc,
@@ -120,7 +120,16 @@ export function TransactionDetailsDialog({
   // (e.g. confirmed on the /comprovantes page but list cache not yet refreshed)
   useEffect(() => {
     if (!isOpen || !transaction) return;
+    // Prefer storagePath (proxy) over legacy public URL
+    if (transaction.comprovanteStoragePath) {
+      setComprovanteUrl(
+        comprovanteProxyUrl(transaction.comprovanteStoragePath),
+      );
+      setComprovanteId(transaction.comprovanteId ?? null);
+      return;
+    }
     if (transaction.comprovanteUrl) {
+      // Legacy: existing records that still have the public URL
       setComprovanteUrl(transaction.comprovanteUrl);
       setComprovanteId(transaction.comprovanteId ?? null);
       return;
@@ -134,7 +143,7 @@ export function TransactionDetailsDialog({
       .getByTransactionId(transaction.companyId, transaction.id)
       .then((c) => {
         if (c?.matchStatus === "matched") {
-          setComprovanteUrl(c.storageUrl);
+          setComprovanteUrl(comprovanteProxyUrl(c.storagePath));
           setComprovanteId(c.id);
         }
       })

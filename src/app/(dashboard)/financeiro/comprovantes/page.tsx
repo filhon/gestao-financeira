@@ -69,7 +69,7 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Comprovante, Transaction, ComprovanteMatchStatus } from "@/lib/types";
 import { comprovanteService } from "@/lib/services/comprovanteService";
 import { transactionService } from "@/lib/services/transactionService";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { ComprovanteStatusBadge } from "@/components/features/finance/comprovantes/ComprovanteStatusBadge";
 import { ConfidenceBadge } from "@/components/features/finance/comprovantes/ConfidenceBadge";
 import { UploadComprovanteDialog } from "@/components/features/finance/comprovantes/UploadComprovanteDialog";
@@ -409,7 +409,7 @@ const MobileComprovanteCard = memo(function MobileComprovanteCard({
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export default function ComprovantesPage() {
-  useAuth();
+  const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const { isAdmin, isFinancialManager } = usePermissions();
 
@@ -637,7 +637,14 @@ export default function ComprovantesPage() {
     if (!c?.transactionId) return;
     const txIds = c.transactionIds ?? [c.transactionId];
     try {
-      await comprovanteService.removeMatch(c.id, txIds);
+      await comprovanteService.removeMatch(
+        c.id,
+        txIds,
+        user?.uid,
+        selectedCompany && user
+          ? { companyId: selectedCompany.id, userEmail: user.email ?? "" }
+          : undefined,
+      );
       toast.success("Associação removida.");
       refresh();
       queryClient.invalidateQueries({
@@ -703,7 +710,8 @@ export default function ComprovantesPage() {
 
       if (!navigator.share) {
         try {
-          await navigator.clipboard.writeText(c.storageUrl);
+          const proxyLink = `${window.location.origin}${comprovanteProxyUrl(c.storagePath)}`;
+          await navigator.clipboard.writeText(proxyLink);
           toast.success("Link copiado para a área de transferência.");
         } catch {
           toast.error("Compartilhamento não suportado neste navegador.");
@@ -713,7 +721,7 @@ export default function ComprovantesPage() {
 
       setSharingId(c.id);
       try {
-        const proxyUrl = `/api/internal/storage-proxy?path=${encodeURIComponent(c.storagePath)}`;
+        const proxyUrl = comprovanteProxyUrl(c.storagePath);
         const response = await fetch(proxyUrl);
         if (!response.ok) throw new Error("proxy_error");
         const blob = await response.blob();
@@ -724,7 +732,11 @@ export default function ComprovantesPage() {
         if (navigator.canShare?.({ files: [file] })) {
           await navigator.share({ title, text, files: [file] });
         } else {
-          await navigator.share({ title, text, url: c.storageUrl });
+          await navigator.share({
+            title,
+            text,
+            url: `${window.location.origin}${comprovanteProxyUrl(c.storagePath)}`,
+          });
         }
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
@@ -1242,7 +1254,7 @@ export default function ComprovantesPage() {
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem asChild>
                                     <a
-                                      href={c.storageUrl}
+                                      href={comprovanteProxyUrl(c.storagePath)}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="flex items-center gap-2 cursor-pointer"
@@ -1348,7 +1360,7 @@ export default function ComprovantesPage() {
                           onOpenReview={handleOpenReview}
                           onShare={handleShare}
                           onSetRemoveId={handleSetRemoveId}
-                          downloadUrl={c.storageUrl}
+                          downloadUrl={comprovanteProxyUrl(c.storagePath)}
                         />
                       );
                     })}

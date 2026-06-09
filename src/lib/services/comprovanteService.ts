@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { Comprovante, ComprovanteMatchStatus } from "@/lib/types";
+import { auditService } from "@/lib/services/auditService";
 
 const COLLECTION = "comprovantes";
 
@@ -255,7 +256,8 @@ export const comprovanteService = {
       supplierOrClient?: string;
     }>,
     reviewedBy: string,
-    storageUrl: string,
+    storagePath: string,
+    actor?: { companyId: string; userEmail: string },
   ): Promise<void> {
     const batch = writeBatch(db);
     const primaryId = transactionIds[0];
@@ -282,15 +284,32 @@ export const comprovanteService = {
     for (const txId of transactionIds) {
       batch.update(doc(db, "transactions", txId), {
         comprovanteId,
-        comprovanteUrl: storageUrl,
+        comprovanteStoragePath: storagePath,
+        comprovanteUrl: null, // limpar URL pública legada
         updatedAt: serverTimestamp(),
       });
     }
 
     await batch.commit();
+
+    if (actor) {
+      await auditService.log({
+        companyId: actor.companyId,
+        userId: reviewedBy,
+        userEmail: actor.userEmail,
+        action: "confirm_match",
+        entity: "comprovante",
+        entityId: comprovanteId,
+        details: { transactionIds, storagePath },
+      });
+    }
   },
 
-  async rejectMatch(comprovanteId: string, reviewedBy: string): Promise<void> {
+  async rejectMatch(
+    comprovanteId: string,
+    reviewedBy: string,
+    actor?: { companyId: string; userEmail: string },
+  ): Promise<void> {
     await updateDoc(doc(db, COLLECTION, comprovanteId), {
       matchStatus: "rejected_match",
       transactionId: null,
@@ -302,11 +321,25 @@ export const comprovanteService = {
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    if (actor) {
+      await auditService.log({
+        companyId: actor.companyId,
+        userId: reviewedBy,
+        userEmail: actor.userEmail,
+        action: "reject_match",
+        entity: "comprovante",
+        entityId: comprovanteId,
+        details: {},
+      });
+    }
   },
 
   async removeMatch(
     comprovanteId: string,
     transactionIds: string[],
+    removedBy?: string,
+    actor?: { companyId: string; userEmail: string },
   ): Promise<void> {
     const batch = writeBatch(db);
 
@@ -326,11 +359,24 @@ export const comprovanteService = {
       batch.update(doc(db, "transactions", txId), {
         comprovanteId: null,
         comprovanteUrl: null,
+        comprovanteStoragePath: null,
         updatedAt: serverTimestamp(),
       });
     }
 
     await batch.commit();
+
+    if (removedBy && actor) {
+      await auditService.log({
+        companyId: actor.companyId,
+        userId: removedBy,
+        userEmail: actor.userEmail,
+        action: "remove_match",
+        entity: "comprovante",
+        entityId: comprovanteId,
+        details: { transactionIds },
+      });
+    }
   },
 
   async update(

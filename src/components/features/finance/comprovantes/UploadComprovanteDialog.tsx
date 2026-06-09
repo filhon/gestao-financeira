@@ -22,18 +22,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from "firebase/storage";
+import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { storage } from "@/lib/firebase/client";
-import { splitPdfPages, extractTextFromPdf } from "@/lib/pdfUtils";
-import { matchTransactions, MatchScore } from "@/lib/matchingAlgorithm";
+import { splitPdfPages } from "@/lib/pdfUtils";
 import { comprovanteService } from "@/lib/services/comprovanteService";
 import { transactionService } from "@/lib/services/transactionService";
-import { Transaction } from "@/lib/types";
+import { Transaction, ComprovanteMatchStatus } from "@/lib/types";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { ConfidenceBadge } from "./ConfidenceBadge";
@@ -42,17 +36,28 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
+const ACCEPTED_TYPES =
+  "application/pdf,image/jpeg,image/png,image/webp,image/gif";
+
 type PageResult = {
   pageNumber: number;
   totalPages: number;
   blob: Blob;
-  extractedText: string;
-  storageUrl: string;
+  mimeType: string;
+  storageUrl?: string; // não usado na UI — só storagePath é relevante
   storagePath: string;
   fileSize: number;
   comprovanteId: string;
-  // best match
-  bestMatch: MatchScore | null;
+  matchStatus: ComprovanteMatchStatus;
+  // best match metadata from server
+  bestMatchTransactionId?: string;
+  bestMatchTransactionIds?: string[];
+  matchConfidence?: number;
+  matchConfidenceLevel?: "HIGH" | "MEDIUM" | "LOW";
+  matchedAmount?: number;
+  matchedDate?: Date;
+  matchedEntity?: string;
+  isConsolidated?: boolean;
   // user decision
   decision: "confirm" | "skip" | null;
 };
@@ -91,52 +96,154 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
     onClose();
   };
 
-  // ── File processing ──────────────────────────────────────────────────────────
+  // ── Compute SHA-256 hash of a Blob ────────────────────────────────────────────
+
+  const computeHash = async (blob: Blob): Promise<string> => {
+    const buf = await blob.arrayBuffer();
+    const hashBuf = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  };
+
+  // ── Process a single page/image via server-side API route ────────────────────
+
+  const processPage = useCallback(
+    async (
+      blob: Blob,
+      mimeType: string,
+      pageNumber: number,
+      totalPages: number,
+      fileHash: string,
+      uploadBatchId: string,
+      storageRef: ReturnType<typeof ref>,
+    ): Promise<Omit<PageResult, "decision"> | null> => {
+      if (!user || !selectedCompany) return null;
+
+      // Upload to Storage first
+      await uploadBytes(storageRef, blob, { contentType: mimeType });
+      const storagePath = storageRef.fullPath;
+
+      // Call server-side pipeline
+      let resp: Response;
+      try {
+        resp = await fetch("/api/internal/comprovantes/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storagePath,
+            companyId: selectedCompany.id,
+            pageNumber,
+            totalPages,
+            fileHash,
+            uploadBatchId,
+            uploadedBy: user.uid,
+            mimeType,
+          }),
+        });
+      } catch {
+        throw new Error("network_error");
+      }
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error ?? "server_error");
+      }
+
+      const data = (await resp.json()) as {
+        comprovanteId: string;
+        matchStatus: ComprovanteMatchStatus;
+        suggestedTransactionId?: string;
+        suggestedTransactionIds?: string[];
+        isConsolidated?: boolean;
+        matchConfidence?: number;
+        matchConfidenceLevel?: "HIGH" | "MEDIUM" | "LOW";
+        matchedAmount?: number;
+        matchedDate?: string;
+        matchedEntity?: string;
+        duplicate?: boolean;
+      };
+
+      return {
+        pageNumber,
+        totalPages,
+        blob,
+        mimeType,
+        storagePath,
+        fileSize: blob.size,
+        comprovanteId: data.comprovanteId,
+        matchStatus: data.matchStatus,
+        bestMatchTransactionId: data.suggestedTransactionId,
+        bestMatchTransactionIds: data.suggestedTransactionIds,
+        isConsolidated: data.isConsolidated,
+        matchConfidence: data.matchConfidence,
+        matchConfidenceLevel: data.matchConfidenceLevel,
+        matchedAmount: data.matchedAmount,
+        matchedDate: data.matchedDate ? new Date(data.matchedDate) : undefined,
+        matchedEntity: data.matchedEntity,
+      };
+    },
+    [user, selectedCompany],
+  );
+
+  // ── Main file processing ──────────────────────────────────────────────────────
 
   const processFile = useCallback(
     async (file: File) => {
-      if (!file.type.includes("pdf")) {
-        toast.error("Apenas arquivos PDF são aceitos.");
+      if (!user || !selectedCompany) return;
+
+      const mimeType = file.type || "application/pdf";
+      const isPdf = mimeType === "application/pdf";
+      const isImage = mimeType.startsWith("image/");
+
+      if (!isPdf && !isImage) {
+        toast.error(
+          "Apenas arquivos PDF e imagens (JPG, PNG, WebP) são aceitos.",
+        );
         return;
       }
-      if (!user || !selectedCompany) return;
 
       try {
         setStep("processing");
         setProgress(5);
-        setProgressLabel("Lendo o arquivo PDF...");
+        setProgressLabel("Lendo o arquivo...");
 
-        // 1. Split pages
-        const splitResult = await splitPdfPages(file);
-        const total = splitResult.length;
-        setProgressLabel(`Extraindo ${total} página${total > 1 ? "s" : ""}...`);
+        // Split PDFs into pages; images are treated as a single "page"
+        type PageEntry = {
+          blob: Blob;
+          mimeType: string;
+          pageNumber: number;
+          totalPages: number;
+        };
+        let pagesToProcess: PageEntry[];
+
+        if (isPdf) {
+          const split = await splitPdfPages(file);
+          pagesToProcess = split.map((s) => ({
+            ...s,
+            mimeType: "application/pdf",
+          }));
+        } else {
+          pagesToProcess = [
+            { blob: file, mimeType, pageNumber: 1, totalPages: 1 },
+          ];
+        }
+
+        const total = pagesToProcess.length;
+        setProgressLabel(
+          `Verificando duplicados (${total} página${total > 1 ? "s" : ""})...`,
+        );
         setProgress(15);
 
-        // 2. Load candidate transactions (paid or authorized payables) — filtered server-side
-        const candidates = await transactionService.getAll({
-          companyId: selectedCompany.id,
-          type: "payable",
-          statuses: ["paid", "authorized"],
-        });
-        setTransactions(candidates);
-        setProgress(20);
-
-        // 3. Compute all SHA-256 hashes upfront for batch dedup
-        setProgressLabel("Verificando duplicados...");
+        // Compute hashes for batch dedup
         const hashEntries = await Promise.all(
-          splitResult.map(async ({ blob, pageNumber, totalPages }) => {
-            const hashBuf = await crypto.subtle.digest(
-              "SHA-256",
-              await blob.arrayBuffer(),
-            );
-            const fileHash = Array.from(new Uint8Array(hashBuf))
-              .map((b) => b.toString(16).padStart(2, "0"))
-              .join("");
-            return { blob, pageNumber, totalPages, fileHash };
-          }),
+          pagesToProcess.map(async (p) => ({
+            ...p,
+            fileHash: await computeHash(p.blob),
+          })),
         );
 
-        // 4. Single batch query to find all already-uploaded hashes
+        // Batch dedup query
         const allHashes = hashEntries.map((e) => e.fileHash);
         const existingHashes = await comprovanteService.findExistingHashes(
           selectedCompany.id,
@@ -147,6 +254,15 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           (e) => !existingHashes.has(e.fileHash),
         );
         const duplicatesSkipped = hashEntries.length - toProcess.length;
+        setProgress(20);
+
+        // Pre-load paid/authorized transactions for the review step display
+        const candidates = await transactionService.getAll({
+          companyId: selectedCompany.id,
+          type: "payable",
+          statuses: ["paid", "authorized"],
+        });
+        setTransactions(candidates);
         setProgress(25);
 
         const batchId = uuidv4();
@@ -154,80 +270,51 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         const pageFailures: number[] = [];
 
         for (let i = 0; i < toProcess.length; i++) {
-          const { blob, pageNumber, totalPages, fileHash } = toProcess[i];
+          const {
+            blob,
+            mimeType: pMimeType,
+            pageNumber,
+            totalPages,
+            fileHash,
+          } = toProcess[i];
           setProgressLabel(
             `Processando página ${pageNumber} de ${totalPages}...`,
           );
           setProgress(25 + Math.round((i / toProcess.length) * 65));
 
-          let storageRef: ReturnType<typeof ref> | null = null;
+          const comprovanteId = uuidv4();
+          const storageRef = ref(
+            storage,
+            `comprovantes/${selectedCompany.id}/${comprovanteId}.${pMimeType.startsWith("image/") ? pMimeType.split("/")[1] : "pdf"}`,
+          );
+
           try {
-            // 5. Extract text
-            const text = await extractTextFromPdf(blob);
-
-            // 6. Match
-            const scores = matchTransactions(text, candidates);
-            const best = scores[0] ?? null;
-
-            // 7. Upload page to Storage
-            const comprovanteId = uuidv4();
-            storageRef = ref(
-              storage,
-              `comprovantes/${selectedCompany.id}/${comprovanteId}.pdf`,
+            const result = await processPage(
+              blob,
+              pMimeType,
+              pageNumber,
+              totalPages,
+              fileHash,
+              batchId,
+              storageRef,
             );
-            await uploadBytes(storageRef, blob, {
-              contentType: "application/pdf",
-            });
-            const storageUrl = await getDownloadURL(storageRef);
-
-            // 8. Save to Firestore — if this fails, roll back the Storage upload
-            let firestoreId: string;
-            try {
-              firestoreId = await comprovanteService.create({
-                companyId: selectedCompany.id,
-                uploadBatchId: batchId,
-                pageNumber,
-                totalPages,
-                storageUrl,
-                storagePath: storageRef.fullPath,
-                fileSize: blob.size,
-                fileHash,
-                matchStatus: best ? "pending_review" : "unmatched",
-                suggestedTransactionId: best?.transactionId,
-                suggestedTransactionIds: best?.transactionIds,
-                isConsolidated: best?.isConsolidated ?? false,
-                matchConfidence: best?.score,
-                matchConfidenceLevel: best?.confidenceLevel,
-                matchedAmount: best?.matchedAmount,
-                matchedDate: best?.matchedDate,
-                matchedEntity: best?.matchedEntity,
-                extractedText: text,
-                uploadedBy: user.uid,
-                uploadedAt: new Date(),
-              });
-            } catch (firestoreErr) {
-              // Roll back the orphaned Storage object
-              deleteObject(storageRef).catch(() => {});
-              throw firestoreErr;
+            if (!result) {
+              pageFailures.push(pageNumber);
+              continue;
             }
 
             results.push({
-              pageNumber,
-              totalPages,
-              blob,
-              extractedText: text,
-              storageUrl,
-              storagePath: storageRef.fullPath,
-              fileSize: blob.size,
-              comprovanteId: firestoreId,
-              bestMatch: best,
-              decision: best?.confidenceLevel === "HIGH" ? "confirm" : null,
+              ...result,
+              decision:
+                result.matchConfidenceLevel === "HIGH" ? "confirm" : null,
             });
           } catch (pageErr) {
             console.error(
               `[UploadComprovanteDialog] página ${pageNumber} falhou:`,
               pageErr,
             );
+            // Roll back Storage upload if it happened
+            deleteObject(storageRef).catch(() => {});
             pageFailures.push(pageNumber);
           }
         }
@@ -246,7 +333,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           pageFailures.length === 0
         ) {
           toast.warning(
-            `Todas as ${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} deste PDF já foram enviadas anteriormente.`,
+            `Todas as ${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} deste arquivo já foram enviadas anteriormente.`,
           );
           reset();
           return;
@@ -268,11 +355,11 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         setStep("review");
       } catch (err) {
         console.error("[UploadComprovanteDialog]", err);
-        toast.error("Erro ao processar o arquivo PDF.");
+        toast.error("Erro ao processar o arquivo.");
         reset();
       }
     },
-    [user, selectedCompany],
+    [user, selectedCompany, processPage],
   );
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -288,28 +375,31 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
     if (file) processFile(file);
   };
 
-  // ── Save confirmed matches ───────────────────────────────────────────────────
+  // ── Save confirmed matches ─────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!user) return;
+    if (!user || !selectedCompany) return;
     try {
       setStep("saving");
       const toConfirm = pages.filter(
-        (p) => p.decision === "confirm" && p.bestMatch,
+        (p) =>
+          p.decision === "confirm" &&
+          p.bestMatchTransactionIds &&
+          p.bestMatchTransactionIds.length > 0,
       );
 
       for (const page of toConfirm) {
-        const matchTxs = page
-          .bestMatch!.transactionIds.map((id) =>
-            transactions.find((t) => t.id === id),
-          )
+        const txIds = page.bestMatchTransactionIds!;
+        const matchTxs = txIds
+          .map((id) => transactions.find((t) => t.id === id))
           .filter((t): t is Transaction => !!t);
         await comprovanteService.confirmMatch(
           page.comprovanteId,
-          page.bestMatch!.transactionIds,
+          txIds,
           matchTxs,
           user.uid,
-          page.storageUrl,
+          page.storagePath,
+          { companyId: selectedCompany.id, userEmail: user.email ?? "" },
         );
       }
 
@@ -343,19 +433,17 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
   const confirmAllHigh = () => {
     setPages((prev) =>
       prev.map((p) =>
-        p.bestMatch?.confidenceLevel === "HIGH"
-          ? { ...p, decision: "confirm" }
-          : p,
+        p.matchConfidenceLevel === "HIGH" ? { ...p, decision: "confirm" } : p,
       ),
     );
   };
 
   const highCount = pages.filter(
-    (p) => p.bestMatch?.confidenceLevel === "HIGH",
+    (p) => p.matchConfidenceLevel === "HIGH",
   ).length;
   const confirmedCount = pages.filter((p) => p.decision === "confirm").length;
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <ResponsiveModal open={open} onOpenChange={handleClose}>
@@ -363,12 +451,13 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         <ResponsiveModalHeader>
           <ResponsiveModalTitle>Enviar Comprovantes</ResponsiveModalTitle>
           <ResponsiveModalDescription>
-            Faça upload de um PDF com um ou mais comprovantes de pagamento. O
-            sistema irá associar automaticamente cada página a uma transação.
+            Faça upload de um PDF com um ou mais comprovantes, ou de imagens
+            (JPG, PNG). O sistema irá associar automaticamente cada página a uma
+            transação.
           </ResponsiveModalDescription>
         </ResponsiveModalHeader>
 
-        {/* ── IDLE: drop zone ─────────────────────────────────────────────── */}
+        {/* ── IDLE: drop zone ──────────────────────────────────────────────── */}
         {step === "idle" && (
           <div
             className={cn(
@@ -390,16 +479,16 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
             </div>
             <div>
               <p className="font-medium text-foreground">
-                Arraste um PDF ou clique para selecionar
+                Arraste um arquivo ou clique para selecionar
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Cada página do PDF será tratada como um comprovante separado
+                PDF (cada página = um comprovante) · JPG · PNG · WebP
               </p>
             </div>
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/pdf"
+              accept={ACCEPTED_TYPES}
               className="hidden"
               onChange={onFileChange}
             />
@@ -415,7 +504,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
             </div>
             <Progress value={progress} className="h-2" />
             <p className="text-xs text-muted-foreground">
-              Extraindo texto e analisando matches com as transações do sistema…
+              Extraindo texto e analisando correspondências com as transações…
             </p>
           </div>
         )}
@@ -443,11 +532,12 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
 
             <div className="space-y-3">
               {pages.map((page, idx) => {
-                const tx = page.bestMatch
+                const tx = page.bestMatchTransactionId
                   ? transactions.find(
-                      (t) => t.id === page.bestMatch!.transactionId,
+                      (t) => t.id === page.bestMatchTransactionId,
                     )
                   : null;
+                const isNeedsManual = page.matchStatus === "needs_manual";
 
                 return (
                   <div
@@ -476,37 +566,43 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
 
                       {/* Match info */}
                       <div className="flex-1 min-w-0">
-                        {page.bestMatch && tx ? (
+                        {isNeedsManual ? (
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                            <p className="text-sm text-muted-foreground">
+                              Não foi possível ler o arquivo — revise
+                              manualmente
+                            </p>
+                          </div>
+                        ) : page.matchConfidenceLevel && tx ? (
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               <ConfidenceBadge
-                                level={page.bestMatch.confidenceLevel}
-                                score={page.bestMatch.score}
+                                level={page.matchConfidenceLevel}
+                                score={page.matchConfidence}
                               />
-                              {page.bestMatch.isConsolidated && (
+                              {page.isConsolidated && (
                                 <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                                  {page.bestMatch.transactionIds.length}{" "}
+                                  {page.bestMatchTransactionIds?.length}{" "}
                                   transações agrupadas
                                 </span>
                               )}
                               <span className="text-sm font-medium truncate">
                                 {tx.description}
-                                {page.bestMatch.isConsolidated &&
-                                  page.bestMatch.transactionIds.length > 1 &&
-                                  ` e mais ${page.bestMatch.transactionIds.length - 1}`}
+                                {page.isConsolidated &&
+                                  (page.bestMatchTransactionIds?.length ?? 0) >
+                                    1 &&
+                                  ` e mais ${(page.bestMatchTransactionIds?.length ?? 1) - 1}`}
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">
                               {tx.supplierOrClient &&
                                 `${tx.supplierOrClient} · `}
-                              {page.bestMatch.matchedAmount
-                                ? formatCurrency(page.bestMatch.matchedAmount)
+                              {page.matchedAmount
+                                ? formatCurrency(page.matchedAmount)
                                 : formatCurrency(tx.finalAmount ?? tx.amount)}
                               {tx.paymentDate &&
                                 ` · ${format(tx.paymentDate, "dd/MM/yyyy", { locale: ptBR })}`}
-                            </p>
-                            <p className="text-xs text-muted-foreground italic">
-                              {page.bestMatch.reasons.join(" · ")}
                             </p>
                           </div>
                         ) : (
@@ -520,7 +616,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
                       </div>
 
                       {/* Actions */}
-                      {page.bestMatch && (
+                      {!isNeedsManual && page.matchConfidenceLevel && (
                         <div className="flex gap-1 shrink-0">
                           <Button
                             size="sm"
@@ -587,7 +683,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           </div>
         )}
 
-        {/* ── DONE ─────────────────────────────────────────────────────────── */}
+        {/* ── DONE ──────────────────────────────────────────────────────── */}
         {step === "done" && (
           <div className="mt-6 flex flex-col items-center gap-4 py-8">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15">

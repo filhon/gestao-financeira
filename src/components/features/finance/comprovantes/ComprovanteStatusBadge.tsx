@@ -23,6 +23,11 @@ const CONFIG: Record<
     label: "Rejeitado",
     className: "bg-muted text-muted-foreground border-border",
   },
+  needs_manual: {
+    label: "Revisar manualmente",
+    className:
+      "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20",
+  },
 };
 
 export function ComprovanteStatusBadge({

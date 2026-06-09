@@ -12,6 +12,19 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
+/**
+ * Builds an authenticated proxy URL for a comprovante stored in Firebase Storage.
+ * Never use the raw storageUrl (public download token) — use this instead.
+ * @param mode "download" adds Content-Disposition: attachment; "inline" renders in browser.
+ */
+export function comprovanteProxyUrl(
+  storagePath: string,
+  mode: "download" | "inline" = "download",
+): string {
+  const base = `/api/internal/storage-proxy?path=${encodeURIComponent(storagePath)}`;
+  return mode === "inline" ? `${base}&inline=1` : base;
+}
+
 export function formatCurrencyAbbr(value: number) {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";

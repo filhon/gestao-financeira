@@ -17,6 +17,7 @@ import { cookies } from "next/headers";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
 
 export async function GET(req: NextRequest) {
+  // ?inline=1 → serve inline (para <iframe> preview); default → attachment
   // ── Auth ──────────────────────────────────────────────────────────────────
   const cookieStore = await cookies();
   const token = cookieStore.get("auth_token")?.value;
@@ -81,6 +82,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 
+  const inline = req.nextUrl.searchParams.get("inline") === "1";
+
   // ── Download from Storage ─────────────────────────────────────────────────
   try {
     const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
@@ -98,11 +101,31 @@ export async function GET(req: NextRequest) {
     const file = bucket.file(storagePath);
     const [contents] = await file.download();
 
+    const rawName = storagePath.split("/").pop() ?? "comprovante";
+    // Sanitise filename: strip CR/LF/quotes that would break the header
+    const safeName = rawName.replace(/[\r\n"]/g, "_");
+    // Infer MIME type from extension (avoids an extra getMetadata() round-trip)
+    const ext = rawName.split(".").pop()?.toLowerCase() ?? "pdf";
+    const mimeType =
+      ext === "pdf"
+        ? "application/pdf"
+        : ext === "png"
+          ? "image/png"
+          : ext === "webp"
+            ? "image/webp"
+            : ext === "gif"
+              ? "image/gif"
+              : "image/jpeg";
+
+    const disposition = inline
+      ? `inline; filename="${safeName}"`
+      : `attachment; filename="${safeName}"`;
+
     return new NextResponse(contents as unknown as BodyInit, {
       status: 200,
       headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${storagePath.split("/").pop()}"`,
+        "Content-Type": mimeType,
+        "Content-Disposition": disposition,
         "Cache-Control": "private, max-age=300",
       },
     });

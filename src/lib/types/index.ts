@@ -242,7 +242,8 @@ export interface Transaction {
 
   // Comprovante de pagamento
   comprovanteId?: string;
-  comprovanteUrl?: string;
+  comprovanteUrl?: string; // legado — URL pública do Storage (não usar; usar comprovanteStoragePath)
+  comprovanteStoragePath?: string; // caminho no Storage; resolva via /api/internal/storage-proxy
 
   // Reimbursement
   isReimbursement?: boolean;
@@ -333,7 +334,10 @@ export interface AuditLog {
     | "reject"
     | "pay"
     | "authorize"
-    | "release";
+    | "release"
+    | "confirm_match"
+    | "reject_match"
+    | "remove_match";
   entity:
     | "transaction"
     | "company"
@@ -342,7 +346,8 @@ export interface AuditLog {
     | "entity"
     | "batch"
     | "recurrence"
-    | "budget";
+    | "budget"
+    | "comprovante";
   entityId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details: Record<string, any>;
@@ -431,7 +436,8 @@ export type ComprovanteMatchStatus =
   | "matched"
   | "pending_review"
   | "unmatched"
-  | "rejected_match";
+  | "rejected_match"
+  | "needs_manual"; // arquivo não legível (scan/imagem sem OCR)
 
 export type ComprovanteConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
 
@@ -441,7 +447,7 @@ export interface Comprovante {
   uploadBatchId: string; // Groups all pages from the same PDF upload
   pageNumber: number; // 1-based page index in the original PDF
   totalPages: number; // Total pages in the original PDF
-  storageUrl: string; // Firebase Storage download URL
+  storageUrl?: string; // Firebase Storage download URL (legado — use proxy em vez disto)
   storagePath: string; // Firebase Storage full path
   fileSize: number; // Size in bytes
 
