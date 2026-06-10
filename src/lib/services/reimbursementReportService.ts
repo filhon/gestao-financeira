@@ -26,7 +26,6 @@ import { format } from "date-fns";
 import { formatCurrency } from "@/lib/utils";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { PDFDocument } from "pdf-lib";
 
 const COLLECTION = "reimbursement_reports";
 
@@ -84,38 +83,6 @@ const ensureInterFont = async (doc: jsPDF): Promise<boolean> => {
     return !!((doc as any).getFontList?.() ?? {}).Inter;
   } catch {
     return false;
-  }
-};
-
-// ─── Image embed helper ───────────────────────────────────────────────────────
-
-const fetchImageAsBase64 = async (
-  url: string,
-): Promise<{ base64: string; format: "JPEG" | "PNG" } | null> => {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const blob = await response.blob();
-    const mimeType = blob.type;
-    if (
-      !mimeType.startsWith("image/jpeg") &&
-      !mimeType.startsWith("image/png") &&
-      !mimeType.startsWith("image/jpg")
-    )
-      return null;
-    const fmt: "JPEG" | "PNG" = mimeType.includes("png") ? "PNG" : "JPEG";
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        resolve(result.split(",")[1]);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    return { base64, format: fmt };
-  } catch {
-    return null;
   }
 };
 
@@ -412,6 +379,7 @@ export const reimbursementReportService = {
     const GRAY_300 = [209, 213, 219] as [number, number, number];
     const AMBER_600 = [217, 119, 6] as [number, number, number];
     const RED_600 = [220, 38, 38] as [number, number, number];
+    const LINK_BLUE = [37, 99, 235] as [number, number, number];
 
     const fillRGB = (c: [number, number, number]) =>
       doc.setFillColor(c[0], c[1], c[2]);
@@ -608,12 +576,18 @@ export const reimbursementReportService = {
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tableRows: any[][] = sorted.map((t, idx) => {
+    const tableRows: any[][] = sorted.map((t) => {
       const effDate =
         t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
       const effAmount =
         t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-      const hasAttachments = (t.attachments?.length ?? 0) > 0;
+      const atts = (t.attachments ?? []).filter((a) => !!a.url);
+
+      let attachContent = "-";
+      if (atts.length === 1) attachContent = "↓ Baixar";
+      else if (atts.length > 1)
+        attachContent = atts.map((_, i) => `↓ NF ${i + 1}`).join("\n");
+
       return [
         format(effDate, "dd/MM/yy"),
         t.description || "-",
@@ -630,8 +604,13 @@ export const reimbursementReportService = {
           },
         },
         {
-          content: hasAttachments ? `ver p. ${idx + 3}` : "-",
-          styles: { textColor: SLATE_600, halign: "center", fontSize: 7 },
+          content: attachContent,
+          styles: {
+            textColor: atts.length > 0 ? LINK_BLUE : SLATE_600,
+            halign: "center",
+            fontSize: 7.5,
+            fontStyle: atts.length > 0 ? "bold" : "normal",
+          },
         },
         {
           content: formatCurrency(effAmount),
@@ -642,14 +621,14 @@ export const reimbursementReportService = {
 
     autoTable(doc, {
       startY: 28,
-      head: [["Data", "Descrição", "Status", "Anexo", "Valor (R$)"]],
+      head: [["Data", "Descrição", "Status", "Nota Fiscal", "Valor (R$)"]],
       body: tableRows,
       theme: "plain",
       columnStyles: {
         0: { cellWidth: 22 },
-        1: { cellWidth: USABLE_W - 22 - 24 - 22 - 28 },
+        1: { cellWidth: USABLE_W - 22 - 24 - 30 - 28 },
         2: { cellWidth: 24, halign: "center" },
-        3: { cellWidth: 22, halign: "center" },
+        3: { cellWidth: 30, halign: "center" },
         4: { cellWidth: 28, halign: "right" },
       },
       styles: {
@@ -674,6 +653,17 @@ export const reimbursementReportService = {
       alternateRowStyles: { fillColor: SLATE_50 },
       showHead: "everyPage",
       rowPageBreak: "auto",
+      didDrawCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 3) return;
+        const tx = sorted[data.row.index];
+        const atts = (tx.attachments ?? []).filter((a) => !!a.url);
+        if (atts.length === 0) return;
+        const { x, y, width, height } = data.cell;
+        const linkH = height / atts.length;
+        atts.forEach((att, i) => {
+          doc.link(x, y + i * linkH, width, linkH, { url: att.url });
+        });
+      },
       didDrawPage: () => {
         doc.setCharSpace(0);
       },
@@ -703,192 +693,14 @@ export const reimbursementReportService = {
       );
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // PÁGINAS DE ANEXOS
-    // ────────────────────────────────────────────────────────────────────────
-
-    // Track PDF attachments to concatenate after jsPDF is done.
-    // Each entry records the jsPDF page number of the placeholder so we can
-    // insert the real PDF pages right after it later.
-    const pdfAttachmentsToConcat: Array<{
-      url: string;
-      name: string;
-      afterPage: number; // 1-based jsPDF page index of the placeholder
-    }> = [];
-
-    for (const t of sorted) {
-      const attachments = t.attachments ?? [];
-
-      const effDate2 =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      const effAmt2 =
-        t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-
-      const drawAttachmentHeader = (name: string) => {
-        fillRGB(NAVY);
-        doc.rect(0, 0, PAGE_W, 22, "F");
-        fillRGB(GREEN_600);
-        doc.rect(0, 20, PAGE_W, 2, "F");
-
-        doc.setFont(font, "bold");
-        doc.setFontSize(8.5);
-        textRGB(WHITE);
-        const descTrunc =
-          t.description.length > 60
-            ? t.description.slice(0, 57) + "..."
-            : t.description;
-        doc.text(descTrunc, MARGIN, 12);
-
-        doc.setFont(font, "normal");
-        doc.setFontSize(7.5);
-        textRGB(GRAY_300);
-        doc.text(
-          `${format(effDate2, "dd/MM/yyyy")} · ${formatCurrency(effAmt2)}`,
-          PAGE_W - MARGIN,
-          12,
-          { align: "right" },
-        );
-
-        doc.setFont(font, "normal");
-        doc.setFontSize(7.5);
-        textRGB(SLATE_600);
-        doc.text(`Anexo: ${name}`, MARGIN, 30);
-      };
-
-      for (const attachment of attachments) {
-        const isPdf =
-          attachment.type === "application/pdf" ||
-          attachment.name.toLowerCase().endsWith(".pdf");
-
-        if (isPdf) {
-          // Add a placeholder/separator page; actual pages will be spliced in later
-          doc.addPage();
-          drawAttachmentHeader(attachment.name);
-
-          doc.setFont(font, "normal");
-          doc.setFontSize(9);
-          textRGB(SLATE_600);
-          doc.text("Documento PDF — páginas a seguir.", MARGIN, 45);
-
-          pdfAttachmentsToConcat.push({
-            url: attachment.url,
-            name: attachment.name,
-            afterPage: doc.getNumberOfPages(),
-          });
-          continue;
-        }
-
-        const isImage =
-          attachment.type.startsWith("image/") ||
-          attachment.category === "invoice";
-        if (!isImage) continue;
-
-        doc.addPage();
-        drawAttachmentHeader(attachment.name);
-
-        const imgData = await fetchImageAsBase64(attachment.url);
-        if (imgData) {
-          const maxW = USABLE_W;
-          const maxH = PAGE_H - 48 - 20;
-
-          const tempImg = new Image();
-          await new Promise<void>((resolve) => {
-            tempImg.onload = () => resolve();
-            tempImg.onerror = () => resolve();
-            tempImg.src = `data:image/${imgData.format === "PNG" ? "png" : "jpeg"};base64,${imgData.base64}`;
-          });
-
-          let imgW = maxW;
-          let imgH = maxH;
-          if (tempImg.naturalWidth && tempImg.naturalHeight) {
-            const ratio = tempImg.naturalWidth / tempImg.naturalHeight;
-            if (maxW / ratio <= maxH) {
-              imgW = maxW;
-              imgH = maxW / ratio;
-            } else {
-              imgH = maxH;
-              imgW = maxH * ratio;
-            }
-          }
-
-          const imgX = MARGIN + (maxW - imgW) / 2;
-          try {
-            doc.addImage(imgData.base64, imgData.format, imgX, 34, imgW, imgH);
-          } catch {
-            doc.setFont(font, "normal");
-            doc.setFontSize(8.5);
-            textRGB(SLATE_600);
-            doc.text("Imagem não pôde ser incorporada ao PDF.", MARGIN, 40);
-          }
-        } else {
-          doc.setFont(font, "normal");
-          doc.setFontSize(9);
-          textRGB(SLATE_600);
-          doc.text("Arquivo não pôde ser carregado.", MARGIN, 45);
-        }
-      }
-    }
-
-    // ── Draw footers on all pages (report only, before concatenation) ────────
+    // ── Draw footers on all pages ─────────────────────────────────────────────
     const reportPageCount = doc.getNumberOfPages();
     for (let p = 1; p <= reportPageCount; p++) {
       doc.setPage(p);
       drawFooter(p, reportPageCount);
     }
 
-    // ── Concatenate PDF attachments via pdf-lib ────────────────────────────
     const filename = `${report.rdNumber.replace("-", "_")}_${format(new Date(), "yyyyMMdd")}.pdf`;
-
-    if (pdfAttachmentsToConcat.length === 0) {
-      doc.save(filename);
-      return;
-    }
-
-    // Fetch all PDF attachment bytes in parallel
-    const attachmentResults = await Promise.all(
-      pdfAttachmentsToConcat.map(async (entry) => {
-        try {
-          const res = await fetch(entry.url);
-          if (!res.ok) return { ...entry, bytes: null };
-          return { ...entry, bytes: await res.arrayBuffer() };
-        } catch {
-          return { ...entry, bytes: null };
-        }
-      }),
-    );
-
-    // Build merged PDF using pdf-lib.
-    // Strategy: insert attachment pages right after their placeholder page.
-    // We process entries in reverse order so earlier page indices stay valid.
-    const reportBytes = doc.output("arraybuffer");
-    const merged = await PDFDocument.load(reportBytes);
-
-    for (const entry of [...attachmentResults].reverse()) {
-      if (!entry.bytes) continue;
-      try {
-        const attachPdf = await PDFDocument.load(entry.bytes, {
-          ignoreEncryption: true,
-        });
-        const indices = attachPdf.getPageIndices();
-        const copied = await merged.copyPages(attachPdf, indices);
-        // Insert pages right after the placeholder (afterPage is 1-based)
-        copied.forEach((page, i) => {
-          merged.insertPage(entry.afterPage + i, page);
-        });
-      } catch (err) {
-        console.error(`[RD PDF] Falha ao mesclar anexo "${entry.name}":`, err);
-      }
-    }
-
-    const finalBytes = await merged.save();
-    const blob = new Blob([new Uint8Array(finalBytes)], {
-      type: "application/pdf",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    doc.save(filename);
   },
 };
