@@ -158,7 +158,7 @@ service firebase.storage {
       // WRITE (Upload): Admin and Financial Manager only
       allow write: if isAuthenticated() && isManager(companyId)
         && request.resource.size < 20 * 1024 * 1024 // Max 20MB
-        && request.resource.contentType.matches('application/pdf|application/octet-stream');
+        && request.resource.contentType.matches('application/pdf|application/octet-stream|image/.*');
 
       // DELETE: Admin and Financial Manager only
       allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());

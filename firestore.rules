@@ -301,15 +301,18 @@ service cloud.firestore {
       allow create: if false;
 
       // Update: Admin e Financial Manager (confirmar/rejeitar/remover match)
-      // Campos derivados do servidor (extractedText, matchConfidence, suggestedTransaction*) não
-      // podem ser alterados pelo client — a regra abaixo protege esses campos.
+      // Campos derivados do servidor não podem ser reatribuídos pelo client.
+      // suggestedTransactionId/Ids podem ser limpos (null) mas não reatribuídos.
       allow update: if isAuthenticated() && isManager(getCompanyId()) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'extractedText', 'matchConfidence', 'matchConfidenceLevel',
           'matchedAmount', 'matchedDate', 'matchedEntity',
-          'suggestedTransactionId', 'suggestedTransactionIds',
           'fileHash', 'storagePath', 'uploadedBy', 'companyId'
-        ]);
+        ]) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['suggestedTransactionId']) ||
+         request.resource.data.suggestedTransactionId == null) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['suggestedTransactionIds']) ||
+         request.resource.data.suggestedTransactionIds == null);
 
       // Delete: Admin always; Manager can delete unmatched/rejected/unreadable receipts
       allow delete: if isGlobalAdmin() ||
