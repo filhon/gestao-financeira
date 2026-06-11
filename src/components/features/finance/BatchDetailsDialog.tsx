@@ -925,14 +925,9 @@ export function BatchDetailsDialog({
                                   return (
                                     <Badge variant="secondary">Rascunho</Badge>
                                   );
-                                default:
-                                  return (
-                                    <Badge variant="outline">
-                                      {t.status === "open"
-                                        ? "Aberto"
-                                        : t.status}
-                                    </Badge>
-                                  );
+                                case "paid":
+                                case "received":
+                                  return <Badge variant="outline">Pago</Badge>;
                               }
                             })()}
                           </TableCell>

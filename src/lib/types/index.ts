@@ -15,6 +15,7 @@ export type TransactionStatus =
   | "pending_authorization" // Prepare for bank / payment
   | "authorized" // Ready for payment
   | "paid"
+  | "received" // receivable equivalent of "paid"
   | "rejected";
 
 export type PaymentMethod =
