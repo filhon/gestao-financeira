@@ -17,7 +17,7 @@ export function KPICards({ metrics }: KPICardsProps) {
     <div className="rounded-xl border bg-card overflow-hidden">
       <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
         {/* Receita Total */}
-        <div className="flex items-start gap-3 px-5 py-4">
+        <div className="flex items-start gap-2 sm:gap-3 px-3 py-3 sm:px-5 sm:py-4">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-500 mt-0.5">
             <ArrowUpIcon className="h-4 w-4" />
           </div>
@@ -51,7 +51,7 @@ export function KPICards({ metrics }: KPICardsProps) {
         </div>
 
         {/* Despesas Totais */}
-        <div className="flex items-start gap-3 px-5 py-4">
+        <div className="flex items-start gap-2 sm:gap-3 px-3 py-3 sm:px-5 sm:py-4">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-red-500/10 text-red-500 mt-0.5">
             <ArrowDownIcon className="h-4 w-4" />
           </div>
@@ -85,7 +85,7 @@ export function KPICards({ metrics }: KPICardsProps) {
         </div>
 
         {/* Saldo Realizado */}
-        <div className="flex items-start gap-3 px-5 py-4">
+        <div className="flex items-start gap-2 sm:gap-3 px-3 py-3 sm:px-5 sm:py-4">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
             <Wallet className="h-4 w-4" />
           </div>
@@ -116,7 +116,7 @@ export function KPICards({ metrics }: KPICardsProps) {
         </div>
 
         {/* Previsão 30 dias */}
-        <div className="flex items-start gap-3 px-5 py-4">
+        <div className="flex items-start gap-2 sm:gap-3 px-3 py-3 sm:px-5 sm:py-4">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
             <DollarSign className="h-4 w-4" />
           </div>

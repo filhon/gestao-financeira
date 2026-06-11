@@ -173,7 +173,7 @@ export function CfoInsights({
       </div>
 
       {/* Insights list */}
-      <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {insights.map((insight) => {
           const styles = severityStyles[insight.severity];
           return (

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import {
   Inter,
-  JetBrains_Mono,
+  IBM_Plex_Sans,
   Cormorant_Garamond,
   DM_Sans,
 } from "next/font/google";
@@ -15,9 +15,10 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const inter = Inter({ subsets: ["latin"] });
-const jetbrainsMono = JetBrains_Mono({
+const ibmPlexSans = IBM_Plex_Sans({
   subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-ibm-plex-sans",
 });
 const cormorant = Cormorant_Garamond({
   subsets: ["latin"],
@@ -63,7 +64,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.className} ${jetbrainsMono.variable} ${cormorant.variable} ${dmSans.variable}`}
+        className={`${inter.className} ${ibmPlexSans.variable} ${cormorant.variable} ${dmSans.variable}`}
       >
         <ThemeProvider
           attribute="class"

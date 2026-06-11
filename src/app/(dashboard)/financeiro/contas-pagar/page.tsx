@@ -319,12 +319,11 @@ function MobileTransactionCard({
       {...swipe}
       className={[
         "relative flex items-start gap-3 px-4 py-3.5 transition-colors select-none",
-        "border-l-4",
         isSelected
-          ? "border-l-primary bg-primary/5"
+          ? "bg-primary/5 ring-1 ring-inset ring-primary/30"
           : isOverdue
-            ? "border-l-red-500 bg-red-50 dark:bg-red-900/10"
-            : "border-l-transparent",
+            ? "bg-red-50 dark:bg-red-900/10"
+            : "",
       ].join(" ")}
     >
       {/* Checkbox — min 44×44 touch area */}
@@ -392,8 +391,8 @@ function MobileTransactionCard({
           {getStatusBadge(t.status)}
         </div>
         {canPay && (
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            ← deslize para pagar
+          <p className="text-[10px] text-muted-foreground/50 mt-1">
+            deslize para pagar
           </p>
         )}
       </button>
@@ -1258,22 +1257,24 @@ export default function AccountsPayablePage() {
 
       {/* Stats strip */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
+        {/* 2-col on mobile, 4-col on md+. Borders drawn explicitly so they work
+            correctly in both grid configurations (CSS divide-x/y fails on 2×2). */}
+        <div className="grid grid-cols-2 md:grid-cols-4">
           {/* Total a Pagar */}
-          <div className="flex items-start gap-3 px-5 py-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
-              <TrendingDown className="h-4 w-4" />
+          <div className="flex items-start gap-3 px-4 py-3.5 md:px-5 md:py-4 border-r border-b md:border-b-0">
+            <div className="flex h-7 w-7 md:h-8 md:w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
+              <TrendingDown className="h-3.5 w-3.5 md:h-4 md:w-4" />
             </div>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground leading-none mb-1.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground leading-none mb-1.5 truncate">
                 Total a Pagar
               </p>
               <div
-                className="text-lg font-bold font-financial leading-none"
+                className="text-base md:text-lg font-bold font-financial leading-none truncate"
                 title={formatCurrency(kpis.pendingAmount)}
               >
                 {isKpisLoading ? (
-                  <Skeleton className="h-5 w-28" />
+                  <Skeleton className="h-5 w-20 md:w-28" />
                 ) : (
                   <>
                     <span className="md:hidden">
@@ -1291,7 +1292,7 @@ export default function AccountsPayablePage() {
                   </>
                 )}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1.5">
+              <p className="text-[11px] text-muted-foreground mt-1.5 hidden sm:block">
                 No período filtrado
               </p>
             </div>
@@ -1299,19 +1300,19 @@ export default function AccountsPayablePage() {
 
           {/* Vencidas */}
           <div
-            className={`flex items-start gap-3 px-5 py-4 transition-colors ${kpis.overdueCount > 0 ? "bg-red-50/60 dark:bg-red-900/10" : ""}`}
+            className={`flex items-start gap-3 px-4 py-3.5 md:px-5 md:py-4 border-b md:border-b-0 md:border-r transition-colors ${kpis.overdueCount > 0 ? "bg-red-50/60 dark:bg-red-900/10" : ""}`}
           >
             <div
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md mt-0.5 ${kpis.overdueCount > 0 ? "bg-red-500/10 text-red-500" : "bg-muted text-muted-foreground"}`}
+              className={`flex h-7 w-7 md:h-8 md:w-8 shrink-0 items-center justify-center rounded-md mt-0.5 ${kpis.overdueCount > 0 ? "bg-red-500/10 text-red-500" : "bg-muted text-muted-foreground"}`}
             >
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle className="h-3.5 w-3.5 md:h-4 md:w-4" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-xs text-muted-foreground leading-none mb-1.5">
                 Vencidas
               </p>
               <div
-                className={`text-lg font-bold leading-none ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+                className={`text-base md:text-lg font-bold leading-none ${kpis.overdueCount > 0 ? "text-red-600 dark:text-red-400" : ""}`}
               >
                 {isKpisLoading ? (
                   <Skeleton className="h-5 w-8" />
@@ -1319,9 +1320,9 @@ export default function AccountsPayablePage() {
                   <AnimatedNumber value={kpis.overdueCount} />
                 )}
               </div>
-              <div className="text-[11px] text-muted-foreground font-financial mt-1.5">
+              <div className="text-[11px] text-muted-foreground font-financial mt-1.5 truncate">
                 {isKpisLoading ? (
-                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-3 w-16 md:w-20" />
                 ) : (
                   <>
                     <span className="md:hidden">
@@ -1336,21 +1337,22 @@ export default function AccountsPayablePage() {
             </div>
           </div>
 
-          {/* Vencem Hoje/Amanhã */}
+          {/* Vencem em Breve */}
           <div
-            className={`flex items-start gap-3 px-5 py-4 transition-colors ${kpis.dueSoonCount > 0 ? "bg-amber-50/60 dark:bg-amber-900/10" : ""}`}
+            className={`flex items-start gap-3 px-4 py-3.5 md:px-5 md:py-4 border-r transition-colors ${kpis.dueSoonCount > 0 ? "bg-amber-50/60 dark:bg-amber-900/10" : ""}`}
           >
             <div
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md mt-0.5 ${kpis.dueSoonCount > 0 ? "bg-amber-500/10 text-amber-500" : "bg-muted text-muted-foreground"}`}
+              className={`flex h-7 w-7 md:h-8 md:w-8 shrink-0 items-center justify-center rounded-md mt-0.5 ${kpis.dueSoonCount > 0 ? "bg-amber-500/10 text-amber-500" : "bg-muted text-muted-foreground"}`}
             >
-              <Clock className="h-4 w-4" />
+              <Clock className="h-3.5 w-3.5 md:h-4 md:w-4" />
             </div>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground leading-none mb-1.5">
-                Vencem Hoje/Amanhã
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground leading-none mb-1.5 truncate">
+                <span className="md:hidden">Hoje/Amanhã</span>
+                <span className="hidden md:inline">Vencem Hoje/Amanhã</span>
               </p>
               <div
-                className={`text-lg font-bold leading-none ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+                className={`text-base md:text-lg font-bold leading-none ${kpis.dueSoonCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
               >
                 {isKpisLoading ? (
                   <Skeleton className="h-5 w-8" />
@@ -1358,9 +1360,9 @@ export default function AccountsPayablePage() {
                   <AnimatedNumber value={kpis.dueSoonCount} />
                 )}
               </div>
-              <div className="text-[11px] text-muted-foreground font-financial mt-1.5">
+              <div className="text-[11px] text-muted-foreground font-financial mt-1.5 truncate">
                 {isKpisLoading ? (
-                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-3 w-16 md:w-20" />
                 ) : (
                   <>
                     <span className="md:hidden">
@@ -1376,20 +1378,20 @@ export default function AccountsPayablePage() {
           </div>
 
           {/* Pagas */}
-          <div className="flex items-start gap-3 px-5 py-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 mt-0.5">
-              <DollarSign className="h-4 w-4" />
+          <div className="flex items-start gap-3 px-4 py-3.5 md:px-5 md:py-4">
+            <div className="flex h-7 w-7 md:h-8 md:w-8 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 mt-0.5">
+              <DollarSign className="h-3.5 w-3.5 md:h-4 md:w-4" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-xs text-muted-foreground leading-none mb-1.5">
                 Pagas
               </p>
               <div
-                className="text-lg font-bold font-financial leading-none text-blue-600 dark:text-blue-400"
+                className="text-base md:text-lg font-bold font-financial leading-none text-blue-600 dark:text-blue-400 truncate"
                 title={formatCurrency(kpis.paidAmount)}
               >
                 {isKpisLoading ? (
-                  <Skeleton className="h-5 w-28" />
+                  <Skeleton className="h-5 w-20 md:w-28" />
                 ) : (
                   <>
                     <span className="md:hidden">
@@ -1407,7 +1409,7 @@ export default function AccountsPayablePage() {
                   </>
                 )}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1.5">
+              <p className="text-[11px] text-muted-foreground mt-1.5 hidden sm:block">
                 No período filtrado
               </p>
             </div>
@@ -1588,7 +1590,7 @@ export default function AccountsPayablePage() {
                   <span>
                     {format(filterOptions.dateRange.from, "dd/MM")}
                     {filterOptions.dateRange.to &&
-                      ` – ${format(filterOptions.dateRange.to, "dd/MM")}`}
+                      ` - ${format(filterOptions.dateRange.to, "dd/MM")}`}
                   </span>
                   <button
                     onClick={() =>
@@ -1674,10 +1676,10 @@ export default function AccountsPayablePage() {
             </div>
           )}
         </CardHeader>
-        <CardContent className="p-0 md:p-6">
+        <CardContent className="p-0">
           {isLoading ? (
             <>
-              <div className="hidden md:block p-0">
+              <div className="hidden md:block px-6 py-2">
                 <TableSkeleton />
               </div>
               <div className="md:hidden">
@@ -1687,7 +1689,7 @@ export default function AccountsPayablePage() {
           ) : (
             <>
               {/* ── Desktop: Table ───────────────────────────────────── */}
-              <div className="hidden md:block">
+              <div className="hidden md:block px-6 pb-6">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1808,9 +1810,7 @@ export default function AccountsPayablePage() {
                           <TableRow
                             key={t.id}
                             className={
-                              isOverdue
-                                ? "bg-red-50/80 dark:bg-red-950/20 border-l-2 border-l-red-400 dark:border-l-red-600"
-                                : ""
+                              isOverdue ? "bg-red-50/80 dark:bg-red-950/20" : ""
                             }
                           >
                             <TableCell>
@@ -1997,17 +1997,48 @@ export default function AccountsPayablePage() {
                 ) : (
                   <>
                     {/* Select-all row */}
-                    <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-muted/30">
-                      <Checkbox
-                        checked={
-                          displayTransactions.length > 0 &&
-                          displayTransactions.every((t) =>
-                            selectedIds.has(t.id),
+                    <div className="flex items-center gap-2 px-4 border-b bg-muted/30">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
+                          toggleSelectAll(
+                            !(
+                              displayTransactions.length > 0 &&
+                              displayTransactions.every((t) =>
+                                selectedIds.has(t.id),
+                              )
+                            ),
                           )
                         }
-                        onCheckedChange={toggleSelectAll}
-                        className="h-5 w-5"
-                      />
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleSelectAll(
+                              !(
+                                displayTransactions.length > 0 &&
+                                displayTransactions.every((t) =>
+                                  selectedIds.has(t.id),
+                                )
+                              ),
+                            );
+                          }
+                        }}
+                        className="flex items-center justify-center -ml-1 h-11 w-11 shrink-0 cursor-pointer"
+                        aria-label="Selecionar todas as transações"
+                      >
+                        <Checkbox
+                          checked={
+                            displayTransactions.length > 0 &&
+                            displayTransactions.every((t) =>
+                              selectedIds.has(t.id),
+                            )
+                          }
+                          onCheckedChange={toggleSelectAll}
+                          className="h-5 w-5 pointer-events-none"
+                          tabIndex={-1}
+                        />
+                      </div>
                       <span className="text-xs text-muted-foreground">
                         Selecionar todas ({displayTransactions.length})
                       </span>
@@ -2073,7 +2104,7 @@ export default function AccountsPayablePage() {
 
       {/* Bulk action bar — floats at bottom when rows are selected */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] md:bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 w-[calc(100vw-2rem)] md:w-auto">
+        <div className="fixed bottom-[max(calc(env(safe-area-inset-bottom)+4.5rem),5rem)] md:bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 w-[calc(100vw-2rem)] md:w-auto">
           <div className="flex items-center gap-2 md:gap-3 rounded-xl border bg-background/95 backdrop-blur-sm px-3 md:px-4 py-2.5 md:py-3 shadow-lg w-full">
             {/* Count + total */}
             <div className="flex items-center gap-1.5 mr-auto md:mr-0 min-w-0 md:pr-3 md:border-r">
@@ -2084,8 +2115,10 @@ export default function AccountsPayablePage() {
                   selecionada{selectedIds.size !== 1 ? "s" : ""}
                 </span>
               </span>
+              <span className="text-muted-foreground/40 mx-0.5 hidden sm:inline">
+                ·
+              </span>
               <span className="text-sm text-muted-foreground font-financial truncate">
-                —{" "}
                 <AnimatedNumber
                   value={selectedTotal}
                   formatter={formatCurrency}
@@ -2103,7 +2136,8 @@ export default function AccountsPayablePage() {
                   size="sm"
                   className="shrink-0 bg-green-600 hover:bg-green-700 text-white border-0 md:bg-transparent md:text-green-600 md:border md:border-green-600 md:hover:bg-green-50 dark:md:hover:bg-green-950 md:hover:text-green-700"
                 >
-                  <CheckCheck className="h-4 w-4 md:hidden" />
+                  <CheckCheck className="h-4 w-4 mr-1.5 md:hidden" />
+                  <span className="md:hidden">Pagar</span>
                   <span className="hidden md:inline">Pagar</span>
                 </Button>
               </ResponsiveModalTrigger>

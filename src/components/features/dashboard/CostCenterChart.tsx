@@ -87,7 +87,7 @@ export function CostCenterChart({ year }: { year?: number }) {
           <Tabs
             value={view}
             onValueChange={setView}
-            className="w-[140px] md:w-[160px] shrink-0"
+            className="w-[140px] md:w-40 shrink-0"
           >
             <TabsList className="grid w-full grid-cols-2 h-7 md:h-8">
               <TabsTrigger
@@ -105,7 +105,7 @@ export function CostCenterChart({ year }: { year?: number }) {
             </TabsList>
           </Tabs>
         </div>
-        <div className="flex justify-between items-center text-xs text-muted-foreground min-h-[16px]">
+        <div className="flex justify-between items-center text-xs text-muted-foreground min-h-4">
           <span>Mês atual</span>
           {view === "risk" && (
             <span
@@ -128,30 +128,33 @@ export function CostCenterChart({ year }: { year?: number }) {
             Nenhum centro de custo encontrado.
           </div>
         ) : (
-          <div className="h-[320px]">
+          <div className="h-80">
             {view === "risk" ? (
-              <div className="space-y-4 max-h-[320px] overflow-y-auto pr-2">
+              <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
                 {data.slice(0, 6).map((item) => (
                   <Popover key={item.id}>
                     <PopoverTrigger asChild>
                       <div className="space-y-2 cursor-pointer hover:bg-muted/50 p-2 rounded-md transition-colors group">
                         <div className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
                             {getStatusIcon(item.status)}
                             <span
-                              className="font-medium truncate max-w-[80px] md:max-w-[120px]"
+                              className="font-medium truncate"
                               title={item.name}
                             >
                               {item.name}
                             </span>
                             {isBurningTooFast(item.percentage) &&
                               item.status !== "no-budget" && (
-                                <span title="Ritmo de gastos acima do tempo decorrido no mês">
+                                <span
+                                  title="Ritmo de gastos acima do tempo decorrido no mês"
+                                  className="shrink-0"
+                                >
                                   <TrendingUp className="h-3 w-3 text-red-500 animate-pulse" />
                                 </span>
                               )}
                           </div>
-                          <div className="flex items-center gap-2 text-xs">
+                          <div className="flex items-center gap-2 text-xs shrink-0">
                             {item.status === "no-budget" ? (
                               <span className="text-muted-foreground">
                                 Sem orçamento

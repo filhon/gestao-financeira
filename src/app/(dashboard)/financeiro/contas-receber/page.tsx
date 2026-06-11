@@ -313,7 +313,7 @@ function MobileTransactionCard({
       {/* Main content */}
       <button
         type="button"
-        className="flex-1 text-left min-w-0 py-0.5"
+        className="flex-1 text-left min-w-0 py-1 min-h-[44px]"
         onClick={onViewDetails}
       >
         <div className="flex items-start justify-between gap-2">
@@ -845,9 +845,9 @@ export default function AccountsReceivablePage() {
 
       {/* Stats strip */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 [&>*]:border-r [&>*:nth-child(2n)]:border-r-0 md:[&>*]:border-r md:[&>*:last-child]:border-r-0">
           {/* Total a Receber */}
-          <div className="flex items-start gap-3 px-5 py-4">
+          <div className="flex items-start gap-3 px-4 py-4 sm:px-5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60 mt-0.5">
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -885,7 +885,7 @@ export default function AccountsReceivablePage() {
           {/* Em Atraso */}
           <div
             className={[
-              "flex items-start gap-3 px-5 py-4",
+              "flex items-start gap-3 px-4 py-4 sm:px-5",
               kpis.overdueCount > 0 ? "bg-red-50/60 dark:bg-red-950/20" : "",
             ].join(" ")}
           >
@@ -932,7 +932,7 @@ export default function AccountsReceivablePage() {
           {/* Vencem Hoje/Amanhã */}
           <div
             className={[
-              "flex items-start gap-3 px-5 py-4",
+              "flex items-start gap-3 px-4 py-4 sm:px-5",
               kpis.dueSoonCount > 0
                 ? "bg-amber-50/60 dark:bg-amber-950/20"
                 : "",
@@ -981,7 +981,7 @@ export default function AccountsReceivablePage() {
           </div>
 
           {/* Recebido */}
-          <div className="flex items-start gap-3 px-5 py-4">
+          <div className="flex items-start gap-3 px-4 py-4 sm:px-5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 dark:bg-blue-950/40 mt-0.5">
               <DollarSign className="h-4 w-4 text-blue-500" />
             </div>
@@ -1034,39 +1034,41 @@ export default function AccountsReceivablePage() {
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <div className="relative min-w-[180px] flex-1 max-w-[260px]">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="receivable-search"
                   placeholder="Buscar transações..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-[200px] pl-8 pr-8"
+                  className="pl-9 pr-8"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm("")}
-                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     aria-label="Limpar busca"
                   >
                     <X className="h-4 w-4" />
                   </button>
                 )}
               </div>
-              <DatePickerWithRange
-                date={filterOptions.dateRange}
-                setDate={(dateRange) =>
-                  setFilterOptions((prev) => ({ ...prev, dateRange }))
-                }
-              />
+              <div className="shrink-0">
+                <DatePickerWithRange
+                  date={filterOptions.dateRange}
+                  setDate={(dateRange) =>
+                    setFilterOptions((prev) => ({ ...prev, dateRange }))
+                  }
+                />
+              </div>
               <Select
                 value={filterOptions.batchFilter}
                 onValueChange={(val) =>
                   setFilterOptions((prev) => ({ ...prev, batchFilter: val }))
                 }
               >
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-[140px] shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1081,7 +1083,10 @@ export default function AccountsReceivablePage() {
                   setFilterOptions((prev) => ({ ...prev, status: val }))
                 }
               >
-                <SelectTrigger id="status-filter" className="w-[200px]">
+                <SelectTrigger
+                  id="status-filter"
+                  className="w-[190px] shrink-0"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1375,9 +1380,7 @@ export default function AccountsReceivablePage() {
                           <TableRow
                             key={t.id}
                             className={
-                              isOverdue
-                                ? "bg-red-50/80 dark:bg-red-950/20 border-l-2 border-l-red-400 dark:border-l-red-600"
-                                : ""
+                              isOverdue ? "bg-red-50/80 dark:bg-red-950/20" : ""
                             }
                           >
                             <TableCell>
@@ -1677,10 +1680,7 @@ export default function AccountsReceivablePage() {
               </Button>
               <Button
                 className="flex-1"
-                onClick={() => {
-                  setMobileFiltersOpen(false);
-                  toast.success("Filtros aplicados");
-                }}
+                onClick={() => setMobileFiltersOpen(false)}
               >
                 Aplicar
               </Button>

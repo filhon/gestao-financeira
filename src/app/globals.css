@@ -124,7 +124,7 @@
 
 @layer utilities {
   .font-financial {
-    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-family: var(--font-ibm-plex-sans), system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }

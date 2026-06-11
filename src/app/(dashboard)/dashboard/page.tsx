@@ -42,7 +42,10 @@ function KPICardsSkeleton() {
     <div className="rounded-xl border bg-card overflow-hidden">
       <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-start gap-3 px-5 py-4">
+          <div
+            key={i}
+            className="flex items-start gap-2 sm:gap-3 px-3 py-3 sm:px-5 sm:py-4"
+          >
             <Skeleton className="h-8 w-8 rounded-md shrink-0 mt-0.5" />
             <div className="space-y-2 flex-1 min-w-0">
               <Skeleton className="h-3 w-24" />
@@ -58,7 +61,7 @@ function KPICardsSkeleton() {
 
 function InsightsSkeleton() {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
       {Array.from({ length: 2 }).map((_, i) => (
         <Skeleton key={i} className="h-24 rounded-xl" />
       ))}
@@ -181,7 +184,7 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
                     Venceu em {format(t.dueDate, "dd/MM/yyyy")}
                   </p>
                 </div>
-                <div className="font-bold font-financial text-red-600 shrink-0">
+                <div className="text-sm font-bold font-financial text-red-600 shrink-0 whitespace-nowrap">
                   {formatCurrency(t.amount)}
                 </div>
               </div>
@@ -245,7 +248,7 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
                     {t.supplierOrClient} • {format(t.dueDate, "dd/MM/yyyy")}
                   </p>
                 </div>
-                <div className="font-medium font-financial text-amber-600 shrink-0">
+                <div className="text-sm font-medium font-financial text-amber-600 shrink-0 whitespace-nowrap">
                   {formatCurrency(t.amount)}
                 </div>
               </div>
@@ -374,13 +377,13 @@ export default function DashboardPage() {
       </section>
 
       {/* ── Charts ─────────────────────────────────────────────────── */}
-      <div className="grid gap-5 md:grid-cols-7">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-7">
         <CashFlowChart year={selectedYear} />
         <CostCenterChart year={selectedYear} />
       </div>
 
       {/* ── Action Cards ───────────────────────────────────────────── */}
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         {isOverdueLoading ? (
           <ActionCardSkeleton />
         ) : isOverdueError ? (

@@ -6,7 +6,9 @@
       "Bash(find \"c:/Users/Filipe Honório/Documents/gestao-financeira/src/app/\\(dashboard\\)/financeiro\" -type f -name \"*.tsx\" -o -name \"*.ts\")",
       "Bash(ls -laR \"c:/Users/Filipe Honório/Documents/gestao-financeira/src/app/\\(dashboard\\)/financeiro/contas-pagar\")",
       "Bash(npm run:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Skill(impeccable)",
+      "Skill(impeccable:*)"
     ]
   }
 }
