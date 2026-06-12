@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
+import { GlobalTransactionDetailModal } from "@/components/features/finance/GlobalTransactionDetailModal";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -114,6 +115,7 @@ export default function DashboardLayout({
       </div>
       <MobileNav />
       <GlobalSearch />
+      <GlobalTransactionDetailModal />
     </div>
   );
 }

@@ -39,6 +39,7 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { transactionService } from "@/lib/services/transactionService";
 import { Transaction } from "@/lib/types";
+import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -228,6 +229,7 @@ export function GlobalSearch() {
   const permissions = usePermissions();
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
+  const { openTransaction } = useTransactionDetailStore();
 
   // Handles open/close: clears query on close, loads recents on open
   const handleOpenChange = useCallback(
@@ -407,13 +409,10 @@ export function GlobalSearch() {
                       ]
                         .filter(Boolean)
                         .join(" ")}
-                      onSelect={() =>
-                        handleNavigate(
-                          t.type === "payable"
-                            ? "/financeiro/contas-pagar"
-                            : "/financeiro/contas-receber",
-                        )
-                      }
+                      onSelect={() => {
+                        openTransaction(t);
+                        setOpen(false);
+                      }}
                     >
                       <span
                         className={cn(

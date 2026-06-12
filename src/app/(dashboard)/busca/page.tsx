@@ -63,8 +63,8 @@ import {
   X,
   SlidersHorizontal,
 } from "lucide-react";
-import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
 import {
   BarChart,
   Bar,
@@ -224,12 +224,6 @@ function getStatusBadge(status: string) {
     default:
       return <Badge variant="secondary">{status}</Badge>;
   }
-}
-
-function getTransactionHref(transaction: Transaction): string {
-  return transaction.type === "payable"
-    ? `/financeiro/contas-pagar`
-    : `/financeiro/contas-receber`;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -468,10 +462,14 @@ function TopOriginsChart({
 
 function MobileTransactionRow({ t, query }: { t: Transaction; query: string }) {
   const isPayable = t.type === "payable";
+  const { openTransaction } = useTransactionDetailStore();
   return (
-    <Link
-      href={getTransactionHref(t)}
-      className="flex items-start gap-3 px-4 py-3.5 hover:bg-muted/40 transition-colors"
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => openTransaction(t)}
+      onKeyDown={(e) => e.key === "Enter" && openTransaction(t)}
+      className="flex items-start gap-3 px-4 py-3.5 hover:bg-muted/40 transition-colors cursor-pointer"
     >
       <span
         className={cn(
@@ -517,7 +515,7 @@ function MobileTransactionRow({ t, query }: { t: Transaction; query: string }) {
           )}
         </div>
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -526,6 +524,7 @@ function MobileTransactionRow({ t, query }: { t: Transaction; query: string }) {
 function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { openTransaction } = useTransactionDetailStore();
   const query = searchParams.get("q") || "";
   const typeParam = searchParams.get("type") as TypeFilter | null;
   const originParam = searchParams.get("origem") || "";
@@ -974,6 +973,7 @@ function SearchContent() {
     return (
       <TableRow
         key={transaction.id}
+        onClick={() => openTransaction(transaction)}
         className="group cursor-pointer animate-in fade-in-0 slide-in-from-bottom-1"
         style={{
           animationDelay: `${Math.min(index, 30) * 25}ms`,
@@ -1041,13 +1041,9 @@ function SearchContent() {
           {formatCurrency(transaction.amount)}
         </TableCell>
         <TableCell className="pr-4">
-          <Link
-            href={getTransactionHref(transaction)}
-            className="flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Ver transações"
-          >
+          <span className="flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          </Link>
+          </span>
         </TableCell>
       </TableRow>
     );

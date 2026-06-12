@@ -34,6 +34,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
 import { Transaction } from "@/lib/types";
+import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
 
 // ─── Skeleton helpers ─────────────────────────────────────────────────────────
 
@@ -133,6 +134,7 @@ function SectionError({
 
 function OverdueCard({ transactions }: { transactions: Transaction[] }) {
   const hasItems = transactions.length > 0;
+  const { openTransaction } = useTransactionDetailStore();
 
   return (
     <Card
@@ -174,7 +176,11 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
             transactions.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center justify-between py-2 border-b last:border-0"
+                role="button"
+                tabIndex={0}
+                onClick={() => openTransaction(t)}
+                onKeyDown={(e) => e.key === "Enter" && openTransaction(t)}
+                className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-muted/40 rounded px-1 -mx-1 transition-colors"
               >
                 <div className="space-y-1 min-w-0 pr-2">
                   <p className="text-sm font-medium leading-none truncate">
@@ -200,6 +206,7 @@ function OverdueCard({ transactions }: { transactions: Transaction[] }) {
 
 function PendingCard({ transactions }: { transactions: Transaction[] }) {
   const hasItems = transactions.length > 0;
+  const { openTransaction } = useTransactionDetailStore();
 
   return (
     <Card
@@ -238,7 +245,11 @@ function PendingCard({ transactions }: { transactions: Transaction[] }) {
             transactions.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center justify-between py-2 border-b last:border-0"
+                role="button"
+                tabIndex={0}
+                onClick={() => openTransaction(t)}
+                onKeyDown={(e) => e.key === "Enter" && openTransaction(t)}
+                className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-muted/40 rounded px-1 -mx-1 transition-colors"
               >
                 <div className="space-y-1 min-w-0 pr-2">
                   <p className="text-sm font-medium leading-none truncate">
