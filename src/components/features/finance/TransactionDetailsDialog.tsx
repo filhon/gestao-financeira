@@ -161,13 +161,15 @@ export function TransactionDetailsDialog({
     return names;
   }, [transaction?.costCenterAllocation, costCenters]);
 
-  // Fetch user names (approver/releaser) in a single batched query
+  // Fetch user names (creator/approver/releaser) in a single batched query
   useEffect(() => {
     const fetchUserNames = async () => {
       if (!transaction) return;
-      const userIds = [transaction.approvedBy, transaction.releasedBy].filter(
-        (id): id is string => Boolean(id),
-      );
+      const userIds = [
+        transaction.createdBy,
+        transaction.approvedBy,
+        transaction.releasedBy,
+      ].filter((id): id is string => Boolean(id));
       if (userIds.length === 0) return;
       try {
         const snap = await getDocs(
@@ -675,8 +677,33 @@ export function TransactionDetailsDialog({
                   </ResponsiveModalTitle>
                   {!isEditing && getStatusBadge(transaction.status)}
                 </div>
-                <ResponsiveModalDescription>
-                  ID: {transaction.id}
+                <ResponsiveModalDescription asChild>
+                  <div className="flex flex-col gap-1 mt-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs text-muted-foreground/70 bg-muted px-2 py-0.5 rounded select-all">
+                        {transaction.id}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(transaction.id);
+                          toast.success("ID copiado!");
+                        }}
+                        className="text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                        title="Copiar ID"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                    </div>
+                    {transaction.createdBy && (
+                      <span className="text-xs text-muted-foreground">
+                        Cadastrado por{" "}
+                        <span className="font-medium text-foreground/70">
+                          {userNames[transaction.createdBy] || "…"}
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 </ResponsiveModalDescription>
               </ResponsiveModalHeader>
 
