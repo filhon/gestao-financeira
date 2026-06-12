@@ -100,6 +100,9 @@ export function TransactionForm({
   const [openEntityCombobox, setOpenEntityCombobox] = useState(false);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
+  const [aiSuggestions, setAiSuggestions] = useState<
+    Record<string, { value: unknown; display: string; diff?: string }>
+  >({});
   const [openCostCenterCombobox, setOpenCostCenterCombobox] = useState<
     number | null
   >(null);
@@ -261,11 +264,7 @@ export function TransactionForm({
 
         // Iniciar upload e extração IA em paralelo
         const isFirstAttachment = attachmentFields.length === 0;
-        const canExtract =
-          isFirstAttachment &&
-          !form.getValues("description") &&
-          !form.getValues("amount") &&
-          type === "payable";
+        const canExtract = isFirstAttachment && type === "payable";
 
         const uploadPromise = storageService.uploadFile(
           file,
@@ -290,51 +289,115 @@ export function TransactionForm({
         });
 
         // Preencher campos com dados extraídos pela IA
+        // Campos já preenchidos: apenas preenche se vazio; caso contrário, gera sugestão inline
         if (extractionResult?.data) {
           const { data, matchedEntity } = extractionResult;
           const filled = new Set<string>();
+          const suggestions: Record<
+            string,
+            { value: unknown; display: string; diff?: string }
+          > = {};
 
-          if (data.description) {
+          // amount — sugere divergência se campo já preenchido com valor diferente
+          if (data.amount) {
+            const current = form.getValues("amount");
+            if (!current) {
+              form.setValue("amount", data.amount);
+              filled.add("amount");
+            } else if (Math.abs(current - data.amount) > 0.01) {
+              const diff = data.amount - current;
+              suggestions.amount = {
+                value: data.amount,
+                display: formatCurrency(data.amount),
+                diff: `${diff > 0 ? "+" : ""}${formatCurrency(diff)}`,
+              };
+            }
+          }
+
+          // dueDate — sugere divergência em dias
+          if (data.dueDate) {
+            const current = form.getValues("dueDate");
+            const extracted = new Date(data.dueDate + "T12:00:00");
+            if (!current) {
+              form.setValue("dueDate", extracted);
+              filled.add("dueDate");
+            } else {
+              const diffDays = Math.round(
+                (extracted.getTime() - current.getTime()) /
+                  (1000 * 60 * 60 * 24),
+              );
+              if (diffDays !== 0) {
+                suggestions.dueDate = {
+                  value: extracted,
+                  display: format(extracted, "dd/MM/yyyy", { locale: ptBR }),
+                  diff: `${diffDays > 0 ? "+" : ""}${diffDays} dia${Math.abs(diffDays) !== 1 ? "s" : ""}`,
+                };
+              }
+            }
+          }
+
+          // paymentMethod — sugere mudança de método
+          if (data.paymentMethod) {
+            const current = form.getValues("paymentMethod");
+            if (!current) {
+              form.setValue("paymentMethod", data.paymentMethod);
+              filled.add("paymentMethod");
+            } else if (current !== data.paymentMethod) {
+              const methodLabels: Record<string, string> = {
+                pix: "PIX",
+                boleto: "Boleto",
+                transfer: "Transferência",
+                credit_card: "Cartão de Crédito",
+                cash: "Dinheiro",
+              };
+              suggestions.paymentMethod = {
+                value: data.paymentMethod,
+                display: methodLabels[data.paymentMethod] || data.paymentMethod,
+              };
+            }
+          }
+
+          // description, supplierOrClient, notes, barcode — preenche apenas se vazio
+          if (data.description && !form.getValues("description")) {
             form.setValue("description", data.description);
             filled.add("description");
           }
-          if (data.amount) {
-            form.setValue("amount", data.amount);
-            filled.add("amount");
+          if (!form.getValues("supplierOrClient")) {
+            if (matchedEntity) {
+              setUseEntity(true);
+              form.setValue("entityId", matchedEntity.id);
+              form.setValue("supplierOrClient", matchedEntity.name as string);
+              filled.add("supplierOrClient");
+            } else if (data.supplierName) {
+              setUseEntity(false);
+              form.setValue("supplierOrClient", data.supplierName);
+              filled.add("supplierOrClient");
+            }
           }
-          if (data.dueDate) {
-            form.setValue("dueDate", new Date(data.dueDate + "T12:00:00"));
-            filled.add("dueDate");
-          }
-          if (data.paymentMethod) {
-            form.setValue("paymentMethod", data.paymentMethod);
-            filled.add("paymentMethod");
-          }
-
-          if (matchedEntity) {
-            setUseEntity(true);
-            form.setValue("entityId", matchedEntity.id);
-            form.setValue("supplierOrClient", matchedEntity.name as string);
-            filled.add("supplierOrClient");
-          } else if (data.supplierName) {
-            setUseEntity(false);
-            form.setValue("supplierOrClient", data.supplierName);
-            filled.add("supplierOrClient");
-          }
-
-          if (data.notes) {
+          if (data.notes && !form.getValues("notes")) {
             form.setValue("notes", data.notes);
           }
-          if (data.barcode) {
+          if (data.barcode && !form.getValues("barcode")) {
             form.setValue("barcode", data.barcode);
+            filled.add("barcode");
           }
 
           setAiFilledFields(filled);
           setTimeout(() => setAiFilledFields(new Set()), 5000);
+          setAiSuggestions(suggestions);
 
-          if (data.confidence >= 50) {
+          const suggestionCount = Object.keys(suggestions).length;
+          if (filled.size === 0 && suggestionCount === 0) {
+            toast.info("Documento analisado pela IA", {
+              description:
+                "Nenhum campo novo encontrado — todos já estavam preenchidos.",
+            });
+          } else if (data.confidence >= 50) {
             toast.success("Dados extraídos do documento com IA", {
-              description: `Confiança: ${data.confidence}% — Confira os campos preenchidos.`,
+              description:
+                suggestionCount > 0
+                  ? `Confiança: ${data.confidence}% — ${suggestionCount} divergência(s) detectada(s). Veja os campos em destaque.`
+                  : `Confiança: ${data.confidence}% — Confira os campos preenchidos.`,
             });
           } else {
             toast.warning("Extração com baixa confiança", {
@@ -498,6 +561,40 @@ export function TransactionForm({
                         />
                       </FormControl>
                       <FormMessage />
+                      {aiSuggestions.amount && (
+                        <div className="flex items-center gap-1.5 mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span>
+                            Documento:{" "}
+                            <span className="font-semibold">
+                              {aiSuggestions.amount.display}
+                            </span>
+                          </span>
+                          {aiSuggestions.amount.diff && (
+                            <span className="text-muted-foreground">
+                              ({aiSuggestions.amount.diff})
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              form.setValue(
+                                "amount",
+                                aiSuggestions.amount!.value as number,
+                                { shouldValidate: true },
+                              );
+                              setAiSuggestions((s) => {
+                                const n = { ...s };
+                                delete n.amount;
+                                return n;
+                              });
+                            }}
+                            className="ml-auto font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+                      )}
                     </FormItem>
                   )}
                 />
@@ -517,7 +614,7 @@ export function TransactionForm({
                       </FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
@@ -537,6 +634,40 @@ export function TransactionForm({
                         </SelectContent>
                       </Select>
                       <FormMessage />
+                      {aiSuggestions.paymentMethod && (
+                        <div className="flex items-center gap-1.5 mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span>
+                            Documento:{" "}
+                            <span className="font-semibold">
+                              {aiSuggestions.paymentMethod.display}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              form.setValue(
+                                "paymentMethod",
+                                aiSuggestions.paymentMethod!.value as
+                                  | "pix"
+                                  | "boleto"
+                                  | "transfer"
+                                  | "credit_card"
+                                  | "cash",
+                                { shouldValidate: true },
+                              );
+                              setAiSuggestions((s) => {
+                                const n = { ...s };
+                                delete n.paymentMethod;
+                                return n;
+                              });
+                            }}
+                            className="ml-auto font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+                      )}
                     </FormItem>
                   )}
                 />
@@ -744,6 +875,40 @@ export function TransactionForm({
                         </PopoverContent>
                       </Popover>
                       <FormMessage />
+                      {aiSuggestions.dueDate && (
+                        <div className="flex items-center gap-1.5 mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span>
+                            Documento:{" "}
+                            <span className="font-semibold">
+                              {aiSuggestions.dueDate.display}
+                            </span>
+                          </span>
+                          {aiSuggestions.dueDate.diff && (
+                            <span className="text-muted-foreground">
+                              ({aiSuggestions.dueDate.diff})
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              form.setValue(
+                                "dueDate",
+                                aiSuggestions.dueDate!.value as Date,
+                                { shouldValidate: true },
+                              );
+                              setAiSuggestions((s) => {
+                                const n = { ...s };
+                                delete n.dueDate;
+                                return n;
+                              });
+                            }}
+                            className="ml-auto font-semibold text-amber-700 dark:text-amber-300 hover:underline"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+                      )}
                     </FormItem>
                   )}
                 />
