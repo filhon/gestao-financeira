@@ -74,7 +74,6 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
@@ -82,49 +81,49 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 const STATUS_CONFIG: Record<
   string,
-  { label: string; color: string; dot: string; border: string }
+  { label: string; color: string; dot: string; bg: string }
 > = {
   open: {
     label: "Aberto",
     color: "bg-slate-100 text-slate-700 border-slate-200",
     dot: "bg-slate-400",
-    border: "border-l-slate-400",
+    bg: "",
   },
   pending_approval: {
     label: "Ag. Aprovação",
     color: "bg-amber-50 text-amber-700 border-amber-200",
     dot: "bg-amber-400 animate-pulse",
-    border: "border-l-amber-400",
+    bg: "bg-amber-50/60 dark:bg-amber-950/20",
   },
   approved: {
     label: "Aprovado",
     color: "bg-green-50 text-green-700 border-green-200",
     dot: "bg-green-500",
-    border: "border-l-green-500",
+    bg: "bg-green-50/40 dark:bg-green-950/15",
   },
   pending_authorization: {
     label: "Ag. Autorização",
     color: "bg-amber-50 text-amber-700 border-amber-200",
     dot: "bg-amber-400 animate-pulse",
-    border: "border-l-amber-400",
+    bg: "bg-amber-50/60 dark:bg-amber-950/20",
   },
   authorized: {
     label: "Autorizado",
     color: "bg-teal-50 text-teal-700 border-teal-200",
     dot: "bg-teal-500",
-    border: "border-l-teal-500",
+    bg: "bg-teal-50/40 dark:bg-teal-950/15",
   },
   paid: {
     label: "Pago",
     color: "bg-blue-50 text-blue-700 border-blue-200",
     dot: "bg-blue-500",
-    border: "border-l-blue-500",
+    bg: "bg-blue-50/40 dark:bg-blue-950/15",
   },
   rejected: {
     label: "Rejeitado",
     color: "bg-red-50 text-red-700 border-red-200",
     dot: "bg-red-500",
-    border: "border-l-red-500",
+    bg: "bg-red-50/40 dark:bg-red-950/15",
   },
 };
 
@@ -161,10 +160,7 @@ function MobileCardSkeleton() {
   return (
     <div className="divide-y">
       {Array.from({ length: 5 }).map((_, i) => (
-        <div
-          key={i}
-          className="flex items-start gap-3 px-4 py-3.5 border-l-4 border-l-transparent"
-        >
+        <div key={i} className="flex items-start gap-3 px-4 py-3.5">
           <div className="flex-1 space-y-2 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <Skeleton className="h-4 flex-1 max-w-[180px]" />
@@ -217,7 +213,7 @@ function MobileBatchCard({
   onRevert,
 }: MobileBatchCardProps) {
   const cfg = STATUS_CONFIG[batch.status];
-  const borderClass = cfg?.border ?? "border-l-transparent";
+  const bgClass = cfg?.bg ?? "";
 
   const quickAction = (() => {
     if (batch.status === "pending_approval" && canApproveBatches)
@@ -252,8 +248,8 @@ function MobileBatchCard({
   return (
     <div
       className={cn(
-        "relative flex items-start gap-2 px-4 py-3.5 border-l-4 transition-colors",
-        borderClass,
+        "relative flex items-start gap-2 px-4 py-3.5 transition-colors",
+        bgClass,
       )}
     >
       {/* Main content */}
@@ -296,7 +292,7 @@ function MobileBatchCard({
           <Button
             size="sm"
             variant="outline"
-            className={cn("h-8 text-xs", quickAction.className)}
+            className={cn("h-10 text-xs px-3", quickAction.className)}
             onClick={quickAction.onClick}
           >
             {quickAction.label}
@@ -862,126 +858,117 @@ export default function PaymentBatchesPage() {
         </div>
       )}
 
-      {/* ── KPI Summary Cards ─────────────────────────────────────────── */}
+      {/* ── KPI stat strip ─────────────────────────────────────────────── */}
       {!isPaginatedLoading && batches.length > 0 && (
-        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
-              <Layers className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-xl md:text-2xl font-bold">
-                {kpiData.openCount}
-              </div>
-              <p
-                className="text-xs text-muted-foreground font-financial"
-                title={formatCurrency(kpiData.openTotal)}
-              >
-                <span className="md:hidden">
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <div className="grid grid-cols-2 md:grid-cols-4">
+            <div className="px-5 py-4 border-r border-b md:border-b-0">
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Layers className="h-3.5 w-3.5" />
+                Em Aberto
+              </p>
+              <div className="mt-1.5 flex items-baseline gap-2">
+                <span className="text-2xl font-bold tabular-nums">
+                  {kpiData.openCount}
+                </span>
+                <span
+                  className="text-xs text-muted-foreground font-financial truncate"
+                  title={formatCurrency(kpiData.openTotal)}
+                >
                   {formatCurrencyAbbr(kpiData.openTotal)}
                 </span>
-                <span className="hidden md:inline">
-                  {formatCurrency(kpiData.openTotal)}
-                </span>
-              </p>
-            </CardContent>
-          </Card>
-          <Card
-            className={
-              kpiData.pendingCount > 0
-                ? "border-amber-200 dark:border-amber-900"
-                : ""
-            }
-          >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Aguardando Ação
-              </CardTitle>
-              <Clock
-                className={`h-4 w-4 ${kpiData.pendingCount > 0 ? "text-amber-500" : "text-muted-foreground"}`}
-              />
-            </CardHeader>
-            <CardContent>
-              <div
-                className={`text-xl md:text-2xl font-bold ${kpiData.pendingCount > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
-              >
-                {kpiData.pendingCount}
               </div>
-              <p className="text-xs text-muted-foreground">lotes pendentes</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Autorizados</CardTitle>
-              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-xl md:text-2xl font-bold text-teal-600 dark:text-teal-400">
-                {kpiData.authorizedCount}
-              </div>
+            </div>
+            <div className="px-5 py-4 border-b md:border-b-0 md:border-r">
               <p
-                className="text-xs text-muted-foreground font-financial"
-                title={formatCurrency(kpiData.authorizedTotal)}
+                className={cn(
+                  "text-xs flex items-center gap-1.5",
+                  kpiData.pendingCount > 0
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground",
+                )}
               >
-                <span className="md:hidden">
+                <Clock className="h-3.5 w-3.5" />
+                Aguardando
+              </p>
+              <div className="mt-1.5 flex items-baseline gap-2">
+                <span
+                  className={cn(
+                    "text-2xl font-bold tabular-nums",
+                    kpiData.pendingCount > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "",
+                  )}
+                >
+                  {kpiData.pendingCount}
+                </span>
+                <span className="text-xs text-muted-foreground">lotes</span>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-r">
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Autorizados
+              </p>
+              <div className="mt-1.5 flex items-baseline gap-2">
+                <span className="text-2xl font-bold tabular-nums text-teal-600 dark:text-teal-400">
+                  {kpiData.authorizedCount}
+                </span>
+                <span
+                  className="text-xs text-muted-foreground font-financial truncate"
+                  title={formatCurrency(kpiData.authorizedTotal)}
+                >
                   {formatCurrencyAbbr(kpiData.authorizedTotal)}
                 </span>
-                <span className="hidden md:inline">
-                  {formatCurrency(kpiData.authorizedTotal)}
-                </span>
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <DollarSign className="h-3.5 w-3.5" />
+                Total Pago
               </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Pago</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div
-                className="text-xl md:text-2xl font-bold font-financial text-blue-600 dark:text-blue-400"
-                title={formatCurrency(kpiData.paidTotal)}
-              >
-                <span className="md:hidden">
-                  {formatCurrencyAbbr(kpiData.paidTotal)}
-                </span>
-                <span className="hidden md:inline">
-                  {formatCurrency(kpiData.paidTotal)}
+              <div className="mt-1.5">
+                <span
+                  className="text-2xl font-bold font-financial text-blue-600 dark:text-blue-400"
+                  title={formatCurrency(kpiData.paidTotal)}
+                >
+                  <span className="md:hidden">
+                    {formatCurrencyAbbr(kpiData.paidTotal)}
+                  </span>
+                  <span className="hidden md:inline">
+                    {formatCurrency(kpiData.paidTotal)}
+                  </span>
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">no período</p>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* ── Desktop: status filter bar ───────────────────────────────── */}
-      <div className="hidden md:flex flex-wrap justify-between items-center bg-muted/20 p-4 rounded-lg border gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Label>Status:</Label>
-          <Select
-            value={filterStatus}
-            onValueChange={(value) => setFilterStatus(value)}
-          >
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="open">Aberto</SelectItem>
-              <SelectItem value="pending_approval">
-                Aguardando Aprovação
-              </SelectItem>
-              <SelectItem value="approved">Aprovado</SelectItem>
-              <SelectItem value="pending_authorization">
-                Aguardando Autorização
-              </SelectItem>
-              <SelectItem value="authorized">Autorizado</SelectItem>
-              <SelectItem value="paid">Pago</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="hidden md:flex items-center gap-3">
+        <Label className="text-sm text-muted-foreground shrink-0">Status</Label>
+        <Select
+          value={filterStatus}
+          onValueChange={(value) => setFilterStatus(value)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="open">Aberto</SelectItem>
+            <SelectItem value="pending_approval">
+              Aguardando Aprovação
+            </SelectItem>
+            <SelectItem value="approved">Aprovado</SelectItem>
+            <SelectItem value="pending_authorization">
+              Aguardando Autorização
+            </SelectItem>
+            <SelectItem value="authorized">Autorizado</SelectItem>
+            <SelectItem value="paid">Pago</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ── Mobile: card list ────────────────────────────────────────── */}
