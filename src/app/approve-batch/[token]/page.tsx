@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -67,7 +67,6 @@ interface BatchCostCenter {
   parentId?: string | null;
 }
 
-// Types for grouped transactions
 interface TransactionEdit {
   id: string;
   adjustedAmount?: number;
@@ -82,7 +81,6 @@ interface SupplierGroup {
 interface CostCenterGroup {
   costCenterId: string;
   breadcrumb: string[];
-  highlightedName: string;
   suppliers: SupplierGroup[];
   totalAmount: number;
 }
@@ -101,27 +99,25 @@ export default function BatchApprovalPage() {
   >("loading");
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Editing state
   const [edits, setEdits] = useState<Map<string, TransactionEdit>>(new Map());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [comment, setComment] = useState("");
 
-  // Reject transaction state
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  // Return to manager state
   const [showReturnDialog, setShowReturnDialog] = useState(false);
   const [returnReason, setReturnReason] = useState("");
 
-  // Approve confirmation dialog state
   const [showApproveDialog, setShowApproveDialog] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRejectSubmitting, setIsRejectSubmitting] = useState(false);
 
-  // Load batch and transactions from server-side API
+  const rejectCardRef = useRef<HTMLDivElement>(null);
+  const rejectTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   useEffect(() => {
     if (!token) return;
 
@@ -174,13 +170,22 @@ export default function BatchApprovalPage() {
     loadData();
   }, [token]);
 
-  // Pre-build a lookup map to make breadcrumb traversal O(depth) instead of O(n*depth)
+  // Scroll to and focus the rejection form whenever a transaction is selected for rejection
+  useEffect(() => {
+    if (!rejectingId) return;
+    rejectCardRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    const timer = setTimeout(() => rejectTextareaRef.current?.focus(), 150);
+    return () => clearTimeout(timer);
+  }, [rejectingId]);
+
   const costCenterMap = useMemo(
     () => new Map(costCenters.map((cc) => [cc.id, cc])),
     [costCenters],
   );
 
-  // Build cost center breadcrumb
   const buildBreadcrumb = useCallback(
     (costCenterId: string): string[] => {
       const result: string[] = [];
@@ -201,7 +206,6 @@ export default function BatchApprovalPage() {
     [costCenterMap],
   );
 
-  // Group transactions by cost center and supplier
   const groupedTransactions = useMemo((): CostCenterGroup[] => {
     const ccMap = new Map<string, SupplierGroup[]>();
 
@@ -225,19 +229,14 @@ export default function BatchApprovalPage() {
       group.totalAmount = currency(group.totalAmount).add(amount).value;
     });
 
-    // Build result with breadcrumbs
     const result: CostCenterGroup[] = [];
     ccMap.forEach((suppliers, ccId) => {
       const breadcrumb =
         ccId === "uncategorized"
           ? ["Sem Centro de Custo"]
           : buildBreadcrumb(ccId);
-      const cc = costCenterMap.get(ccId);
-
-      // Sort suppliers by total (highest first)
       suppliers.sort((a, b) => b.totalAmount - a.totalAmount);
 
-      // Sort transactions within each supplier by amount (highest first)
       suppliers.forEach((sg) => {
         sg.transactions.sort((a, b) => {
           const amountA = edits.get(a.id)?.adjustedAmount ?? a.amount;
@@ -249,7 +248,6 @@ export default function BatchApprovalPage() {
       result.push({
         costCenterId: ccId,
         breadcrumb,
-        highlightedName: cc?.name || "Sem Centro de Custo",
         suppliers,
         totalAmount: suppliers.reduce(
           (sum, sg) => currency(sum).add(sg.totalAmount).value,
@@ -258,13 +256,11 @@ export default function BatchApprovalPage() {
       });
     });
 
-    // Sort cost center groups by total (highest first)
     result.sort((a, b) => b.totalAmount - a.totalAmount);
 
     return result;
-  }, [transactions, costCenterMap, edits, buildBreadcrumb]);
+  }, [transactions, edits, buildBreadcrumb]);
 
-  // Calculate totals
   const totalAmount = useMemo(() => {
     return transactions.reduce((sum, t) => {
       const amount = edits.get(t.id)?.adjustedAmount ?? t.amount;
@@ -272,13 +268,15 @@ export default function BatchApprovalPage() {
     }, 0);
   }, [transactions, edits]);
 
-  // Check if transaction is new (created within last 30 days)
-  const isNewTransaction = (t: BatchTransaction): boolean => {
-    if (!t.createdAt) return false;
-    return differenceInDays(new Date(), t.createdAt) <= 30;
-  };
+  const now = useMemo(() => new Date(), []);
+  const isNewTransaction = useCallback(
+    (t: BatchTransaction): boolean => {
+      if (!t.createdAt) return false;
+      return differenceInDays(now, t.createdAt) <= 30;
+    },
+    [now],
+  );
 
-  // Edit amount handlers
   const handleStartEdit = (t: BatchTransaction) => {
     setEditingId(t.id);
     const current = edits.get(t.id)?.adjustedAmount ?? t.amount;
@@ -316,7 +314,6 @@ export default function BatchApprovalPage() {
     setEditValue("");
   };
 
-  // Reject transaction
   const handleRejectTransaction = async () => {
     if (!rejectingId || !rejectReason.trim()) {
       toast.error("Informe o motivo da rejeição");
@@ -358,7 +355,6 @@ export default function BatchApprovalPage() {
     }
   };
 
-  // Return to manager
   const handleReturnToManager = async () => {
     if (!returnReason.trim()) {
       toast.error("Informe o motivo da devolução");
@@ -395,7 +391,6 @@ export default function BatchApprovalPage() {
     }
   };
 
-  // Approve batch
   const handleApprove = async () => {
     if (transactions.length === 0) {
       toast.error("Não há transações para aprovar");
@@ -435,25 +430,22 @@ export default function BatchApprovalPage() {
     }
   };
 
-  // Loading state
   if (status === "loading") {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <Loader2 className="h-12 w-12 animate-spin text-gray-400" />
+      <div className="flex flex-col items-center justify-center min-h-screen bg-muted/40 gap-3">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Carregando lote...</p>
       </div>
     );
   }
 
-  // Error state
   if (status === "error") {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-        <Card className="w-full max-w-md text-center border-red-200">
-          <CardHeader>
-            <div className="mx-auto bg-red-100 p-3 rounded-full w-fit mb-4">
-              <XCircle className="h-8 w-8 text-red-600" />
-            </div>
-            <CardTitle className="text-red-700">Erro</CardTitle>
+      <div className="flex items-center justify-center min-h-screen bg-muted/40 p-4">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center pb-2">
+            <XCircle className="h-10 w-10 text-destructive mx-auto mb-3" />
+            <CardTitle>Link inválido</CardTitle>
             <CardDescription>{errorMessage}</CardDescription>
           </CardHeader>
           <CardFooter className="justify-center">
@@ -466,16 +458,13 @@ export default function BatchApprovalPage() {
     );
   }
 
-  // Success state
   if (status === "success") {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-        <Card className="w-full max-w-md text-center">
-          <CardHeader>
-            <div className="mx-auto bg-emerald-100 p-3 rounded-full w-fit mb-4">
-              <CheckCircle2 className="h-8 w-8 text-emerald-600" />
-            </div>
-            <CardTitle className="text-emerald-700">Ação Concluída!</CardTitle>
+      <div className="flex items-center justify-center min-h-screen bg-muted/40 p-4">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center pb-2">
+            <CheckCircle2 className="h-10 w-10 text-emerald-600 dark:text-emerald-400 mx-auto mb-3" />
+            <CardTitle>Concluído</CardTitle>
             <CardDescription>
               O lote foi processado com sucesso.
             </CardDescription>
@@ -491,61 +480,94 @@ export default function BatchApprovalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 py-4">
-          <h1 className="text-xl font-bold">Aprovar Lote: {batch?.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            Revise as transações abaixo e aprove ou devolva o lote.
+    <div className="min-h-screen bg-muted/40">
+      {/* Sticky header */}
+      <div className="bg-background border-b sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-4 py-3 sm:py-4">
+          <h1 className="text-lg sm:text-xl font-bold truncate">
+            {batch?.name}
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            Revise as transações e aprove ou devolva o lote.
           </p>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* Summary Bar */}
-        <div className="bg-white rounded-lg border p-4 flex justify-between items-center">
+      {/* pb-28 sm:pb-20 clears the fixed footer (mobile: 2 stacked buttons ≈ 112px; sm: 1 row ≈ 80px) */}
+      <div className="max-w-5xl mx-auto px-4 py-5 space-y-5 pb-28 sm:pb-20">
+        {/* Summary bar */}
+        <div className="bg-card rounded-lg border px-5 py-4 grid grid-cols-2">
           <div>
-            <span className="text-sm text-muted-foreground">Transações: </span>
-            <span className="font-semibold">{transactions.length}</span>
+            <p className="text-xs text-muted-foreground mb-1">Transações</p>
+            <p className="text-xl sm:text-2xl font-semibold tabular-nums leading-none">
+              {transactions.length}
+            </p>
           </div>
-          <div>
-            <span className="text-sm text-muted-foreground">Total: </span>
-            <span className="font-bold font-financial text-lg">
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground mb-1">Total</p>
+            <p className="text-xl sm:text-2xl font-bold font-financial tabular-nums leading-none">
               {formatCurrency(totalAmount)}
-            </span>
+            </p>
           </div>
         </div>
 
-        {/* Transactions grouped by Cost Center */}
+        {/* Transactions grouped by cost center */}
         <div className="space-y-4">
+          {groupedTransactions.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <p className="text-sm font-medium text-muted-foreground">
+                Todas as transações foram rejeitadas.
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                As transações rejeitadas aguardam revisão do gestor. Use
+                &ldquo;Devolver ao Gestor&rdquo; para solicitar os ajustes
+                necessários.
+              </p>
+            </div>
+          )}
           {groupedTransactions.map((ccGroup) => (
             <Card key={ccGroup.costCenterId}>
-              <CardHeader className="pb-2">
-                {/* Breadcrumb */}
-                <div className="flex items-center gap-1 text-sm">
-                  {ccGroup.breadcrumb.map((name, idx) => (
-                    <span key={idx} className="flex items-center gap-1">
-                      {idx > 0 && (
-                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                      )}
+              <CardHeader className="pt-4 pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  {/* Breadcrumb — last segment serves as section heading for screen readers */}
+                  <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm min-w-0 flex-1">
+                    {ccGroup.breadcrumb.map((name, idx) => (
                       <span
-                        className={
-                          idx === ccGroup.breadcrumb.length - 1
-                            ? "font-semibold text-primary"
-                            : "text-muted-foreground"
-                        }
+                        key={idx}
+                        className="flex items-center gap-1 min-w-0"
                       >
-                        {name}
+                        {idx > 0 && (
+                          <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                        )}
+                        <span
+                          role={
+                            idx === ccGroup.breadcrumb.length - 1
+                              ? "heading"
+                              : undefined
+                          }
+                          aria-level={
+                            idx === ccGroup.breadcrumb.length - 1
+                              ? 2
+                              : undefined
+                          }
+                          className={
+                            idx === ccGroup.breadcrumb.length - 1
+                              ? "font-semibold text-primary"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {name}
+                        </span>
                       </span>
-                    </span>
-                  ))}
-                </div>
-                <div className="text-sm text-muted-foreground font-financial">
-                  Total: {formatCurrency(ccGroup.totalAmount)}
+                    ))}
+                  </div>
+                  <span className="text-sm font-financial text-muted-foreground shrink-0 tabular-nums">
+                    {formatCurrency(ccGroup.totalAmount)}
+                  </span>
                 </div>
               </CardHeader>
-              <CardContent className="pt-0">
+
+              <CardContent className="pt-0 pb-4">
                 <Accordion type="multiple" className="space-y-2">
                   {ccGroup.suppliers.map((sg) => (
                     <AccordionItem
@@ -553,39 +575,54 @@ export default function BatchApprovalPage() {
                       value={sg.supplier}
                       className="border rounded-lg"
                     >
-                      <AccordionTrigger className="px-4 hover:no-underline">
-                        <div className="flex justify-between w-full mr-4 gap-2 min-w-0">
-                          <span className="font-medium truncate min-w-0">
-                            {sg.supplier}
-                          </span>
-                          <span className="text-muted-foreground font-financial shrink-0">
-                            {sg.transactions.length} transações •{" "}
-                            {formatCurrency(sg.totalAmount)}
-                          </span>
-                        </div>
-                      </AccordionTrigger>
+                      <h3 className="m-0 leading-none">
+                        <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full mr-2 gap-0.5 sm:gap-4 min-w-0 text-left">
+                            <span className="font-medium truncate">
+                              {sg.supplier}
+                            </span>
+                            <span className="text-xs sm:text-sm text-muted-foreground font-financial tabular-nums shrink-0">
+                              {sg.transactions.length}{" "}
+                              {sg.transactions.length === 1
+                                ? "transação"
+                                : "transações"}{" "}
+                              · {formatCurrency(sg.totalAmount)}
+                            </span>
+                          </div>
+                        </AccordionTrigger>
+                      </h3>
+
                       <AccordionContent className="px-4 pb-4">
-                        <div className="space-y-2">
+                        <ul className="space-y-2">
                           {sg.transactions.map((t) => {
                             const isNew = isNewTransaction(t);
                             const amount =
                               edits.get(t.id)?.adjustedAmount ?? t.amount;
                             const isEdited = edits.has(t.id);
+                            const isEditing = editingId === t.id;
 
                             return (
-                              <div
+                              <li
                                 key={t.id}
-                                className={`flex justify-between gap-2 p-3 rounded-lg border ${editingId === t.id ? "flex-col sm:flex-row sm:items-center items-start" : "items-center"} ${isNew ? "bg-emerald-50 border-emerald-200" : "bg-gray-50"}`}
+                                className={[
+                                  "flex gap-2 p-3 rounded-lg border",
+                                  isEditing
+                                    ? "flex-col"
+                                    : "flex-row items-center justify-between",
+                                  isNew
+                                    ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800"
+                                    : "bg-muted/40",
+                                ].join(" ")}
                               >
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 min-w-0">
-                                    <span className="font-medium truncate">
+                                    <span className="font-medium text-sm truncate">
                                       {t.description}
                                     </span>
                                     {isNew && (
                                       <Badge
                                         variant="secondary"
-                                        className="bg-emerald-100 text-emerald-700 text-xs"
+                                        className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-xs shrink-0"
                                       >
                                         Novo
                                       </Badge>
@@ -593,21 +630,25 @@ export default function BatchApprovalPage() {
                                     {isEdited && (
                                       <Badge
                                         variant="secondary"
-                                        className="text-xs"
+                                        className="text-xs shrink-0"
                                       >
                                         Editado
                                       </Badge>
                                     )}
                                   </div>
-                                  <p className="text-xs text-muted-foreground">
-                                    Vencimento:{" "}
-                                    {format(t.dueDate, "dd/MM/yyyy")}
+                                  <p className="text-xs text-muted-foreground mt-0.5">
+                                    Venc. {format(t.dueDate, "dd/MM/yyyy")}
                                   </p>
                                 </div>
 
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {editingId === t.id ? (
-                                    <div className="flex items-center gap-1">
+                                <div
+                                  className={[
+                                    "flex items-center gap-1 shrink-0",
+                                    isEditing ? "w-full" : "",
+                                  ].join(" ")}
+                                >
+                                  {isEditing ? (
+                                    <div className="flex items-center gap-1 w-full">
                                       <Input
                                         type="text"
                                         inputMode="decimal"
@@ -615,22 +656,22 @@ export default function BatchApprovalPage() {
                                         onChange={(e) =>
                                           setEditValue(e.target.value)
                                         }
-                                        className="w-28 h-8"
+                                        className="flex-1 h-10 sm:h-8 sm:w-32 sm:flex-none"
                                         autoFocus
                                       />
                                       <Button
                                         size="icon"
                                         variant="ghost"
-                                        className="h-8 w-8"
+                                        className="h-11 w-11 sm:h-8 sm:w-8 shrink-0"
                                         onClick={handleSaveEdit}
                                         aria-label="Confirmar edição"
                                       >
-                                        <Check className="h-4 w-4 text-green-600" />
+                                        <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                                       </Button>
                                       <Button
                                         size="icon"
                                         variant="ghost"
-                                        className="h-8 w-8"
+                                        className="h-11 w-11 sm:h-8 sm:w-8 shrink-0"
                                         onClick={() => setEditingId(null)}
                                         aria-label="Cancelar edição"
                                       >
@@ -639,13 +680,13 @@ export default function BatchApprovalPage() {
                                     </div>
                                   ) : (
                                     <>
-                                      <span className="font-semibold font-financial">
+                                      <span className="font-semibold font-financial text-sm tabular-nums">
                                         {formatCurrency(amount)}
                                       </span>
                                       <Button
                                         size="icon"
                                         variant="ghost"
-                                        className="h-8 w-8"
+                                        className="h-11 w-11 sm:h-8 sm:w-8"
                                         onClick={() => handleStartEdit(t)}
                                         aria-label="Editar valor"
                                       >
@@ -654,7 +695,7 @@ export default function BatchApprovalPage() {
                                       <Button
                                         size="icon"
                                         variant="ghost"
-                                        className="h-8 w-8 text-red-500 hover:text-red-700"
+                                        className="h-11 w-11 sm:h-8 sm:w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                                         onClick={() => setRejectingId(t.id)}
                                         aria-label="Rejeitar transação"
                                       >
@@ -663,10 +704,10 @@ export default function BatchApprovalPage() {
                                     </>
                                   )}
                                 </div>
-                              </div>
+                              </li>
                             );
                           })}
-                        </div>
+                        </ul>
                       </AccordionContent>
                     </AccordionItem>
                   ))}
@@ -676,21 +717,24 @@ export default function BatchApprovalPage() {
           ))}
         </div>
 
-        {/* Rejection inline form */}
+        {/* Inline rejection form */}
         {rejectingId && (
-          <Card className="border-red-200">
-            <CardHeader>
-              <CardTitle className="text-red-700 text-lg">
+          <Card ref={rejectCardRef} className="border-destructive/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-destructive text-base">
                 Rejeitar Transação
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div>
-                <Label>Motivo da rejeição</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="reject-reason">Motivo da rejeição</Label>
                 <Textarea
+                  ref={rejectTextareaRef}
+                  id="reject-reason"
                   placeholder="Descreva o motivo..."
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
+                  rows={3}
                 />
               </div>
               <div className="flex gap-2">
@@ -716,22 +760,24 @@ export default function BatchApprovalPage() {
           </Card>
         )}
 
-        {/* Comment section */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Comentário (opcional)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              placeholder="Adicione um comentário sobre a aprovação..."
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-            />
-          </CardContent>
-        </Card>
+        {/* Comment */}
+        <div className="space-y-1.5">
+          <Label htmlFor="batch-comment" className="text-sm font-medium">
+            Comentário (opcional)
+          </Label>
+          <Textarea
+            id="batch-comment"
+            placeholder="Adicione um comentário sobre a aprovação..."
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+          />
+        </div>
+      </div>
 
-        {/* Actions */}
-        <div className="flex flex-col sm:flex-row justify-between sticky bottom-0 bg-white border-t pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] -mx-4 gap-2">
+      {/* Fixed action footer */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 bg-background border-t">
+        <div className="max-w-5xl mx-auto px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex flex-col-reverse sm:flex-row sm:justify-between gap-2">
           <Button
             variant="outline"
             onClick={() => setShowReturnDialog(true)}
@@ -743,7 +789,7 @@ export default function BatchApprovalPage() {
           <Button
             onClick={() => setShowApproveDialog(true)}
             disabled={isSubmitting || transactions.length === 0}
-            className="bg-emerald-600 hover:bg-emerald-700"
+            className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400"
           >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Aprovar Lote
@@ -751,7 +797,7 @@ export default function BatchApprovalPage() {
         </div>
       </div>
 
-      {/* Approve Confirmation Dialog */}
+      {/* Approve confirmation dialog */}
       <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -773,7 +819,7 @@ export default function BatchApprovalPage() {
                 setShowApproveDialog(false);
                 handleApprove();
               }}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400 text-white"
             >
               Confirmar Aprovação
             </AlertDialogAction>
@@ -781,7 +827,7 @@ export default function BatchApprovalPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Return to Manager Dialog */}
+      {/* Return to manager dialog */}
       <AlertDialog open={showReturnDialog} onOpenChange={setShowReturnDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -791,14 +837,24 @@ export default function BatchApprovalPage() {
               necessários.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="py-4">
-            <Label>Motivo da devolução</Label>
+          <div className="py-4 space-y-1.5">
+            <Label htmlFor="return-reason">Motivo da devolução</Label>
             <Textarea
+              id="return-reason"
+              aria-describedby="return-reason-hint"
               placeholder="Descreva os ajustes necessários..."
               value={returnReason}
               onChange={(e) => setReturnReason(e.target.value)}
-              className="mt-2"
+              rows={3}
             />
+            {!returnReason.trim() && (
+              <p
+                id="return-reason-hint"
+                className="text-xs text-muted-foreground"
+              >
+                Obrigatório para confirmar a devolução.
+              </p>
+            )}
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
