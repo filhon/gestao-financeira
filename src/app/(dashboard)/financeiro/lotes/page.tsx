@@ -530,7 +530,7 @@ export default function PaymentBatchesPage() {
   };
 
   const handleSendForApproval = async (
-    approverId: string,
+    _userId: string,
     approverEmail: string,
     approverName: string,
   ) => {
@@ -538,7 +538,7 @@ export default function PaymentBatchesPage() {
     try {
       const token = await paymentBatchService.sendForApproval(
         actionBatch.id,
-        approverId,
+        approverEmail,
         approverEmail,
       );
       await emailService.sendBatchApprovalRequest(
@@ -550,14 +550,9 @@ export default function PaymentBatchesPage() {
         user.displayName,
         approverEmail,
       );
-      await notificationService.notifyBatchForApproval(
-        approverId,
-        actionBatch.name,
-        actionBatch.id,
-        user.displayName,
-        selectedCompany.id,
+      toast.success(
+        `Lote enviado para ${approverName || approverEmail} (e-mail enviado)`,
       );
-      toast.success(`Lote enviado para ${approverName} (email enviado)`);
       fetchBatches();
     } catch (error) {
       console.error("Error sending for approval:", error);
@@ -593,7 +588,7 @@ export default function PaymentBatchesPage() {
   };
 
   const handleSendForAuthorization = async (
-    authorizerId: string,
+    _userId: string,
     authorizerEmail: string,
     authorizerName: string,
   ) => {
@@ -601,7 +596,7 @@ export default function PaymentBatchesPage() {
     try {
       const token = await paymentBatchService.sendForAuthorization(
         actionBatch.id,
-        authorizerId,
+        authorizerEmail,
         authorizerEmail,
       );
       await emailService.sendBatchAuthorizationRequest(
@@ -613,14 +608,9 @@ export default function PaymentBatchesPage() {
         user.displayName,
         authorizerEmail,
       );
-      await notificationService.notifyBatchForAuthorization(
-        authorizerId,
-        actionBatch.name,
-        actionBatch.id,
-        user.displayName,
-        selectedCompany.id,
+      toast.success(
+        `Lote enviado para ${authorizerName || authorizerEmail} (e-mail enviado)`,
       );
-      toast.success(`Lote enviado para ${authorizerName} (email enviado)`);
       fetchBatches();
     } catch (error) {
       console.error("Error sending for authorization:", error);
@@ -1443,8 +1433,7 @@ export default function PaymentBatchesPage() {
           onSend={handleSendForApproval}
           companyId={selectedCompany.id}
           title="Enviar para Aprovador"
-          description="Selecione o aprovador que irá revisar e aprovar este lote de pagamentos."
-          roles={["approver", "admin", "financial_manager"]}
+          description="Digite o e-mail do aprovador. Um link de aprovação será enviado — o destinatário não precisa ser usuário do sistema."
           buttonText="Enviar para Aprovação"
         />
       )}
@@ -1474,8 +1463,7 @@ export default function PaymentBatchesPage() {
           onSend={handleSendForAuthorization}
           companyId={selectedCompany.id}
           title="Enviar para Autorização"
-          description="Selecione o autorizador que irá confirmar os pagamentos no banco."
-          roles={["releaser", "admin", "financial_manager"]}
+          description="Digite o e-mail do autorizador. Um link de autorização será enviado — o destinatário não precisa ser usuário do sistema."
           buttonText="Enviar para Autorização"
         />
       )}

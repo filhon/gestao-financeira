@@ -8,6 +8,7 @@ import { PaymentBatch, Transaction } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
 import { transactionService } from "@/lib/services/transactionService";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
+import { emailService } from "@/lib/services/emailService";
 import {
   Table,
   TableBody,
@@ -195,8 +196,32 @@ export function BatchDetailsDialog({
     if (!batch) return;
     setAddingId(tx.id);
     try {
-      await paymentBatchService.addTransactions(batch.id, [tx]);
-      toast.success("Transação adicionada ao lote");
+      const result = await paymentBatchService.addTransactionsWithApprovalCheck(
+        batch.id,
+        [tx],
+      );
+
+      if (result.token && result.approverEmail && result.batchName) {
+        try {
+          await emailService.sendBatchNewTransactionsNotification(
+            result.batchName,
+            batch.id,
+            result.token,
+            result.newTransactionCount,
+            result.additionalAmount,
+            user?.displayName ?? "Gestor Financeiro",
+            result.approverEmail,
+          );
+        } catch (emailErr) {
+          console.error("Error sending re-approval notification:", emailErr);
+        }
+        toast.success(
+          "Transação adicionada — aprovador notificado por e-mail para revisar o lote",
+        );
+      } else {
+        toast.success("Transação adicionada ao lote");
+      }
+
       loadTransactions();
       loadMissingTransactions();
       if (onUpdate) onUpdate();

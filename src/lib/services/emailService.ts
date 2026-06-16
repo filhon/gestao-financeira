@@ -165,6 +165,46 @@ export const emailService = {
     }
   },
 
+  sendBatchNewTransactionsNotification: async (
+    batchName: string,
+    batchId: string,
+    token: string,
+    newTransactionCount: number,
+    additionalAmount: number,
+    senderName: string,
+    approverEmail: string,
+  ): Promise<EmailResponse> => {
+    try {
+      const appDomain = getAppDomain();
+
+      const response = await fetch("/api/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "batch_new_transactions",
+          to: [approverEmail],
+          data: {
+            batchName,
+            batchId,
+            newTransactionCount,
+            additionalAmount: new Intl.NumberFormat("pt-BR", {
+              style: "currency",
+              currency: "BRL",
+            }).format(additionalAmount),
+            senderName,
+            link: `${appDomain}/approve-batch/${token}`,
+          },
+        }),
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Error sending batch new transactions email:", error);
+      return { error };
+    }
+  },
+
   // ============================================
   // Reimbursement Report Emails
   // ============================================

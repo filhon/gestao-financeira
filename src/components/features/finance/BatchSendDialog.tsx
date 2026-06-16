@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   ResponsiveModal,
   ResponsiveModalContent,
@@ -10,17 +10,8 @@ import {
 } from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { userService } from "@/lib/services/userService";
-import { UserProfile, UserRole } from "@/lib/types";
+import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
 
 interface BatchSendDialogProps {
   isOpen: boolean;
@@ -33,7 +24,6 @@ interface BatchSendDialogProps {
   companyId: string;
   title: string;
   description: string;
-  roles: UserRole[]; // Which roles to show (approver, releaser, etc.)
   buttonText: string;
 }
 
@@ -41,49 +31,31 @@ export function BatchSendDialog({
   isOpen,
   onClose,
   onSend,
-  companyId,
   title,
   description,
-  roles,
   buttonText,
 }: BatchSendDialogProps) {
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [emailError, setEmailError] = useState("");
   const [isSending, setIsSending] = useState(false);
 
-  // Create a stable key for roles dependency to avoid infinite loops
-  const rolesKey = roles.join(",");
-
-  useEffect(() => {
-    const loadUsers = async () => {
-      if (isOpen && companyId) {
-        setIsLoading(true);
-        try {
-          const data = await userService.getUsersByRole(companyId, roles);
-          setUsers(data);
-        } catch (error) {
-          console.error("Error loading users:", error);
-          toast.error("Erro ao carregar lista de usuários");
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    };
-    loadUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, companyId, rolesKey]);
+  const validateEmail = (value: string): boolean => {
+    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    setEmailError(isValid ? "" : "Digite um e-mail válido");
+    return isValid;
+  };
 
   const handleSend = async () => {
-    const user = users.find((u) => u.uid === selectedUserId);
-    if (!user) return;
-
+    if (!validateEmail(email)) return;
     setIsSending(true);
     try {
-      await onSend(user.uid, user.email, user.displayName);
+      await onSend(email, email, name.trim() || email);
+      setEmail("");
+      setName("");
       onClose();
-    } catch (error) {
-      console.error("Error sending:", error);
+    } catch {
+      // error handled by parent
     } finally {
       setIsSending(false);
     }
@@ -91,7 +63,9 @@ export function BatchSendDialog({
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
-      setSelectedUserId("");
+      setEmail("");
+      setName("");
+      setEmailError("");
       onClose();
     }
   };
@@ -107,31 +81,39 @@ export function BatchSendDialog({
           <p className="text-sm text-muted-foreground">{description}</p>
 
           <div className="space-y-2">
-            <Label>Selecione o usuário</Label>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-6 w-6 animate-spin" />
-              </div>
-            ) : users.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-2">
-                Nenhum usuário disponível com esta permissão.
-              </p>
-            ) : (
-              <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione um usuário" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[200px]">
-                  {users.map((user) => (
-                    <SelectItem key={user.uid} value={user.uid}>
-                      <span className="block truncate max-w-[280px]">
-                        {user.displayName} ({user.email})
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <Label htmlFor="send-email">E-mail</Label>
+            <Input
+              id="send-email"
+              type="email"
+              placeholder="aprovador@empresa.com"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (emailError) setEmailError("");
+              }}
+              onBlur={() => email && validateEmail(email)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            />
+            {emailError && (
+              <p className="text-sm text-destructive">{emailError}</p>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="send-name">
+              Nome{" "}
+              <span className="text-muted-foreground font-normal">
+                (opcional)
+              </span>
+            </Label>
+            <Input
+              id="send-name"
+              type="text"
+              placeholder="Nome do responsável"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            />
           </div>
         </div>
 
@@ -139,7 +121,7 @@ export function BatchSendDialog({
           <Button variant="outline" onClick={onClose} disabled={isSending}>
             Cancelar
           </Button>
-          <Button onClick={handleSend} disabled={!selectedUserId || isSending}>
+          <Button onClick={handleSend} disabled={!email.trim() || isSending}>
             {isSending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {buttonText}
           </Button>

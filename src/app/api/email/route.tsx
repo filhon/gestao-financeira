@@ -3,6 +3,7 @@ import {
   StatusUpdateEmail,
   BatchApprovalEmail,
   BatchAuthorizationEmail,
+  BatchNewTransactionsEmail,
   FeedbackNotificationEmail,
   ReimbursementApprovalEmail,
   ReimbursementApprovedEmail,
@@ -66,6 +67,9 @@ export async function POST(request: Request) {
   } else if (type === "batch_authorization_request") {
     emailComponent = <BatchAuthorizationEmail {...data} />;
     subject = `Autorização Necessária: ${data.batchName}`;
+  } else if (type === "batch_new_transactions") {
+    emailComponent = <BatchNewTransactionsEmail {...data} />;
+    subject = `Novas transações adicionadas ao lote: ${data.batchName}`;
   } else if (type === "feedback_notification") {
     emailComponent = <FeedbackNotificationEmail {...data} />;
     subject = `Novo Feedback: ${data.feedbackTypeLabel} - ${data.title}`;

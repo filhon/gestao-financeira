@@ -555,7 +555,9 @@ export default function BatchApprovalPage() {
                     >
                       <AccordionTrigger className="px-4 hover:no-underline">
                         <div className="flex justify-between w-full mr-4 gap-2 min-w-0">
-                          <span className="font-medium truncate min-w-0">{sg.supplier}</span>
+                          <span className="font-medium truncate min-w-0">
+                            {sg.supplier}
+                          </span>
                           <span className="text-muted-foreground font-financial shrink-0">
                             {sg.transactions.length} transações •{" "}
                             {formatCurrency(sg.totalAmount)}

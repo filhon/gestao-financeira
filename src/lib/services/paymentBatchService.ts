@@ -190,6 +190,88 @@ export const paymentBatchService = {
     });
   },
 
+  /**
+   * Add transactions with automatic re-approval flow for approved batches.
+   *
+   * When the batch is already "approved" and has an approverEmail, this reverts
+   * it to "pending_approval" with a new token so the original approver must
+   * review and re-approve. Returns the token and approver info so the caller
+   * can send the notification email.
+   *
+   * If the batch is already "pending_approval" (e.g., a previous addition
+   * already triggered this flow), transactions are added silently — no new
+   * token or email is needed since the existing link still covers everything.
+   */
+  addTransactionsWithApprovalCheck: async (
+    batchId: string,
+    transactions: Transaction[],
+  ): Promise<{
+    token?: string;
+    approverEmail?: string;
+    batchName?: string;
+    additionalAmount: number;
+    newTransactionCount: number;
+  }> => {
+    const batchRef = doc(db, COLLECTION_NAME, batchId);
+    const batchSnap = await getDoc(batchRef);
+    if (!batchSnap.exists()) throw new Error("Batch not found");
+    const batchData = batchSnap.data() as PaymentBatch;
+
+    const existingIds = new Set(batchData.transactionIds);
+    const uniqueTransactions = transactions.filter(
+      (t) => !existingIds.has(t.id),
+    );
+
+    if (uniqueTransactions.length === 0) {
+      return { newTransactionCount: 0, additionalAmount: 0 };
+    }
+
+    const newIds = uniqueTransactions.map((t) => t.id);
+    const additionalAmount = uniqueTransactions.reduce(
+      (sum, t) => sum + t.amount,
+      0,
+    );
+
+    const shouldRevert =
+      batchData.status === "approved" && !!batchData.approverEmail;
+
+    let token: string | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const batchUpdate: any = {
+      transactionIds: [...batchData.transactionIds, ...newIds],
+      totalAmount: batchData.totalAmount + additionalAmount,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (shouldRevert) {
+      token = crypto.randomUUID();
+      const tokenHash = await hashToken(token);
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 48);
+
+      batchUpdate.status = "pending_approval";
+      batchUpdate.approvalTokenHash = tokenHash;
+      batchUpdate.approvalToken = null;
+      batchUpdate.approvalTokenExpiresAt = expiresAt;
+      batchUpdate.sentForApprovalAt = serverTimestamp();
+    }
+
+    const wb = writeBatch(db);
+    wb.update(batchRef, batchUpdate);
+    uniqueTransactions.forEach((t) => {
+      wb.update(doc(db, TRANSACTIONS_COLLECTION, t.id), { batchId });
+    });
+    await wb.commit();
+
+    return {
+      token,
+      approverEmail: shouldRevert ? batchData.approverEmail : undefined,
+      batchName: shouldRevert ? batchData.name : undefined,
+      additionalAmount,
+      newTransactionCount: uniqueTransactions.length,
+    };
+  },
+
   addTransactions: async (batchId: string, transactions: Transaction[]) => {
     const batch = writeBatch(db);
     const batchRef = doc(db, COLLECTION_NAME, batchId);

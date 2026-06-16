@@ -368,6 +368,146 @@ export const BatchAuthorizationEmail: React.FC<
 );
 
 // ============================================
+// Batch New Transactions Email
+// ============================================
+
+interface BatchNewTransactionsEmailProps {
+  batchName: string;
+  newTransactionCount: number;
+  additionalAmount: string;
+  senderName: string;
+  link: string;
+}
+
+export const BatchNewTransactionsEmail: React.FC<
+  Readonly<BatchNewTransactionsEmailProps>
+> = ({
+  batchName,
+  newTransactionCount,
+  additionalAmount,
+  senderName,
+  link,
+}) => (
+  <div
+    style={{
+      fontFamily: "sans-serif",
+      lineHeight: "1.6",
+      maxWidth: "600px",
+      margin: "0 auto",
+    }}
+  >
+    <div
+      style={{ background: "#f8fafc", padding: "20px", borderRadius: "8px" }}
+    >
+      <h2 style={{ color: "#1e293b", marginTop: 0 }}>
+        ➕ Novas Transações Adicionadas ao Lote
+      </h2>
+
+      <p style={{ color: "#475569" }}>Olá,</p>
+      <p style={{ color: "#475569" }}>
+        <strong>{senderName}</strong> adicionou{" "}
+        {newTransactionCount === 1
+          ? "uma nova transação"
+          : `${newTransactionCount} novas transações`}{" "}
+        ao lote <strong>{batchName}</strong> que você havia aprovado
+        anteriormente. Por favor, revise as alterações e aprove novamente.
+      </p>
+
+      <div
+        style={{
+          background: "#fff",
+          padding: "16px",
+          borderRadius: "6px",
+          border: "1px solid #e2e8f0",
+          margin: "20px 0",
+        }}
+      >
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <tbody>
+            <tr>
+              <td style={{ padding: "8px 0", color: "#64748b" }}>Lote:</td>
+              <td
+                style={{
+                  padding: "8px 0",
+                  fontWeight: "bold",
+                  textAlign: "right",
+                }}
+              >
+                {batchName}
+              </td>
+            </tr>
+            <tr>
+              <td style={{ padding: "8px 0", color: "#64748b" }}>
+                Novas transações:
+              </td>
+              <td
+                style={{
+                  padding: "8px 0",
+                  fontWeight: "bold",
+                  textAlign: "right",
+                }}
+              >
+                {newTransactionCount}
+              </td>
+            </tr>
+            <tr>
+              <td
+                style={{
+                  padding: "8px 0",
+                  color: "#64748b",
+                  borderTop: "1px solid #e2e8f0",
+                }}
+              >
+                Valor adicional:
+              </td>
+              <td
+                style={{
+                  padding: "8px 0",
+                  fontWeight: "bold",
+                  textAlign: "right",
+                  borderTop: "1px solid #e2e8f0",
+                  color: "#d97706",
+                  fontSize: "18px",
+                }}
+              >
+                {additionalAmount}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style={{ color: "#475569", fontSize: "14px" }}>
+        Clique no botão abaixo para revisar todas as transações do lote
+        (incluindo as novas) e aprovar novamente.
+      </p>
+
+      <div style={{ textAlign: "center", margin: "24px 0" }}>
+        <a
+          href={link}
+          style={{
+            background: "#d97706",
+            color: "#fff",
+            padding: "12px 32px",
+            textDecoration: "none",
+            borderRadius: "6px",
+            fontWeight: "bold",
+            display: "inline-block",
+          }}
+        >
+          Revisar e Aprovar Lote
+        </a>
+      </div>
+
+      <p style={{ color: "#94a3b8", fontSize: "12px", marginBottom: 0 }}>
+        Este link expira em 48 horas. Se você não reconhece esta solicitação,
+        por favor ignore este email.
+      </p>
+    </div>
+  </div>
+);
+
+// ============================================
 // Feedback Email Template
 // ============================================
 
