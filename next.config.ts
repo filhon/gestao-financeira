@@ -9,6 +9,18 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
+      // ── Magic-link de aprovação de lote ─────────────────────────────────
+      // Impede que o token na URL vaze via cabeçalho Referer ao navegar para
+      // qualquer recurso externo carregado pela página (imagens, fontes, etc.).
+      {
+        source: "/approve-batch/:path*",
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
+      },
       // ── CORS para a API externa ──────────────────────────────────────────
       // Permite que aplicações externas chamem /api/v1/* a partir do browser.
       // Métodos restritos ao necessário; requests com credentials não são

@@ -2,9 +2,6 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { paymentBatchService } from "@/lib/services/paymentBatchService";
-import { transactionService } from "@/lib/services/transactionService";
-import { PaymentBatch, Transaction, CostCenter } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -34,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import currency from "currency.js";
 import { formatCurrency } from "@/lib/utils";
 import { format, differenceInDays } from "date-fns";
 import {
@@ -47,8 +45,27 @@ import {
   Check,
 } from "lucide-react";
 import { toast } from "sonner";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+
+interface BatchInfo {
+  id: string;
+  name: string;
+}
+
+interface BatchTransaction {
+  id: string;
+  description: string;
+  amount: number;
+  dueDate: Date;
+  createdAt: Date | null;
+  costCenterId: string | null;
+  supplierOrClient: string | null;
+}
+
+interface BatchCostCenter {
+  id: string;
+  name: string;
+  parentId?: string | null;
+}
 
 // Types for grouped transactions
 interface TransactionEdit {
@@ -58,7 +75,7 @@ interface TransactionEdit {
 
 interface SupplierGroup {
   supplier: string;
-  transactions: Transaction[];
+  transactions: BatchTransaction[];
   totalAmount: number;
 }
 
@@ -73,11 +90,12 @@ interface CostCenterGroup {
 export default function BatchApprovalPage() {
   const params = useParams();
   const router = useRouter();
-  const token = params.token as string;
+  const rawToken = params.token;
+  const token = Array.isArray(rawToken) ? rawToken[0] : (rawToken ?? "");
 
-  const [batch, setBatch] = useState<PaymentBatch | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [batch, setBatch] = useState<BatchInfo | null>(null);
+  const [transactions, setTransactions] = useState<BatchTransaction[]>([]);
+  const [costCenters, setCostCenters] = useState<BatchCostCenter[]>([]);
   const [status, setStatus] = useState<
     "loading" | "ready" | "success" | "error"
   >("loading");
@@ -97,65 +115,79 @@ export default function BatchApprovalPage() {
   const [showReturnDialog, setShowReturnDialog] = useState(false);
   const [returnReason, setReturnReason] = useState("");
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Approve confirmation dialog state
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
 
-  // Load batch and transactions
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRejectSubmitting, setIsRejectSubmitting] = useState(false);
+
+  // Load batch and transactions from server-side API
   useEffect(() => {
+    if (!token) return;
+
     const loadData = async () => {
       try {
-        const batchData = await paymentBatchService.getByApprovalToken(token);
-        if (!batchData) {
-          setStatus("error");
-          setErrorMessage("Link inválido ou expirado.");
-          return;
-        }
-
-        if (batchData.status !== "pending_approval") {
-          setStatus("error");
-          setErrorMessage(
-            `Este lote não está aguardando aprovação (status: ${batchData.status}).`,
-          );
-          return;
-        }
-
-        setBatch(batchData);
-
-        // Load transactions
-        const txns = await transactionService.getAll({ batchId: batchData.id });
-        setTransactions(txns);
-
-        // Load cost centers for this company
-        const ccQuery = query(
-          collection(db, "cost_centers"),
-          where("companyId", "==", batchData.companyId),
+        const res = await fetch(
+          `/api/internal/batch-approval?token=${encodeURIComponent(token)}`,
         );
-        const ccSnapshot = await getDocs(ccQuery);
-        const ccData = ccSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as CostCenter[];
-        setCostCenters(ccData);
+        const payload = await res.json();
 
+        if (!res.ok) {
+          setStatus("error");
+          setErrorMessage(payload.error || "Erro ao carregar o lote.");
+          return;
+        }
+
+        setBatch({ id: payload.batch.id, name: payload.batch.name });
+
+        setTransactions(
+          payload.transactions.map(
+            (t: {
+              id: string;
+              description: string;
+              amount: number;
+              dueDate: string | null;
+              createdAt: string | null;
+              costCenterId: string | null;
+              supplierOrClient: string | null;
+            }) => ({
+              id: t.id,
+              description: t.description,
+              amount: t.amount,
+              dueDate: t.dueDate ? new Date(t.dueDate) : new Date(),
+              createdAt: t.createdAt ? new Date(t.createdAt) : null,
+              costCenterId: t.costCenterId,
+              supplierOrClient: t.supplierOrClient,
+            }),
+          ),
+        );
+
+        setCostCenters(payload.costCenters);
         setStatus("ready");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } catch (error: any) {
+      } catch (error) {
         console.error("Error loading batch:", error);
         setStatus("error");
-        setErrorMessage(error.message || "Erro ao carregar o lote.");
+        setErrorMessage("Erro ao carregar o lote.");
       }
     };
 
     loadData();
   }, [token]);
 
+  // Pre-build a lookup map to make breadcrumb traversal O(depth) instead of O(n*depth)
+  const costCenterMap = useMemo(
+    () => new Map(costCenters.map((cc) => [cc.id, cc])),
+    [costCenters],
+  );
+
   // Build cost center breadcrumb
   const buildBreadcrumb = useCallback(
     (costCenterId: string): string[] => {
       const result: string[] = [];
-      let currentId: string | undefined = costCenterId;
+      let currentId: string | undefined | null = costCenterId;
 
       while (currentId) {
-        const cc = costCenters.find((c) => c.id === currentId);
+        const cc = costCenterMap.get(currentId);
         if (cc) {
           result.unshift(cc.name);
           currentId = cc.parentId;
@@ -166,7 +198,7 @@ export default function BatchApprovalPage() {
 
       return result;
     },
-    [costCenters],
+    [costCenterMap],
   );
 
   // Group transactions by cost center and supplier
@@ -190,7 +222,7 @@ export default function BatchApprovalPage() {
 
       const amount = edits.get(t.id)?.adjustedAmount ?? t.amount;
       group.transactions.push(t);
-      group.totalAmount += amount;
+      group.totalAmount = currency(group.totalAmount).add(amount).value;
     });
 
     // Build result with breadcrumbs
@@ -200,7 +232,7 @@ export default function BatchApprovalPage() {
         ccId === "uncategorized"
           ? ["Sem Centro de Custo"]
           : buildBreadcrumb(ccId);
-      const cc = costCenters.find((c) => c.id === ccId);
+      const cc = costCenterMap.get(ccId);
 
       // Sort suppliers by total (highest first)
       suppliers.sort((a, b) => b.totalAmount - a.totalAmount);
@@ -219,7 +251,10 @@ export default function BatchApprovalPage() {
         breadcrumb,
         highlightedName: cc?.name || "Sem Centro de Custo",
         suppliers,
-        totalAmount: suppliers.reduce((sum, sg) => sum + sg.totalAmount, 0),
+        totalAmount: suppliers.reduce(
+          (sum, sg) => currency(sum).add(sg.totalAmount).value,
+          0,
+        ),
       });
     });
 
@@ -227,32 +262,41 @@ export default function BatchApprovalPage() {
     result.sort((a, b) => b.totalAmount - a.totalAmount);
 
     return result;
-  }, [transactions, costCenters, edits, buildBreadcrumb]);
+  }, [transactions, costCenterMap, edits, buildBreadcrumb]);
 
   // Calculate totals
   const totalAmount = useMemo(() => {
     return transactions.reduce((sum, t) => {
       const amount = edits.get(t.id)?.adjustedAmount ?? t.amount;
-      return sum + amount;
+      return currency(sum).add(amount).value;
     }, 0);
   }, [transactions, edits]);
 
   // Check if transaction is new (created within last 30 days)
-  const isNewTransaction = (t: Transaction): boolean => {
+  const isNewTransaction = (t: BatchTransaction): boolean => {
+    if (!t.createdAt) return false;
     return differenceInDays(new Date(), t.createdAt) <= 30;
   };
 
   // Edit amount handlers
-  const handleStartEdit = (t: Transaction) => {
+  const handleStartEdit = (t: BatchTransaction) => {
     setEditingId(t.id);
     const current = edits.get(t.id)?.adjustedAmount ?? t.amount;
-    setEditValue(String(current));
+    setEditValue(
+      current.toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    );
   };
 
   const handleSaveEdit = () => {
     if (!editingId) return;
-    const newAmount = parseFloat(editValue);
-    if (isNaN(newAmount) || newAmount < 0) {
+    const newAmount = currency(editValue, {
+      decimal: ",",
+      separator: ".",
+    }).value;
+    if (isNaN(newAmount) || newAmount <= 0) {
       toast.error("Valor inválido");
       return;
     }
@@ -274,25 +318,41 @@ export default function BatchApprovalPage() {
 
   // Reject transaction
   const handleRejectTransaction = async () => {
-    if (!rejectingId || !batch || !rejectReason.trim()) {
+    if (!rejectingId || !rejectReason.trim()) {
       toast.error("Informe o motivo da rejeição");
       return;
     }
 
+    setIsRejectSubmitting(true);
     try {
-      await paymentBatchService.rejectTransaction(
-        batch.id,
-        rejectingId,
-        rejectReason,
-      );
+      const res = await fetch("/api/internal/batch-approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          action: "reject-transaction",
+          transactionId: rejectingId,
+          reason: rejectReason,
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json();
+        throw new Error(payload.error || "Erro ao rejeitar transação");
+      }
+
+      const newEdits = new Map(edits);
+      newEdits.delete(rejectingId);
+      setEdits(newEdits);
       setTransactions(transactions.filter((t) => t.id !== rejectingId));
-      edits.delete(rejectingId);
-      setEdits(new Map(edits));
       toast.success("Transação rejeitada");
     } catch (error) {
       console.error("Error rejecting:", error);
-      toast.error("Erro ao rejeitar transação");
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao rejeitar transação",
+      );
     } finally {
+      setIsRejectSubmitting(false);
       setRejectingId(null);
       setRejectReason("");
     }
@@ -300,19 +360,35 @@ export default function BatchApprovalPage() {
 
   // Return to manager
   const handleReturnToManager = async () => {
-    if (!batch || !returnReason.trim()) {
+    if (!returnReason.trim()) {
       toast.error("Informe o motivo da devolução");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await paymentBatchService.returnToManager(batch.id, returnReason);
+      const res = await fetch("/api/internal/batch-approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          action: "return",
+          reason: returnReason,
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json();
+        throw new Error(payload.error || "Erro ao devolver lote");
+      }
+
       toast.success("Lote devolvido ao gestor");
       setStatus("success");
     } catch (error) {
       console.error("Error returning:", error);
-      toast.error("Erro ao devolver lote");
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao devolver lote",
+      );
     } finally {
       setIsSubmitting(false);
       setShowReturnDialog(false);
@@ -321,8 +397,6 @@ export default function BatchApprovalPage() {
 
   // Approve batch
   const handleApprove = async () => {
-    if (!batch) return;
-
     if (transactions.length === 0) {
       toast.error("Não há transações para aprovar");
       return;
@@ -333,15 +407,29 @@ export default function BatchApprovalPage() {
       const adjustments = Array.from(edits.values()).filter(
         (e) => e.adjustedAmount !== undefined,
       );
-      await paymentBatchService.approveByToken(
-        token,
-        comment || undefined,
-        adjustments.length > 0 ? adjustments : undefined,
-      );
+
+      const res = await fetch("/api/internal/batch-approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          action: "approve",
+          comment: comment || undefined,
+          adjustments: adjustments.length > 0 ? adjustments : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json();
+        throw new Error(payload.error || "Erro ao aprovar lote");
+      }
+
       setStatus("success");
     } catch (error) {
       console.error("Error approving:", error);
-      toast.error("Erro ao aprovar lote");
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao aprovar lote",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -415,49 +503,6 @@ export default function BatchApprovalPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* Balance Counters */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Saldo Atual</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold font-financial text-gray-900">
-                {formatCurrency(0)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Receitas - Despesas confirmadas
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Saldo Projetado (Fim do Ano)</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold font-financial text-gray-900">
-                {formatCurrency(0)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Projeção ao final do exercício
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-amber-200 bg-amber-50/50">
-            <CardHeader className="pb-2">
-              <CardDescription>Saldo Após Pagamento</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold font-financial text-amber-700">
-                {formatCurrency(0 - totalAmount)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Após pagar este lote
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Summary Bar */}
         <div className="bg-white rounded-lg border p-4 flex justify-between items-center">
           <div>
@@ -509,9 +554,9 @@ export default function BatchApprovalPage() {
                       className="border rounded-lg"
                     >
                       <AccordionTrigger className="px-4 hover:no-underline">
-                        <div className="flex justify-between w-full mr-4">
-                          <span className="font-medium">{sg.supplier}</span>
-                          <span className="text-muted-foreground font-financial">
+                        <div className="flex justify-between w-full mr-4 gap-2 min-w-0">
+                          <span className="font-medium truncate min-w-0">{sg.supplier}</span>
+                          <span className="text-muted-foreground font-financial shrink-0">
                             {sg.transactions.length} transações •{" "}
                             {formatCurrency(sg.totalAmount)}
                           </span>
@@ -528,11 +573,11 @@ export default function BatchApprovalPage() {
                             return (
                               <div
                                 key={t.id}
-                                className={`flex items-center justify-between p-3 rounded-lg border ${isNew ? "bg-emerald-50 border-emerald-200" : "bg-gray-50"}`}
+                                className={`flex justify-between gap-2 p-3 rounded-lg border ${editingId === t.id ? "flex-col sm:flex-row sm:items-center items-start" : "items-center"} ${isNew ? "bg-emerald-50 border-emerald-200" : "bg-gray-50"}`}
                               >
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-medium truncate">
                                       {t.description}
                                     </span>
                                     {isNew && (
@@ -558,11 +603,12 @@ export default function BatchApprovalPage() {
                                   </p>
                                 </div>
 
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 shrink-0">
                                   {editingId === t.id ? (
                                     <div className="flex items-center gap-1">
                                       <Input
-                                        type="number"
+                                        type="text"
+                                        inputMode="decimal"
                                         value={editValue}
                                         onChange={(e) =>
                                           setEditValue(e.target.value)
@@ -575,6 +621,7 @@ export default function BatchApprovalPage() {
                                         variant="ghost"
                                         className="h-8 w-8"
                                         onClick={handleSaveEdit}
+                                        aria-label="Confirmar edição"
                                       >
                                         <Check className="h-4 w-4 text-green-600" />
                                       </Button>
@@ -583,6 +630,7 @@ export default function BatchApprovalPage() {
                                         variant="ghost"
                                         className="h-8 w-8"
                                         onClick={() => setEditingId(null)}
+                                        aria-label="Cancelar edição"
                                       >
                                         <X className="h-4 w-4" />
                                       </Button>
@@ -597,6 +645,7 @@ export default function BatchApprovalPage() {
                                         variant="ghost"
                                         className="h-8 w-8"
                                         onClick={() => handleStartEdit(t)}
+                                        aria-label="Editar valor"
                                       >
                                         <Edit2 className="h-4 w-4" />
                                       </Button>
@@ -605,6 +654,7 @@ export default function BatchApprovalPage() {
                                         variant="ghost"
                                         className="h-8 w-8 text-red-500 hover:text-red-700"
                                         onClick={() => setRejectingId(t.id)}
+                                        aria-label="Rejeitar transação"
                                       >
                                         <X className="h-4 w-4" />
                                       </Button>
@@ -642,10 +692,21 @@ export default function BatchApprovalPage() {
                 />
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setRejectingId(null)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setRejectingId(null)}
+                  disabled={isRejectSubmitting}
+                >
                   Cancelar
                 </Button>
-                <Button variant="destructive" onClick={handleRejectTransaction}>
+                <Button
+                  variant="destructive"
+                  onClick={handleRejectTransaction}
+                  disabled={isRejectSubmitting}
+                >
+                  {isRejectSubmitting && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   Confirmar Rejeição
                 </Button>
               </div>
@@ -668,7 +729,7 @@ export default function BatchApprovalPage() {
         </Card>
 
         {/* Actions */}
-        <div className="flex justify-between sticky bottom-0 bg-white border-t p-4 -mx-4">
+        <div className="flex flex-col sm:flex-row justify-between sticky bottom-0 bg-white border-t pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] -mx-4 gap-2">
           <Button
             variant="outline"
             onClick={() => setShowReturnDialog(true)}
@@ -678,7 +739,7 @@ export default function BatchApprovalPage() {
             Devolver ao Gestor
           </Button>
           <Button
-            onClick={handleApprove}
+            onClick={() => setShowApproveDialog(true)}
             disabled={isSubmitting || transactions.length === 0}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
@@ -687,6 +748,36 @@ export default function BatchApprovalPage() {
           </Button>
         </div>
       </div>
+
+      {/* Approve Confirmation Dialog */}
+      <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Aprovação do Lote</AlertDialogTitle>
+            <AlertDialogDescription>
+              Você está aprovando{" "}
+              <strong>{transactions.length} transações</strong> no valor total
+              de{" "}
+              <strong className="font-financial">
+                {formatCurrency(totalAmount)}
+              </strong>
+              . Esta ação não pode ser desfeita pelo portal de aprovação.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowApproveDialog(false);
+                handleApprove();
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              Confirmar Aprovação
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Return to Manager Dialog */}
       <AlertDialog open={showReturnDialog} onOpenChange={setShowReturnDialog}>
