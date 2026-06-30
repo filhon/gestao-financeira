@@ -346,7 +346,7 @@ export function CashFlowChart({ year }: { year?: number }) {
       <CardContent className="pl-2">
         {!hasCompanyStats && !isLoading && (
           <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 text-xs rounded-md px-3 py-2 mb-2">
-            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             <span>
               Saldo base calculado a partir de R$0,00. Recalcule o saldo para
               projeções mais precisas.
@@ -355,7 +355,7 @@ export function CashFlowChart({ year }: { year?: number }) {
         )}
         {isSimulating && !isLoading && (
           <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400 text-xs rounded-md px-3 py-2 mb-2">
-            <FlaskConical className="h-3.5 w-3.5 flex-shrink-0" />
+            <FlaskConical className="h-3.5 w-3.5 shrink-0" />
             <span>
               Exibindo projeção com{" "}
               <strong>{simulatedTransactions.length}</strong>{" "}
@@ -427,7 +427,7 @@ export function CashFlowChart({ year }: { year?: number }) {
                     if (active && payload && payload.length) {
                       const point = payload[0].payload as ChartPoint;
                       return (
-                        <div className="rounded-lg border bg-popover p-3 shadow-md min-w-[176px]">
+                        <div className="rounded-lg border bg-popover p-3 shadow-md min-w-44">
                           <p className="text-sm font-medium text-popover-foreground mb-2">
                             {label}
                           </p>

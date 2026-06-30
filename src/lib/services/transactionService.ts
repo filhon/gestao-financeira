@@ -24,7 +24,13 @@ import { db } from "@/lib/firebase/client";
 import currency from "currency.js";
 import { Transaction, TransactionStatus } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
-import { format, addMonths, addDays, differenceInCalendarDays } from "date-fns";
+import {
+  format,
+  addMonths,
+  addDays,
+  differenceInCalendarDays,
+  endOfDay,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { auditService } from "@/lib/services/auditService";
@@ -129,7 +135,10 @@ export const transactionService = {
       );
     }
     if (filter?.endDate) {
-      q = query(q, where("dueDate", "<=", Timestamp.fromDate(filter.endDate)));
+      q = query(
+        q,
+        where("dueDate", "<=", Timestamp.fromDate(endOfDay(filter.endDate))),
+      );
     }
 
     if (filter?.limit) {
@@ -161,7 +170,7 @@ export const transactionService = {
       where("status", "==", "paid"),
       orderBy("paymentDate", "asc"),
       where("paymentDate", ">=", Timestamp.fromDate(filter.startDate)),
-      where("paymentDate", "<=", Timestamp.fromDate(filter.endDate)),
+      where("paymentDate", "<=", Timestamp.fromDate(endOfDay(filter.endDate))),
     );
 
     if (filter.createdBy) {
@@ -213,7 +222,10 @@ export const transactionService = {
       );
     }
     if (filter?.endDate) {
-      q = query(q, where("dueDate", "<=", Timestamp.fromDate(filter.endDate)));
+      q = query(
+        q,
+        where("dueDate", "<=", Timestamp.fromDate(endOfDay(filter.endDate))),
+      );
     }
 
     const snapshot = await getCountFromServer(q);
@@ -257,6 +269,12 @@ export const transactionService = {
 
     const hasMultipleCostCenters = (filters.costCenterIds?.length ?? 0) > 1;
 
+    // Normalize to end-of-day so a same-day endDate includes transactions
+    // due later that day (e.g. AI-extracted boletos, stamped at noon).
+    const normalizedEndDate = filters.endDate
+      ? endOfDay(filters.endDate)
+      : undefined;
+
     // Base query: payable transactions in the selected company
     const baseConstraints = [
       where("companyId", "==", companyId),
@@ -296,9 +314,9 @@ export const transactionService = {
         where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
       );
     }
-    if (filters.endDate) {
+    if (normalizedEndDate) {
       paidConstraints.push(
-        where("dueDate", "<=", Timestamp.fromDate(filters.endDate)),
+        where("dueDate", "<=", Timestamp.fromDate(normalizedEndDate)),
       );
     }
     const paidQuery = query(
@@ -315,9 +333,9 @@ export const transactionService = {
           where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
         );
       }
-      if (filters.endDate) {
+      if (normalizedEndDate) {
         totalConstraints.push(
-          where("dueDate", "<=", Timestamp.fromDate(filters.endDate)),
+          where("dueDate", "<=", Timestamp.fromDate(normalizedEndDate)),
         );
       }
       const totalQuery = query(
@@ -397,9 +415,9 @@ export const transactionService = {
         where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
       );
     }
-    if (filters.endDate) {
+    if (normalizedEndDate) {
       pendingConstraints.push(
-        where("dueDate", "<=", Timestamp.fromDate(filters.endDate)),
+        where("dueDate", "<=", Timestamp.fromDate(normalizedEndDate)),
       );
     }
     const pendingQuery = query(
@@ -544,7 +562,10 @@ export const transactionService = {
       );
     }
     if (filters?.endDate) {
-      q = query(q, where("dueDate", "<=", Timestamp.fromDate(filters.endDate)));
+      q = query(
+        q,
+        where("dueDate", "<=", Timestamp.fromDate(endOfDay(filters.endDate))),
+      );
     }
 
     // Dynamic sort — uses sortField/sortDirection when provided, else defaults to dueDate asc

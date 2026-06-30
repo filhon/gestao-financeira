@@ -747,7 +747,104 @@ export default function AccountsPayablePage() {
     }
   };
 
-  const fetchTransactions = refreshTransactions;
+  const performSearch = useCallback(async () => {
+    if (!debouncedSearchTerm || !selectedCompany || !user) return;
+    setIsSearching(true);
+    try {
+      const params = new URLSearchParams({
+        q: debouncedSearchTerm,
+        companyId: selectedCompany.id,
+        type: "payable",
+        limit: "50",
+      });
+
+      if (filterOptions.dateRange?.from) {
+        params.set("startDate", filterOptions.dateRange.from.toISOString());
+      }
+      if (filterOptions.dateRange?.to) {
+        params.set("endDate", filterOptions.dateRange.to.toISOString());
+      }
+
+      if (filterOptions.status === "exclude-paid") {
+        params.set("excludeStatus", "paid");
+      } else if (filterOptions.status !== "all") {
+        params.set("status", filterOptions.status);
+      }
+
+      if (onlyOwnPayables) {
+        params.set("createdBy", user.uid);
+      }
+
+      const response = await fetch(
+        `/api/internal/transactions/search?${params.toString()}`,
+        { credentials: "include" },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.status}`);
+      }
+
+      const json = await response.json();
+
+      const mapped = (json.data ?? []).map((t: Record<string, unknown>) => ({
+        ...t,
+        dueDate: t.dueDate ? new Date(t.dueDate as string) : new Date(),
+        paymentDate: t.paymentDate
+          ? new Date(t.paymentDate as string)
+          : undefined,
+        approvedAt: t.approvedAt ? new Date(t.approvedAt as string) : undefined,
+        releasedAt: t.releasedAt ? new Date(t.releasedAt as string) : undefined,
+        createdAt: t.createdAt ? new Date(t.createdAt as string) : undefined,
+        updatedAt: t.updatedAt ? new Date(t.updatedAt as string) : undefined,
+        approvalTokenExpiresAt: t.approvalTokenExpiresAt
+          ? new Date(t.approvalTokenExpiresAt as string)
+          : undefined,
+      })) as Transaction[];
+
+      let filteredResults = mapped;
+
+      if (filterOptions.costCenterId !== "all" && costCenters.length > 0) {
+        const descendantIds = getDescendantIds(
+          filterOptions.costCenterId,
+          costCenters,
+        );
+        filteredResults = filteredResults.filter(
+          (t) =>
+            t.costCenterAllocation?.some((alloc) =>
+              descendantIds.includes(alloc.costCenterId),
+            ) ||
+            descendantIds.includes(
+              ((t as unknown as Record<string, unknown>)
+                .costCenterId as string) ?? "",
+            ),
+        );
+      }
+
+      setSearchResults(filteredResults);
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro na busca");
+    } finally {
+      setIsSearching(false);
+    }
+  }, [
+    debouncedSearchTerm,
+    selectedCompany,
+    user,
+    onlyOwnPayables,
+    filterOptions,
+    costCenters,
+    getDescendantIds,
+  ]);
+
+  // Delegates to the right refresh strategy depending on whether search mode is active.
+  const fetchTransactions = useCallback(() => {
+    if (debouncedSearchTerm) {
+      performSearch();
+    } else {
+      refreshTransactions();
+    }
+  }, [debouncedSearchTerm, performSearch, refreshTransactions]);
 
   const sentinelEnabled =
     hasMore && !isFetchingNextPage && !debouncedSearchTerm && !searchTerm;
@@ -796,115 +893,20 @@ export default function AccountsPayablePage() {
   }, [selectedCompany]);
 
   useEffect(() => {
+    // performSearch's identity changes whenever filterOptions changes (e.g.
+    // "Limpar filtros" resets filters in the same tick it clears searchTerm).
+    // That can re-trigger this effect before the debounce timer has caught
+    // up, running a stale search with the old text. Bail until
+    // debouncedSearchTerm matches the live searchTerm again.
+    if (debouncedSearchTerm !== searchTerm) return;
+
     if (debouncedSearchTerm && selectedCompany && user) {
-      const performSearch = async () => {
-        setIsSearching(true);
-        try {
-          const params = new URLSearchParams({
-            q: debouncedSearchTerm,
-            companyId: selectedCompany.id,
-            type: "payable",
-            limit: "50",
-          });
-
-          // Pass date range to server so it narrows the Firestore scan
-          if (filterOptions.dateRange?.from) {
-            params.set("startDate", filterOptions.dateRange.from.toISOString());
-          }
-          if (filterOptions.dateRange?.to) {
-            params.set("endDate", filterOptions.dateRange.to.toISOString());
-          }
-
-          // Pass status filter to server
-          if (filterOptions.status === "exclude-paid") {
-            params.set("excludeStatus", "paid");
-          } else if (filterOptions.status !== "all") {
-            params.set("status", filterOptions.status);
-          }
-
-          if (onlyOwnPayables) {
-            params.set("createdBy", user.uid);
-          }
-
-          const response = await fetch(
-            `/api/internal/transactions/search?${params.toString()}`,
-            { credentials: "include" },
-          );
-
-          if (!response.ok) {
-            throw new Error(`Search failed: ${response.status}`);
-          }
-
-          const json = await response.json();
-
-          const mapped = (json.data ?? []).map(
-            (t: Record<string, unknown>) => ({
-              ...t,
-              dueDate: t.dueDate ? new Date(t.dueDate as string) : new Date(),
-              paymentDate: t.paymentDate
-                ? new Date(t.paymentDate as string)
-                : undefined,
-              approvedAt: t.approvedAt
-                ? new Date(t.approvedAt as string)
-                : undefined,
-              releasedAt: t.releasedAt
-                ? new Date(t.releasedAt as string)
-                : undefined,
-              createdAt: t.createdAt
-                ? new Date(t.createdAt as string)
-                : undefined,
-              updatedAt: t.updatedAt
-                ? new Date(t.updatedAt as string)
-                : undefined,
-              approvalTokenExpiresAt: t.approvalTokenExpiresAt
-                ? new Date(t.approvalTokenExpiresAt as string)
-                : undefined,
-            }),
-          ) as Transaction[];
-
-          // Cost center filtering remains client-side (API doesn't support it)
-          let filteredResults = mapped;
-
-          if (filterOptions.costCenterId !== "all" && costCenters.length > 0) {
-            const descendantIds = getDescendantIds(
-              filterOptions.costCenterId,
-              costCenters,
-            );
-            filteredResults = filteredResults.filter(
-              (t) =>
-                t.costCenterAllocation?.some((alloc) =>
-                  descendantIds.includes(alloc.costCenterId),
-                ) ||
-                descendantIds.includes(
-                  ((t as unknown as Record<string, unknown>)
-                    .costCenterId as string) ?? "",
-                ),
-            );
-          }
-
-          setSearchResults(filteredResults);
-        } catch (e) {
-          console.error(e);
-          toast.error("Erro na busca");
-        } finally {
-          setIsSearching(false);
-        }
-      };
       performSearch();
     } else {
       setSearchResults(null);
     }
-
     setSelectedIds(new Set());
-  }, [
-    debouncedSearchTerm,
-    selectedCompany,
-    user,
-    onlyOwnPayables,
-    filterOptions,
-    costCenters,
-    getDescendantIds,
-  ]);
+  }, [debouncedSearchTerm, searchTerm, selectedCompany, user, performSearch]);
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -1101,13 +1103,22 @@ export default function AccountsPayablePage() {
   const handleTransactionUpdate = useCallback(
     (updatedTransaction?: Transaction) => {
       if (updatedTransaction) {
+        // Patch paginated cache (no-op when search is active, but keeps it fresh for when search clears)
         updateItem(updatedTransaction.id, () => updatedTransaction);
+        // Patch search results in-place so the edited transaction is reflected immediately
+        setSearchResults((prev) =>
+          prev
+            ? prev.map((t) =>
+                t.id === updatedTransaction.id ? updatedTransaction : t,
+              )
+            : prev,
+        );
         setSelectedTransaction(updatedTransaction);
       } else {
-        refreshTransactions();
+        fetchTransactions();
       }
     },
-    [refreshTransactions, updateItem],
+    [updateItem, fetchTransactions],
   );
 
   const handleRevertToDraft = async (transaction: Transaction) => {
@@ -1164,13 +1175,15 @@ export default function AccountsPayablePage() {
     filterOptions.status !== "exclude-paid" ||
     filterOptions.costCenterId !== "all" ||
     filterOptions.batchFilter !== "all" ||
-    !isDateRangeDefault;
+    !isDateRangeDefault ||
+    !!searchTerm;
 
   const activeFilterCount =
     (filterOptions.status !== "exclude-paid" ? 1 : 0) +
     (filterOptions.costCenterId !== "all" ? 1 : 0) +
     (filterOptions.batchFilter !== "all" ? 1 : 0) +
-    (!isDateRangeDefault ? 1 : 0);
+    (!isDateRangeDefault ? 1 : 0) +
+    (searchTerm ? 1 : 0);
 
   const statusLabels: Record<string, string> = {
     all: "Todas",
@@ -1183,7 +1196,8 @@ export default function AccountsPayablePage() {
     rejected: "Rejeitado",
   };
 
-  const clearFilters = () =>
+  const clearFilters = () => {
+    setSearchTerm("");
     setFilterOptions({
       status: "exclude-paid",
       costCenterId: "all",
@@ -1193,6 +1207,7 @@ export default function AccountsPayablePage() {
         to: addDays(startOfDay(new Date()), 7),
       },
     });
+  };
 
   return (
     <div className="flex flex-col gap-5">

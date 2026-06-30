@@ -504,7 +504,7 @@ export const dashboardService = {
       });
 
       const netChangeBeforeToday = pastTransactions.reduce((acc, t) => {
-        const amount = Number(t.amount) || 0;
+        const amount = Number(t.finalAmount ?? t.amount) || 0;
         if (t.type === "receivable") {
           return acc + amount;
         } else {
@@ -535,17 +535,30 @@ export const dashboardService = {
         const dayTxns = txByDateKey.get(key);
         if (dayTxns) {
           dayTxns.forEach((t) => {
-            // In '30days' mode: skip paid transactions on or before today
-            if (mode === "30days") {
+            // Days strictly before today only occur in 'year' mode. Only PAID
+            // transactions actually affected the real balance on those days —
+            // overdue/unpaid ones were never realized, so including them here
+            // would permanently skew today's and every future balance.
+            if (isBefore(daysToCheck, today) && t.status !== "paid") return;
+
+            // '30days' mode starts 'currentBalance' from the live
+            // company_stats balance, which already reflects everything paid
+            // up to and including today. Skip those paid transactions here
+            // so they aren't subtracted/added a second time. ('year' mode
+            // doesn't need this — its starting balance excludes today via
+            // netChangeBeforeToday above, so today's paid transactions must
+            // flow through this loop exactly once.) Compare by calendar day
+            // (not exact time) since paymentDate carries a real time-of-day
+            // while 'today' is normalized to midnight.
+            if (mode === "30days" && t.status === "paid") {
               const effDate =
                 t.status === "paid" && t.paymentDate
                   ? t.paymentDate
                   : t.dueDate;
-              const isPastOrToday = !isAfter(effDate, today);
-              if (t.status === "paid" && isPastOrToday) return;
+              if (isBefore(effDate, addDays(today, 1))) return;
             }
 
-            const amount = Number(t.amount) || 0;
+            const amount = Number(t.finalAmount ?? t.amount) || 0;
             if (t.type === "receivable") {
               dayIncome += amount;
               currentBalance += amount;
