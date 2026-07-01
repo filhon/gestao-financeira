@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { RecurringTransactionTemplate } from "@/lib/types";
@@ -22,7 +23,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   Loader2,
-  Trash2,
   PauseCircle,
   PlayCircle,
   Pencil,
@@ -37,7 +37,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { format, differenceInDays, isAfter } from "date-fns";
+import { format, differenceInDays, isAfter, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,7 +60,6 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurrenceDialog";
 import { AnimatedCounter } from "@/components/ui/animated-counter";
 
@@ -102,7 +101,7 @@ function getFrequencyIcon(freq: string) {
 
 function getDueDateUrgency(nextDueDate: Date, active: boolean) {
   if (!active) return null;
-  const today = new Date();
+  const today = startOfDay(new Date());
   const diff = differenceInDays(nextDueDate, today);
   if (!isAfter(nextDueDate, today)) return "overdue";
   if (diff <= 3) return "critical";
@@ -159,7 +158,6 @@ interface MobileRecurrenceCardProps {
   canManage: boolean;
   onEdit: () => void;
   onToggleActive: () => void;
-  onDelete: () => void;
 }
 
 function MobileRecurrenceCard({
@@ -168,24 +166,14 @@ function MobileRecurrenceCard({
   canManage,
   onEdit,
   onToggleActive,
-  onDelete,
 }: MobileRecurrenceCardProps) {
   return (
     <div
-      className={[
+      className={cn(
         "flex items-start gap-3 px-4 py-3.5 transition-colors select-none",
-        "border-l-4",
-        urgency === "overdue"
-          ? "border-l-red-500 bg-red-50 dark:bg-red-900/10"
-          : urgency === "critical"
-            ? "border-l-orange-400"
-            : urgency === "warning"
-              ? "border-l-yellow-400"
-              : t.type === "payable"
-                ? "border-l-red-200 dark:border-l-red-800"
-                : "border-l-green-200 dark:border-l-green-800",
+        urgency === "overdue" && "bg-red-50 dark:bg-red-900/10",
         !t.active && "opacity-60",
-      ].join(" ")}
+      )}
     >
       {/* Frequency icon badge */}
       <span
@@ -273,12 +261,6 @@ function MobileRecurrenceCard({
               )}
               {t.active ? "Pausar" : "Ativar"}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={onDelete}
-              className="text-red-600 focus:text-red-700"
-            >
-              <Trash2 className="mr-2 h-4 w-4" /> Excluir
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
@@ -298,15 +280,10 @@ export default function RecorrenciasPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editTemplate, setEditTemplate] =
     useState<RecurringTransactionTemplate | null>(null);
 
-  // All active templates for KPI calculation (unfiltered)
-  const [allTemplates, setAllTemplates] = useState<
-    RecurringTransactionTemplate[]
-  >([]);
-  const [kpiLoading, setKpiLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!canViewRecurrences) {
@@ -314,16 +291,13 @@ export default function RecorrenciasPage() {
     }
   }, [canViewRecurrences, router]);
 
-  // Load all active templates for KPI computation
-  useEffect(() => {
-    if (!selectedCompany || !canViewRecurrences) return;
-    setKpiLoading(true);
-    recurrenceService
-      .getTemplates(selectedCompany.id)
-      .then(setAllTemplates)
-      .catch(() => {})
-      .finally(() => setKpiLoading(false));
-  }, [selectedCompany, canViewRecurrences]);
+  // All active templates for KPI calculation (unfiltered)
+  const kpiQueryKey = ["recurrences-kpi", selectedCompany?.id];
+  const { data: allTemplates = [], isLoading: kpiLoading } = useQuery({
+    queryKey: kpiQueryKey,
+    queryFn: () => recurrenceService.getTemplates(selectedCompany!.id),
+    enabled: !!selectedCompany && canViewRecurrences,
+  });
 
   const {
     items: templates,
@@ -331,6 +305,7 @@ export default function RecorrenciasPage() {
     loadMore,
     isLoading,
     isFetchingNextPage,
+    isError,
     refresh: fetchTemplates,
   } = usePaginatedQuery<RecurringTransactionTemplate>({
     queryKey: [
@@ -362,7 +337,7 @@ export default function RecorrenciasPage() {
   // KPIs derived from all active templates
   const kpis = useMemo(() => {
     const active = allTemplates.filter((t) => t.active);
-    const today = new Date();
+    const today = startOfDay(new Date());
 
     const toMonthlyAmount = (t: RecurringTransactionTemplate): number => {
       switch (t.frequency) {
@@ -401,30 +376,16 @@ export default function RecorrenciasPage() {
 
   const handleToggleActive = async (template: RecurringTransactionTemplate) => {
     try {
-      await recurrenceService.updateTemplate(template.id, {
+      await recurrenceService.updateTemplate(template.id, template.companyId, {
         active: !template.active,
       });
       toast.success(
         `Recorrência ${template.active ? "pausada" : "ativada"} com sucesso!`,
       );
       fetchTemplates();
-      recurrenceService.getTemplates(selectedCompany!.id).then(setAllTemplates);
+      queryClient.invalidateQueries({ queryKey: kpiQueryKey });
     } catch {
       toast.error("Erro ao atualizar recorrência.");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteId) return;
-    try {
-      await recurrenceService.deleteTemplate(deleteId);
-      toast.success("Recorrência excluída com sucesso!");
-      fetchTemplates();
-      recurrenceService.getTemplates(selectedCompany!.id).then(setAllTemplates);
-    } catch {
-      toast.error("Erro ao excluir recorrência.");
-    } finally {
-      setDeleteId(null);
     }
   };
 
@@ -450,185 +411,147 @@ export default function RecorrenciasPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border md:grid-cols-4">
         {/* MRR */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              MRR (Receita Mensal)
-            </CardTitle>
-            <div className="rounded-md bg-green-100 p-1.5 dark:bg-green-900/30">
-              <TrendingUp className="h-4 w-4 text-green-600 dark:text-green-400" />
+        <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <TrendingUp className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+            MRR
+          </div>
+          {kpiLoading ? (
+            <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
+          ) : (
+            <div
+              className="mt-1 text-xl font-bold text-green-600 dark:text-green-400 md:text-2xl"
+              title={formatCurrency(kpis.mrr)}
+            >
+              <span className="md:hidden">
+                <AnimatedCounter
+                  value={kpis.mrr}
+                  formatter={formatCurrencyAbbr}
+                  duration={700}
+                />
+              </span>
+              <span className="hidden md:inline">
+                <AnimatedCounter
+                  value={kpis.mrr}
+                  formatter={formatCurrency}
+                  duration={700}
+                />
+              </span>
             </div>
-          </CardHeader>
-          <CardContent>
-            {kpiLoading ? (
-              <div className="h-8 w-32 animate-pulse rounded bg-muted" />
-            ) : (
-              <div
-                className="text-2xl font-bold text-green-600 dark:text-green-400"
-                title={formatCurrency(kpis.mrr)}
-              >
-                <span className="md:hidden">
-                  <AnimatedCounter
-                    value={kpis.mrr}
-                    formatter={formatCurrencyAbbr}
-                    duration={700}
-                  />
-                </span>
-                <span className="hidden md:inline">
-                  <AnimatedCounter
-                    value={kpis.mrr}
-                    formatter={formatCurrency}
-                    duration={700}
-                  />
-                </span>
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              Receitas ativas mensalizadas
-            </p>
-          </CardContent>
-        </Card>
+          )}
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Receitas ativas mensalizadas
+          </p>
+        </div>
 
         {/* Compromisso fixo */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Compromisso Fixo
-            </CardTitle>
-            <div className="rounded-md bg-red-100 p-1.5 dark:bg-red-900/30">
-              <TrendingDown className="h-4 w-4 text-red-600 dark:text-red-400" />
+        <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <TrendingDown className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
+            Compromisso Fixo
+          </div>
+          {kpiLoading ? (
+            <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
+          ) : (
+            <div
+              className="mt-1 text-xl font-bold text-red-600 dark:text-red-400 md:text-2xl"
+              title={formatCurrency(kpis.fixedCost)}
+            >
+              <span className="md:hidden">
+                <AnimatedCounter
+                  value={kpis.fixedCost}
+                  formatter={formatCurrencyAbbr}
+                  duration={700}
+                />
+              </span>
+              <span className="hidden md:inline">
+                <AnimatedCounter
+                  value={kpis.fixedCost}
+                  formatter={formatCurrency}
+                  duration={700}
+                />
+              </span>
             </div>
-          </CardHeader>
-          <CardContent>
-            {kpiLoading ? (
-              <div className="h-8 w-32 animate-pulse rounded bg-muted" />
-            ) : (
-              <div
-                className="text-2xl font-bold text-red-600 dark:text-red-400"
-                title={formatCurrency(kpis.fixedCost)}
-              >
-                <span className="md:hidden">
-                  <AnimatedCounter
-                    value={kpis.fixedCost}
-                    formatter={formatCurrencyAbbr}
-                    duration={700}
-                  />
-                </span>
-                <span className="hidden md:inline">
-                  <AnimatedCounter
-                    value={kpis.fixedCost}
-                    formatter={formatCurrency}
-                    duration={700}
-                  />
-                </span>
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              Despesas ativas mensalizadas
-            </p>
-          </CardContent>
-        </Card>
+          )}
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Despesas ativas mensalizadas
+          </p>
+        </div>
 
         {/* Total ativo */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Recorrências Ativas
-            </CardTitle>
-            <div className="rounded-md bg-blue-100 p-1.5 dark:bg-blue-900/30">
-              <RepeatIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <RepeatIcon className="h-3.5 w-3.5" />
+            Recorrências Ativas
+          </div>
+          {kpiLoading ? (
+            <div className="mt-2 h-7 w-10 animate-pulse rounded bg-muted" />
+          ) : (
+            <div className="mt-1 text-xl font-bold md:text-2xl">
+              <AnimatedCounter
+                value={kpis.totalActive}
+                formatter={(v) => Math.round(v).toString()}
+                duration={500}
+              />
             </div>
-          </CardHeader>
-          <CardContent>
-            {kpiLoading ? (
-              <div className="h-8 w-16 animate-pulse rounded bg-muted" />
-            ) : (
-              <div className="text-2xl font-bold">
-                <AnimatedCounter
-                  value={kpis.totalActive}
-                  formatter={(v) => Math.round(v).toString()}
-                  duration={500}
-                />
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              Templates em execução
-            </p>
-          </CardContent>
-        </Card>
+          )}
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Templates em execução
+          </p>
+        </div>
 
         {/* Vencendo em breve / vencidas */}
-        <Card
+        <div
           className={cn(
-            kpis.overdue.length > 0 && "border-red-300 dark:border-red-800",
-            kpis.overdue.length === 0 &&
-              kpis.dueIn7.length > 0 &&
-              "border-yellow-300 dark:border-yellow-800",
+            "px-4 py-3.5 md:px-5 md:py-4",
+            kpis.overdue.length > 0
+              ? "bg-red-50 dark:bg-red-950/30"
+              : kpis.dueIn7.length > 0
+                ? "bg-yellow-50 dark:bg-yellow-950/20"
+                : "bg-card",
           )}
         >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Atenção Necessária
-            </CardTitle>
-            <div
-              className={cn(
-                "rounded-md p-1.5",
-                kpis.overdue.length > 0
-                  ? "bg-red-100 dark:bg-red-900/30"
-                  : kpis.dueIn7.length > 0
-                    ? "bg-yellow-100 dark:bg-yellow-900/30"
-                    : "bg-muted",
-              )}
-            >
-              {kpis.overdue.length > 0 ? (
-                <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />
-              ) : (
-                <CalendarClock
-                  className={cn(
-                    "h-4 w-4",
-                    kpis.dueIn7.length > 0
-                      ? "text-yellow-600 dark:text-yellow-400"
-                      : "text-muted-foreground",
-                  )}
-                />
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {kpiLoading ? (
-              <div className="h-8 w-16 animate-pulse rounded bg-muted" />
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            {kpis.overdue.length > 0 ? (
+              <AlertTriangle className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
             ) : (
-              <>
-                {kpis.overdue.length > 0 && (
-                  <div className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    {kpis.overdue.length} vencida
-                    {kpis.overdue.length > 1 ? "s" : ""}
-                  </div>
-                )}
-                {kpis.overdue.length === 0 && kpis.dueIn7.length > 0 && (
-                  <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                    {kpis.dueIn7.length} em 7 dias
-                  </div>
-                )}
-                {kpis.overdue.length === 0 && kpis.dueIn7.length === 0 && (
-                  <div className="text-2xl font-bold text-muted-foreground">
-                    —
-                  </div>
-                )}
-              </>
+              <CalendarClock className="h-3.5 w-3.5" />
             )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              {kpis.overdue.length > 0
-                ? "Verifique as recorrências vencidas"
-                : kpis.dueIn7.length > 0
-                  ? `${kpis.dueIn7.length} vencem nos próximos 7 dias`
-                  : "Nenhum vencimento próximo"}
-            </p>
-          </CardContent>
-        </Card>
+            Atenção Necessária
+          </div>
+          {kpiLoading ? (
+            <div className="mt-2 h-7 w-16 animate-pulse rounded bg-muted" />
+          ) : (
+            <>
+              {kpis.overdue.length > 0 && (
+                <div className="mt-1 text-xl font-bold text-red-600 dark:text-red-400 md:text-2xl">
+                  {kpis.overdue.length} vencida
+                  {kpis.overdue.length > 1 ? "s" : ""}
+                </div>
+              )}
+              {kpis.overdue.length === 0 && kpis.dueIn7.length > 0 && (
+                <div className="mt-1 text-xl font-bold text-yellow-600 dark:text-yellow-400 md:text-2xl">
+                  {kpis.dueIn7.length} em 7 dias
+                </div>
+              )}
+              {kpis.overdue.length === 0 && kpis.dueIn7.length === 0 && (
+                <div className="mt-1 text-xl font-bold text-muted-foreground md:text-2xl">
+                  —
+                </div>
+              )}
+            </>
+          )}
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {kpis.overdue.length > 0
+              ? "Verifique as recorrências vencidas"
+              : kpis.dueIn7.length > 0
+                ? `${kpis.dueIn7.length} vencem nos próximos 7 dias`
+                : "Nenhum vencimento próximo"}
+          </p>
+        </div>
       </div>
 
       {/* Table card */}
@@ -653,7 +576,7 @@ export default function RecorrenciasPage() {
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-40">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -745,7 +668,27 @@ export default function RecorrenciasPage() {
         </CardHeader>
 
         <CardContent className="p-0">
-          {isLoading && templates.length === 0 ? (
+          {isError ? (
+            <div className="flex flex-col items-center gap-3 py-16 px-4 text-center">
+              <div className="rounded-full bg-red-100 p-4 dark:bg-red-900/30">
+                <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="font-medium">Erro ao carregar recorrências</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Não foi possível buscar os dados. Tente novamente.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fetchTemplates()}
+              >
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                Tentar novamente
+              </Button>
+            </div>
+          ) : isLoading && templates.length === 0 ? (
             <>
               <div className="hidden md:block">
                 <TableSkeleton />
@@ -934,15 +877,6 @@ export default function RecorrenciasPage() {
                                       <PlayCircle className="h-3.5 w-3.5" />
                                     )}
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
-                                    onClick={() => setDeleteId(t.id)}
-                                    title="Excluir"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
                                 </div>
                               </TableCell>
                             )}
@@ -1012,7 +946,6 @@ export default function RecorrenciasPage() {
                             canManage={canManageRecurrences}
                             onEdit={() => setEditTemplate(t)}
                             onToggleActive={() => handleToggleActive(t)}
-                            onDelete={() => setDeleteId(t.id)}
                           />
                         );
                       })}
@@ -1097,25 +1030,13 @@ export default function RecorrenciasPage() {
         </SheetContent>
       </Sheet>
 
-      <ConfirmDialog
-        open={!!deleteId}
-        onOpenChange={(open) => !open && setDeleteId(null)}
-        title="Desativar Recorrência"
-        description="Tem certeza que deseja desativar esta recorrência? Ela parará de gerar transações, mas poderá ser reativada depois."
-        confirmText="Desativar"
-        variant="destructive"
-        onConfirm={handleDelete}
-      />
-
       <EditRecurrenceDialog
         open={!!editTemplate}
         onOpenChange={(open) => !open && setEditTemplate(null)}
         template={editTemplate}
         onSuccess={() => {
           fetchTemplates();
-          recurrenceService
-            .getTemplates(selectedCompany!.id)
-            .then(setAllTemplates);
+          queryClient.invalidateQueries({ queryKey: kpiQueryKey });
         }}
       />
     </div>

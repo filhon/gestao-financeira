@@ -107,7 +107,7 @@ export function EditRecurrenceDialog({
 
     try {
       setIsSubmitting(true);
-      await recurrenceService.updateTemplate(template.id, {
+      await recurrenceService.updateTemplate(template.id, template.companyId, {
         description: data.description,
         amount: data.amount,
         frequency: data.frequency,

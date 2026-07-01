@@ -2,6 +2,7 @@ import { db } from "@/lib/firebase/client";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   query,
   where,
@@ -121,17 +122,22 @@ export const recurrenceService = {
 
   updateTemplate: async (
     id: string,
+    companyId: string,
     data: Partial<RecurringTransactionTemplate>,
   ): Promise<void> => {
     const docRef = doc(db, COLLECTION_NAME, id);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) {
+      throw new Error("Recorrência não encontrada");
+    }
+    if (docSnap.data().companyId !== companyId) {
+      throw new Error("Recorrência não pertence a esta empresa");
+    }
+
     await updateDoc(docRef, {
       ...data,
       updatedAt: Timestamp.now(),
     });
-  },
-
-  deleteTemplate: async (id: string): Promise<void> => {
-    const docRef = doc(db, COLLECTION_NAME, id);
-    await updateDoc(docRef, { active: false }); // Soft delete
   },
 };
