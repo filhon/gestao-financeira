@@ -33,6 +33,9 @@ export interface Permissions {
   canApproveBatches: boolean;
   canPayBatches: boolean;
 
+  canViewReconciliation: boolean; // View bank statement / matches
+  canManageReconciliation: boolean; // Import statements, confirm/ignore matches, clear session
+
   canViewCostCenters: boolean;
   canManageCostCenters: boolean; // Create/Edit/Delete
 
@@ -153,6 +156,23 @@ export function usePermissions(): Permissions {
       canManageBatches: isAdminOrManager,
       canApproveBatches: isOneOf(["admin", "financial_manager", "approver"]),
       canPayBatches: isOneOf(["admin", "financial_manager", "releaser"]),
+
+      // Reconciliation
+      // Exposes the full company bank statement (all cash movements) — must NOT
+      // be visible to 'user' (restricted to own payables) nor writable by 'auditor'
+      // (read-only role everywhere else in the app).
+      canViewReconciliation: isOneOf([
+        "admin",
+        "financial_manager",
+        "approver",
+        "releaser",
+        "auditor",
+      ]),
+      canManageReconciliation: isOneOf([
+        "admin",
+        "financial_manager",
+        "releaser",
+      ]),
 
       // Cost Centers
       // User: View assigned (canView = true).

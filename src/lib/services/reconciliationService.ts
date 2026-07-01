@@ -17,15 +17,23 @@ export class ReconciliationService {
       try {
         const raw = JSON.parse(fileContent);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return raw.map((item: any, index: number) => ({
-          id: `bank-tx-${index}-${Date.now()}`,
-          date: this.parseDate(item.date) || new Date(item.date),
-          amount: this.parseAmount(item.amount),
-          description: String(item.description || ""),
-          type: Number(item.amount) < 0 ? "debit" : "credit",
-          status: "unmatched",
-          confidence: 0,
-        }));
+        return raw.map((item: any) => {
+          const date = this.parseDate(item.date) || new Date(item.date);
+          const amount = this.parseAmount(item.amount);
+          const description = String(item.description || "");
+          return {
+            id:
+              item.id || item.fitid || item.documentNumber
+                ? String(item.id || item.fitid || item.documentNumber)
+                : this.buildDedupId("json", date, amount, description),
+            date,
+            amount,
+            description,
+            type: Number(item.amount) < 0 ? "debit" : "credit",
+            status: "unmatched",
+            confidence: 0,
+          };
+        });
       } catch (e) {
         console.error("Failed to parse JSON", e);
         return [];
@@ -54,7 +62,7 @@ export class ReconciliationService {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    parsed.data.forEach((row: any, i: number) => {
+    parsed.data.forEach((row: any) => {
       const dateVal =
         row.data || row.date || row.dt || row.dtpost || row.dtposted;
       const descVal =
@@ -100,7 +108,7 @@ export class ReconciliationService {
       seen.add(key);
 
       transactions.push({
-        id: docVal || `bank-tx-${i}-${Date.now()}`,
+        id: docVal || this.buildDedupId("csv", date, amount, description),
         date,
         amount,
         description,
@@ -187,8 +195,11 @@ export class ReconciliationService {
     confidence: number;
     status: BankTransaction["status"];
   } {
-    // Filter by type (credit/debit must match payable/receivable logic)
+    // Filter by type (credit/debit must match payable/receivable logic).
+    // Already-reconciled transactions are excluded so a bank line can never
+    // "steal" a match that was already confirmed against another statement line.
     let relevantSystemTxs = systemTransactions.filter((tx) => {
+      if (tx.reconciled) return false;
       if (bankTx.amount < 0 && tx.type === "payable") return true;
       if (bankTx.amount > 0 && tx.type === "receivable") return true;
       return false;
@@ -392,6 +403,23 @@ export class ReconciliationService {
     });
 
     return results;
+  }
+
+  // Deterministic id for statement formats without a native document number
+  // (CSV/JSON), so re-importing the same or an overlapping statement produces
+  // the same id and the session merge treats it as already-seen.
+  private static buildDedupId(
+    prefix: string,
+    date: Date,
+    amount: number,
+    description: string,
+  ): string {
+    const datePart = date.toISOString().slice(0, 10);
+    const amountPart = amount.toFixed(2).replace("-", "n").replace(".", "c");
+    const descPart =
+      this.normalizeText(description).replace(/\s+/g, "-").slice(0, 60) ||
+      "sem-descricao";
+    return `${prefix}-${datePart}-${amountPart}-${descPart}`;
   }
 
   private static extractCNPJ(text: string): string | null {

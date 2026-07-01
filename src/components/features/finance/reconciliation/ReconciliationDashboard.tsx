@@ -122,9 +122,10 @@ interface MobileBankTxCardProps {
     action: "confirm" | "create" | "ignore",
     matchedId?: string,
   ) => void;
+  readOnly?: boolean;
 }
 
-function MobileBankTxCard({ tx, onAction }: MobileBankTxCardProps) {
+function MobileBankTxCard({ tx, onAction, readOnly }: MobileBankTxCardProps) {
   return (
     <div
       className={cn(
@@ -212,55 +213,57 @@ function MobileBankTxCard({ tx, onAction }: MobileBankTxCardProps) {
       ) : null}
 
       {/* Actions */}
-      <div className="flex gap-2 mt-2.5 justify-end items-center">
-        {tx.status === "potential_match" && (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
-              onClick={() => onAction(tx.id, "confirm")}
-            >
-              <Check className="h-3.5 w-3.5 mr-1" />
-              Confirmar
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8 text-muted-foreground"
-              onClick={() => onAction(tx.id, "ignore")}
-              title="Ignorar"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </>
-        )}
-        {tx.status === "unmatched" && (
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs"
-              onClick={() => onAction(tx.id, "create")}
-            >
-              <Plus className="h-3 w-3 mr-1" />
-              Criar
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8 text-muted-foreground"
-              onClick={() => onAction(tx.id, "ignore")}
-              title="Ignorar"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </>
-        )}
-        {tx.status === "matched" && (
-          <CheckCircle2 className="h-5 w-5 text-green-500" />
-        )}
-      </div>
+      {!readOnly && (
+        <div className="flex gap-2 mt-2.5 justify-end items-center">
+          {tx.status === "potential_match" && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs text-green-600 border-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                onClick={() => onAction(tx.id, "confirm")}
+              >
+                <Check className="h-3.5 w-3.5 mr-1" />
+                Confirmar
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={() => onAction(tx.id, "ignore")}
+                title="Ignorar"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {tx.status === "unmatched" && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => onAction(tx.id, "create")}
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Criar
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={() => onAction(tx.id, "ignore")}
+                title="Ignorar"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {tx.status === "matched" && (
+            <CheckCircle2 className="h-5 w-5 text-green-500" />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -274,26 +277,57 @@ export function ReconciliationDashboard() {
     clearSession,
     setIsLoading,
   } = useReconciliationStore();
-  const { selectedCompany } = useCompany();
+  const { selectedCompany, isLoading: isCompanyLoading } = useCompany();
   const { user } = useAuth();
-  const { onlyOwnPayables } = usePermissions();
+  const { onlyOwnPayables, canViewReconciliation, canManageReconciliation } =
+    usePermissions();
   const [isMatching, setIsMatching] = useState(false);
 
-  // Sync with Firestore
+  // Sync with Firestore (only for roles allowed to view the bank statement)
   useEffect(() => {
-    if (!selectedCompany?.id) return;
+    if (!selectedCompany?.id || !canViewReconciliation) return;
 
     setIsLoading(true);
-    const unsubscribe = reconciliationSessionService.subscribeToSession(
-      selectedCompany.id,
-      (txs) => {
-        setTransactions(txs);
-        setIsLoading(false);
-      },
-    );
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
 
-    return () => unsubscribe();
-  }, [selectedCompany?.id, setTransactions, setIsLoading]);
+    const start = async () => {
+      // Best-effort one-time migration from the legacy single-document
+      // session into the per-item subcollection. Only managers can write,
+      // so a read-only viewer simply skips it (nothing is lost either way).
+      if (canManageReconciliation) {
+        try {
+          await reconciliationSessionService.migrateLegacySessionIfNeeded(
+            selectedCompany.id,
+          );
+        } catch (e) {
+          console.error("Falha ao migrar sessão legada de conciliação", e);
+        }
+      }
+
+      if (cancelled) return;
+      unsubscribe = reconciliationSessionService.subscribeToSession(
+        selectedCompany.id,
+        (txs) => {
+          setTransactions(txs);
+          setIsLoading(false);
+        },
+      );
+    };
+
+    start();
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [
+    selectedCompany?.id,
+    canViewReconciliation,
+    canManageReconciliation,
+    setTransactions,
+    setIsLoading,
+  ]);
 
   // Create Modal State
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -389,13 +423,10 @@ export function ReconciliationDashboard() {
     updateTransactionStatus(id, status, updates);
     if (!selectedCompany?.id) return;
 
-    const updatedTxs = transactions.map((t) =>
-      t.id === id ? { ...t, status, ...updates } : t,
-    );
-    await reconciliationSessionService.saveSession(
-      selectedCompany.id,
-      updatedTxs,
-    );
+    await reconciliationSessionService.updateItem(selectedCompany.id, id, {
+      status,
+      ...updates,
+    });
   };
 
   const handleAction = async (
@@ -403,6 +434,7 @@ export function ReconciliationDashboard() {
     action: "confirm" | "create" | "ignore",
     matchedId?: string,
   ) => {
+    if (!canManageReconciliation) return;
     if (action === "confirm") {
       const tx = transactions.find((t) => t.id === id);
       if (tx) {
@@ -417,25 +449,38 @@ export function ReconciliationDashboard() {
               ? [tx.matchedTransactionId]
               : [];
 
-        if (matchedIds.length > 0 && user?.uid) {
-          await Promise.all(
-            matchedIds.map((matchedId) =>
-              transactionService.reconcile(matchedId, {
-                externalId: tx.id,
-                reconciledBy: user.uid,
-              }),
-            ),
+        try {
+          if (matchedIds.length > 0 && user?.uid) {
+            const actor = selectedCompany?.id
+              ? { companyId: selectedCompany.id, userEmail: user.email }
+              : undefined;
+            await Promise.all(
+              matchedIds.map((matchedId) =>
+                transactionService.reconcile(
+                  matchedId,
+                  { externalId: tx.id, reconciledBy: user.uid },
+                  actor,
+                ),
+              ),
+            );
+          }
+
+          await updateStatusAndSync(id, "matched", {
+            matchedTransactionId:
+              selectedCandidate?.id || tx.matchedTransactionId,
+            matchedDetails: selectedCandidate?.transaction || tx.matchedDetails,
+            confidence: tx.confidence || 100,
+          });
+          toast.success("Conciliação confirmada");
+        } catch (error) {
+          console.error(error);
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Erro ao confirmar conciliação",
           );
         }
-
-        await updateStatusAndSync(id, "matched", {
-          matchedTransactionId:
-            selectedCandidate?.id || tx.matchedTransactionId,
-          matchedDetails: selectedCandidate?.transaction || tx.matchedDetails,
-          confidence: tx.confidence || 100,
-        });
       }
-      toast.success("Conciliação confirmada");
     } else if (action === "ignore") {
       await updateStatusAndSync(id, "ignored");
     } else if (action === "create") {
@@ -448,7 +493,13 @@ export function ReconciliationDashboard() {
   };
 
   const handleCreateSubmit = async (data: TransactionFormData) => {
-    if (!selectedCompany?.id || !user || !selectedBankTx) return;
+    if (
+      !canManageReconciliation ||
+      !selectedCompany?.id ||
+      !user ||
+      !selectedBankTx
+    )
+      return;
 
     try {
       const ref = await transactionService.create(
@@ -459,10 +510,11 @@ export function ReconciliationDashboard() {
 
       const matchedId = "id" in ref ? ref.id : undefined;
       if (matchedId) {
-        await transactionService.reconcile(matchedId, {
-          externalId: selectedBankTx.id,
-          reconciledBy: user.uid,
-        });
+        await transactionService.reconcile(
+          matchedId,
+          { externalId: selectedBankTx.id, reconciledBy: user.uid },
+          { companyId: selectedCompany.id, userEmail: user.email },
+        );
       }
 
       await updateStatusAndSync(selectedBankTx.id, "matched", {
@@ -480,6 +532,7 @@ export function ReconciliationDashboard() {
   };
 
   const triggerAutoMatch = async () => {
+    if (!canManageReconciliation) return;
     setIsMatching(true);
     try {
       const dates = transactions.map((t) => new Date(t.date));
@@ -502,6 +555,10 @@ export function ReconciliationDashboard() {
       const [systemTransactions, entities] = await Promise.all([
         transactionService.getAll({
           companyId: selectedCompany.id,
+          // Only transactions where money actually moved are valid reconciliation
+          // candidates — matching against draft/pending/rejected transactions would
+          // let a bank line "confirm" a payment that hasn't happened.
+          status: "paid",
           startDate: minDate,
           endDate: maxDate,
           ...(onlyOwnPayables && user?.uid ? { createdBy: user.uid } : {}),
@@ -515,10 +572,15 @@ export function ReconciliationDashboard() {
         entities,
       );
       setTransactions(processed);
-      if (selectedCompany?.id) {
-        await reconciliationSessionService.saveSession(
+
+      // Only the entries the matcher actually touched need to be persisted —
+      // runAutoReconciliation keeps the same object reference for anything
+      // it skipped (already matched/ignored), so a reference check is a cheap diff.
+      const changed = processed.filter((tx, i) => tx !== transactions[i]);
+      if (changed.length > 0) {
+        await reconciliationSessionService.bulkUpdateItems(
           selectedCompany.id,
-          processed,
+          changed.map((tx) => ({ id: tx.id, data: tx })),
         );
       }
 
@@ -538,11 +600,31 @@ export function ReconciliationDashboard() {
   };
 
   const handleClearSession = async () => {
+    if (!canManageReconciliation) return;
     clearSession();
     if (selectedCompany?.id) {
       await reconciliationSessionService.clearSession(selectedCompany.id);
     }
   };
+
+  // Access guard — wait for the company/role to resolve before deciding
+  if (!isCompanyLoading && selectedCompany && !canViewReconciliation) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+          Conciliação Bancária
+        </h1>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+            <FileText className="h-8 w-8 opacity-40" />
+            <p className="text-sm font-medium">
+              Você não tem permissão para acessar a conciliação bancária.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // Loading skeleton (initial load, before any transactions)
   if (isStoreLoading && transactions.length === 0) {
@@ -592,7 +674,14 @@ export function ReconciliationDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <UploadStatement />
+            {canManageReconciliation ? (
+              <UploadStatement />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Nenhum extrato importado. Você não tem permissão para importar
+                extratos bancários.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -606,30 +695,32 @@ export function ReconciliationDashboard() {
         <h1 className="text-xl md:text-3xl font-bold tracking-tight">
           Conciliação Bancária
         </h1>
-        <div className="flex gap-2 shrink-0">
-          <Button
-            size="sm"
-            className="h-9"
-            onClick={triggerAutoMatch}
-            disabled={isMatching}
-          >
-            {isMatching ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline ml-2">Processar Matches</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 text-destructive border-destructive hover:bg-destructive/10"
-            onClick={handleClearSession}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span className="hidden sm:inline ml-2">Limpar Sessão</span>
-          </Button>
-        </div>
+        {canManageReconciliation && (
+          <div className="flex gap-2 shrink-0">
+            <Button
+              size="sm"
+              className="h-9"
+              onClick={triggerAutoMatch}
+              disabled={isMatching}
+            >
+              {isMatching ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline ml-2">Processar Matches</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-destructive border-destructive hover:bg-destructive/10"
+              onClick={handleClearSession}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="hidden sm:inline ml-2">Limpar Sessão</span>
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* KPI cards */}
@@ -877,6 +968,7 @@ export function ReconciliationDashboard() {
             <ReconciliationTable
               transactions={filteredTransactions}
               onAction={handleAction}
+              readOnly={!canManageReconciliation}
             />
           </div>
 
@@ -913,6 +1005,7 @@ export function ReconciliationDashboard() {
                     key={tx.id}
                     tx={tx}
                     onAction={handleAction}
+                    readOnly={!canManageReconciliation}
                   />
                 ))}
               </div>

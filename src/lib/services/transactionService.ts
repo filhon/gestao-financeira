@@ -19,6 +19,7 @@ import {
   getAggregateFromServer,
   sum,
   writeBatch,
+  runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import currency from "currency.js";
@@ -922,15 +923,45 @@ export const transactionService = {
   reconcile: async (
     transactionId: string,
     data: { externalId: string; reconciledBy: string },
+    actor?: { companyId: string; userEmail: string },
   ) => {
     const docRef = doc(db, COLLECTION_NAME, transactionId);
-    return updateDoc(docRef, {
-      reconciled: true,
-      reconciledAt: serverTimestamp(),
-      externalId: data.externalId,
-      reconciledBy: data.reconciledBy,
-      updatedAt: serverTimestamp(),
+
+    // Atomic read-then-write: prevents a bank line from silently overwriting
+    // a reconciliation that another bank line/user already placed on this
+    // transaction (two statement lines racing to claim the same transaction).
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists()) {
+        throw new Error("Transação não encontrada.");
+      }
+      const current = snap.data();
+      if (current.reconciled && current.externalId !== data.externalId) {
+        throw new Error(
+          "Esta transação já foi conciliada com outro lançamento do extrato.",
+        );
+      }
+
+      tx.update(docRef, {
+        reconciled: true,
+        reconciledAt: serverTimestamp(),
+        externalId: data.externalId,
+        reconciledBy: data.reconciledBy,
+        updatedAt: serverTimestamp(),
+      });
     });
+
+    if (actor) {
+      await auditService.log({
+        companyId: actor.companyId,
+        userId: data.reconciledBy,
+        userEmail: actor.userEmail,
+        action: "confirm_match",
+        entity: "transaction",
+        entityId: transactionId,
+        details: { externalId: data.externalId },
+      });
+    }
   },
 
   updateRecurrence: async (

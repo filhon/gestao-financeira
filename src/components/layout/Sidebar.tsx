@@ -74,7 +74,7 @@ const allMenuItems: MenuItem[] = [
         title: "Conciliação Bancária",
         href: "/financeiro/conciliacao",
         icon: Scale,
-        permission: "canViewPayables",
+        permission: "canViewReconciliation",
       },
       {
         title: "Lotes de Pagamento",

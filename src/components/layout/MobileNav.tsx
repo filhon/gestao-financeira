@@ -69,7 +69,7 @@ const moreItems: NavTab[] = [
     title: "Conciliação",
     href: "/financeiro/conciliacao",
     icon: Scale,
-    permission: "canViewPayables",
+    permission: "canViewReconciliation",
   },
   {
     title: "Lotes",

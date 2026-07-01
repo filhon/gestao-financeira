@@ -122,7 +122,7 @@ const navigationPages: NavigationPage[] = [
     href: "/financeiro/conciliacao",
     icon: Scale,
     keywords: ["conciliacao", "banco", "extrato", "ofx"],
-    permission: "canViewPayables",
+    permission: "canViewReconciliation",
   },
   {
     name: "Lotes de Pagamento",
@@ -322,7 +322,7 @@ export function GlobalSearch() {
         href: "/financeiro/contas-receber",
       });
     }
-    if (permissions.canViewPayables) {
+    if (permissions.canManageReconciliation) {
       items.push({ label: "Importar OFX", href: "/financeiro/conciliacao" });
     }
     return items;

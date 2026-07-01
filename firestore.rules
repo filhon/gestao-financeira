@@ -248,8 +248,21 @@ service cloud.firestore {
     }
     
     // 14. Reconciliation Sessions
+    // Read: roles that can view the company's financial movements (view-only for auditor).
+    // Write: only roles that actually operate bank reconciliation — 'auditor' is read-only
+    // everywhere else in the app, and 'user' (own-payables-only) must not see the full
+    // company bank statement nor be able to reconcile arbitrary transactions.
     match /reconciliation_sessions/{companyId} {
-       allow read, write: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+       allow read: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor']);
+       allow write: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'releaser']);
+
+       // Bank statement lines live in a subcollection (one doc per line) instead
+       // of a single array field — avoids the 1MiB document cap and lets
+       // concurrent edits touch one item without clobbering the whole session.
+       match /items/{itemId} {
+          allow read: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor']);
+          allow write: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'releaser']);
+       }
     }
     
     // ── API Externa ──────────────────────────────────────────────────────────

@@ -36,14 +36,22 @@ export function UploadStatement() {
         return;
       }
 
-      await reconciliationSessionService.saveSession(
+      const { added, skipped } = await reconciliationSessionService.mergeItems(
         selectedCompany.id,
         transactions,
       );
 
-      toast.success(
-        `${transactions.length} transações importadas com sucesso!`,
-      );
+      if (added === 0) {
+        toast.info(
+          "Todos os lançamentos deste extrato já haviam sido importados.",
+        );
+      } else if (skipped > 0) {
+        toast.success(
+          `${added} novo(s) lançamento(s) importado(s). ${skipped} já existiam e foram ignorados.`,
+        );
+      } else {
+        toast.success(`${added} transações importadas com sucesso!`);
+      }
     } catch (error) {
       console.error(error);
       toast.error("Erro ao processar arquivo.");

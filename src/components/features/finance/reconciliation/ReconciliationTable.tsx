@@ -31,11 +31,13 @@ interface ReconciliationTableProps {
     action: "confirm" | "create" | "ignore",
     matchedId?: string,
   ) => void;
+  readOnly?: boolean;
 }
 
 export function ReconciliationTable({
   transactions,
   onAction,
+  readOnly,
 }: ReconciliationTableProps) {
   // const { transactions } = useReconciliationStore(); // Props passed from parent now
 
@@ -279,16 +281,18 @@ export function ReconciliationTable({
                             <span>{c.score}%</span>
                           </div>
                         </div>
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[10px]"
-                            onClick={() => onAction(tx.id, "confirm", c.id)}
-                          >
-                            Selecionar
-                          </Button>
-                        </div>
+                        {!readOnly && (
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-[10px]"
+                              onClick={() => onAction(tx.id, "confirm", c.id)}
+                            >
+                              Selecionar
+                            </Button>
+                          </div>
+                        )}
                         {c.reasons.length > 0 && (
                           <div className="text-[10px] text-muted-foreground">
                             {c.reasons.join(" • ")}
@@ -304,63 +308,73 @@ export function ReconciliationTable({
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
                   {/* Logic: If potential match, show confirm/ignore. If unmatched, show create. If matched, show success. */}
-                  {tx.status === "potential_match" && (
+                  {readOnly ? (
+                    tx.status === "matched" ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <span className="text-muted-foreground text-xs">-</span>
+                    )
+                  ) : (
                     <>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100"
-                        title="Confirmar Match"
-                        onClick={() => onAction(tx.id, "confirm")}
-                      >
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100"
-                        title="Ignorar"
-                        onClick={() => onAction(tx.id, "ignore")}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                      {tx.status === "potential_match" && (
+                        <>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100"
+                            title="Confirmar Match"
+                            onClick={() => onAction(tx.id, "confirm")}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100"
+                            title="Ignorar"
+                            onClick={() => onAction(tx.id, "ignore")}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+
+                      {tx.status === "unmatched" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={() => onAction(tx.id, "create")}
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Criar
+                        </Button>
+                      )}
+
+                      {tx.status === "matched" && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground opacity-50"
+                          disabled
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                      )}
+
+                      {/* Also allow ignore on unmatched if needed, but usually just leave it. */}
+                      {tx.status === "unmatched" && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground"
+                          onClick={() => onAction(tx.id, "ignore")}
+                          title="Ignorar"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
                     </>
-                  )}
-
-                  {tx.status === "unmatched" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => onAction(tx.id, "create")}
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Criar
-                    </Button>
-                  )}
-
-                  {tx.status === "matched" && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-muted-foreground opacity-50"
-                      disabled
-                    >
-                      <Check className="h-4 w-4" />
-                    </Button>
-                  )}
-
-                  {/* Also allow ignore on unmatched if needed, but usually just leave it. */}
-                  {tx.status === "unmatched" && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-muted-foreground"
-                      onClick={() => onAction(tx.id, "ignore")}
-                      title="Ignorar"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
                   )}
                 </div>
               </TableCell>
