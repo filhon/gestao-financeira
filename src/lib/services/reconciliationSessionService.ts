@@ -38,6 +38,23 @@ const stripUndefined = (obj: any): any => {
 const serializeItem = (tx: Partial<BankTransaction>): any =>
   stripUndefined(JSON.parse(JSON.stringify(tx)));
 
+// Like serializeItem, but a field explicitly set to `undefined` (e.g. clearing
+// a match on unreconcile) is turned into a Firestore field deletion instead of
+// being silently dropped — JSON.stringify strips undefined keys, which would
+// otherwise leave the stale value untouched in Firestore.
+const withFieldDeletions = (
+  updates: Partial<BankTransaction>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any => {
+  const payload = serializeItem(updates);
+  Object.keys(updates).forEach((key) => {
+    if (updates[key as keyof BankTransaction] === undefined) {
+      payload[key] = deleteField();
+    }
+  });
+  return payload;
+};
+
 const runBatched = async <T>(
   items: T[],
   apply: (batch: ReturnType<typeof writeBatch>, item: T) => void,
@@ -88,7 +105,7 @@ export const reconciliationSessionService = {
   ): Promise<void> {
     const colRef = this.getItemsCollection(companyId);
     const batch = writeBatch(db);
-    batch.set(doc(colRef, id), serializeItem(updates), { merge: true });
+    batch.set(doc(colRef, id), withFieldDeletions(updates), { merge: true });
     await batch.commit();
   },
 
@@ -99,7 +116,7 @@ export const reconciliationSessionService = {
   ): Promise<void> {
     const colRef = this.getItemsCollection(companyId);
     await runBatched(updates, (batch, { id, data }) => {
-      batch.set(doc(colRef, id), serializeItem(data), { merge: true });
+      batch.set(doc(colRef, id), withFieldDeletions(data), { merge: true });
     });
   },
 

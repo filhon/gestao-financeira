@@ -7,6 +7,7 @@ import {
 import { differenceInDays } from "date-fns";
 import { parse as parseOFXData } from "ofx-js";
 import Papa from "papaparse";
+import currency from "currency.js";
 
 export class ReconciliationService {
   static async parseStatement(
@@ -95,7 +96,7 @@ export class ReconciliationService {
       ) {
         const debit = this.parseAmount(row.debito || row.debit || "0");
         const credit = this.parseAmount(row.credito || row.credit || "0");
-        amount = credit - debit;
+        amount = currency(credit).subtract(debit).value;
       }
 
       const date = this.parseDate(dateVal);
@@ -279,7 +280,10 @@ export class ReconciliationService {
 
     const closeCandidates = candidates.filter((tx) => {
       const diff = Math.abs(differenceInDays(new Date(tx.dueDate), bankDate));
-      return diff <= 5 && Math.abs(tx.amount) <= targetAmount + 0.5; // tolerance
+      return (
+        diff <= 5 &&
+        Math.abs(tx.amount) <= currency(targetAmount).add(0.5).value
+      ); // tolerance
     });
 
     // Try to match by Entity/CNPJ first (Heuristic: Bundled payments are usually for the same supplier)
@@ -326,15 +330,15 @@ export class ReconciliationService {
     const limit = Math.min(n, 12);
 
     for (let i = 1; i < 1 << limit; i++) {
-      let sum = 0;
+      let sum = currency(0);
       const subset: Transaction[] = [];
       for (let j = 0; j < limit; j++) {
         if ((i >> j) & 1) {
-          sum += Math.abs(transactions[j].amount);
+          sum = sum.add(Math.abs(transactions[j].amount));
           subset.push(transactions[j]);
         }
       }
-      if (Math.abs(sum - target) < EPSILON) {
+      if (Math.abs(sum.subtract(target).value) < EPSILON) {
         return subset;
       }
     }
@@ -454,7 +458,9 @@ export class ReconciliationService {
   ): ReconciliationMatchCandidate {
     const txDate = new Date(tx.dueDate);
     const dateDiff = Math.abs(differenceInDays(txDate, bankDate));
-    const amountDiff = Math.abs(Math.abs(tx.amount) - Math.abs(bankTx.amount));
+    const amountDiff = Math.abs(
+      currency(Math.abs(tx.amount)).subtract(Math.abs(bankTx.amount)).value,
+    );
 
     const entity = tx.entityId ? entitiesMap[tx.entityId] : undefined;
     const entityName = entity?.name || tx.supplierOrClient;
@@ -634,7 +640,9 @@ export class ReconciliationService {
     }
 
     const parsed = Number(normalized);
-    return Number.isNaN(parsed) ? 0 : parsed;
+    // Snap to a clean 2-decimal currency value so downstream comparisons
+    // never drift on float representation artifacts from the raw string.
+    return Number.isNaN(parsed) ? 0 : currency(parsed).value;
   }
 
   private static normalize(value: string): string {

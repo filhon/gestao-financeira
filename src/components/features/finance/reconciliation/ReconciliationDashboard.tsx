@@ -30,6 +30,7 @@ import {
   Zap,
   MinusCircle,
   Circle,
+  Undo2,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -119,7 +120,7 @@ interface MobileBankTxCardProps {
   tx: BankTransaction;
   onAction: (
     id: string,
-    action: "confirm" | "create" | "ignore",
+    action: "confirm" | "create" | "ignore" | "unreconcile",
     matchedId?: string,
   ) => void;
   readOnly?: boolean;
@@ -260,7 +261,18 @@ function MobileBankTxCard({ tx, onAction, readOnly }: MobileBankTxCardProps) {
             </>
           )}
           {tx.status === "matched" && (
-            <CheckCircle2 className="h-5 w-5 text-green-500" />
+            <>
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-xs text-muted-foreground"
+                onClick={() => onAction(tx.id, "unreconcile")}
+              >
+                <Undo2 className="h-3.5 w-3.5 mr-1" />
+                Desfazer
+              </Button>
+            </>
           )}
         </div>
       )}
@@ -431,7 +443,7 @@ export function ReconciliationDashboard() {
 
   const handleAction = async (
     id: string,
-    action: "confirm" | "create" | "ignore",
+    action: "confirm" | "create" | "ignore" | "unreconcile",
     matchedId?: string,
   ) => {
     if (!canManageReconciliation) return;
@@ -488,6 +500,47 @@ export function ReconciliationDashboard() {
       if (tx) {
         setSelectedBankTx(tx);
         setCreateModalOpen(true);
+      }
+    } else if (action === "unreconcile") {
+      const tx = transactions.find((t) => t.id === id);
+      if (!tx) return;
+
+      const matchedIds =
+        tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0
+          ? tx.matchedTransactionIds
+          : tx.matchedTransactionId
+            ? [tx.matchedTransactionId]
+            : [];
+
+      try {
+        if (matchedIds.length > 0 && user?.uid && selectedCompany?.id) {
+          const actor = {
+            companyId: selectedCompany.id,
+            userId: user.uid,
+            userEmail: user.email,
+          };
+          await Promise.all(
+            matchedIds.map((matchedId) =>
+              transactionService.unreconcile(matchedId, actor),
+            ),
+          );
+        }
+
+        await updateStatusAndSync(id, "unmatched", {
+          matchedTransactionId: undefined,
+          matchedTransactionIds: undefined,
+          matchedDetails: undefined,
+          matchedBundleDetails: undefined,
+          confidence: undefined,
+        });
+        toast.success("Conciliação desfeita");
+      } catch (error) {
+        console.error(error);
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Erro ao desfazer conciliação",
+        );
       }
     }
   };

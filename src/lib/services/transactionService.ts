@@ -20,6 +20,7 @@ import {
   sum,
   writeBatch,
   runTransaction,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import currency from "currency.js";
@@ -960,6 +961,33 @@ export const transactionService = {
         entity: "transaction",
         entityId: transactionId,
         details: { externalId: data.externalId },
+      });
+    }
+  },
+
+  /** Reverses `reconcile()` — frees the transaction so it can be matched again. */
+  unreconcile: async (
+    transactionId: string,
+    actor?: { companyId: string; userId: string; userEmail: string },
+  ) => {
+    const docRef = doc(db, COLLECTION_NAME, transactionId);
+    await updateDoc(docRef, {
+      reconciled: false,
+      reconciledAt: deleteField(),
+      externalId: deleteField(),
+      reconciledBy: deleteField(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (actor) {
+      await auditService.log({
+        companyId: actor.companyId,
+        userId: actor.userId,
+        userEmail: actor.userEmail,
+        action: "remove_match",
+        entity: "transaction",
+        entityId: transactionId,
+        details: {},
       });
     }
   },

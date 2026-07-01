@@ -20,6 +20,7 @@ import {
   Zap,
   MinusCircle,
   Circle,
+  Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BankTransaction } from "@/lib/types";
@@ -28,7 +29,7 @@ interface ReconciliationTableProps {
   transactions: BankTransaction[];
   onAction: (
     id: string,
-    action: "confirm" | "create" | "ignore",
+    action: "confirm" | "create" | "ignore" | "unreconcile",
     matchedId?: string,
   ) => void;
   readOnly?: boolean;
@@ -353,12 +354,14 @@ export function ReconciliationTable({
 
                       {tx.status === "matched" && (
                         <Button
-                          size="icon"
+                          size="sm"
                           variant="ghost"
-                          className="h-8 w-8 text-muted-foreground opacity-50"
-                          disabled
+                          className="h-8 text-xs text-muted-foreground hover:text-destructive"
+                          onClick={() => onAction(tx.id, "unreconcile")}
+                          title="Desfazer conciliação"
                         >
-                          <Check className="h-4 w-4" />
+                          <Undo2 className="h-3.5 w-3.5 mr-1" />
+                          Desfazer
                         </Button>
                       )}
 
