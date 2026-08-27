@@ -350,6 +350,18 @@ export default function ApprovalPage() {
               <p className="text-lg font-semibold">{transaction.description}</p>
             </div>
 
+            {transaction.details && (
+              <div>
+                <Label className="text-muted-foreground text-sm flex items-center gap-2 mb-2">
+                  <FileText className="h-4 w-4" />
+                  Detalhes
+                </Label>
+                <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                  {transaction.details}
+                </p>
+              </div>
+            )}
+
             <div>
               <Label className="text-muted-foreground text-sm mb-2 flex items-center justify-between">
                 <span>Valor</span>

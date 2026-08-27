@@ -11,7 +11,7 @@
  *
  * Busca textual:
  *   - search: termo de busca textual (mín. 2 caracteres, máx. 100).
- *     Pesquisa case-insensitive nos campos description, notes e supplier.
+ *     Pesquisa case-insensitive nos campos description, details, notes e supplier.
  *     Quando presente, a filtragem é feita em memória após a query base,
  *     garantindo contagens e paginação precisas.
  *
@@ -324,7 +324,12 @@ export async function GET(request: NextRequest) {
     // Helper para verificar se uma transação contém o termo de busca
     const matchesSearch = (txn: Transaction): boolean => {
       if (!searchTerm) return true;
-      const fields = [txn.description, txn.notes, txn.supplierOrClient];
+      const fields = [
+        txn.description,
+        txn.details,
+        txn.notes,
+        txn.supplierOrClient,
+      ];
       return fields.some(
         (field) => field && field.toLowerCase().includes(searchTerm),
       );

@@ -313,7 +313,7 @@ function MobileTransactionCard({
       {/* Main content */}
       <button
         type="button"
-        className="flex-1 text-left min-w-0 py-1 min-h-[44px]"
+        className="flex-1 text-left min-w-0 py-1 min-h-11"
         onClick={onViewDetails}
       >
         <div className="flex items-start justify-between gap-2">
@@ -725,6 +725,7 @@ export default function AccountsReceivablePage() {
             entityId: data.entityId,
             paymentMethod: data.paymentMethod,
             requestOrigin: data.requestOrigin,
+            details: data.details || "",
             notes: data.notes || "",
           },
         });
@@ -845,7 +846,7 @@ export default function AccountsReceivablePage() {
 
       {/* Stats strip */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 [&>*]:border-r [&>*:nth-child(2n)]:border-r-0 md:[&>*]:border-r md:[&>*:last-child]:border-r-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 *:border-r [&>*:nth-child(2n)]:border-r-0 md:*:border-r md:[&>*:last-child]:border-r-0">
           {/* Total a Receber */}
           <div className="flex items-start gap-3 px-4 py-4 sm:px-5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60 mt-0.5">

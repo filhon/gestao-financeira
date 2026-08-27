@@ -204,7 +204,8 @@ export interface Transaction {
   installments?: TransactionInstallments;
   requestOrigin?: RequestOrigin;
   paymentMethod?: PaymentMethod;
-  notes?: string;
+  details?: string; // Texto livre escrito pelo usuário no cadastro
+  notes?: string; // Observações — preenchidas automaticamente (IA/importação)
   barcode?: string; // Linha digitável do boleto
 
   // Attachments

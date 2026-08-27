@@ -10,6 +10,7 @@ export interface ImportedRow {
   costCenterCode?: string;
   costCenterId?: string; // Resolved from costCenterCode or bulk assignment
   paymentMethod?: string;
+  details?: string;
   notes?: string;
   // Validation state
   errors: ValidationError[];
@@ -76,6 +77,9 @@ export const COLUMN_MAP: Record<string, keyof ImportedRow> = {
   "forma de pagamento": "paymentMethod",
   "payment method": "paymentMethod",
   pagamento: "paymentMethod",
+  detalhes: "details",
+  detalhe: "details",
+  details: "details",
   observações: "notes",
   observacoes: "notes",
   notas: "notes",

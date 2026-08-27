@@ -267,12 +267,14 @@ export async function GET(request: NextRequest) {
 
       const data = doc.data();
       const description: string = data.description ?? "";
+      const details: string = data.details ?? "";
       const notes: string = data.notes ?? "";
       const supplierOrClient: string = data.supplierOrClient ?? "";
 
       // Busca case-insensitive por substring
       const matchesSearch =
         description.toLowerCase().includes(searchTerm) ||
+        details.toLowerCase().includes(searchTerm) ||
         notes.toLowerCase().includes(searchTerm) ||
         supplierOrClient.toLowerCase().includes(searchTerm);
 

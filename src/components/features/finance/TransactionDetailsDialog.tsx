@@ -483,6 +483,20 @@ export function TransactionDetailsDialog({
         )}
       </div>
 
+      {transaction.details && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium text-muted-foreground mb-1">
+              Detalhes
+            </h4>
+            <p className="text-sm whitespace-pre-wrap leading-relaxed">
+              {transaction.details}
+            </p>
+          </div>
+        </>
+      )}
+
       <Separator />
 
       <div>

@@ -358,6 +358,7 @@ export const importService = {
             },
           ],
           paymentMethod: row.paymentMethod as PaymentMethod | undefined,
+          details: row.details?.toString(),
           notes: row.notes?.toString(),
         };
 

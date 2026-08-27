@@ -62,6 +62,7 @@ export interface SanitizedTransaction {
     type: string;
     name: string;
   };
+  details?: string;
   notes?: string;
   reconciled?: boolean;
   createdAt: string;
@@ -135,6 +136,7 @@ export function sanitizeTransaction(
     };
   }
   if (txn.requestOrigin) sanitized.requestOrigin = txn.requestOrigin;
+  if (txn.details) sanitized.details = txn.details;
   if (txn.notes) sanitized.notes = txn.notes;
   if (txn.reconciled !== undefined) sanitized.reconciled = txn.reconciled;
 

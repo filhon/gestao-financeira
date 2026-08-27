@@ -66,6 +66,10 @@ export const transactionSchema = z.object({
   paymentMethod: z
     .enum(["pix", "boleto", "transfer", "credit_card", "cash"])
     .optional(),
+  details: z
+    .string()
+    .max(2000, "Detalhes devem ter no máximo 2000 caracteres")
+    .optional(),
   notes: z.string().optional(),
   barcode: z.string().optional(),
   dunningStatus: z

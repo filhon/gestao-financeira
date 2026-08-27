@@ -184,6 +184,7 @@ export async function GET(request: NextRequest) {
         continue;
 
       const description: string = (data.description ?? "").toLowerCase();
+      const details: string = (data.details ?? "").toLowerCase();
       const notes: string = (data.notes ?? "").toLowerCase();
       const supplier: string = (data.supplierOrClient ?? "").toLowerCase();
 
@@ -194,6 +195,7 @@ export async function GET(request: NextRequest) {
       const term = normalize(searchTerm);
       const matchesSearch =
         normalize(description).includes(term) ||
+        normalize(details).includes(term) ||
         normalize(notes).includes(term) ||
         normalize(supplier).includes(term);
 

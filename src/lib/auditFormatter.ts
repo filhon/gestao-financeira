@@ -21,6 +21,7 @@ export const FIELD_LABELS: Record<string, string> = {
   entityId: "Entidade",
   costCenterId: "Centro de Custo",
   costCenterAllocation: "Alocação de Centros de Custo",
+  details: "Detalhes",
   notes: "Observações",
   discount: "Desconto",
   interest: "Juros",

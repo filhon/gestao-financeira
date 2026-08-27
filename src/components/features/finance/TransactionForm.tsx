@@ -10,6 +10,7 @@ import {
 } from "@/lib/validations/transaction";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Form,
   FormControl,
@@ -141,6 +142,7 @@ export function TransactionForm({
       costCenterAllocation: [{ costCenterId: "", percentage: 100, amount: 0 }],
       attachments: [],
       description: "",
+      details: "",
       amount: 0,
       paymentMethod: undefined,
       supplierOrClient: "",
@@ -952,6 +954,55 @@ export function TransactionForm({
                   )}
                 />
               </div>
+
+              <div className="col-span-12">
+                <FormField
+                  control={form.control}
+                  name="details"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Detalhes</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Contexto, justificativa, combinados com o fornecedor, número do contrato..."
+                          className="min-h-[90px] resize-y"
+                          maxLength={2000}
+                          {...field}
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <div className="flex items-center justify-between gap-2">
+                        <FormDescription>
+                          Opcional — aparece na janela de detalhes da transação.
+                        </FormDescription>
+                        {(field.value?.length ?? 0) > 0 && (
+                          <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                            {field.value?.length ?? 0}/2000
+                          </span>
+                        )}
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Observações preenchidas automaticamente (IA / importação) — leitura */}
+              {form.watch("notes") && (
+                <div className="col-span-12">
+                  <div className="rounded-lg border bg-muted/40 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Sparkles className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Observações (preenchimento automático)
+                      </span>
+                    </div>
+                    <p className="text-sm whitespace-pre-wrap text-foreground/80">
+                      {form.watch("notes")}
+                    </p>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

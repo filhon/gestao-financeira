@@ -1948,6 +1948,7 @@ export const reportService = {
       "Status",
       "Centro de Custo",
       "Forma de Pagamento",
+      "Detalhes",
       "Observações",
     ];
 
@@ -1962,6 +1963,7 @@ export const reportService = {
       t.status,
       t.costCenterId ?? "",
       t.paymentMethod ?? "",
+      escapeCSV(t.details),
       escapeCSV(t.notes),
     ]);
 

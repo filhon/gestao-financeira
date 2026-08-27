@@ -1072,6 +1072,7 @@ export default function AccountsPayablePage() {
             entityId: data.entityId,
             paymentMethod: data.paymentMethod,
             requestOrigin: data.requestOrigin,
+            details: data.details || "",
             notes: data.notes || "",
           },
         });
