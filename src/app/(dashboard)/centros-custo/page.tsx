@@ -168,7 +168,7 @@ function CostCenterRow({
             return (
               <div
                 key={i}
-                className="relative flex-shrink-0 self-stretch"
+                className="relative shrink-0 self-stretch"
                 style={{ width: INDENT }}
               >
                 {isLastSegment ? (

@@ -237,6 +237,20 @@ service cloud.firestore {
        allow write: if isAuthenticated() && isManager(getCompanyId());
     }
     
+    // 12b. Cost Center Ledger (envelope budgeting — single source of truth for balance)
+    match /cost_center_ledger/{ledgerId} {
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+       // Read: same roles that can see budgets and reports
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+
+       // Write: NEVER from a client, not even a manager.
+       // The envelope invariant (sum of children <= parent's available) cannot be
+       // expressed in rules, so a direct write would let a manager create money.
+       // All mutation goes through Cloud Functions, which bypass these rules.
+       allow write: if false;
+    }
+
     // 13. Company Stats (Current Balance)
     match /company_stats/{companyId} {
        // Read: All roles in the company

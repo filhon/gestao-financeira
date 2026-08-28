@@ -115,6 +115,70 @@ export interface Budget {
   updatedAt: Date;
 }
 
+/**
+ * Razão do orçamento por envelope — um documento por (centro de custo, ano).
+ *
+ * Substitui `Budget`, o campo legado `CostCenter.budget` e os campos
+ * `allocatedToChildren`/`allocatedFromParent` do centro de custo. É a única
+ * fonte de verdade de saldo: toda tela lê daqui, e toda mutação passa por
+ * `runTransaction` sobre este documento.
+ *
+ * Saldo disponível = received + carryIn − allocatedToChildren − spentDirect
+ *
+ * `carryIn` não é persistido: é derivado do disponível do ano anterior na
+ * leitura, para nunca dessincronizar quando o exercício anterior ainda muda.
+ */
+export interface CostCenterLedger {
+  id: string; // `${companyId}_${costCenterId}_${year}`
+  companyId: string;
+  costCenterId: string;
+  year: number;
+
+  parentId: string | null; // desnormalizado — evita ler o CC ao validar
+  isRoot: boolean;
+
+  /** Raiz: receitas do ano. Filho: envelope recebido do pai. */
+  received: number;
+  /** Soma dos envelopes entregues aos filhos diretos. Zero em folhas. */
+  allocatedToChildren: number;
+  /** Despesas comprometidas no próprio CC (draft→paid). Zero em nós internos. */
+  spentDirect: number;
+  /** Parcela de `spentDirect` já paga. */
+  spentDirectPaid: number;
+
+  /**
+   * `spentDirect` deste CC somado ao de todos os descendentes. Mantido em cada
+   * ancestral a cada lançamento (profundidade ≤ 3, então ≤ 4 escritas).
+   *
+   * Serve a dois propósitos: alimenta a barra de consumo hierárquico sem varrer
+   * a subárvore, e torna o carry-over uma leitura de um documento por exercício
+   * — a sobra consolidada de um ano é `received + carryIn − subtreeSpent` no
+   * raiz, já que alocações internas são transferência, não consumo.
+   */
+  subtreeSpent: number;
+  subtreeSpentPaid: number;
+
+  updatedAt: Date;
+}
+
+/** Saldo calculado de um centro de custo num exercício. */
+export interface CostCenterBalance {
+  costCenterId: string;
+  year: number;
+  isRoot: boolean;
+  isLeaf: boolean;
+  /** Raiz: sobra consolidada do exercício anterior. Zero para filhos. */
+  carryIn: number;
+  received: number;
+  allocatedToChildren: number;
+  spentDirect: number;
+  spentDirectPaid: number;
+  subtreeSpent: number;
+  subtreeSpentPaid: number;
+  /** received + carryIn − allocatedToChildren − spentDirect. Pode ser negativo. */
+  available: number;
+}
+
 export interface CostCenterAllocation {
   costCenterId: string;
   percentage: number;

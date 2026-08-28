@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "eval:matching": "tsc -p scripts/matching-eval/tsconfig.json && node scripts/matching-eval/run.js"
+    "eval:matching": "tsc -p scripts/matching-eval/tsconfig.json && node scripts/matching-eval/run.js",
+    "audit:cost-centers": "node scripts/audit-cost-centers.mjs",
+    "backfill:ledger": "node scripts/backfill-cost-center-ledger.mjs",
+    "verify:ledger": "node scripts/verify-cost-center-ledger.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
