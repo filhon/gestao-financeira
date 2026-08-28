@@ -22,7 +22,8 @@ import {
   runTransaction,
   deleteField,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { httpsCallable } from "firebase/functions";
+import { db, functions as fbFunctions } from "@/lib/firebase/client";
 import currency from "currency.js";
 import { Transaction, TransactionStatus } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
@@ -79,6 +80,53 @@ const stripUndefined = (obj: any): any => {
   }
   return obj;
 };
+
+/**
+ * Cria uma despesa através da Cloud Function que valida o saldo do centro de
+ * custo. O callable trafega JSON, então Date vira ISO e `undefined` é removido
+ * antes de sair daqui.
+ *
+ * Devolve uma DocumentReference para o restante do fluxo (token de aprovação,
+ * e-mail, log de auditoria) continuar funcionando sem saber da diferença.
+ */
+async function createPayableViaLedger(
+  transactionData: Record<string, unknown>,
+  costCenterIds: string[],
+  companyId: string,
+  status: TransactionStatus,
+) {
+  const serialize = (value: unknown): unknown => {
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map(serialize);
+    if (value && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).reduce(
+        (acc, [k, v]) => {
+          if (v !== undefined) acc[k] = serialize(v);
+          return acc;
+        },
+        {} as Record<string, unknown>,
+      );
+    }
+    return value;
+  };
+
+  const call = httpsCallable<
+    { companyId: string; transaction: unknown },
+    { success: boolean; id: string }
+  >(fbFunctions, "createPayableTransaction");
+
+  const { data } = await call({
+    companyId,
+    transaction: serialize({
+      ...transactionData,
+      costCenterIds,
+      costCenterId: costCenterIds[0],
+      status,
+    }),
+  });
+
+  return doc(db, COLLECTION_NAME, data.id);
+}
 
 export const transactionService = {
   getByIds: async (ids: string[]): Promise<Transaction[]> => {
@@ -775,17 +823,30 @@ export const transactionService = {
       transactionData.costCenterAllocation?.map((a) => a.costCenterId) || [];
     const costCenterId = costCenterIds[0];
 
-    const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-      ...transactionData,
-      costCenterIds,
-      costCenterId,
-      companyId,
-      createdBy: userId,
-      status: status,
-      batchId: null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    // Despesa avulsa passa pela Cloud Function, que valida o saldo do centro de
+    // custo e grava transação e razão na mesma operação atômica. Escrever daqui
+    // direto no Firestore deixaria duas pessoas lançarem sobre o mesmo saldo.
+    // Parceladas e receitas seguem o caminho antigo por enquanto; o razão delas
+    // é mantido pelo trigger `syncCostCenterLedger`.
+    const docRef =
+      transactionData.type === "payable"
+        ? await createPayableViaLedger(
+            transactionData,
+            costCenterIds,
+            companyId,
+            status,
+          )
+        : await addDoc(collection(db, COLLECTION_NAME), {
+            ...transactionData,
+            costCenterIds,
+            costCenterId,
+            companyId,
+            createdBy: userId,
+            status: status,
+            batchId: null,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
 
     // Trigger Notification if pending approval
     if (status === "pending_approval" && transactionData.costCenterAllocation) {

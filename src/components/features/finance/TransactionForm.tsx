@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import currency from "currency.js";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -55,6 +55,7 @@ import {
   costCenterService,
   getHierarchicalCostCenters,
 } from "@/lib/services/costCenterService";
+import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -188,22 +189,43 @@ export function TransactionForm({
         );
         setCostCenters(data);
 
-        // Load balances for payables (to show in dropdown) - filtered by year
+        // Saldo vem do razão de envelopes, a mesma fonte que a Cloud Function
+        // consulta ao aceitar ou recusar o lançamento. Com o cálculo legado, o
+        // aviso do formulário e a decisão do servidor discordavam.
         if (type === "payable") {
-          // Optimized: Fetch all balances at once
-          const forUserId = onlyOwnPayables ? user.uid : undefined;
-          const balances = await costCenterService.getAllBalances(
-            selectedCompany.id,
-            data,
-            balanceYear,
-            forUserId,
-          );
-          setCostCenterBalances(balances);
+          try {
+            const balances = await costCenterLedgerService.getBalances(
+              selectedCompany.id,
+              data,
+              balanceYear,
+            );
+            setCostCenterBalances(
+              Object.fromEntries(
+                Object.entries(balances).map(([id, b]) => [id, b.available]),
+              ),
+            );
+          } catch (error) {
+            // Hierarquia inválida ou razão ausente: sem aviso preventivo, mas o
+            // servidor continua sendo a autoridade no momento de gravar.
+            console.error("Não foi possível carregar saldos:", error);
+            setCostCenterBalances({});
+          }
         }
       }
     };
     loadCostCenters();
   }, [selectedCompany, user, onlyOwnPayables, type, balanceYear]);
+
+  /** Centros que têm filhos: agrupam recurso, nunca recebem despesa direta. */
+  const parentIds = useMemo(
+    () =>
+      new Set(
+        costCenters
+          .map((cc) => cc.parentId)
+          .filter((id): id is string => !!id && id !== "none"),
+      ),
+    [costCenters],
+  );
 
   // Update allocation amounts when total amount changes
   const totalAmount = form.watch("amount");
@@ -1335,15 +1357,30 @@ export function TransactionForm({
                                     {hierarchicalCostCenters.map((cc) => {
                                       const balance = costCenterBalances[cc.id];
                                       const isSelected = field.value === cc.id;
+                                      // Despesa só entra em centro de último
+                                      // grau. Os intermediários continuam à
+                                      // vista para dar contexto da árvore, mas
+                                      // não são selecionáveis: o servidor os
+                                      // recusaria depois do formulário todo
+                                      // preenchido.
+                                      const isBranch =
+                                        type === "payable" &&
+                                        parentIds.has(cc.id);
                                       return (
                                         <CommandItem
                                           key={cc.id}
                                           value={`${cc.name} ${cc.code}`}
+                                          disabled={isBranch}
                                           onSelect={() => {
+                                            if (isBranch) return;
                                             field.onChange(cc.id);
                                             setOpenCostCenterCombobox(null);
                                           }}
-                                          className="flex items-center gap-0"
+                                          className={cn(
+                                            "flex items-center gap-0",
+                                            isBranch &&
+                                              "opacity-45 data-disabled:pointer-events-none",
+                                          )}
                                         >
                                           <div
                                             className="flex items-center gap-1.5 w-full"
@@ -1368,18 +1405,24 @@ export function TransactionForm({
                                               {cc.name}
                                             </span>
                                             {type === "payable" &&
-                                              balance !== undefined && (
-                                                <span
-                                                  className={cn(
-                                                    "ml-auto text-xs shrink-0 font-financial",
-                                                    balance > 0
-                                                      ? "text-green-600"
-                                                      : "text-muted-foreground",
-                                                  )}
-                                                >
-                                                  {formatCurrency(balance)}
+                                              (isBranch ? (
+                                                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                                                  agrupador
                                                 </span>
-                                              )}
+                                              ) : (
+                                                balance !== undefined && (
+                                                  <span
+                                                    className={cn(
+                                                      "ml-auto text-xs shrink-0 font-financial",
+                                                      balance > 0
+                                                        ? "text-green-600"
+                                                        : "text-muted-foreground",
+                                                    )}
+                                                  >
+                                                    {formatCurrency(balance)}
+                                                  </span>
+                                                )
+                                              ))}
                                           </div>
                                         </CommandItem>
                                       );

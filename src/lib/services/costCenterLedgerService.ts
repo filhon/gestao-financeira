@@ -7,8 +7,9 @@ import {
   where,
   Timestamp,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import currency from "currency.js";
-import { db } from "@/lib/firebase/client";
+import { db, functions as fbFunctions } from "@/lib/firebase/client";
 import { CostCenter, CostCenterBalance, CostCenterLedger } from "@/lib/types";
 
 const COLLECTION_NAME = "cost_center_ledger";
@@ -240,12 +241,38 @@ export const costCenterLedgerService = {
 
   // ─── Mutação ──────────────────────────────────────────────────────────────
   //
-  // Não há escrita aqui de propósito. A invariante do envelope — a soma dos
-  // filhos nunca ultrapassar o disponível do pai — não é expressável nas rules
-  // do Firestore, então `cost_center_ledger` é somente-leitura para qualquer
-  // cliente (ver firestore.rules) e toda mutação passa por Cloud Function.
-  //
-  // Alocação pai→filho e débito de despesa chegam nas Fases 2 e 3, como
-  // callables. Um método de escrita client-side aqui seria contornável pelo
-  // SDK e repetiria o defeito do antigo `costCenterService.allocateToChild`.
+  // Não há escrita direta aqui de propósito. A invariante do envelope — a soma
+  // dos filhos nunca ultrapassar o disponível do pai — não é expressável nas
+  // rules do Firestore, então `cost_center_ledger` é somente-leitura para
+  // qualquer cliente e toda mutação passa pela Cloud Function.
+
+  /**
+   * Define o envelope anual de um centro de custo, movendo recurso do pai.
+   *
+   * A validação vive no servidor: o erro devolvido já vem com a mensagem
+   * pronta para o usuário (saldo insuficiente no pai, ou envelope abaixo do
+   * que o filho já comprometeu).
+   */
+  setEnvelope: async (
+    companyId: string,
+    costCenterId: string,
+    year: number,
+    amount: number,
+  ): Promise<{ previous: number; parentAvailableAfter?: number }> => {
+    const call = httpsCallable<
+      {
+        companyId: string;
+        costCenterId: string;
+        year: number;
+        amount: number;
+      },
+      { success: boolean; previous: number; parentAvailableAfter?: number }
+    >(fbFunctions, "setCostCenterEnvelope");
+
+    const { data } = await call({ companyId, costCenterId, year, amount });
+    return {
+      previous: data.previous,
+      parentAvailableAfter: data.parentAvailableAfter,
+    };
+  },
 };

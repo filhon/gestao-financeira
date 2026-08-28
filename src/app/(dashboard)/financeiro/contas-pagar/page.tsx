@@ -73,6 +73,7 @@ import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { PaymentBatch } from "@/lib/types";
 import { formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
+import { friendlyError } from "@/lib/errors";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -1090,7 +1091,9 @@ export default function AccountsPayablePage() {
       setIsDialogOpen(false);
     } catch (error) {
       console.error("Error saving transaction:", error);
-      toast.error("Erro ao salvar conta a pagar.");
+      // A recusa por saldo vem do servidor já redigida com os valores em jogo;
+      // trocá-la por um texto genérico esconderia justamente o que resolve.
+      toast.error(friendlyError(error, "Erro ao salvar conta a pagar."));
     } finally {
       setIsSubmitting(false);
     }

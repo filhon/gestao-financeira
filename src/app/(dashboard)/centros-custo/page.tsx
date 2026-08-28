@@ -11,6 +11,7 @@ import {
   ArrowUpDown,
   GitBranch,
   MoreHorizontal,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -665,13 +666,22 @@ export default function CostCentersPage() {
 
         {canManageCostCenters && (
           <ResponsiveModal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <ResponsiveModalTrigger asChild>
-              <Button onClick={handleAddNew}>
-                <Plus className="mr-2 h-4 w-4" />
-                <span className="hidden sm:inline">Novo Centro de Custo</span>
-                <span className="sm:hidden">Novo</span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" asChild>
+                <Link href="/centros-custo/distribuicao">
+                  <Wallet className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Distribuir recursos</span>
+                  <span className="sm:hidden">Distribuir</span>
+                </Link>
               </Button>
-            </ResponsiveModalTrigger>
+              <ResponsiveModalTrigger asChild>
+                <Button onClick={handleAddNew}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Novo Centro de Custo</span>
+                  <span className="sm:hidden">Novo</span>
+                </Button>
+              </ResponsiveModalTrigger>
+            </div>
             <ResponsiveModalContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
               <ResponsiveModalHeader>
                 <ResponsiveModalTitle>

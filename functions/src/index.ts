@@ -13,6 +13,14 @@ import { syncCompany } from "./sheetsSync";
 admin.initializeApp();
 const db = admin.firestore();
 
+// Orçamento por envelope — mutação do razão, isolada em módulo próprio porque
+// é o único caminho de escrita permitido em `cost_center_ledger`.
+export { setCostCenterEnvelope } from "./costCenterLedger";
+export {
+  syncCostCenterLedger,
+  createPayableTransaction,
+} from "./transactionLedger";
+
 /**
  * Trigger que atualiza o saldo da empresa (company_stats)
  * sempre que uma transação é criada, atualizada ou deletada.
