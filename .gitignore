@@ -40,3 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 serviceAccountKey.json
+# matching eval build output
+/scripts/matching-eval/out/

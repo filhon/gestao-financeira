@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "outDir": "./out",
+    "rootDir": "../..",
+    "baseUrl": "../..",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["./eval.ts"]
+}

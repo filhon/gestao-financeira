@@ -444,6 +444,17 @@ export type ComprovanteMatchStatus =
 
 export type ComprovanteConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
 
+/** Candidato alternativo ao match sugerido, ranqueado pelo algoritmo. */
+export interface ComprovanteMatchAlternative {
+  transactionId: string;
+  transactionIds: string[];
+  isConsolidated: boolean;
+  score: number;
+  confidenceLevel: ComprovanteConfidenceLevel;
+  entityName?: string | null;
+  reason?: string | null;
+}
+
 export interface Comprovante {
   id: string;
   companyId: string;
@@ -466,6 +477,9 @@ export interface Comprovante {
   matchedAmount?: number; // Amount found in extracted text
   matchedDate?: Date; // Date found in extracted text
   matchedEntity?: string; // Beneficiary found in extracted text
+  matchReasons?: string[]; // Evidências que sustentam a sugestão (server-authored)
+  matchIsAmbiguous?: boolean; // Outro candidato tem evidência equivalente
+  matchAlternatives?: ComprovanteMatchAlternative[]; // Próximos colocados, para revisão manual
   extractedText?: string; // Raw text extracted from the PDF page
   fileHash?: string; // SHA-256 of the page blob — used to detect duplicate uploads
 

@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "functions/**",
+    // Saída compilada e runner CommonJS da suíte de avaliação do matching.
+    "scripts/matching-eval/out/**",
+    "scripts/matching-eval/run.js",
   ]),
 ]);
 

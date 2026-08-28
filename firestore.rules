@@ -320,6 +320,7 @@ service cloud.firestore {
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'extractedText', 'matchConfidence', 'matchConfidenceLevel',
           'matchedAmount', 'matchedDate', 'matchedEntity',
+          'matchReasons', 'matchIsAmbiguous', 'matchAlternatives',
           'fileHash', 'storagePath', 'uploadedBy', 'companyId'
         ]) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['suggestedTransactionId']) ||

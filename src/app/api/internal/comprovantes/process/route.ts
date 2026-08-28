@@ -16,8 +16,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
-import { matchTransactions } from "@/lib/matchingAlgorithm";
-import type { Transaction, ComprovanteMatchStatus } from "@/lib/types";
+import { matchComprovante } from "@/lib/matching";
+import type { Entity, Transaction, ComprovanteMatchStatus } from "@/lib/types";
 import { GoogleGenAI } from "@google/genai";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -117,19 +117,33 @@ async function extractText(
 // ── Fetch transactions (Admin SDK) ────────────────────────────────────────────
 
 interface RawTransaction {
-  id: string;
   companyId: string;
   type: string;
   status: string;
   amount: number;
   finalAmount?: number;
+  discount?: number;
+  interest?: number;
   description: string;
+  notes?: string;
+  details?: string;
+  barcode?: string;
+  paymentMethod?: Transaction["paymentMethod"];
   supplierOrClient?: string;
   entityId?: string;
+  comprovanteId?: string;
   paymentDate?: FirebaseFirestore.Timestamp;
   dueDate?: FirebaseFirestore.Timestamp;
 }
 
+/**
+ * Candidatos ao match: pagáveis já pagos ou autorizados.
+ *
+ * Traz todos os campos que o motor usa como evidência — `barcode` (linha
+ * digitável), `notes`/`details` (nº de NF), juros/desconto (o valor do
+ * comprovante costuma ser o ajustado) e `comprovanteId` (para despriorizar
+ * transações já conciliadas). Antes daqui só saíam valor, data e nome.
+ */
 async function fetchCandidateTransactions(
   companyId: string,
 ): Promise<Transaction[]> {
@@ -149,15 +163,52 @@ async function fetchCandidateTransactions(
       status: data.status as Transaction["status"],
       amount: data.amount,
       finalAmount: data.finalAmount,
+      discount: data.discount,
+      interest: data.interest,
       description: data.description,
+      notes: data.notes,
+      details: data.details,
+      barcode: data.barcode,
+      paymentMethod: data.paymentMethod,
       supplierOrClient: data.supplierOrClient,
       entityId: data.entityId,
+      comprovanteId: data.comprovanteId,
       paymentDate: data.paymentDate?.toDate(),
       dueDate: data.dueDate?.toDate() ?? new Date(),
       createdBy: "",
       createdAt: new Date(),
       updatedAt: new Date(),
     } as Transaction;
+  });
+}
+
+/**
+ * Cadastro de entidades da empresa — habilita o match por CNPJ/CPF,
+ * chave Pix e agência/conta, que são os sinais decisivos num comprovante.
+ */
+async function fetchEntities(companyId: string): Promise<Entity[]> {
+  const snap = await adminDb
+    .collection("entities")
+    .where("companyId", "==", companyId)
+    .get();
+
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      companyId: data.companyId,
+      name: data.name ?? "",
+      type: data.type ?? "company",
+      document: data.document,
+      category: data.category ?? "supplier",
+      bankName: data.bankName,
+      agency: data.agency,
+      account: data.account,
+      pixKey: data.pixKey,
+      pixKeyType: data.pixKeyType,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as Entity;
   });
 }
 
@@ -335,15 +386,18 @@ export async function POST(req: NextRequest) {
   // ── Text extraction / OCR ────────────────────────────────────────────────────
   const extractedText = await extractText(fileBuffer, mimeType);
 
-  // ── Fetch candidate transactions ─────────────────────────────────────────────
-  const candidates = await fetchCandidateTransactions(companyId);
+  // ── Fetch candidates + cadastro (evidência de CNPJ/Pix/conta) ────────────────
+  const [candidates, entities] = await Promise.all([
+    fetchCandidateTransactions(companyId),
+    fetchEntities(companyId).catch(() => [] as Entity[]),
+  ]);
 
   // ── Run matching algorithm ───────────────────────────────────────────────────
-  const scores =
+  const outcome =
     extractedText.length > 0
-      ? matchTransactions(extractedText, candidates)
-      : [];
-  const best = scores[0] ?? null;
+      ? matchComprovante(extractedText, candidates, { entities })
+      : null;
+  const best = outcome?.best ?? null;
 
   // ── Determine matchStatus ────────────────────────────────────────────────────
   let matchStatus: ComprovanteMatchStatus;
@@ -379,11 +433,26 @@ export async function POST(req: NextRequest) {
     updatedAt: FieldValue.serverTimestamp(),
   };
 
+  // Alternativas plausíveis: a revisão manual passa a ser escolher entre
+  // poucas opções ranqueadas em vez de procurar na lista inteira.
+  const alternatives = (outcome?.alternatives ?? []).map((candidate) => ({
+    transactionId: candidate.transactionId,
+    transactionIds: candidate.transactionIds,
+    isConsolidated: candidate.isConsolidated,
+    score: candidate.score,
+    confidenceLevel: candidate.confidenceLevel,
+    entityName: candidate.matchedEntity ?? null,
+    reason: candidate.reasons[0] ?? null,
+  }));
+
   if (best) {
     docData.suggestedTransactionId = best.transactionId;
     docData.suggestedTransactionIds = best.transactionIds;
     docData.matchConfidence = best.score;
     docData.matchConfidenceLevel = best.confidenceLevel;
+    docData.matchReasons = best.reasons.slice(0, 6);
+    docData.matchIsAmbiguous = best.isAmbiguous ?? false;
+    docData.matchAlternatives = alternatives;
     if (best.matchedAmount != null) docData.matchedAmount = best.matchedAmount;
     if (best.matchedDate != null) docData.matchedDate = best.matchedDate;
     if (best.matchedEntity) docData.matchedEntity = best.matchedEntity;
@@ -403,6 +472,9 @@ export async function POST(req: NextRequest) {
       matchedAmount: best?.matchedAmount,
       matchedDate: best?.matchedDate?.toISOString(),
       matchedEntity: best?.matchedEntity,
+      matchReasons: best?.reasons.slice(0, 6),
+      matchIsAmbiguous: best?.isAmbiguous ?? false,
+      matchAlternatives: alternatives,
     },
     { status: 201 },
   );

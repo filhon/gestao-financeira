@@ -58,6 +58,8 @@ type PageResult = {
   matchedDate?: Date;
   matchedEntity?: string;
   isConsolidated?: boolean;
+  matchReasons?: string[];
+  matchIsAmbiguous?: boolean;
   // user decision
   decision: "confirm" | "skip" | null;
 };
@@ -161,6 +163,8 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         matchedAmount?: number;
         matchedDate?: string;
         matchedEntity?: string;
+        matchReasons?: string[];
+        matchIsAmbiguous?: boolean;
         duplicate?: boolean;
       };
 
@@ -181,6 +185,8 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         matchedAmount: data.matchedAmount,
         matchedDate: data.matchedDate ? new Date(data.matchedDate) : undefined,
         matchedEntity: data.matchedEntity,
+        matchReasons: data.matchReasons,
+        matchIsAmbiguous: data.matchIsAmbiguous,
       };
     },
     [user, selectedCompany],
@@ -305,8 +311,12 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
 
             results.push({
               ...result,
+              // Pré-marca só o que o algoritmo considera inequívoco.
               decision:
-                result.matchConfidenceLevel === "HIGH" ? "confirm" : null,
+                result.matchConfidenceLevel === "HIGH" &&
+                !result.matchIsAmbiguous
+                  ? "confirm"
+                  : null,
             });
           } catch (pageErr) {
             console.error(
@@ -433,13 +443,15 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
   const confirmAllHigh = () => {
     setPages((prev) =>
       prev.map((p) =>
-        p.matchConfidenceLevel === "HIGH" ? { ...p, decision: "confirm" } : p,
+        p.matchConfidenceLevel === "HIGH" && !p.matchIsAmbiguous
+          ? { ...p, decision: "confirm" }
+          : p,
       ),
     );
   };
 
   const highCount = pages.filter(
-    (p) => p.matchConfidenceLevel === "HIGH",
+    (p) => p.matchConfidenceLevel === "HIGH" && !p.matchIsAmbiguous,
   ).length;
   const confirmedCount = pages.filter((p) => p.decision === "confirm").length;
 
@@ -604,6 +616,18 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
                               {tx.paymentDate &&
                                 ` · ${format(tx.paymentDate, "dd/MM/yyyy", { locale: ptBR })}`}
                             </p>
+                            {page.matchIsAmbiguous ? (
+                              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                                Há outra transação igualmente compatível —
+                                revise antes de confirmar
+                              </p>
+                            ) : (
+                              page.matchReasons?.[0] && (
+                                <p className="text-[11px] text-muted-foreground/80">
+                                  {page.matchReasons[0]}
+                                </p>
+                              )
+                            )}
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">

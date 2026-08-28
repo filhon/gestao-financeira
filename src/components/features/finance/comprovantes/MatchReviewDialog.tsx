@@ -36,6 +36,7 @@ import {
   ExternalLink,
   Download,
   Layers,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Comprovante, Transaction } from "@/lib/types";
@@ -150,6 +151,32 @@ export function MatchReviewDialog({
       .toLowerCase()
       .includes(txSearch.toLowerCase()),
   );
+
+  // Alternativas ranqueadas pelo algoritmo, resolvidas contra as transações
+  // já em cache. Só entram as que ainda podem ser resolvidas por completo.
+  const alternatives = useMemo(() => {
+    const shownIds = new Set(shownTxs.map((t) => t.id));
+    return (comprovante?.matchAlternatives ?? [])
+      .map((alt) => {
+        const transactions = alt.transactionIds
+          .map((id) => txCandidates.find((t) => t.id === id))
+          .filter((t): t is Transaction => !!t);
+        return { ...alt, transactions };
+      })
+      .filter(
+        (alt) =>
+          alt.transactions.length === alt.transactionIds.length &&
+          alt.transactions.length > 0 &&
+          !alt.transactionIds.every((id) => shownIds.has(id)),
+      )
+      .map((alt) => ({
+        ...alt,
+        total: alt.transactions.reduce(
+          (sum, t) => sum + (t.finalAmount ?? t.amount),
+          0,
+        ),
+      }));
+  }, [comprovante?.matchAlternatives, txCandidates, shownTxs]);
 
   // Effective transaction IDs to confirm (shown suggestion OR manual selection)
   const effectiveTxIds =
@@ -379,6 +406,35 @@ export function MatchReviewDialog({
                     </span>
                   </p>
                 )}
+
+                {comprovante.matchIsAmbiguous && (
+                  <div className="flex items-start gap-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 px-2 py-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <p className="text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                      Outra transação tem evidências equivalentes. Confira antes
+                      de confirmar.
+                    </p>
+                  </div>
+                )}
+
+                {(comprovante.matchReasons?.length ?? 0) > 0 && (
+                  <div className="pt-1">
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">
+                      Por que esta sugestão
+                    </p>
+                    <ul className="space-y-0.5">
+                      {comprovante.matchReasons!.map((reason, i) => (
+                        <li
+                          key={i}
+                          className="text-[11px] leading-snug text-muted-foreground flex gap-1.5"
+                        >
+                          <span className="text-muted-foreground/50">·</span>
+                          <span>{reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 
@@ -432,6 +488,44 @@ export function MatchReviewDialog({
               <div className="rounded-lg border border-dashed p-3 flex items-center gap-2 text-muted-foreground">
                 <FileText className="h-4 w-4" />
                 <p className="text-sm">Nenhuma sugestão automática</p>
+              </div>
+            )}
+
+            {/* Alternativas ranqueadas — evita procurar na lista inteira */}
+            {alternatives.length > 0 && (
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-sm font-medium">Outras possibilidades</p>
+                <Separator />
+                <div className="space-y-2">
+                  {alternatives.map((alt) => (
+                    <button
+                      key={alt.transactionIds.join(",")}
+                      type="button"
+                      onClick={() => setManualTxs(alt.transactions)}
+                      className="w-full text-left rounded-md border border-transparent px-2 py-1.5 transition-colors hover:border-border hover:bg-muted/50"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium truncate">
+                          {alt.transactions[0].description}
+                          {alt.transactions.length > 1 &&
+                            ` e mais ${alt.transactions.length - 1}`}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {alt.score}%
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {alt.entityName ?? alt.transactions[0].supplierOrClient}{" "}
+                        · {formatCurrency(alt.total)}
+                      </p>
+                      {alt.reason && (
+                        <p className="text-[10px] text-muted-foreground/80 truncate">
+                          {alt.reason}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
