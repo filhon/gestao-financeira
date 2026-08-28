@@ -51,6 +51,21 @@ interface TxShape {
   costCenterId?: string;
   costCenterAllocation?: Allocation[];
   ledgerApplied?: boolean;
+  ledgerAppliedAt?: admin.firestore.Timestamp;
+}
+
+/**
+ * A escrita veio de um callable que já ajustou o razão na mesma operação?
+ *
+ * O carimbo muda a cada gravação validada, então serve tanto para a criação
+ * quanto para a edição — a flag booleana sozinha só distinguia a criação, e
+ * deixava a edição contar em dobro.
+ */
+function alreadyApplied(before: TxShape | null, after: TxShape | null) {
+  const stamp = after?.ledgerAppliedAt;
+  if (!stamp) return false;
+  const previous = before?.ledgerAppliedAt;
+  return !previous || !previous.isEqual(stamp);
 }
 
 /**
@@ -267,7 +282,7 @@ export const syncCostCenterLedger = functions.firestore
 
     // O callable já gravou razão e transação atomicamente; contar de novo aqui
     // dobraria o consumo.
-    if (!before && after?.ledgerApplied) return null;
+    if (alreadyApplied(before, after)) return null;
 
     const prev = ledgerEffect(before);
     const next = ledgerEffect(after);
@@ -486,6 +501,8 @@ export const createPayableTransaction = functions.https.onCall(
         createdBy: context.auth!.uid,
         batchId: null,
         ledgerApplied: true,
+        // Carimbo que diz ao trigger que o razão desta escrita já foi ajustado.
+        ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
         ...(dueDate
           ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
           : {}),
@@ -539,5 +556,512 @@ export const createPayableTransaction = functions.https.onCall(
     });
 
     return { success: true, id: txRef.id };
+  },
+);
+
+/**
+ * Cria um parcelamento validando a soma, não cada parcela isolada.
+ *
+ * Doze parcelas de R$ 10 mil cabem uma a uma num envelope de R$ 15 mil, e
+ * juntas não cabem. Como parcelas caem em exercícios diferentes, o total é
+ * agrupado por (centro de custo, ano) antes de ser conferido — o que também
+ * faz o parcelamento que atravessa a virada do ano ser validado contra o
+ * orçamento certo de cada lado.
+ */
+export const createPayableInstallments = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "O usuário precisa estar autenticado.",
+      );
+    }
+
+    const { companyId, transactions } = data as {
+      companyId?: string;
+      transactions?: Array<Record<string, unknown>>;
+    };
+
+    if (
+      !companyId ||
+      !Array.isArray(transactions) ||
+      transactions.length === 0
+    ) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "companyId e transactions são obrigatórios.",
+      );
+    }
+    // O schema do formulário limita em 120 parcelas; o teto aqui protege o
+    // limite de operações de uma transação do Firestore.
+    if (transactions.length > 120) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Um parcelamento não pode ter mais de 120 parcelas.",
+      );
+    }
+
+    const ccSnap = await db()
+      .collection("cost_centers")
+      .where("companyId", "==", companyId)
+      .get();
+    const ccs = ccSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<{
+      id: string;
+      name?: string;
+      parentId?: string;
+    }>;
+    const { byId, parentIdOf, rootId } = indexHierarchy(ccs);
+    const hasChildren = new Set(
+      ccs.map((c) => parentIdOf(c.id)).filter(Boolean) as string[],
+    );
+
+    // Soma o efeito de todas as parcelas por (centro, exercício).
+    const totals = new Map<
+      string,
+      { ccId: string; year: number; spent: number; paid: number }
+    >();
+
+    for (const raw of transactions) {
+      const tx = raw as TxShape;
+      if (tx.type !== "payable") {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Esta função valida apenas despesas.",
+        );
+      }
+      const effect = ledgerEffect(tx);
+      if (effect.size === 0) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Toda parcela precisa de centro de custo e data de vencimento.",
+        );
+      }
+      for (const [ccId, e] of effect) {
+        if (!byId.has(ccId)) {
+          throw new functions.https.HttpsError(
+            "not-found",
+            "Centro de custo não encontrado nesta empresa.",
+          );
+        }
+        if (hasChildren.has(ccId)) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `${byId.get(ccId)?.name || "O centro de custo"} possui filhos. ` +
+              "Despesas só podem ser lançadas em centros de custo de último grau.",
+          );
+        }
+        const key = `${ccId}_${e.year}`;
+        const cur = totals.get(key) || {
+          ccId,
+          year: e.year,
+          spent: 0,
+          paid: 0,
+        };
+        cur.spent += e.spent;
+        cur.paid += e.paid;
+        totals.set(key, cur);
+      }
+    }
+
+    const grouped = [...totals.values()];
+    const refs = transactions.map(() => db().collection("transactions").doc());
+
+    await db().runTransaction(async (trx) => {
+      const years = [...new Set(grouped.map((g) => g.year))];
+      const carryByYear = new Map<number, number>();
+      for (const y of years) {
+        carryByYear.set(y, await readCarryIn(trx, companyId, rootId, y));
+      }
+
+      const chain = new Map<string, string[]>();
+      const refKeys: Array<{ ccId: string; year: number }> = [];
+      const seen = new Set<string>();
+      for (const g of grouped) {
+        const ancestors = ancestorsOf(g.ccId, parentIdOf);
+        chain.set(g.ccId, ancestors);
+        for (const id of [g.ccId, ...ancestors]) {
+          const key = `${id}_${g.year}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          refKeys.push({ ccId: id, year: g.year });
+        }
+      }
+
+      const snaps = await trx.getAll(
+        ...refKeys.map((k) =>
+          db()
+            .collection(LEDGER)
+            .doc(ledgerDocId(companyId, k.ccId, k.year)),
+        ),
+      );
+      const ledgers = new Map<string, Record<string, unknown>>();
+      refKeys.forEach((k, i) => {
+        ledgers.set(
+          `${k.ccId}_${k.year}`,
+          snaps[i].exists ? (snaps[i].data() as Record<string, unknown>) : {},
+        );
+      });
+
+      const availableOf = (ccId: string, year: number) => {
+        const l = ledgers.get(`${ccId}_${year}`) || {};
+        return (
+          toCents(l.received) +
+          (ccId === rootId ? carryByYear.get(year) || 0 : 0) -
+          toCents(l.allocatedToChildren) -
+          toCents(l.spentDirect)
+        );
+      };
+
+      for (const g of grouped) {
+        const available = availableOf(g.ccId, g.year);
+        if (g.spent > available) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `Saldo insuficiente em ${byId.get(g.ccId)?.name || "centro de custo"} ` +
+              `para o exercício ${g.year}: disponível ${formatBRL(available)}, ` +
+              `necessário ${formatBRL(g.spent)} somando as parcelas.`,
+          );
+        }
+        for (const ancestorId of chain.get(g.ccId) || []) {
+          if (availableOf(ancestorId, g.year) < 0) {
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              `${byId.get(ancestorId)?.name || "Um centro de custo superior"} está ` +
+                "com saldo negativo. Regularize a distribuição antes de lançar novas despesas.",
+            );
+          }
+        }
+      }
+
+      transactions.forEach((raw, i) => {
+        const tx = raw as TxShape;
+        const dueDate = asDate(tx.dueDate);
+        const paymentDate = asDate(tx.paymentDate);
+        const ids = (tx.costCenterAllocation || [])
+          .filter((a) => a?.costCenterId)
+          .map((a) => a.costCenterId);
+
+        trx.set(refs[i], {
+          ...raw,
+          companyId,
+          costCenterIds: ids,
+          costCenterId: ids[0],
+          createdBy: context.auth!.uid,
+          batchId: null,
+          ledgerApplied: true,
+          ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(dueDate
+            ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
+            : {}),
+          ...(paymentDate
+            ? { paymentDate: admin.firestore.Timestamp.fromDate(paymentDate) }
+            : {}),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+
+      for (const g of grouped) {
+        const targets: Array<[string, boolean]> = [
+          [g.ccId, true],
+          ...(chain.get(g.ccId) || []).map(
+            (a) => [a, false] as [string, boolean],
+          ),
+        ];
+        for (const [id, isLeaf] of targets) {
+          trx.set(
+            db()
+              .collection(LEDGER)
+              .doc(ledgerDocId(companyId, id, g.year)),
+            {
+              companyId,
+              costCenterId: id,
+              year: g.year,
+              parentId: parentIdOf(id),
+              isRoot: id === rootId,
+              ...(isLeaf
+                ? {
+                    spentDirect: admin.firestore.FieldValue.increment(
+                      toReais(g.spent),
+                    ),
+                    spentDirectPaid: admin.firestore.FieldValue.increment(
+                      toReais(g.paid),
+                    ),
+                  }
+                : {}),
+              subtreeSpent: admin.firestore.FieldValue.increment(
+                toReais(g.spent),
+              ),
+              subtreeSpentPaid: admin.firestore.FieldValue.increment(
+                toReais(g.paid),
+              ),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+      }
+    });
+
+    return { success: true, ids: refs.map((r) => r.id) };
+  },
+);
+
+/**
+ * Edita uma despesa validando o efeito da mudança sobre o orçamento.
+ *
+ * Sem isto o bloqueio da criação seria contornável em dois passos: lançar um
+ * valor que cabe e depois editá-lo para um que não cabe. Trabalha por delta, de
+ * modo que reduzir valor, trocar de centro de custo, mudar de exercício ou
+ * rejeitar a despesa sejam todos o mesmo caminho.
+ */
+export const updatePayableTransaction = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "O usuário precisa estar autenticado.",
+      );
+    }
+
+    const { transactionId, patch } = data as {
+      transactionId?: string;
+      patch?: Record<string, unknown>;
+    };
+
+    if (!transactionId || !patch) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "transactionId e patch são obrigatórios.",
+      );
+    }
+
+    const txRef = db().collection("transactions").doc(transactionId);
+    const snap = await txRef.get();
+    if (!snap.exists) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "Transação não encontrada.",
+      );
+    }
+
+    const current = snap.data() as TxShape;
+    const companyId = current.companyId;
+    if (!companyId) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Transação sem empresa associada.",
+      );
+    }
+
+    const ccSnap = await db()
+      .collection("cost_centers")
+      .where("companyId", "==", companyId)
+      .get();
+    const ccs = ccSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<{
+      id: string;
+      name?: string;
+      parentId?: string;
+    }>;
+    const { byId, parentIdOf, rootId } = indexHierarchy(ccs);
+    const hasChildren = new Set(
+      ccs.map((c) => parentIdOf(c.id)).filter(Boolean) as string[],
+    );
+
+    const merged: TxShape = { ...current, ...(patch as TxShape) };
+    const beforeEffect = ledgerEffect(current);
+    const afterEffect = ledgerEffect(merged);
+
+    for (const ccId of afterEffect.keys()) {
+      if (!byId.has(ccId)) {
+        throw new functions.https.HttpsError(
+          "not-found",
+          "Centro de custo não encontrado nesta empresa.",
+        );
+      }
+      if (hasChildren.has(ccId)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${byId.get(ccId)?.name || "O centro de custo"} possui filhos. ` +
+            "Despesas só podem ser lançadas em centros de custo de último grau.",
+        );
+      }
+    }
+
+    // Delta por (centro, exercício). Trocar de ano vira estorno num exercício e
+    // lançamento no outro, que é exatamente o que o modelo espera.
+    const deltas = new Map<
+      string,
+      { ccId: string; year: number; spent: number; paid: number }
+    >();
+    const bumpDelta = (
+      ccId: string,
+      year: number,
+      spent: number,
+      paid: number,
+    ) => {
+      const key = `${ccId}_${year}`;
+      const cur = deltas.get(key) || { ccId, year, spent: 0, paid: 0 };
+      cur.spent += spent;
+      cur.paid += paid;
+      deltas.set(key, cur);
+    };
+
+    for (const [ccId, e] of beforeEffect) {
+      bumpDelta(ccId, e.year, -e.spent, -e.paid);
+    }
+    for (const [ccId, e] of afterEffect) {
+      bumpDelta(ccId, e.year, e.spent, e.paid);
+    }
+
+    const effective = [...deltas.values()].filter(
+      (d) => d.spent !== 0 || d.paid !== 0,
+    );
+
+    const dueDate = asDate(merged.dueDate);
+    const paymentDate = asDate(merged.paymentDate);
+    const patchWrite: Record<string, unknown> = {
+      ...patch,
+      ...(dueDate
+        ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
+        : {}),
+      ...(paymentDate
+        ? { paymentDate: admin.firestore.Timestamp.fromDate(paymentDate) }
+        : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (effective.length === 0) {
+      // Nada que toque orçamento mudou (descrição, anexo, observação). Grava
+      // sem carimbo: não há razão a ajustar e o trigger não encontrará delta.
+      await txRef.update(patchWrite);
+      return { success: true, budgetChanged: false };
+    }
+
+    if (merged.costCenterAllocation) {
+      const ids = merged.costCenterAllocation
+        .filter((a) => a?.costCenterId)
+        .map((a) => a.costCenterId);
+      patchWrite.costCenterIds = ids;
+      patchWrite.costCenterId = ids[0];
+    }
+
+    await db().runTransaction(async (trx) => {
+      const years = [...new Set(effective.map((d) => d.year))];
+      const carryByYear = new Map<number, number>();
+      for (const y of years) {
+        carryByYear.set(y, await readCarryIn(trx, companyId, rootId, y));
+      }
+
+      const chain = new Map<string, string[]>();
+      const refKeys: Array<{ ccId: string; year: number }> = [];
+      const seen = new Set<string>();
+      for (const d of effective) {
+        const ancestors = ancestorsOf(d.ccId, parentIdOf);
+        chain.set(d.ccId, ancestors);
+        for (const id of [d.ccId, ...ancestors]) {
+          const key = `${id}_${d.year}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          refKeys.push({ ccId: id, year: d.year });
+        }
+      }
+
+      const snaps = await trx.getAll(
+        ...refKeys.map((k) =>
+          db()
+            .collection(LEDGER)
+            .doc(ledgerDocId(companyId, k.ccId, k.year)),
+        ),
+      );
+      const ledgers = new Map<string, Record<string, unknown>>();
+      refKeys.forEach((k, i) => {
+        ledgers.set(
+          `${k.ccId}_${k.year}`,
+          snaps[i].exists ? (snaps[i].data() as Record<string, unknown>) : {},
+        );
+      });
+
+      const availableOf = (ccId: string, year: number) => {
+        const l = ledgers.get(`${ccId}_${year}`) || {};
+        return (
+          toCents(l.received) +
+          (ccId === rootId ? carryByYear.get(year) || 0 : 0) -
+          toCents(l.allocatedToChildren) -
+          toCents(l.spentDirect)
+        );
+      };
+
+      // Só aumentos precisam caber; devolver recurso é sempre permitido.
+      for (const d of effective) {
+        if (d.spent <= 0) continue;
+        const available = availableOf(d.ccId, d.year);
+        if (d.spent > available) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `Saldo insuficiente em ${byId.get(d.ccId)?.name || "centro de custo"}: ` +
+              `disponível ${formatBRL(available)}, necessário ${formatBRL(d.spent)}.`,
+          );
+        }
+        for (const ancestorId of chain.get(d.ccId) || []) {
+          if (availableOf(ancestorId, d.year) < 0) {
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              `${byId.get(ancestorId)?.name || "Um centro de custo superior"} está ` +
+                "com saldo negativo. Regularize a distribuição antes de aumentar despesas.",
+            );
+          }
+        }
+      }
+
+      trx.update(txRef, {
+        ...patchWrite,
+        ledgerApplied: true,
+        ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      for (const d of effective) {
+        const targets: Array<[string, boolean]> = [
+          [d.ccId, true],
+          ...(chain.get(d.ccId) || []).map(
+            (a) => [a, false] as [string, boolean],
+          ),
+        ];
+        for (const [id, isLeaf] of targets) {
+          trx.set(
+            db()
+              .collection(LEDGER)
+              .doc(ledgerDocId(companyId, id, d.year)),
+            {
+              companyId,
+              costCenterId: id,
+              year: d.year,
+              parentId: parentIdOf(id),
+              isRoot: id === rootId,
+              ...(isLeaf
+                ? {
+                    spentDirect: admin.firestore.FieldValue.increment(
+                      toReais(d.spent),
+                    ),
+                    spentDirectPaid: admin.firestore.FieldValue.increment(
+                      toReais(d.paid),
+                    ),
+                  }
+                : {}),
+              subtreeSpent: admin.firestore.FieldValue.increment(
+                toReais(d.spent),
+              ),
+              subtreeSpentPaid: admin.firestore.FieldValue.increment(
+                toReais(d.paid),
+              ),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+      }
+    });
+
+    return { success: true, budgetChanged: true };
   },
 );

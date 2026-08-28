@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { PaymentDialog } from "./PaymentDialog";
 import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
+import { friendlyError } from "@/lib/errors";
 import { db } from "@/lib/firebase/client";
 import {
   doc,
@@ -245,7 +246,9 @@ export function TransactionDetailsDialog({
         onClose();
       } catch (error) {
         console.error("Error updating status:", error);
-        toast.error("Erro ao atualizar status. Tente novamente.");
+        toast.error(
+          friendlyError(error, "Erro ao atualizar status. Tente novamente."),
+        );
       } finally {
         setIsProcessing(false);
       }
@@ -279,7 +282,8 @@ export function TransactionDetailsDialog({
         setIsEditing(false);
       } catch (error) {
         console.error("Error updating transaction:", error);
-        toast.error("Erro ao atualizar transação.");
+        // A recusa por saldo vem do servidor já com os valores em jogo.
+        toast.error(friendlyError(error, "Erro ao atualizar transação."));
       } finally {
         setIsProcessing(false);
       }
@@ -306,7 +310,9 @@ export function TransactionDetailsDialog({
         setIsRecurrenceUpdateDialogOpen(false);
       } catch (error) {
         console.error("Error updating recurrence:", error);
-        toast.error("Erro ao atualizar transações recorrentes.");
+        toast.error(
+          friendlyError(error, "Erro ao atualizar transações recorrentes."),
+        );
       } finally {
         setIsProcessing(false);
       }
@@ -335,7 +341,7 @@ export function TransactionDetailsDialog({
         onClose();
       } catch (error) {
         console.error("Error settling transaction:", error);
-        toast.error("Erro ao registrar pagamento.");
+        toast.error(friendlyError(error, "Erro ao registrar pagamento."));
       } finally {
         setIsProcessing(false);
       }

@@ -81,10 +81,65 @@ const stripUndefined = (obj: any): any => {
   return obj;
 };
 
+/** Datas viram ISO e `undefined` some: o callable trafega JSON puro. */
+const serializeForCallable = (value: unknown): unknown => {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(serializeForCallable);
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).reduce(
+      (acc, [k, v]) => {
+        if (v !== undefined) acc[k] = serializeForCallable(v);
+        return acc;
+      },
+      {} as Record<string, unknown>,
+    );
+  }
+  return value;
+};
+
 /**
- * Cria uma despesa através da Cloud Function que valida o saldo do centro de
- * custo. O callable trafega JSON, então Date vira ISO e `undefined` é removido
- * antes de sair daqui.
+ * Edita uma despesa através da Cloud Function, que revalida o saldo com o
+ * delta da alteração antes de gravar.
+ */
+async function updatePayableViaLedger(
+  transactionId: string,
+  patch: Record<string, unknown>,
+) {
+  const call = httpsCallable<
+    { transactionId: string; patch: unknown },
+    { success: boolean; budgetChanged: boolean }
+  >(fbFunctions, "updatePayableTransaction");
+
+  await call({
+    transactionId,
+    patch: serializeForCallable(patch),
+  });
+}
+
+/**
+ * Cria um parcelamento de despesa pela Cloud Function, que valida a soma das
+ * parcelas por centro de custo e exercício antes de gravar qualquer uma.
+ */
+async function createPayableInstallmentsViaLedger(
+  installments: Array<Record<string, unknown>>,
+  companyId: string,
+) {
+  const call = httpsCallable<
+    { companyId: string; transactions: unknown },
+    { success: boolean; ids: string[] }
+  >(fbFunctions, "createPayableInstallments");
+
+  const { data } = await call({
+    companyId,
+    transactions: serializeForCallable(installments),
+  });
+
+  return data.ids.map((id) => doc(db, COLLECTION_NAME, id));
+}
+
+/**
+ * Cria uma despesa avulsa pela Cloud Function, que valida o saldo do centro de
+ * custo e grava transação e razão na mesma operação atômica.
  *
  * Devolve uma DocumentReference para o restante do fluxo (token de aprovação,
  * e-mail, log de auditoria) continuar funcionando sem saber da diferença.
@@ -95,21 +150,6 @@ async function createPayableViaLedger(
   companyId: string,
   status: TransactionStatus,
 ) {
-  const serialize = (value: unknown): unknown => {
-    if (value instanceof Date) return value.toISOString();
-    if (Array.isArray(value)) return value.map(serialize);
-    if (value && typeof value === "object") {
-      return Object.entries(value as Record<string, unknown>).reduce(
-        (acc, [k, v]) => {
-          if (v !== undefined) acc[k] = serialize(v);
-          return acc;
-        },
-        {} as Record<string, unknown>,
-      );
-    }
-    return value;
-  };
-
   const call = httpsCallable<
     { companyId: string; transaction: unknown },
     { success: boolean; id: string }
@@ -117,7 +157,7 @@ async function createPayableViaLedger(
 
   const { data } = await call({
     companyId,
-    transaction: serialize({
+    transaction: serializeForCallable({
       ...transactionData,
       costCenterIds,
       costCenterId: costCenterIds[0],
@@ -708,7 +748,7 @@ export const transactionService = {
       const installmentAmounts =
         totalAmountCurrency.distribute(installmentsCount);
 
-      const promises = [];
+      const installmentPayloads = [];
       for (let i = 1; i <= installmentsCount; i++) {
         const installmentAmount = installmentAmounts[i - 1].value;
         const dueDate =
@@ -768,14 +808,30 @@ export const transactionService = {
           createdBy: userId,
           status: status,
           batchId: null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
         };
 
-        promises.push(addDoc(collection(db, COLLECTION_NAME), txData));
+        installmentPayloads.push(txData);
       }
 
-      const refs = await Promise.all(promises);
+      // Um parcelamento é validado pela soma, não parcela a parcela: doze
+      // parcelas de R$ 10 mil cabem uma a uma num envelope de R$ 15 mil e
+      // juntas não cabem. A função grava as N parcelas e o razão numa só
+      // operação atômica.
+      const refs =
+        transactionData.type === "payable"
+          ? await createPayableInstallmentsViaLedger(
+              installmentPayloads,
+              companyId,
+            )
+          : await Promise.all(
+              installmentPayloads.map((txData) =>
+                addDoc(collection(db, COLLECTION_NAME), {
+                  ...txData,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                }),
+              ),
+            );
 
       // Trigger Notification if pending approval
       if (
@@ -939,29 +995,45 @@ export const transactionService = {
     const batchId = currentData.batchId as string | undefined;
     const oldAmount = currentData.amount as number | undefined;
     const newAmount = cleanData.amount;
-    if (
-      batchId &&
+    const batchNeedsAdjustment =
+      !!batchId &&
       typeof newAmount === "number" &&
       typeof oldAmount === "number" &&
-      newAmount !== oldAmount
-    ) {
-      const amountDiff = newAmount - oldAmount;
+      newAmount !== oldAmount;
+
+    // Despesa passa pela Cloud Function, que revalida o saldo com o delta da
+    // edição. Sem isso o bloqueio da criação seria contornável em dois passos:
+    // lançar um valor que cabe e depois editá-lo para um que não cabe.
+    const isPayable = currentData.type === "payable";
+    if (isPayable) {
+      await updatePayableViaLedger(id, cleanData);
+    }
+
+    if (batchNeedsAdjustment) {
+      const amountDiff = newAmount! - oldAmount!;
       const PAYMENT_BATCHES = "payment_batches";
-      const batchDocRef = doc(db, PAYMENT_BATCHES, batchId);
+      const batchDocRef = doc(db, PAYMENT_BATCHES, batchId!);
       const batchSnap = await getDoc(batchDocRef);
       if (batchSnap.exists()) {
         const currentBatchTotal = (batchSnap.data().totalAmount as number) ?? 0;
-        const firestoreBatch = writeBatch(db);
-        firestoreBatch.update(docRef, updatePayload);
-        firestoreBatch.update(batchDocRef, {
+        const batchUpdate = {
           totalAmount: Math.max(0, currentBatchTotal + amountDiff),
           updatedAt: serverTimestamp(),
-        });
-        await firestoreBatch.commit();
-      } else {
+        };
+        if (isPayable) {
+          // A transação já foi gravada pela função; resta o total do lote, que
+          // é um valor derivado e recalculável.
+          await updateDoc(batchDocRef, batchUpdate);
+        } else {
+          const firestoreBatch = writeBatch(db);
+          firestoreBatch.update(docRef, updatePayload);
+          firestoreBatch.update(batchDocRef, batchUpdate);
+          await firestoreBatch.commit();
+        }
+      } else if (!isPayable) {
         await updateDoc(docRef, updatePayload);
       }
-    } else {
+    } else if (!isPayable) {
       await updateDoc(docRef, updatePayload);
     }
 

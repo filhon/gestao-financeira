@@ -61,6 +61,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn, formatCurrency } from "@/lib/utils";
+import { friendlyError } from "@/lib/errors";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 
 function getStatusBadge(status: BankTransaction["status"]) {
@@ -580,7 +581,7 @@ export function ReconciliationDashboard() {
       setSelectedBankTx(null);
     } catch (error) {
       console.error(error);
-      toast.error("Erro ao criar transação");
+      toast.error(friendlyError(error, "Erro ao criar transação"));
     }
   };
 

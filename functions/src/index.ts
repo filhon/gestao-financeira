@@ -19,6 +19,8 @@ export { setCostCenterEnvelope } from "./costCenterLedger";
 export {
   syncCostCenterLedger,
   createPayableTransaction,
+  createPayableInstallments,
+  updatePayableTransaction,
 } from "./transactionLedger";
 
 /**
