@@ -21,7 +21,12 @@ export {
   createPayableTransaction,
   createPayableInstallments,
   updatePayableTransaction,
+  setTransactionStatus,
+  applyTransactionPatches,
+  approveTransactionByToken,
+  rejectTransactionByToken,
 } from "./transactionLedger";
+import { checkBudgetFit, notifyBudgetExceeded } from "./transactionLedger";
 
 /**
  * Trigger que atualiza o saldo da empresa (company_stats)
@@ -686,6 +691,35 @@ export const processRecurringTemplates = functions
       const templateRef = docSnap.ref;
 
       try {
+        // A recorrência é gerada mesmo sem saldo: um compromisso que vence não
+        // deixa de existir por falta de orçamento, e ninguém está na tela às
+        // 02:00 para ler uma recusa. Ela nasce marcada e o gestor é avisado.
+        // A leitura fica fora da transação porque informa, não bloqueia.
+        const preData = docSnap.data() as any;
+        let budgetFit: { fits: boolean; message: string | null } = {
+          fits: true,
+          message: null,
+        };
+        if (
+          preData.type === "payable" &&
+          preData.nextDueDate &&
+          preData.companyId
+        ) {
+          try {
+            budgetFit = await checkBudgetFit(preData.companyId, {
+              companyId: preData.companyId,
+              type: "payable",
+              status: "draft",
+              amount: preData.amount,
+              dueDate: preData.nextDueDate,
+              costCenterAllocation:
+                preData.baseTransactionData?.costCenterAllocation,
+            });
+          } catch (err) {
+            console.error("Falha ao checar orçamento da recorrência:", err);
+          }
+        }
+
         const objGenerated = await db.runTransaction(async (t) => {
           // 1) Leia o template e garanta dados atualizados
           const templateSnap = await t.get(templateRef);
@@ -738,6 +772,13 @@ export const processRecurringTemplates = functions
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               costCenterIds,
               costCenterId,
+              // Marca para a interface destacar e para o gestor filtrar.
+              ...(budgetFit.fits
+                ? {}
+                : {
+                    budgetExceeded: true,
+                    budgetExceededReason: budgetFit.message,
+                  }),
             };
 
             // 3) Cria o documento na coleção `transactions` em lote transacional
@@ -776,6 +817,14 @@ export const processRecurringTemplates = functions
 
         if (objGenerated) {
           generatedCount++;
+          if (!budgetFit.fits) {
+            await notifyBudgetExceeded(
+              preData.companyId,
+              "Recorrência sem saldo no centro de custo",
+              `${preData.description || "Recorrência"} foi criada como rascunho. ` +
+                `${budgetFit.message || ""}`,
+            );
+          }
         }
       } catch (error) {
         console.error(`Erro processando template ${templateRef.id}:`, error);

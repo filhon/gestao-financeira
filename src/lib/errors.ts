@@ -15,6 +15,8 @@ const USER_FACING_CODES = new Set([
   "functions/not-found",
   "functions/unauthenticated",
   "functions/resource-exhausted",
+  // Link de aprovação expirado — a mensagem diz exatamente isso.
+  "functions/deadline-exceeded",
 ]);
 
 interface CallableError {

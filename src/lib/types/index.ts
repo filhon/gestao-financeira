@@ -272,6 +272,16 @@ export interface Transaction {
   notes?: string; // Observações — preenchidas automaticamente (IA/importação)
   barcode?: string; // Linha digitável do boleto
 
+  /**
+   * Recorrência gerada pelo job noturno sem saldo no centro de custo.
+   *
+   * Ela é criada assim mesmo — um compromisso que vence não deixa de existir
+   * por falta de orçamento — mas fica marcada para o gestor regularizar a
+   * distribuição antes de a despesa seguir no fluxo de aprovação.
+   */
+  budgetExceeded?: boolean;
+  budgetExceededReason?: string;
+
   // Attachments
   attachments?: Attachment[];
 

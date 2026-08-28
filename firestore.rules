@@ -106,39 +106,85 @@ service cloud.firestore {
       function getCompanyId() {
         return resource != null ? resource.data.companyId : request.resource.data.companyId;
       }
-      
+
+      // Papéis autorizados a escrever, independentemente do conteúdo da escrita.
+      function canWrite() {
+        return isManager(getCompanyId()) ||
+               hasCompanyRole(getCompanyId(), ['approver']) ||
+               hasCompanyRole(getCompanyId(), ['releaser']) ||
+               (hasCompanyRole(getCompanyId(), ['user']) && resource.data.createdBy == request.auth.uid);
+      }
+
+      // ───────────────────────────────────────────────────────────────────────
+      // Orçamento por envelope
+      //
+      // A invariante `recebido − alocadoAosFilhos − gastoDireto >= 0` não é
+      // expressável aqui: conferi-la exige ler o razão do centro e de todos os
+      // ancestrais na mesma operação em que se grava. Quem faz isso são os
+      // callables (`createPayableTransaction`, `createPayableInstallments`,
+      // `updatePayableTransaction`, `setTransactionStatus`), que rodam com o
+      // Admin SDK e por isso não passam por estas regras.
+      //
+      // O papel das regras é o inverso: fechar o caminho direto, para que o
+      // callable seja o único jeito de uma despesa nascer ou mudar de valor.
+      // ───────────────────────────────────────────────────────────────────────
+
+      // Campos de que o cálculo do envelope depende.
+      function budgetKeys() {
+        return [
+          'type', 'amount', 'finalAmount',
+          'costCenterAllocation', 'costCenterId', 'costCenterIds',
+          'dueDate', 'paymentDate',
+          'budgetExceeded', 'budgetExceededReason',
+          'ledgerApplied', 'ledgerAppliedAt'
+        ].toSet();
+      }
+
+      // Vale tanto para a despesa que já é quanto para a que a escrita tornaria.
+      function isPayableWrite() {
+        return resource.data.get('type', '') == 'payable' ||
+               request.resource.data.get('type', '') == 'payable';
+      }
+
+      function keepsBudgetFields() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(budgetKeys());
+      }
+
+      // Rejeitar devolve envelope e é sempre seguro. Tirar de `rejected` reocupa
+      // o que a recusa liberou — e esse espaço pode já ter sido gasto noutro
+      // lugar —, então essa volta só existe pelo `setTransactionStatus`.
+      // As demais transições (rascunho → aprovada → paga, inclusive em lote)
+      // não mudam quanto a despesa consome, e seguem livres.
+      function keepsRejection() {
+        return resource.data.get('status', '') != 'rejected' ||
+               request.resource.data.get('status', '') == 'rejected';
+      }
+
       // READ
       allow read: if isAuthenticated() && (
         // Admin, Manager, Approver, Releaser, Auditor: Can view ALL in the company
         hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor']) ||
-        
+
         // User: Can view ONLY their own transactions (Created By them)
         (hasCompanyRole(getCompanyId(), ['user']) && resource.data.createdBy == request.auth.uid)
       );
 
-      // CREATE
-      allow create: if isAuthenticated() && (
-         // Admin, Manager: Can create both Payables and Receivables
-         hasCompanyRole(getCompanyId(), ['financial_manager']) ||
-         
-         // User: Can create Payables (Logic simplified: allow create if they have 'user' role)
-         hasCompanyRole(getCompanyId(), ['user'])
+      // CREATE — receitas pelo SDK; despesa só pela Cloud Function, que confere
+      // o saldo do centro de custo na mesma operação em que grava.
+      allow create: if isAuthenticated() &&
+        (hasCompanyRole(getCompanyId(), ['financial_manager']) ||
+         hasCompanyRole(getCompanyId(), ['user'])) &&
+        request.resource.data.get('type', '') != 'payable';
+
+      // UPDATE — numa despesa, tudo que não mexe em orçamento continua livre:
+      // vínculo com lote, conciliação, comprovante, anexo, observação, token de
+      // aprovação e as mudanças de status do fluxo.
+      allow update: if isAuthenticated() && canWrite() && (
+         !isPayableWrite() || (keepsBudgetFields() && keepsRejection())
       );
 
-      // UPDATE / DELETE
-      allow update, delete: if isAuthenticated() && (
-         // Admin, Manager: Full access
-         isManager(getCompanyId()) ||
-         
-         // Approver: Can Update (e.g. Approve)
-         hasCompanyRole(getCompanyId(), ['approver']) ||
-         
-         // Releaser: Can Update (e.g. Pay)
-         hasCompanyRole(getCompanyId(), ['releaser']) ||
-         
-         // User: Can Update/Delete ONLY their own transactions
-         (hasCompanyRole(getCompanyId(), ['user']) && resource.data.createdBy == request.auth.uid)
-      );
+      // DELETE — apagar só devolve envelope; o trigger estorna o razão.
+      allow delete: if isAuthenticated() && canWrite();
     }
 
     // 4. Payment Batches

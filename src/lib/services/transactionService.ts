@@ -117,6 +117,69 @@ async function updatePayableViaLedger(
 }
 
 /**
+ * Muda o status (ou dá baixa) pela Cloud Function.
+ *
+ * Ela é que preenche `approvedBy`, `releasedBy` e o token do magic link, e é
+ * que revalida o orçamento: tirar uma despesa de `rejected` reocupa envelope, e
+ * a baixa muda o exercício da despesa quando o pagamento cai noutro ano.
+ */
+async function setStatusViaLedger(
+  transactionId: string,
+  status: TransactionStatus,
+  settlement?: {
+    paymentDate: Date;
+    finalAmount: number;
+    discount: number;
+    interest: number;
+  },
+) {
+  const call = httpsCallable<
+    { transactionId: string; status: string; settlement?: unknown },
+    {
+      success: boolean;
+      budgetChanged: boolean;
+      budgetExceeded: boolean;
+      budgetExceededReason: string | null;
+    }
+  >(fbFunctions, "setTransactionStatus");
+
+  const { data } = await call({
+    transactionId,
+    status,
+    ...(settlement ? { settlement: serializeForCallable(settlement) } : {}),
+  });
+
+  return data;
+}
+
+/**
+ * Aplica patches a várias despesas pela Cloud Function.
+ *
+ * Usado onde a tela edita em bloco — baixa em lote, série recorrente, backfill
+ * de `costCenterIds`. A função soma o efeito de todos os patches antes de
+ * gravar qualquer um, para que a série não fique metade editada quando o
+ * envelope acabar no meio.
+ *
+ * `enforce: false` na baixa: a conta já é devida, então o pagamento nunca é
+ * recusado — fica marcado quando o exercício não tem orçamento.
+ */
+async function applyPatchesViaLedger(
+  patches: Array<{ transactionId: string; patch: Record<string, unknown> }>,
+  enforce = true,
+) {
+  const call = httpsCallable<
+    { patches: unknown; enforce: boolean },
+    { success: boolean; applied: string[]; exceeded: string[] }
+  >(fbFunctions, "applyTransactionPatches");
+
+  const { data } = await call({
+    patches: serializeForCallable(patches),
+    enforce,
+  });
+  return data;
+}
+
+/**
  * Cria um parcelamento de despesa pela Cloud Function, que valida a soma das
  * parcelas por centro de custo e exercício antes de gravar qualquer uma.
  */
@@ -881,9 +944,9 @@ export const transactionService = {
 
     // Despesa avulsa passa pela Cloud Function, que valida o saldo do centro de
     // custo e grava transação e razão na mesma operação atômica. Escrever daqui
-    // direto no Firestore deixaria duas pessoas lançarem sobre o mesmo saldo.
-    // Parceladas e receitas seguem o caminho antigo por enquanto; o razão delas
-    // é mantido pelo trigger `syncCostCenterLedger`.
+    // direto no Firestore deixaria duas pessoas lançarem sobre o mesmo saldo —
+    // e as rules já recusam a criação de despesa pelo cliente. Receita segue
+    // pelo SDK: ela não consome envelope.
     const docRef =
       transactionData.type === "payable"
         ? await createPayableViaLedger(
@@ -1165,6 +1228,15 @@ export const transactionService = {
 
       const snapshot = await getDocs(q);
 
+      // Despesa vai pela Cloud Function: a série inteira é conferida contra o
+      // envelope antes de qualquer documento ser gravado, senão metade dela
+      // ficaria editada quando o saldo acabasse no meio do caminho.
+      const isPayableSeries = originalTransaction.type === "payable";
+      const ledgerPatches: Array<{
+        transactionId: string;
+        patch: Record<string, unknown>;
+      }> = [];
+
       let batch = writeBatch(db);
       let operationCount = 0;
       const batchPromises: Promise<void>[] = [];
@@ -1178,7 +1250,6 @@ export const transactionService = {
 
         const updateData: DocumentData = {
           ...cleanData,
-          updatedAt: serverTimestamp(),
         };
 
         // Update costCenterIds when costCenterAllocation changes
@@ -1207,7 +1278,18 @@ export const transactionService = {
           updateData.description = `${baseDescription} (${installments.current}/${installments.total})`;
         }
 
-        batch.update(docSnapshot.ref, updateData);
+        if (isPayableSeries) {
+          ledgerPatches.push({
+            transactionId: docSnapshot.id,
+            patch: updateData,
+          });
+          continue;
+        }
+
+        batch.update(docSnapshot.ref, {
+          ...updateData,
+          updatedAt: serverTimestamp(),
+        });
         operationCount++;
 
         if (operationCount === 500) {
@@ -1215,6 +1297,10 @@ export const transactionService = {
           batch = writeBatch(db);
           operationCount = 0;
         }
+      }
+
+      if (ledgerPatches.length > 0) {
+        await applyPatchesViaLedger(ledgerPatches);
       }
 
       if (operationCount > 0) {
@@ -1251,9 +1337,11 @@ export const transactionService = {
     user: { uid: string; email: string },
     companyId: string,
   ) => {
-    const docRef = doc(db, COLLECTION_NAME, id);
+    // A baixa passa pela Cloud Function: gravar `paymentDate` muda o exercício
+    // da despesa, e o consumo migra para um ano que pode não ter envelope. Ela
+    // nunca é recusada — a conta já é devida —, mas fica marcada quando estoura.
+    const result = await setStatusViaLedger(id, "paid", data);
 
-    // Audit Log
     await auditService.log({
       companyId,
       userId: user.uid,
@@ -1261,19 +1349,16 @@ export const transactionService = {
       action: "update",
       entity: "transaction",
       entityId: id,
-      details: stripUndefined({ status: "paid", ...data }),
+      details: stripUndefined({
+        status: "paid",
+        ...data,
+        ...(result.budgetExceeded
+          ? { budgetExceededReason: result.budgetExceededReason }
+          : {}),
+      }),
     });
 
-    return updateDoc(docRef, {
-      status: "paid",
-      paymentDate: Timestamp.fromDate(data.paymentDate),
-      finalAmount: data.finalAmount,
-      discount: data.discount,
-      interest: data.interest,
-      releasedBy: user.uid,
-      releasedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    return result;
   },
 
   updateStatus: async (
@@ -1283,26 +1368,11 @@ export const transactionService = {
     companyId: string,
   ): Promise<Transaction> => {
     const docRef = doc(db, COLLECTION_NAME, id);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: any = { status, updatedAt: serverTimestamp() };
-    const userId = user.uid;
 
-    if (status === "approved") {
-      updateData.approvedBy = userId;
-      updateData.approvedAt = serverTimestamp();
-    } else if (status === "paid") {
-      updateData.releasedBy = userId;
-      updateData.releasedAt = serverTimestamp();
-    } else if (status === "pending_approval") {
-      // Generate Magic Link Token
-      updateData.approvalToken = crypto.randomUUID();
-      // Set expiration for 7 days
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
-      updateData.approvalTokenExpiresAt = Timestamp.fromDate(expiresAt);
-    }
-
-    await updateDoc(docRef, updateData);
+    // A função é que carimba `approvedBy`/`releasedBy` a partir do token de
+    // autenticação e gera o token do magic link, e é que revalida o orçamento:
+    // tirar uma despesa de `rejected` reocupa o envelope que a recusa liberou.
+    await setStatusViaLedger(id, status);
 
     await auditService.log({
       companyId,
@@ -1375,80 +1445,27 @@ export const transactionService = {
     });
   },
 
+  /**
+   * Aprova pelo magic link. A validade do token, o carimbo do aprovador e a
+   * revalidação do orçamento (um ajuste de valor para cima ocupa envelope que
+   * ninguém conferiu) ficam na Cloud Function — a página é anônima e não pode
+   * ser quem decide que o link ainda vale.
+   */
   approveByToken: async (
     token: string,
-    userId: string,
+    _userId: string,
     comment?: string,
     adjustedAmount?: number,
   ) => {
-    const q = query(
-      collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token),
+    const call = httpsCallable<
+      { token: string; comment?: string; adjustedAmount?: number },
+      { success: boolean; id: string; companyId: string }
+    >(fbFunctions, "approveTransactionByToken");
+
+    const { data } = await call(
+      stripUndefined({ token, comment, adjustedAmount }),
     );
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      throw new Error("Token inválido ou não encontrado.");
-    }
-
-    const docSnapshot = snapshot.docs[0];
-    const transaction = convertDates({
-      id: docSnapshot.id,
-      ...docSnapshot.data(),
-    });
-
-    if (
-      transaction.approvalTokenExpiresAt &&
-      transaction.approvalTokenExpiresAt < new Date()
-    ) {
-      throw new Error("Este link de aprovação expirou.");
-    }
-
-    if (transaction.status !== "pending_approval") {
-      throw new Error("Esta transação já foi processada.");
-    }
-
-    // Prepare update data
-    const updateData: Record<string, unknown> = {
-      status: "approved",
-      approvedBy: userId,
-      approvedAt: serverTimestamp(),
-      approvalToken: null, // Consume token
-      approvalTokenExpiresAt: null,
-    };
-
-    // Add comment if provided
-    if (comment) {
-      updateData.approvalComment = comment;
-    }
-
-    // Add adjusted amount if provided
-    if (adjustedAmount !== undefined && adjustedAmount !== transaction.amount) {
-      updateData.amount = adjustedAmount;
-      updateData.originalAmount = transaction.amount;
-    }
-
-    // Approve
-    const docRef = doc(db, COLLECTION_NAME, transaction.id);
-    await updateDoc(docRef, updateData);
-
-    // Log audit
-    await auditService.log({
-      companyId: transaction.companyId,
-      userId: userId,
-      userEmail: "magic-link-approval@system",
-      action: "approve",
-      entity: "transaction",
-      entityId: transaction.id,
-      details: stripUndefined({
-        via: "magic_link",
-        originalAmount: transaction.amount,
-        adjustedAmount: adjustedAmount,
-        comment: comment,
-      }),
-    });
-
-    return transaction;
+    return data;
   },
 
   getByApprovalToken: async (token: string): Promise<Transaction | null> => {
@@ -1469,60 +1486,15 @@ export const transactionService = {
     });
   },
 
-  rejectByToken: async (token: string, userId: string, reason: string) => {
-    const q = query(
-      collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token),
-    );
-    const snapshot = await getDocs(q);
+  /** Rejeita pelo magic link. Mesma razão do `approveByToken`. */
+  rejectByToken: async (token: string, _userId: string, reason: string) => {
+    const call = httpsCallable<
+      { token: string; reason: string },
+      { success: boolean; id: string; companyId: string }
+    >(fbFunctions, "rejectTransactionByToken");
 
-    if (snapshot.empty) {
-      throw new Error("Token inválido ou não encontrado.");
-    }
-
-    const docSnapshot = snapshot.docs[0];
-    const transaction = convertDates({
-      id: docSnapshot.id,
-      ...docSnapshot.data(),
-    });
-
-    if (
-      transaction.approvalTokenExpiresAt &&
-      transaction.approvalTokenExpiresAt < new Date()
-    ) {
-      throw new Error("Este link de aprovação expirou.");
-    }
-
-    if (transaction.status !== "pending_approval") {
-      throw new Error("Esta transação já foi processada.");
-    }
-
-    // Reject
-    const docRef = doc(db, COLLECTION_NAME, transaction.id);
-    await updateDoc(docRef, {
-      status: "rejected",
-      rejectedBy: userId,
-      rejectedAt: serverTimestamp(),
-      rejectionReason: reason,
-      approvalToken: null, // Consume token
-      approvalTokenExpiresAt: null,
-    });
-
-    // Log audit
-    await auditService.log({
-      companyId: transaction.companyId,
-      userId: userId,
-      userEmail: "magic-link-approval@system",
-      action: "reject",
-      entity: "transaction",
-      entityId: transaction.id,
-      details: {
-        via: "magic_link",
-        reason: reason,
-      },
-    });
-
-    return transaction;
+    const { data } = await call({ token, reason });
+    return data;
   },
 
   getDashboardStats: async (companyId?: string) => {
@@ -1713,11 +1685,14 @@ export const transactionService = {
     );
 
     const snapshot = await getDocs(q);
-    let updated = 0;
-
-    let batch = writeBatch(db);
-    let batchCount = 0;
-    const MAX_BATCH = 500; // Firestore batch limit
+    // `costCenterIds` é campo de orçamento nas rules, então o reparo passa pela
+    // Cloud Function. Ele só reescreve o índice a partir da alocação que já
+    // está no documento, sem mudar quanto a despesa consome — o razão não se
+    // move e a conferência de saldo não tem nada a recusar.
+    const patches: Array<{
+      transactionId: string;
+      patch: Record<string, unknown>;
+    }> = [];
 
     for (const docSnapshot of snapshot.docs) {
       const data = docSnapshot.data();
@@ -1737,35 +1712,33 @@ export const transactionService = {
         expectedIds.some((id) => !currentIds.includes(id));
 
       if (isMissing) {
-        batch.update(docSnapshot.ref, {
-          costCenterIds: expectedIds,
-          costCenterId: expectedIds[0],
+        patches.push({
+          transactionId: docSnapshot.id,
+          patch: {
+            costCenterIds: expectedIds,
+            costCenterId: expectedIds[0],
+          },
         });
-        updated++;
-        batchCount++;
-
-        // Commit in chunks of 500 and create a new batch
-        if (batchCount >= MAX_BATCH) {
-          await batch.commit();
-          batch = writeBatch(db);
-          batchCount = 0;
-        }
       }
     }
 
-    // Commit remaining
-    if (batchCount > 0) {
-      await batch.commit();
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < patches.length; i += CHUNK_SIZE) {
+      await applyPatchesViaLedger(patches.slice(i, i + CHUNK_SIZE));
     }
 
-    return { updated, total: snapshot.size };
+    return { updated: patches.length, total: snapshot.size };
   },
 
   /**
    * Atualiza múltiplas transações atomicamente usando writeBatch do Firestore.
    *
-   * Garante que todos os documentos sejam processados juntos ou falhem juntos.
-   * Chunks de 500 operações respeitam o limite do Firestore por batch.
+   * Passa pela Cloud Function porque as rules já não deixam o cliente mexer em
+   * valor, centro de custo ou data de uma despesa. Ela confere o lote inteiro
+   * contra o envelope antes de gravar o primeiro documento.
+   *
+   * `enforce: false` para a baixa em lote — a conta já é devida, então o
+   * pagamento não é recusado; o que não couber no exercício fica marcado.
    *
    * Não realiza audit por documento individual (overhead desnecessário
    * para operações em lote); um único registro de auditoria resume a operação.
@@ -1775,37 +1748,33 @@ export const transactionService = {
     data: Partial<TransactionFormData>,
     user: { uid: string; email: string },
     companyId: string,
+    opts?: { enforce?: boolean },
   ): Promise<void> => {
     if (ids.length === 0) return;
 
     const cleanData = stripUndefined(data) as Partial<TransactionFormData>;
 
-    const updatePayload: DocumentData = {
-      ...cleanData,
-      updatedAt: serverTimestamp(),
-    };
+    const patch: Record<string, unknown> = { ...cleanData };
 
     if (cleanData.costCenterAllocation) {
       const costCenterIds = cleanData.costCenterAllocation.map(
         (a) => a.costCenterId,
       );
-      updatePayload.costCenterIds = costCenterIds;
-      updatePayload.costCenterId = costCenterIds[0];
+      patch.costCenterIds = costCenterIds;
+      patch.costCenterId = costCenterIds[0];
     }
 
-    // Firestore suporta no máximo 500 operações por writeBatch
+    // Teto da função; acima disso o lote é dividido.
     const CHUNK_SIZE = 500;
 
     for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-      const chunk = ids.slice(i, i + CHUNK_SIZE);
-      const batch = writeBatch(db);
-
-      for (const id of chunk) {
-        const docRef = doc(db, COLLECTION_NAME, id);
-        batch.update(docRef, updatePayload);
-      }
-
-      await batch.commit();
+      await applyPatchesViaLedger(
+        ids.slice(i, i + CHUNK_SIZE).map((id) => ({
+          transactionId: id,
+          patch,
+        })),
+        opts?.enforce ?? true,
+      );
     }
 
     // Audit único para toda a operação em lote

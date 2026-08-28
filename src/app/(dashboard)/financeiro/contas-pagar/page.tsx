@@ -390,6 +390,12 @@ function MobileTransactionCard({
             {isOverdue && " · Vencida"}
           </span>
           {getStatusBadge(t.status)}
+          {t.budgetExceeded && (
+            <span className="inline-flex items-center gap-1 rounded border border-amber-400/60 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-500">
+              <AlertTriangle className="h-3 w-3" />
+              sem saldo
+            </span>
+          )}
         </div>
         {canPay && (
           <p className="text-[10px] text-muted-foreground/50 mt-1">
@@ -994,11 +1000,15 @@ export default function AccountsPayablePage() {
     try {
       setIsProcessingBatch(true);
 
+      // A baixa não é recusada por saldo: a conta já é devida. Quando o
+      // pagamento cai em exercício sem orçamento, o lançamento fica marcado e
+      // os gestores são avisados.
       await transactionService.updateBatch(
         transactionsToPay.map((t) => t.id),
         { status: "paid", paymentDate: batchPaymentDate },
         { uid: user.uid, email: user.email },
         selectedCompany.id,
+        { enforce: false },
       );
 
       toast.success(
@@ -1884,7 +1894,23 @@ export default function AccountsPayablePage() {
                                 currency: "BRL",
                               }).format(t.amount)}
                             </TableCell>
-                            <TableCell>{getStatusBadge(t.status)}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5">
+                                {getStatusBadge(t.status)}
+                                {t.budgetExceeded && (
+                                  <span
+                                    title={
+                                      t.budgetExceededReason ||
+                                      "Gerada sem saldo no centro de custo."
+                                    }
+                                    className="inline-flex items-center gap-1 rounded border border-amber-400/60 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-500"
+                                  >
+                                    <AlertTriangle className="h-3 w-3" />
+                                    sem saldo
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell className="text-right">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
