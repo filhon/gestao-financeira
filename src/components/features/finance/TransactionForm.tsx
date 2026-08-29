@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import currency from "currency.js";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -181,8 +182,14 @@ export function TransactionForm({
     const loadCostCenters = async () => {
       if (selectedCompany && user) {
         // For 'user' role, pass forUserId to filter in Firestore query
-        // This matches Firestore rules and prevents permission errors
-        const forUserId = onlyOwnPayables ? user.uid : undefined;
+        // This matches Firestore rules and prevents permission errors.
+        //
+        // Receita fica de fora do filtro: ela não escolhe centro, só precisa
+        // saber qual é a raiz. Filtrar aqui esconderia a raiz de quem não a tem
+        // entre os centros permitidos, e o lançamento travaria numa validação
+        // que o usuário não teria como resolver.
+        const forUserId =
+          onlyOwnPayables && type === "payable" ? user.uid : undefined;
         const data = await costCenterService.getAll(
           selectedCompany.id,
           forUserId,
@@ -215,6 +222,43 @@ export function TransactionForm({
     };
     loadCostCenters();
   }, [selectedCompany, user, onlyOwnPayables, type, balanceYear]);
+
+  /** Raiz da árvore — é ela que recebe toda receita da empresa. */
+  const rootCostCenter = useMemo(
+    () => costCenters.find((cc) => !cc.parentId || cc.parentId === "none"),
+    [costCenters],
+  );
+
+  /**
+   * Receita credita a raiz automaticamente, sem escolha do usuário.
+   *
+   * No modelo de envelope o recurso entra por cima e desce por distribuição
+   * explícita; deixar a receita apontar para um centro folha sugeriria que ela
+   * engorda o envelope daquele centro, o que não acontece — o razão credita a
+   * raiz de qualquer maneira. A alocação continua sendo gravada, e não é
+   * decorativa: é ela que alimenta `costCenterIds`, de que o filtro por centro
+   * de custo dos relatórios depende.
+   */
+  useEffect(() => {
+    if (type !== "receivable" || !rootCostCenter) return;
+
+    const current = form.getValues("costCenterAllocation");
+    if (
+      current?.length === 1 &&
+      current[0].costCenterId === rootCostCenter.id &&
+      current[0].percentage === 100
+    ) {
+      return;
+    }
+
+    form.setValue("costCenterAllocation", [
+      {
+        costCenterId: rootCostCenter.id,
+        percentage: 100,
+        amount: form.getValues("amount") ?? 0,
+      },
+    ]);
+  }, [type, rootCostCenter, form]);
 
   /** Centros que têm filhos: agrupam recurso, nunca recebem despesa direta. */
   const parentIds = useMemo(
@@ -458,7 +502,8 @@ export function TransactionForm({
   const steps = [
     { label: "Identificação" },
     { label: "Repetição e Anexos" },
-    { label: "Centro de Custo" },
+    // Receita não tem etapa de rateio: ela credita a raiz automaticamente.
+    ...(type === "payable" ? [{ label: "Centro de Custo" }] : []),
   ];
 
   return (
@@ -1271,273 +1316,306 @@ export function TransactionForm({
         </div>
 
         {/* Cost Center Allocation */}
-        <div ref={section2Ref}>
+        {type === "payable" ? (
+          <div ref={section2Ref}>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-base">
+                  Rateio por Centro de Custo
+                </CardTitle>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    append({ costCenterId: "", percentage: 0, amount: 0 })
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Adicionar
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {fields.map((field, index) => (
+                    <div
+                      key={field.id}
+                      className="grid grid-cols-[1fr_1fr_auto] gap-4 items-end"
+                    >
+                      <FormField
+                        control={form.control}
+                        name={`costCenterAllocation.${index}.costCenterId`}
+                        render={({ field }) => (
+                          <FormItem className="flex flex-col">
+                            <FormLabel className={index !== 0 ? "sr-only" : ""}>
+                              Centro de Custo
+                            </FormLabel>
+                            <Popover
+                              open={openCostCenterCombobox === index}
+                              onOpenChange={(open) =>
+                                setOpenCostCenterCombobox(open ? index : null)
+                              }
+                            >
+                              <PopoverTrigger asChild>
+                                <FormControl>
+                                  <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    className={cn(
+                                      "w-full justify-between font-normal",
+                                      !field.value && "text-muted-foreground",
+                                    )}
+                                  >
+                                    <span className="truncate">
+                                      {field.value
+                                        ? (() => {
+                                            const cc =
+                                              hierarchicalCostCenters.find(
+                                                (c) => c.id === field.value,
+                                              );
+                                            if (!cc) return "Selecione...";
+                                            const balance =
+                                              costCenterBalances[cc.id];
+                                            return `${cc.level > 0 ? "↳ " : ""}${cc.name}${type === "payable" && balance !== undefined ? ` (${formatCurrency(balance)})` : ""}`;
+                                          })()
+                                        : "Selecione..."}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </FormControl>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                className="w-[--radix-popover-trigger-width] p-0"
+                                align="start"
+                              >
+                                <Command>
+                                  <CommandInput placeholder="Buscar centro de custo..." />
+                                  <CommandList
+                                    onWheel={(e) => {
+                                      e.stopPropagation();
+                                      const target = e.currentTarget;
+                                      target.scrollTop += e.deltaY;
+                                    }}
+                                  >
+                                    <CommandEmpty>
+                                      Nenhum centro de custo encontrado.
+                                    </CommandEmpty>
+                                    <CommandGroup>
+                                      {hierarchicalCostCenters.map((cc) => {
+                                        const balance =
+                                          costCenterBalances[cc.id];
+                                        const isSelected =
+                                          field.value === cc.id;
+                                        // Despesa só entra em centro de último
+                                        // grau. Os intermediários continuam à
+                                        // vista para dar contexto da árvore, mas
+                                        // não são selecionáveis: o servidor os
+                                        // recusaria depois do formulário todo
+                                        // preenchido.
+                                        const isBranch =
+                                          type === "payable" &&
+                                          parentIds.has(cc.id);
+                                        return (
+                                          <CommandItem
+                                            key={cc.id}
+                                            value={`${cc.name} ${cc.code}`}
+                                            disabled={isBranch}
+                                            onSelect={() => {
+                                              if (isBranch) return;
+                                              field.onChange(cc.id);
+                                              setOpenCostCenterCombobox(null);
+                                            }}
+                                            className={cn(
+                                              "flex items-center gap-0",
+                                              isBranch &&
+                                                "opacity-45 data-disabled:pointer-events-none",
+                                            )}
+                                          >
+                                            <div
+                                              className="flex items-center gap-1.5 w-full"
+                                              style={{
+                                                paddingLeft: `${cc.level * 16}px`,
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "h-4 w-4 shrink-0",
+                                                  isSelected
+                                                    ? "opacity-100"
+                                                    : "opacity-0",
+                                                )}
+                                              />
+                                              {cc.level > 0 ? (
+                                                <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                              ) : (
+                                                <FolderTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                              )}
+                                              <span className="truncate">
+                                                {cc.name}
+                                              </span>
+                                              {type === "payable" &&
+                                                (isBranch ? (
+                                                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                                                    agrupador
+                                                  </span>
+                                                ) : (
+                                                  balance !== undefined && (
+                                                    <span
+                                                      className={cn(
+                                                        "ml-auto text-xs shrink-0 font-financial",
+                                                        balance > 0
+                                                          ? "text-green-600"
+                                                          : "text-muted-foreground",
+                                                      )}
+                                                    >
+                                                      {formatCurrency(balance)}
+                                                    </span>
+                                                  )
+                                                ))}
+                                            </div>
+                                          </CommandItem>
+                                        );
+                                      })}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`costCenterAllocation.${index}.percentage`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className={index !== 0 ? "sr-only" : ""}>
+                              %
+                            </FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                {...field}
+                                onChange={(e) => {
+                                  field.onChange(parseFloat(e.target.value));
+                                }}
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                      <div className={cn("pb-0", index === 0 ? "pb-2" : "")}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => remove(index)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  {/* Barra proporcional de rateio */}
+                  {fields.length > 1 &&
+                    allocations.some((a) => a.costCenterId) && (
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
+                          {allocations.map((alloc, i) => {
+                            const colors = [
+                              "bg-blue-500",
+                              "bg-emerald-500",
+                              "bg-amber-500",
+                              "bg-violet-500",
+                              "bg-red-500",
+                            ];
+                            return (
+                              <div
+                                key={i}
+                                className={`${colors[i % colors.length]} transition-all duration-300`}
+                                style={{ width: `${alloc.percentage || 0}%` }}
+                                title={`${costCenters.find((c) => c.id === alloc.costCenterId)?.name ?? "—"}: ${alloc.percentage}%`}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                          {allocations.map((alloc, i) => {
+                            const colors = [
+                              "text-blue-500",
+                              "text-emerald-500",
+                              "text-amber-500",
+                              "text-violet-500",
+                              "text-red-500",
+                            ];
+                            const name = costCenters.find(
+                              (c) => c.id === alloc.costCenterId,
+                            )?.name;
+                            if (!name) return null;
+                            return (
+                              <span
+                                key={i}
+                                className={`text-xs ${colors[i % colors.length]} tabular-nums`}
+                              >
+                                {name}: {alloc.percentage}%
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                  <FormMessage>
+                    {form.formState.errors.costCenterAllocation?.root?.message}
+                  </FormMessage>
+
+                  {/* Balance Warning */}
+                  {balanceWarning && (
+                    <Alert variant="destructive" className="mt-4">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription>
+                        {balanceWarning}
+                        <br />
+                        <span className="text-xs">
+                          Solicite alocação de recursos ao gestor financeiro
+                          para continuar.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-base">
-                Rateio por Centro de Custo
-              </CardTitle>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  append({ costCenterId: "", percentage: 0, amount: 0 })
-                }
-              >
-                <Plus className="mr-2 h-4 w-4" /> Adicionar
-              </Button>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Centro de Custo</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {fields.map((field, index) => (
-                  <div
-                    key={field.id}
-                    className="grid grid-cols-[1fr_1fr_auto] gap-4 items-end"
-                  >
-                    <FormField
-                      control={form.control}
-                      name={`costCenterAllocation.${index}.costCenterId`}
-                      render={({ field }) => (
-                        <FormItem className="flex flex-col">
-                          <FormLabel className={index !== 0 ? "sr-only" : ""}>
-                            Centro de Custo
-                          </FormLabel>
-                          <Popover
-                            open={openCostCenterCombobox === index}
-                            onOpenChange={(open) =>
-                              setOpenCostCenterCombobox(open ? index : null)
-                            }
-                          >
-                            <PopoverTrigger asChild>
-                              <FormControl>
-                                <Button
-                                  variant="outline"
-                                  role="combobox"
-                                  className={cn(
-                                    "w-full justify-between font-normal",
-                                    !field.value && "text-muted-foreground",
-                                  )}
-                                >
-                                  <span className="truncate">
-                                    {field.value
-                                      ? (() => {
-                                          const cc =
-                                            hierarchicalCostCenters.find(
-                                              (c) => c.id === field.value,
-                                            );
-                                          if (!cc) return "Selecione...";
-                                          const balance =
-                                            costCenterBalances[cc.id];
-                                          return `${cc.level > 0 ? "↳ " : ""}${cc.name}${type === "payable" && balance !== undefined ? ` (${formatCurrency(balance)})` : ""}`;
-                                        })()
-                                      : "Selecione..."}
-                                  </span>
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </FormControl>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[--radix-popover-trigger-width] p-0"
-                              align="start"
-                            >
-                              <Command>
-                                <CommandInput placeholder="Buscar centro de custo..." />
-                                <CommandList
-                                  onWheel={(e) => {
-                                    e.stopPropagation();
-                                    const target = e.currentTarget;
-                                    target.scrollTop += e.deltaY;
-                                  }}
-                                >
-                                  <CommandEmpty>
-                                    Nenhum centro de custo encontrado.
-                                  </CommandEmpty>
-                                  <CommandGroup>
-                                    {hierarchicalCostCenters.map((cc) => {
-                                      const balance = costCenterBalances[cc.id];
-                                      const isSelected = field.value === cc.id;
-                                      // Despesa só entra em centro de último
-                                      // grau. Os intermediários continuam à
-                                      // vista para dar contexto da árvore, mas
-                                      // não são selecionáveis: o servidor os
-                                      // recusaria depois do formulário todo
-                                      // preenchido.
-                                      const isBranch =
-                                        type === "payable" &&
-                                        parentIds.has(cc.id);
-                                      return (
-                                        <CommandItem
-                                          key={cc.id}
-                                          value={`${cc.name} ${cc.code}`}
-                                          disabled={isBranch}
-                                          onSelect={() => {
-                                            if (isBranch) return;
-                                            field.onChange(cc.id);
-                                            setOpenCostCenterCombobox(null);
-                                          }}
-                                          className={cn(
-                                            "flex items-center gap-0",
-                                            isBranch &&
-                                              "opacity-45 data-disabled:pointer-events-none",
-                                          )}
-                                        >
-                                          <div
-                                            className="flex items-center gap-1.5 w-full"
-                                            style={{
-                                              paddingLeft: `${cc.level * 16}px`,
-                                            }}
-                                          >
-                                            <Check
-                                              className={cn(
-                                                "h-4 w-4 shrink-0",
-                                                isSelected
-                                                  ? "opacity-100"
-                                                  : "opacity-0",
-                                              )}
-                                            />
-                                            {cc.level > 0 ? (
-                                              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-                                            ) : (
-                                              <FolderTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                            )}
-                                            <span className="truncate">
-                                              {cc.name}
-                                            </span>
-                                            {type === "payable" &&
-                                              (isBranch ? (
-                                                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                                                  agrupador
-                                                </span>
-                                              ) : (
-                                                balance !== undefined && (
-                                                  <span
-                                                    className={cn(
-                                                      "ml-auto text-xs shrink-0 font-financial",
-                                                      balance > 0
-                                                        ? "text-green-600"
-                                                        : "text-muted-foreground",
-                                                    )}
-                                                  >
-                                                    {formatCurrency(balance)}
-                                                  </span>
-                                                )
-                                              ))}
-                                          </div>
-                                        </CommandItem>
-                                      );
-                                    })}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name={`costCenterAllocation.${index}.percentage`}
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className={index !== 0 ? "sr-only" : ""}>
-                            %
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              type="number"
-                              {...field}
-                              onChange={(e) => {
-                                field.onChange(parseFloat(e.target.value));
-                              }}
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                    <div className={cn("pb-0", index === 0 ? "pb-2" : "")}>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => remove(index)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                {/* Barra proporcional de rateio */}
-                {fields.length > 1 &&
-                  allocations.some((a) => a.costCenterId) && (
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
-                        {allocations.map((alloc, i) => {
-                          const colors = [
-                            "bg-blue-500",
-                            "bg-emerald-500",
-                            "bg-amber-500",
-                            "bg-violet-500",
-                            "bg-red-500",
-                          ];
-                          return (
-                            <div
-                              key={i}
-                              className={`${colors[i % colors.length]} transition-all duration-300`}
-                              style={{ width: `${alloc.percentage || 0}%` }}
-                              title={`${costCenters.find((c) => c.id === alloc.costCenterId)?.name ?? "—"}: ${alloc.percentage}%`}
-                            />
-                          );
-                        })}
-                      </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                        {allocations.map((alloc, i) => {
-                          const colors = [
-                            "text-blue-500",
-                            "text-emerald-500",
-                            "text-amber-500",
-                            "text-violet-500",
-                            "text-red-500",
-                          ];
-                          const name = costCenters.find(
-                            (c) => c.id === alloc.costCenterId,
-                          )?.name;
-                          if (!name) return null;
-                          return (
-                            <span
-                              key={i}
-                              className={`text-xs ${colors[i % colors.length]} tabular-nums`}
-                            >
-                              {name}: {alloc.percentage}%
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                <FormMessage>
-                  {form.formState.errors.costCenterAllocation?.root?.message}
-                </FormMessage>
-
-                {/* Balance Warning */}
-                {balanceWarning && (
-                  <Alert variant="destructive" className="mt-4">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertDescription>
-                      {balanceWarning}
-                      <br />
-                      <span className="text-xs">
-                        Solicite alocação de recursos ao gestor financeiro para
-                        continuar.
-                      </span>
-                    </AlertDescription>
-                  </Alert>
+              <p className="text-sm text-muted-foreground">
+                {rootCostCenter ? (
+                  <>
+                    Receitas creditam{" "}
+                    <span className="font-medium text-foreground">
+                      {rootCostCenter.name}
+                    </span>
+                    , o centro raiz, automaticamente. O recurso entra por cima e
+                    desce para os demais pela{" "}
+                    <Link
+                      href="/centros-custo/distribuicao"
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      distribuição de envelope
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  "Nenhum centro de custo raiz encontrado. Cadastre a árvore de centros de custo antes de lançar receitas."
                 )}
-              </div>
+              </p>
             </CardContent>
           </Card>
-        </div>
+        )}
 
         <div className="flex justify-end gap-2 pt-4">
           <Button

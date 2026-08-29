@@ -567,6 +567,13 @@ export default function CostCentersPage() {
       setEditingId(null);
     } catch (error) {
       console.error("Error saving cost center:", error);
+      // A recusa de raiz duplicada explica o que fazer; sem toast o formulário
+      // apenas não salvava, sem dizer por quê.
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Erro ao salvar centro de custo.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -575,19 +582,16 @@ export default function CostCentersPage() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const children = await costCenterService.getChildren(deleteId);
-      if (children.length > 0) {
-        toast.error(
-          "Não é possível excluir: este centro de custo possui filhos. Remova-os primeiro.",
-        );
-        return;
-      }
       await costCenterService.delete(deleteId);
       await loadData(true);
       toast.success("Centro de custo excluído com sucesso.");
     } catch (error) {
       console.error("Error deleting cost center:", error);
-      toast.error("Erro ao excluir o centro de custo. Tente novamente.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Erro ao excluir o centro de custo. Tente novamente.",
+      );
     } finally {
       setDeleteId(null);
     }

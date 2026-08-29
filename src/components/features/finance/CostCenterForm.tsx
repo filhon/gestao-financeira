@@ -165,6 +165,16 @@ export function CostCenterForm({
     (cc) => cc.id !== editingId && !descendantIds.has(cc.id),
   );
 
+  // A empresa tem exatamente um centro raiz — é ele que recebe as receitas e
+  // distribui o envelope. Um segundo derruba os saldos de todas as telas ao
+  // mesmo tempo, então a opção "Nenhum (Raiz)" só aparece quando ainda não há
+  // raiz, ou quando é a própria raiz que está sendo editada. O serviço repete a
+  // checagem: aqui é conveniência, lá é a garantia.
+  const existingRoot = availableCostCenters.find(
+    (cc) => !cc.parentId || cc.parentId === "none",
+  );
+  const canBeRoot = !existingRoot || existingRoot.id === editingId;
+
   // Build depth map for hierarchical display in parent selector
   const depthMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -195,7 +205,10 @@ export function CostCenterForm({
                 name="parentId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Centro de Custo Pai (Opcional)</FormLabel>
+                    <FormLabel>
+                      Centro de Custo Pai
+                      {canBeRoot ? " (Opcional)" : ""}
+                    </FormLabel>
                     <Select
                       onValueChange={(value) =>
                         field.onChange(value === "none" ? undefined : value)
@@ -208,7 +221,9 @@ export function CostCenterForm({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="none">Nenhum (Raiz)</SelectItem>
+                        {canBeRoot && (
+                          <SelectItem value="none">Nenhum (Raiz)</SelectItem>
+                        )}
                         {potentialParents.map((cc) => {
                           const depth = depthMap.get(cc.id) ?? 0;
                           return (
@@ -233,6 +248,12 @@ export function CostCenterForm({
                         })}
                       </SelectContent>
                     </Select>
+                    {!canBeRoot && (
+                      <FormDescription>
+                        {existingRoot?.name} já é o centro raiz da empresa. Todo
+                        centro novo pendura em algum ponto da árvore.
+                      </FormDescription>
+                    )}
                     {parentBalanceInfo && (
                       <p className="text-sm text-muted-foreground mt-1">
                         Saldo disponível do pai:{" "}

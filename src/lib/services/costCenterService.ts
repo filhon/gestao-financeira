@@ -19,6 +19,42 @@ import { CostCenterFormData } from "@/lib/validations/costCenter";
 
 const COLLECTION_NAME = "cost_centers";
 
+/** Um centro sem pai é raiz. `"none"` é o valor que o formulário usa. */
+const isRootData = (parentId?: string | null) =>
+  !parentId || parentId === "none";
+
+/**
+ * Impede o segundo centro de custo raiz.
+ *
+ * Raiz única é regra de negócio, não convenção: é ela que recebe as receitas do
+ * exercício e consolida a sobra do anterior. Com duas, `buildCostCenterTree`
+ * recusa a árvore e todas as telas de saldo perdem os números ao mesmo tempo —
+ * e o trigger do razão para de creditar receita em silêncio, o que faz a
+ * invariante do `verify:ledger` divergir sem ninguém perceber.
+ *
+ * A checagem vive aqui e no formulário porque as rules do Firestore não
+ * conseguem expressá-la: saber se já existe raiz exige consultar a coleção, e
+ * regra nenhuma faz consulta. Bloquear raiz sempre também não serve — a
+ * primeira de cada empresa nasce por este mesmo caminho.
+ */
+async function assertSingleRoot(companyId: string, selfId?: string) {
+  const snapshot = await getDocs(
+    query(collection(db, COLLECTION_NAME), where("companyId", "==", companyId)),
+  );
+
+  const existingRoot = snapshot.docs.find(
+    (d) => d.id !== selfId && isRootData(d.data().parentId),
+  );
+
+  if (existingRoot) {
+    throw new Error(
+      `Já existe um centro de custo raiz: ${existingRoot.data().name}. ` +
+        "A empresa precisa ter exatamente um, que é quem recebe as receitas e " +
+        "distribui o envelope para os demais. Escolha um centro de custo pai.",
+    );
+  }
+}
+
 export const costCenterService = {
   getAll: async (
     companyId?: string,
@@ -65,6 +101,10 @@ export const costCenterService = {
   },
 
   create: async (data: CostCenterFormData, companyId: string) => {
+    if (isRootData(data.parentId)) {
+      await assertSingleRoot(companyId);
+    }
+
     return addDoc(collection(db, COLLECTION_NAME), {
       ...data,
       companyId,
@@ -75,6 +115,15 @@ export const costCenterService = {
 
   update: async (id: string, data: CostCenterFormData) => {
     const docRef = doc(db, COLLECTION_NAME, id);
+
+    // Promover um centro a raiz vale a mesma checagem que criar um: o caminho
+    // é diferente, o estrago é o mesmo.
+    if (isRootData(data.parentId)) {
+      const current = await getDoc(docRef);
+      const companyId = current.data()?.companyId as string | undefined;
+      if (companyId) await assertSingleRoot(companyId, id);
+    }
+
     return updateDoc(docRef, {
       ...data,
       updatedAt: serverTimestamp(),
@@ -82,6 +131,18 @@ export const costCenterService = {
   },
 
   delete: async (id: string) => {
+    // Apagar um centro com filhos os deixa órfãos, e órfão sem pai conhecido é
+    // lido como raiz — o mesmo estrago de criar uma segunda raiz, por outra
+    // porta. Fica aqui, junto das demais invariantes de estrutura, e não só na
+    // tela que hoje chama.
+    const children = await costCenterService.getChildren(id);
+    if (children.length > 0) {
+      throw new Error(
+        "Não é possível excluir: este centro de custo possui filhos. " +
+          "Remova-os primeiro.",
+      );
+    }
+
     const docRef = doc(db, COLLECTION_NAME, id);
     return deleteDoc(docRef);
   },
