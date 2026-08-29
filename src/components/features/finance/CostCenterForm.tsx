@@ -59,7 +59,9 @@ export function CostCenterForm({
 }: CostCenterFormProps) {
   const { selectedCompany } = useCompany();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [balanceInfo, setBalanceInfo] = useState<CostCenterBalance | null>(null);
+  const [balanceInfo, setBalanceInfo] = useState<CostCenterBalance | null>(
+    null,
+  );
   const [parentBalanceInfo, setParentBalanceInfo] = useState<{
     available: number;
   } | null>(null);

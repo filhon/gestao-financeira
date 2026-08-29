@@ -404,7 +404,8 @@ export default function UserProfilePage({
   const visibleIds = new Set(costCenters.map((cc) => cc.id));
   const totalBudget = costCenters
     .filter(
-      (cc) => !tree?.ancestorsOf(cc.id).some((parent) => visibleIds.has(parent)),
+      (cc) =>
+        !tree?.ancestorsOf(cc.id).some((parent) => visibleIds.has(parent)),
     )
     .reduce((sum, cc) => {
       const b = balances[cc.id];

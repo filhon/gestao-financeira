@@ -103,8 +103,6 @@ export const costCenterService = {
     });
   },
 
-
-
   /**
    * Update the manual balance allocation from parent to child
    */

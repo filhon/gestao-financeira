@@ -488,9 +488,7 @@ export default function CostCenterDashboard() {
       {totalBudget > 0 && (
         <div className="rounded-lg border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-medium">
-              Envelope de {selectedYear}
-            </span>
+            <span className="font-medium">Envelope de {selectedYear}</span>
             <span className="text-muted-foreground tabular-nums">
               {totalBudget > 0
                 ? ((totalConsumed / totalBudget) * 100).toFixed(1)
