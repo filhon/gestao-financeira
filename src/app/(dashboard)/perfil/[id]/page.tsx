@@ -14,7 +14,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { userService } from "@/lib/services/userService";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { transactionService } from "@/lib/services/transactionService";
-import { UserProfile, CostCenter, Transaction, UserRole } from "@/lib/types";
+import {
+  UserProfile,
+  CostCenter,
+  CostCenterBalance,
+  Transaction,
+  UserRole,
+} from "@/lib/types";
+import {
+  costCenterLedgerService,
+  buildCostCenterTree,
+  type CostCenterTree,
+} from "@/lib/services/costCenterLedgerService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import {
   Loader2,
@@ -188,10 +199,14 @@ function CostCenterCard({
   cc,
   userEmail,
   currentRole,
+  balance,
+  year,
 }: {
   cc: CostCenter;
   userEmail: string;
   currentRole: string;
+  balance?: CostCenterBalance;
+  year: number;
 }) {
   const isApprover = cc.approverEmail === userEmail;
   const isReleaser = cc.releaserEmail === userEmail;
@@ -200,7 +215,13 @@ function CostCenterCard({
     !isReleaser &&
     ["admin", "financial_manager"].includes(currentRole);
 
-  const usagePercent = cc.budget && cc.budget > 0 ? 0 : 0;
+  // Envelope do exercício e quanto dele já saiu — distribuído a filhos ou gasto
+  // direto. A barra antes era decorativa: `usagePercent` estava fixo em zero.
+  const envelope = (balance?.received ?? 0) + (balance?.carryIn ?? 0);
+  const committed =
+    (balance?.allocatedToChildren ?? 0) + (balance?.spentDirect ?? 0);
+  const usagePercent =
+    envelope > 0 ? Math.min((committed / envelope) * 100, 100) : 0;
 
   return (
     <Card className="overflow-hidden transition-shadow hover:shadow-md">
@@ -229,9 +250,9 @@ function CostCenterCard({
         {/* Budget bar */}
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Orçamento Anual</span>
+            <span>Envelope {year}</span>
             <span className="font-medium font-financial text-foreground">
-              {formatCurrencyBR(cc.budget || 0)}
+              {formatCurrencyBR(envelope)}
             </span>
           </div>
           <Progress
@@ -242,9 +263,9 @@ function CostCenterCard({
               usagePercent >= 75 && usagePercent < 90 && "[&>div]:bg-amber-500",
             )}
           />
-          {cc.budget && cc.budget > 0 && (
+          {envelope > 0 && (
             <p className="text-right text-xs text-muted-foreground">
-              {usagePercent.toFixed(0)}% utilizado
+              {usagePercent.toFixed(0)}% comprometido
             </p>
           )}
         </div>
@@ -286,6 +307,11 @@ export default function UserProfilePage({
   const { selectedCompany } = useCompany();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [balances, setBalances] = useState<Record<string, CostCenterBalance>>(
+    {},
+  );
+  const [tree, setTree] = useState<CostCenterTree | null>(null);
+  const year = new Date().getFullYear();
   const [upcomingTransactions, setUpcomingTransactions] = useState<
     Transaction[]
   >([]);
@@ -320,6 +346,23 @@ export default function UserProfilePage({
 
         setCostCenters(visibleCostCenters);
 
+        // Saldos vêm do razão. A árvore inteira é necessária para montá-los,
+        // mesmo quando o usuário só enxerga alguns centros.
+        try {
+          setBalances(
+            await costCenterLedgerService.getBalances(
+              selectedCompany.id,
+              allCostCenters,
+              year,
+            ),
+          );
+          setTree(buildCostCenterTree(allCostCenters));
+        } catch (error) {
+          console.error("Error loading cost center balances:", error);
+          setBalances({});
+          setTree(null);
+        }
+
         const upcoming = await transactionService.getUpcomingByUser(
           userId,
           user?.email,
@@ -335,7 +378,7 @@ export default function UserProfilePage({
     };
 
     loadData();
-  }, [userId, selectedCompany]);
+  }, [userId, selectedCompany, year]);
 
   if (isLoading) {
     return (
@@ -355,10 +398,18 @@ export default function UserProfilePage({
       | undefined) || "none";
   const roleConfig = ROLE_CONFIG[currentRole];
 
-  const totalBudget = costCenters.reduce(
-    (sum, cc) => sum + (cc.budget || 0),
-    0,
-  );
+  // Soma só o topo de cada ramo visível. Quando pai e filho aparecem juntos na
+  // lista, somar os dois envelopes contaria o mesmo dinheiro duas vezes — a
+  // alocação do pai para o filho é transferência, não recurso novo.
+  const visibleIds = new Set(costCenters.map((cc) => cc.id));
+  const totalBudget = costCenters
+    .filter(
+      (cc) => !tree?.ancestorsOf(cc.id).some((parent) => visibleIds.has(parent)),
+    )
+    .reduce((sum, cc) => {
+      const b = balances[cc.id];
+      return sum + (b ? b.received + b.carryIn : 0);
+    }, 0);
   const approverCount = costCenters.filter(
     (cc) => cc.approverEmail === userProfile.email,
   ).length;
@@ -610,6 +661,8 @@ export default function UserProfilePage({
                       cc={cc}
                       userEmail={userProfile.email}
                       currentRole={currentRole}
+                      balance={balances[cc.id]}
+                      year={year}
                     />
                   ))}
                 </div>

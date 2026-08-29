@@ -5,24 +5,36 @@
  * incluindo quanto foi consumido e o detalhamento mensal.
  *
  * Fontes:
- *   - cost_centers         → lista de centros de custo
- *   - budgets              → orçamento anual por centro de custo
- *   - cost_center_usage    → gasto real por centro de custo / mês
+ *   - cost_centers        → lista de centros de custo
+ *   - cost_center_ledger  → envelope anual e consumo por centro de custo
+ *   - transactions        → detalhamento mensal do gasto
+ *
+ * O formato da resposta é o mesmo de antes, mas os números passaram a sair do
+ * razão de envelope. Duas mudanças de significado que valem para quem consome:
+ *
+ *   • `budgetAmount` é o envelope do exercício — o que o centro recebeu do pai
+ *     (ou, na raiz, as receitas do ano) mais a sobra consolidada do anterior.
+ *     Antes vinha da coleção `budgets`, preenchida à mão e sem relação com o
+ *     que de fato havia sido distribuído.
+ *
+ *   • `consumed` inclui o que o centro distribuiu aos filhos, não só o gasto
+ *     direto. No modelo de envelope, distribuir esvazia o bolso de quem
+ *     distribuiu. Para centros folha — que são os que têm despesa — nada muda.
  *
  * Query params:
  *   - year (número, default: ano atual)
  *   - costCenterId (string, opcional)
  */
 import type { NextRequest } from "next/server";
-import { adminDb } from "@/lib/firebase/admin";
 import { authenticateApiRequest } from "@/lib/api/apiAuth";
 import { writeApiAuditLog, extractQueryParams } from "@/lib/api/apiAudit";
 import { apiSuccess, ApiErrors } from "@/lib/api/apiResponse";
+import {
+  readCostCenters,
+  readLedgerBalances,
+  readMonthlySpend,
+} from "@/lib/api/costCenterLedgerAdmin";
 import { logger } from "@/lib/logger";
-
-const COST_CENTERS_COLLECTION = "cost_centers";
-const BUDGETS_COLLECTION = "budgets";
-const USAGE_COLLECTION = "cost_center_usage";
 
 type BudgetStatus =
   | "on_track"
@@ -80,112 +92,77 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Meses do ano: "2026-01" até "2026-12"
     const paddedYear = String(year);
-    const monthStart = `${paddedYear}-01`;
-    const monthEnd = `${paddedYear}-12`;
 
-    // Paralelo: centros de custo + orçamentos + uso
-    const [ccSnap, budgetsSnap, usageSnap] = await Promise.all([
-      costCenterIdFilter
-        ? adminDb
-            .collection(COST_CENTERS_COLLECTION)
-            .doc(costCenterIdFilter)
-            .get()
-            .then((d) => ({ docs: d.exists ? [d] : [] }))
-        : adminDb
-            .collection(COST_CENTERS_COLLECTION)
-            .where("companyId", "==", companyId)
-            .get(),
+    // A árvore inteira é necessária para o razão — a raiz define o carry-over —
+    // mesmo quando a resposta é filtrada por um centro só.
+    const allCostCenters = await readCostCenters(companyId);
 
-      adminDb
-        .collection(BUDGETS_COLLECTION)
-        .where("companyId", "==", companyId)
-        .where("year", "==", year)
-        .get(),
+    let balances;
+    try {
+      balances = await readLedgerBalances(companyId, allCostCenters, year);
+    } catch (error) {
+      logger.error("GET /api/v1/budgets: invalid cost center hierarchy", {
+        error,
+        companyId,
+        requestId,
+      });
+      return ApiErrors.internalError(requestId);
+    }
 
-      adminDb
-        .collection(USAGE_COLLECTION)
-        .where("companyId", "==", companyId)
-        .where("monthKey", ">=", monthStart)
-        .where("monthKey", "<=", monthEnd)
-        .get(),
-    ]);
+    const monthlySpend = await readMonthlySpend(companyId, year);
 
-    // Mapas para lookup
-    const budgetByCostCenter = new Map<string, number>();
-    budgetsSnap.docs.forEach((doc) => {
-      const data = doc.data();
-      budgetByCostCenter.set(data.costCenterId, Number(data.amount) || 0);
-    });
+    const visible = costCenterIdFilter
+      ? allCostCenters.filter((cc) => cc.id === costCenterIdFilter)
+      : allCostCenters;
 
-    // usage: costCenterId → { monthKey → amount }
-    const usageByCostCenter = new Map<string, Map<string, number>>();
-    usageSnap.docs.forEach((doc) => {
-      const data = doc.data();
-      const ccId: string = data.costCenterId;
-      const monthKey: string = data.monthKey;
-      const amount: number = Number(data.amount) || 0;
+    const result = visible.map((cc) => {
+      const balance = balances[cc.id];
+      const envelope = balance ? balance.received + balance.carryIn : 0;
+      // Envelope zero significa "sem orçamento definido", como o `undefined`
+      // da coleção antiga: mantém `budgetAmount: null` e status `no_budget`.
+      const budgetAmount = envelope > 0 ? envelope : undefined;
 
-      if (!usageByCostCenter.has(ccId)) {
-        usageByCostCenter.set(ccId, new Map());
+      const consumed = balance
+        ? balance.allocatedToChildren + balance.spentDirect
+        : 0;
+
+      // Detalhamento mensal (apenas meses com gasto)
+      const monthlyMap = monthlySpend.get(cc.id) ?? new Map<string, number>();
+      const monthlyBreakdown: Array<{ month: string; consumed: number }> = [];
+      for (let m = 1; m <= 12; m++) {
+        const monthKey = `${paddedYear}-${String(m).padStart(2, "0")}`;
+        const monthConsumed = monthlyMap.get(monthKey) ?? 0;
+        if (monthConsumed > 0) {
+          monthlyBreakdown.push({ month: monthKey, consumed: monthConsumed });
+        }
       }
-      usageByCostCenter.get(ccId)!.set(monthKey, amount);
+
+      const remaining =
+        budgetAmount !== undefined ? budgetAmount - consumed : undefined;
+
+      const consumedPercentage =
+        budgetAmount && budgetAmount > 0
+          ? Math.round((consumed / budgetAmount) * 1000) / 10
+          : null;
+
+      const status = calculateStatus(consumed, budgetAmount, year);
+
+      return {
+        costCenter: {
+          id: cc.id,
+          name: cc.name,
+          code: cc.code,
+        },
+        year,
+        budgetAmount: budgetAmount ?? null,
+        consumed,
+        remaining: remaining ?? null,
+        consumedPercentage,
+        monthlyBreakdown,
+        status,
+      };
     });
-
-    // ── Montar resultado ─────────────────────────────────────────────────
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (ccSnap as any).docs.map(
-      (ccDoc: import("firebase-admin/firestore").DocumentSnapshot) => {
-        const cc = ccDoc.data()!;
-        const ccId = ccDoc.id;
-
-        const budgetAmount = budgetByCostCenter.get(ccId);
-        const monthlyMap =
-          usageByCostCenter.get(ccId) ?? new Map<string, number>();
-
-        // Total consumido no ano
-        let consumed = 0;
-        for (const amount of monthlyMap.values()) {
-          consumed += amount;
-        }
-
-        // Detalhamento mensal (apenas meses com gasto)
-        const monthlyBreakdown: Array<{ month: string; consumed: number }> = [];
-        for (let m = 1; m <= 12; m++) {
-          const monthKey = `${paddedYear}-${String(m).padStart(2, "0")}`;
-          const monthConsumed = monthlyMap.get(monthKey) ?? 0;
-          if (monthConsumed > 0) {
-            monthlyBreakdown.push({ month: monthKey, consumed: monthConsumed });
-          }
-        }
-
-        const remaining =
-          budgetAmount !== undefined ? budgetAmount - consumed : undefined;
-
-        const consumedPercentage =
-          budgetAmount && budgetAmount > 0
-            ? Math.round((consumed / budgetAmount) * 1000) / 10
-            : null;
-
-        const status = calculateStatus(consumed, budgetAmount, year);
-
-        return {
-          costCenter: {
-            id: ccId,
-            name: cc.name,
-            code: cc.code,
-          },
-          year,
-          budgetAmount: budgetAmount ?? null,
-          consumed,
-          remaining: remaining ?? null,
-          consumedPercentage,
-          monthlyBreakdown,
-          status,
-        };
-      },
-    );
 
     // ── Audit log ─────────────────────────────────────────────────────────
     await writeApiAuditLog(context, {

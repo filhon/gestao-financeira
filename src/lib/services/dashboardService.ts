@@ -13,7 +13,8 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { Transaction } from "@/lib/types";
+import { CostCenter, CostCenterBalance, Transaction } from "@/lib/types";
+import { costCenterLedgerService } from "./costCenterLedgerService";
 import {
   startOfMonth,
   endOfMonth,
@@ -32,7 +33,6 @@ import { recurrenceService } from "./recurrenceService";
 
 const TRANSACTIONS_COLLECTION = "transactions";
 const COST_CENTERS_COLLECTION = "cost_centers";
-const BUDGETS_COLLECTION = "budgets";
 const COMPANY_STATS_COLLECTION = "company_stats";
 
 export interface DashboardMetrics {
@@ -659,112 +659,61 @@ export const dashboardService = {
       .sort((a, b) => b.value - a.value); // Sort by highest expense
   },
 
+  /**
+   * Consumo do envelope anual por centro de custo.
+   *
+   * A versão anterior media ritmo mensal — orçamento restante dividido pelos
+   * meses que faltavam, contra o gasto do mês corrente. Foi trocada porque as
+   * duas fontes que ela usava não existem mais como verdade: a coleção
+   * `budgets` e o agregado `cost_center_usage`, cuja soma mensal nem sequer
+   * fecha com o razão (ele data a despesa por `paymentDate` mesmo quando ela
+   * não está paga). O razão só guarda o exercício, não o mês, então a leitura
+   * passou a ser a do envelope: quanto de cada centro já foi comprometido.
+   *
+   * `spent` inclui o que o centro distribuiu aos filhos, porque no modelo de
+   * envelope distribuir também esvazia o bolso de quem distribuiu.
+   */
   getBudgetProgressByCostCenter: async (
     companyId: string,
     year?: number,
   ): Promise<BudgetProgressData[]> => {
-    const now = new Date();
-    const currentYear = year || now.getFullYear();
-    // For past/future years, use December as reference so full year is considered;
-    // for the current year, use the actual current month.
-    const isCurrentYear = currentYear === now.getFullYear();
-    const currentMonth = isCurrentYear ? now.getMonth() : 11; // 0-indexed
-    const remainingMonths = 12 - currentMonth; // Includes current month
+    const currentYear = year || new Date().getFullYear();
 
-    // Get all cost centers for the company
     const ccQuery = query(
       collection(db, COST_CENTERS_COLLECTION),
       where("companyId", "==", companyId),
     );
     const ccSnapshot = await getDocs(ccQuery);
-    const costCenters = ccSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      name: doc.data().name as string,
-    }));
+    const costCenters = ccSnapshot.docs.map(
+      (doc) => ({ id: doc.id, ...doc.data() }) as CostCenter,
+    );
 
-    // Get all budgets for current year (annual amounts)
-    // Budget docs don't store companyId — security is ensured by scoping
-    // to costCenterIds already filtered by companyId above.
-    const annualBudgets = new Map<string, number>();
-    const ccIds = costCenters.map((cc) => cc.id);
+    if (costCenters.length === 0) return [];
 
-    // Firestore 'in' supports max 30 values, batch if needed
-    const batches: string[][] = [];
-    for (let i = 0; i < ccIds.length; i += 30) {
-      batches.push(ccIds.slice(i, i + 30));
+    let balances: Record<string, CostCenterBalance>;
+    try {
+      balances = await costCenterLedgerService.getBalances(
+        companyId,
+        costCenters,
+        currentYear,
+      );
+    } catch (error) {
+      // Hierarquia inválida (mais de um raiz): sem saldo confiável, o gráfico
+      // fica vazio em vez de mostrar número errado.
+      console.error("Error loading cost center balances:", error);
+      return [];
     }
 
-    await Promise.all(
-      batches.map(async (batch) => {
-        const budgetQuery = query(
-          collection(db, BUDGETS_COLLECTION),
-          where("year", "==", currentYear),
-          where("costCenterId", "in", batch),
-        );
-        const budgetSnapshot = await getDocs(budgetQuery);
-        budgetSnapshot.docs.forEach((doc) => {
-          const data = doc.data();
-          annualBudgets.set(data.costCenterId, data.amount);
-        });
-      }),
-    );
-
-    // Reference month key for the target year
-    const refNow = isCurrentYear ? now : new Date(currentYear, 11, 1);
-    const currentMonthKey = format(refNow, "yyyy-MM");
-    const ytdStartKey = `${currentYear}-01`;
-
-    const ytdExpensesByCC = new Map<string, number>();
-    const currentMonthExpensesByCC = new Map<string, number>();
-
-    // cost_center_usage has at most N_CCs × 12 docs per year (1 doc per CC per month).
-    // A single getDocs scoped by companyId + monthKey range is efficient and requires
-    // no extra composite indexes. getAggregateFromServer would need indexes for
-    // (companyId, costCenterId, monthKey) that don't exist.
-    const usageQuery = query(
-      collection(db, "cost_center_usage"),
-      where("companyId", "==", companyId),
-      where("monthKey", ">=", ytdStartKey),
-      where("monthKey", "<=", `${currentYear}-12`),
-    );
-    const usageSnapshot = await getDocs(usageQuery);
-
-    usageSnapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      const ccId = data.costCenterId as string;
-      const amount = (data.amount as number) || 0;
-      const monthKey = data.monthKey as string;
-
-      if (monthKey < currentMonthKey) {
-        ytdExpensesByCC.set(ccId, (ytdExpensesByCC.get(ccId) || 0) + amount);
-      } else if (monthKey === currentMonthKey) {
-        currentMonthExpensesByCC.set(
-          ccId,
-          (currentMonthExpensesByCC.get(ccId) || 0) + amount,
-        );
-      }
-    });
-
-    // Build result array with adjusted monthly budget
     const result: BudgetProgressData[] = costCenters.map((cc) => {
-      const annualBudget = annualBudgets.get(cc.id) || 0;
-      const ytdSpent = ytdExpensesByCC.get(cc.id) || 0;
-      const currentMonthSpent = currentMonthExpensesByCC.get(cc.id) || 0;
-
-      // Calculate adjusted monthly budget
-      // Remaining budget = Annual - YTD spent (before current month)
-      // Adjusted monthly = Remaining / Remaining months (including current)
-      const remainingBudget = Math.max(0, annualBudget - ytdSpent);
-      const adjustedMonthlyBudget =
-        remainingMonths > 0 ? remainingBudget / remainingMonths : 0;
+      const b = balances[cc.id];
+      const envelope = b ? b.received + b.carryIn : 0;
+      const committed = b ? b.allocatedToChildren + b.spentDirect : 0;
 
       const percentage =
-        adjustedMonthlyBudget > 0
-          ? Math.round((currentMonthSpent / adjustedMonthlyBudget) * 100)
-          : 0;
+        envelope > 0 ? Math.round((committed / envelope) * 100) : 0;
 
       let status: BudgetProgressData["status"];
-      if (annualBudget === 0) {
+      if (envelope === 0) {
         status = "no-budget";
       } else if (percentage >= 100) {
         status = "danger";
@@ -777,8 +726,8 @@ export const dashboardService = {
       return {
         id: cc.id,
         name: cc.name,
-        spent: Math.round(currentMonthSpent * 100) / 100,
-        budget: Math.round(adjustedMonthlyBudget * 100) / 100,
+        spent: Math.round(committed * 100) / 100,
+        budget: Math.round(envelope * 100) / 100,
         percentage,
         status,
       };

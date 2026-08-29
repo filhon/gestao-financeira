@@ -18,11 +18,13 @@ import {
   type SanitizedCostCenter,
 } from "@/lib/api/apiSanitizer";
 import type { CostCenter } from "@/lib/types";
+import {
+  readCostCenters,
+  readLedgerBalances,
+} from "@/lib/api/costCenterLedgerAdmin";
 import { logger } from "@/lib/logger";
 
 const COST_CENTERS_COLLECTION = "cost_centers";
-const BUDGETS_COLLECTION = "budgets";
-const COST_CENTER_USAGE_COLLECTION = "cost_center_usage";
 
 interface RawCostCenter {
   id: string;
@@ -111,58 +113,42 @@ export async function GET(request: NextRequest) {
 
     if (includeBudget && rawCostCenters.length > 0) {
       const currentYear = new Date().getFullYear();
-      const currentMonth = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 
-      // Orçamentos do ano corrente
-      const ccIds = rawCostCenters.map((cc) => cc.id);
-      const chunkSize = 30;
-      const budgetPromises: Promise<void>[] = [];
-
-      for (let i = 0; i < ccIds.length; i += chunkSize) {
-        const chunk = ccIds.slice(i, i + chunkSize);
-        budgetPromises.push(
-          adminDb
-            .collection(BUDGETS_COLLECTION)
-            .where("companyId", "==", companyId)
-            .where("year", "==", currentYear)
-            .where("costCenterId", "in", chunk)
-            .get()
-            .then((snap) => {
-              snap.docs.forEach((doc) => {
-                const d = doc.data();
-                budgetMap.set(d.costCenterId as string, {
-                  amount: (d.amount as number) ?? 0,
-                  year: currentYear,
-                });
-              });
-            }),
+      // Envelope e consumo saem do razão. A árvore precisa estar completa por
+      // causa do carry-over da raiz, então lê-se a empresa inteira mesmo
+      // quando a resposta vem filtrada.
+      try {
+        const allCostCenters = await readCostCenters(companyId);
+        const balances = await readLedgerBalances(
+          companyId,
+          allCostCenters,
+          currentYear,
         );
-      }
 
-      // Uso do mês corrente
-      const usagePromises: Promise<void>[] = [];
-      for (let i = 0; i < ccIds.length; i += chunkSize) {
-        const chunk = ccIds.slice(i, i + chunkSize);
-        usagePromises.push(
-          adminDb
-            .collection(COST_CENTER_USAGE_COLLECTION)
-            .where("companyId", "==", companyId)
-            .where("month", "==", currentMonth)
-            .where("costCenterId", "in", chunk)
-            .get()
-            .then((snap) => {
-              snap.docs.forEach((doc) => {
-                const d = doc.data();
-                usageMap.set(
-                  d.costCenterId as string,
-                  (d.totalSpent as number) ?? 0,
-                );
-              });
-            }),
-        );
-      }
+        for (const cc of rawCostCenters) {
+          const balance = balances[cc.id];
+          if (!balance) continue;
 
-      await Promise.all([...budgetPromises, ...usagePromises]);
+          const envelope = balance.received + balance.carryIn;
+          if (envelope <= 0) continue; // sem envelope, sem campos de orçamento
+
+          budgetMap.set(cc.id, { amount: envelope, year: currentYear });
+          // Consumo inclui a distribuição aos filhos: no envelope, distribuir
+          // esvazia o bolso de quem distribuiu.
+          usageMap.set(
+            cc.id,
+            balance.allocatedToChildren + balance.spentDirect,
+          );
+        }
+      } catch (error) {
+        // Hierarquia sem raiz única: responde sem os campos de orçamento em
+        // vez de devolver número errado.
+        logger.error("GET /api/v1/cost-centers: invalid hierarchy", {
+          error,
+          companyId,
+          requestId,
+        });
+      }
     }
 
     // ── Sanitizar ─────────────────────────────────────────────────────────
@@ -170,9 +156,15 @@ export async function GET(request: NextRequest) {
       const budgetInfo = budgetMap.get(cc.id);
       const spent = usageMap.get(cc.id) ?? 0;
 
-      // Enriquece o objeto com dados de orçamento antes de sanitizar
+      // Os campos legados `budget`/`budgetYear` ainda existem nos documentos,
+      // com valores congelados de antes do razão. Descartá-los aqui garante
+      // que a resposta só carregue orçamento quando ele vier do envelope.
+      const ccWithoutLegacyBudget = { ...cc };
+      delete ccWithoutLegacyBudget.budget;
+      delete ccWithoutLegacyBudget.budgetYear;
+
       const enriched = {
-        ...cc,
+        ...ccWithoutLegacyBudget,
         ...(budgetInfo && {
           budget: budgetInfo.amount,
           budgetYear: budgetInfo.year,

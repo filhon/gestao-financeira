@@ -11,6 +11,11 @@ import { httpsCallable } from "firebase/functions";
 import currency from "currency.js";
 import { db, functions as fbFunctions } from "@/lib/firebase/client";
 import { CostCenter, CostCenterBalance, CostCenterLedger } from "@/lib/types";
+import {
+  buildCostCenterTree,
+  parentOf,
+  type CostCenterTree,
+} from "@/lib/costCenterTree";
 
 const COLLECTION_NAME = "cost_center_ledger";
 
@@ -30,76 +35,11 @@ const sub = (a: number, ...values: number[]) =>
   values.reduce((acc, v) => acc.subtract(v), currency(a)).value;
 
 // ─── Índice da árvore ────────────────────────────────────────────────────────
-
-export interface CostCenterTree {
-  byId: Map<string, CostCenter>;
-  childrenOf: Map<string, CostCenter[]>;
-  rootId: string;
-  isLeaf: (id: string) => boolean;
-  /** Ancestrais de um CC, do pai imediato até a raiz. */
-  ancestorsOf: (id: string) => string[];
-  /** O CC e todos os seus ancestrais — a cadeia que uma despesa afeta. */
-  chainOf: (id: string) => string[];
-}
-
-const parentOf = (cc: CostCenter | undefined) =>
-  cc?.parentId && cc.parentId !== "none" ? cc.parentId : null;
-
-/**
- * Monta o índice da hierarquia. Exige raiz única — é regra de negócio, não
- * convenção, e um segundo raiz significaria receita entrando em dois caixas.
- */
-export function buildCostCenterTree(costCenters: CostCenter[]): CostCenterTree {
-  const byId = new Map(costCenters.map((cc) => [cc.id, cc]));
-  const childrenOf = new Map<string, CostCenter[]>();
-  const roots: CostCenter[] = [];
-
-  for (const cc of costCenters) {
-    const pid = parentOf(cc);
-    if (!pid || !byId.has(pid)) {
-      roots.push(cc);
-      continue;
-    }
-    const siblings = childrenOf.get(pid) || [];
-    siblings.push(cc);
-    childrenOf.set(pid, siblings);
-  }
-
-  if (roots.length !== 1) {
-    throw new Error(
-      `Hierarquia inválida: esperado exatamente 1 centro de custo raiz, encontrado ${roots.length}.` +
-        (roots.length > 1
-          ? ` (${roots.map((r) => r.code || r.id).join(", ")})`
-          : ""),
-    );
-  }
-
-  const ancestorCache = new Map<string, string[]>();
-  const ancestorsOf = (id: string): string[] => {
-    const cached = ancestorCache.get(id);
-    if (cached) return cached;
-
-    const chain: string[] = [];
-    const seen = new Set<string>([id]);
-    let pid = parentOf(byId.get(id));
-    while (pid && byId.has(pid) && !seen.has(pid)) {
-      chain.push(pid);
-      seen.add(pid);
-      pid = parentOf(byId.get(pid));
-    }
-    ancestorCache.set(id, chain);
-    return chain;
-  };
-
-  return {
-    byId,
-    childrenOf,
-    rootId: roots[0].id,
-    isLeaf: (id) => (childrenOf.get(id) || []).length === 0,
-    ancestorsOf,
-    chainOf: (id) => [id, ...ancestorsOf(id)],
-  };
-}
+//
+// A montagem vive em `@/lib/costCenterTree`, sem dependência de Firebase, para
+// que as rotas da API v1 (Admin SDK) apliquem exatamente a mesma invariante.
+// Reexportado aqui porque as telas já importam por este caminho.
+export { buildCostCenterTree, parentOf, type CostCenterTree };
 
 // ─── Leitura ─────────────────────────────────────────────────────────────────
 

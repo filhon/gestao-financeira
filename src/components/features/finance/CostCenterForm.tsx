@@ -27,13 +27,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { CostCenter, UserProfile } from "@/lib/types";
+import Link from "next/link";
+import { ChevronLeft, ChevronRight, Wallet } from "lucide-react";
+import { CostCenter, CostCenterBalance, UserProfile } from "@/lib/types";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { userService } from "@/lib/services/userService";
-import { budgetService } from "@/lib/services/budgetService";
-import { costCenterService } from "@/lib/services/costCenterService";
+import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatCurrency } from "@/lib/utils";
@@ -59,13 +59,7 @@ export function CostCenterForm({
 }: CostCenterFormProps) {
   const { selectedCompany } = useCompany();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [balanceInfo, setBalanceInfo] = useState<{
-    fromReceivables: number;
-    fromParent: number;
-    allocatedToChildren: number;
-    spentOnPayables: number;
-    available: number;
-  } | null>(null);
+  const [balanceInfo, setBalanceInfo] = useState<CostCenterBalance | null>(null);
   const [parentBalanceInfo, setParentBalanceInfo] = useState<{
     available: number;
   } | null>(null);
@@ -76,7 +70,6 @@ export function CostCenterForm({
       name: "",
       code: "",
       description: "",
-      budget: 0,
       budgetYear: new Date().getFullYear(),
       parentId: "none",
       allowedUserIds: [],
@@ -104,88 +97,49 @@ export function CostCenterForm({
   const watchedYearRaw = form.watch("budgetYear");
   const watchedYear = useDebounce(watchedYearRaw, 500);
 
-  useEffect(() => {
-    const loadBudget = async () => {
-      if (editingId && watchedYear && selectedCompany) {
-        try {
-          const budget = await budgetService.getByCostCenterAndYear(
-            editingId,
-            watchedYear,
-            selectedCompany.id,
-          );
-          if (budget) {
-            form.setValue("budget", budget.amount);
-          } else {
-            // If no budget entry exists for this year
-            // If it's the current year, we might rely on the passed default value (legacy),
-            // but only if we haven't touched the field yet?
-            // Actually, simpler: if no budget entity, and year is NOT current year, 0.
-            // If year IS current year, we keep what was passed in defaultValues (which comes from cc.budget)
-            // UNLESS we want to force 0 for new years.
-
-            // Let's assume if we change year, we want to see that year's budget.
-            // If we are on the initial load (current year), defaultValues are used.
-            // If we change the year, we fetch.
-            if (watchedYear !== new Date().getFullYear()) {
-              form.setValue("budget", 0);
-            }
-          }
-        } catch (error) {
-          console.error("Error loading budget:", error);
-        }
-      }
-    };
-    // Debounce or check if year actually changed?
-    // For now, simple effect.
-    loadBudget();
-  }, [editingId, watchedYear, form, selectedCompany]);
-
-  // Load balance info when editing (filtered by selected year)
-  useEffect(() => {
-    const loadBalance = async () => {
-      if (editingId && selectedCompany && watchedYear) {
-        try {
-          const balance = await costCenterService.getEffectiveBalance(
-            editingId,
-            selectedCompany.id,
-            watchedYear,
-          );
-          setBalanceInfo(balance);
-        } catch (error) {
-          console.error("Error loading balance:", error);
-        }
-      }
-    };
-    loadBalance();
-  }, [editingId, selectedCompany, watchedYear]);
-
-  // Watch parent selection and load parent's balance (filtered by selected year)
+  // Saldo do centro e do pai, ambos lidos do razão de envelope — a mesma fonte
+  // que a tela de distribuição e o formulário de despesa consomem. Uma leitura
+  // só serve aos dois, porque `getBalances` devolve o exercício inteiro.
   const watchedParentId = form.watch("parentId");
   useEffect(() => {
-    const loadParentBalance = async () => {
-      if (
-        watchedParentId &&
-        watchedParentId !== "none" &&
-        selectedCompany &&
-        watchedYear
-      ) {
-        try {
-          const balance = await costCenterService.getEffectiveBalance(
-            watchedParentId,
-            selectedCompany.id,
-            watchedYear,
-          );
-          setParentBalanceInfo({ available: balance.available });
-        } catch (error) {
-          console.error("Error loading parent balance:", error);
-          setParentBalanceInfo(null);
-        }
-      } else {
+    const loadBalances = async () => {
+      if (!selectedCompany || !watchedYear) return;
+
+      const hasParent = !!watchedParentId && watchedParentId !== "none";
+      if (!editingId && !hasParent) {
+        setBalanceInfo(null);
+        setParentBalanceInfo(null);
+        return;
+      }
+
+      try {
+        const balances = await costCenterLedgerService.getBalances(
+          selectedCompany.id,
+          availableCostCenters,
+          watchedYear,
+        );
+        setBalanceInfo(editingId ? (balances[editingId] ?? null) : null);
+        setParentBalanceInfo(
+          hasParent && balances[watchedParentId]
+            ? { available: balances[watchedParentId].available }
+            : null,
+        );
+      } catch (error) {
+        // Hierarquia inválida (mais de um raiz) cai aqui. Sem saldo confiável a
+        // mostrar, o painel some em vez de exibir número errado.
+        console.error("Error loading cost center balances:", error);
+        setBalanceInfo(null);
         setParentBalanceInfo(null);
       }
     };
-    loadParentBalance();
-  }, [watchedParentId, selectedCompany, watchedYear]);
+    loadBalances();
+  }, [
+    editingId,
+    watchedParentId,
+    selectedCompany,
+    watchedYear,
+    availableCostCenters,
+  ]);
 
   // Compute all descendant IDs of the CC being edited to prevent circular hierarchy (BUG-02)
   const descendantIds = useMemo(() => {
@@ -391,24 +345,14 @@ export function CostCenterForm({
               />
             </div>
 
-            <div className="col-span-12 md:col-span-4">
-              <FormField
-                control={form.control}
-                name="budget"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Orçamento</FormLabel>
-                    <FormControl>
-                      <CurrencyInput
-                        value={field.value}
-                        onChange={field.onChange}
-                        placeholder="0,00"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            <div className="col-span-12 md:col-span-4 flex items-end">
+              <Link
+                href="/centros-custo/distribuicao"
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-input px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <Wallet className="h-4 w-4" />
+                Definir envelope anual
+              </Link>
             </div>
 
             <div className="col-span-12">
@@ -432,15 +376,16 @@ export function CostCenterForm({
           </div>
         </div>
 
-        {/* Balance Info Section (only when editing) */}
+        {/* Saldo do envelope (só ao editar) */}
         {editingId && balanceInfo && (
           <div className="space-y-4 border-t pt-4">
-            <h3 className="text-lg font-medium">Saldo Disponível</h3>
+            <h3 className="text-lg font-medium">
+              Envelope de {watchedYear ?? new Date().getFullYear()}
+            </h3>
             <div className="rounded-xl border bg-card p-4 space-y-3">
-              {/* Saldo principal em destaque */}
               <div className="flex items-center justify-between">
                 <span className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-                  Saldo Líquido
+                  Disponível
                 </span>
                 <span
                   className={`text-2xl font-bold font-financial ${balanceInfo.available >= 0 ? "text-emerald-600" : "text-red-600"}`}
@@ -449,14 +394,13 @@ export function CostCenterForm({
                 </span>
               </div>
 
-              {/* Barra de utilização */}
+              {/* Quanto do que entrou já foi comprometido, distribuído ou gasto. */}
               {(() => {
-                const total =
-                  balanceInfo.fromReceivables + balanceInfo.fromParent;
-                const spent =
-                  balanceInfo.spentOnPayables + balanceInfo.allocatedToChildren;
+                const total = balanceInfo.received + balanceInfo.carryIn;
+                const committed =
+                  balanceInfo.spentDirect + balanceInfo.allocatedToChildren;
                 const pct =
-                  total > 0 ? Math.min((spent / total) * 100, 100) : 0;
+                  total > 0 ? Math.min((committed / total) * 100, 100) : 0;
                 return (
                   <div className="space-y-1">
                     <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -466,36 +410,37 @@ export function CostCenterForm({
                       />
                     </div>
                     <p className="text-xs text-muted-foreground text-right tabular-nums">
-                      {pct.toFixed(0)}% utilizado
+                      {pct.toFixed(0)}% comprometido
                     </p>
                   </div>
                 );
               })()}
 
-              {/* Detalhes */}
               <div className="border-t pt-3 space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Receitas Projetadas
+                    {balanceInfo.isRoot
+                      ? "Receitas do exercício"
+                      : "Envelope recebido do pai"}
                   </span>
                   <span className="font-medium text-emerald-600 font-financial">
-                    +{formatCurrency(balanceInfo.fromReceivables)}
+                    +{formatCurrency(balanceInfo.received)}
                   </span>
                 </div>
-                {balanceInfo.fromParent > 0 && (
+                {balanceInfo.carryIn !== 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">
-                      Recebido do Pai
+                      Sobra do exercício anterior
                     </span>
                     <span className="font-medium text-blue-600 font-financial">
-                      +{formatCurrency(balanceInfo.fromParent)}
+                      +{formatCurrency(balanceInfo.carryIn)}
                     </span>
                   </div>
                 )}
                 {balanceInfo.allocatedToChildren > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">
-                      Alocado para Filhos
+                      Distribuído aos filhos
                     </span>
                     <span className="font-medium text-orange-600 font-financial">
                       -{formatCurrency(balanceInfo.allocatedToChildren)}
@@ -503,11 +448,9 @@ export function CostCenterForm({
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Despesas Previstas
-                  </span>
+                  <span className="text-muted-foreground">Gasto direto</span>
                   <span className="font-medium text-red-600 font-financial">
-                    -{formatCurrency(balanceInfo.spentOnPayables)}
+                    -{formatCurrency(balanceInfo.spentDirect)}
                   </span>
                 </div>
               </div>

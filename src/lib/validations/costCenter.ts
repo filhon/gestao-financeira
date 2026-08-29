@@ -5,7 +5,9 @@ export const costCenterSchema = z.object({
   code: z.string().min(2, "Código deve ter pelo menos 2 caracteres"),
   parentId: z.string().optional(),
   description: z.string().optional(),
-  budget: z.number().min(0, "Orçamento deve ser positivo").optional(),
+  // Sem `budget`: o orçamento de um centro é o envelope anual, que vive no
+  // razão e só é definido por `setCostCenterEnvelope`. O ano continua aqui
+  // porque o formulário mostra o saldo do exercício selecionado.
   budgetYear: z.number().min(2000),
 
   // Permissions

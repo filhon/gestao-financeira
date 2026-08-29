@@ -7,7 +7,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { transactionService } from "@/lib/services/transactionService";
-import { CostCenter, Transaction } from "@/lib/types";
+import { CostCenter, CostCenterBalance, Transaction } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -48,8 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { budgetService } from "@/lib/services/budgetService";
-import { usageService } from "@/lib/services/usageService";
+import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
 
 export default function CostCenterDashboard() {
   const params = useParams();
@@ -60,13 +59,13 @@ export default function CostCenterDashboard() {
   const [costCenter, setCostCenter] = useState<CostCenter | null>(null);
   const [children, setChildren] = useState<CostCenter[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [usageData, setUsageData] = useState<
-    { monthKey: string; amount: number; amountPaid?: number }[]
-  >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [budgetAmount, setBudgetAmount] = useState(0);
-  const [childrenUsageTotal, setChildrenUsageTotal] = useState(0);
+  const [balances, setBalances] = useState<Record<string, CostCenterBalance>>(
+    {},
+  );
+  /** Despesas do exercício usadas só para a série mensal. */
+  const [yearPayables, setYearPayables] = useState<Transaction[]>([]);
 
   const id = params.id as string;
 
@@ -75,45 +74,56 @@ export default function CostCenterDashboard() {
       if (selectedCompany && id && user) {
         setIsLoading(true);
         try {
-          const [cc, kids, usage, budget] = await Promise.all([
+          const [cc, kids, allCostCenters] = await Promise.all([
             costCenterService.getById(id),
             costCenterService.getChildren(id),
-            usageService.getUsageByCostCenter(
-              selectedCompany.id,
-              id,
-              selectedYear,
-            ),
-            budgetService.getByCostCenterAndYear(
-              id,
-              selectedYear,
-              selectedCompany.id,
-            ),
+            costCenterService.getAll(selectedCompany.id),
           ]);
 
           setCostCenter(cc);
           setChildren(kids);
-          setUsageData(usage);
-          setBudgetAmount(budget?.amount || 0);
 
-          // Fetch children's budgets and usages for the selected year
-          const [kidsUsages] = await Promise.all([
-            Promise.all(
-              kids.map((k) =>
-                usageService.getUsageByCostCenter(
-                  selectedCompany.id,
-                  k.id,
-                  selectedYear,
-                ),
+          // Saldo do centro e dos filhos numa leitura só, do razão de envelope.
+          try {
+            setBalances(
+              await costCenterLedgerService.getBalances(
+                selectedCompany.id,
+                allCostCenters,
+                selectedYear,
               ),
-            ),
+            );
+          } catch (error) {
+            console.error("Error loading cost center balances:", error);
+            setBalances({});
+          }
+
+          // A série mensal sai das próprias transações, não de um agregado
+          // paralelo: `cost_center_usage` data o lançamento por `paymentDate`
+          // sempre que ele existe, enquanto o razão só o faz quando a despesa
+          // está paga — as barras do mês não fechariam com o total do ano.
+          //
+          // Duas consultas porque uma despesa paga pertence ao exercício do
+          // pagamento, que pode cair fora da faixa de vencimento.
+          const start = new Date(selectedYear, 0, 1);
+          const end = new Date(selectedYear, 11, 31, 23, 59, 59);
+          const [byDue, byPayment] = await Promise.all([
+            transactionService.getAll({
+              companyId: selectedCompany.id,
+              costCenterId: id,
+              type: "payable",
+              startDate: start,
+              endDate: end,
+            }),
+            transactionService.getByPaymentDate({
+              companyId: selectedCompany.id,
+              costCenterId: id,
+              startDate: start,
+              endDate: end,
+            }),
           ]);
-          setChildrenUsageTotal(
-            kidsUsages.reduce(
-              (acc, usages) =>
-                acc + usages.reduce((s, u) => s + (u.amount || 0), 0),
-              0,
-            ),
-          );
+          const unique = new Map<string, Transaction>();
+          [...byDue, ...byPayment].forEach((t) => unique.set(t.id, t));
+          setYearPayables([...unique.values()]);
         } catch (error) {
           console.error("Error loading dashboard data:", error);
         } finally {
@@ -185,26 +195,31 @@ export default function CostCenterDashboard() {
     );
   }
 
-  // Calculations
-  const totalBudget = budgetAmount;
+  // Tudo abaixo sai do razão de envelope — a mesma fonte da tela de
+  // distribuição, do formulário de despesa e da listagem de centros.
+  const balance = balances[id];
 
-  // Realizado = somente transações com status "paid"
-  const directRealized = usageData.reduce(
-    (acc, curr) => acc + (curr.amountPaid ?? 0),
-    0,
-  );
-  // Comprometido = total não-rejeitado (inclui paid + pendentes)
-  const directCommitted = usageData.reduce((acc, curr) => acc + curr.amount, 0);
-  // Pendente = comprometido que ainda não foi pago
+  // O recurso do exercício: receitas (se raiz) ou envelope do pai, mais a
+  // sobra consolidada do ano anterior.
+  const totalBudget = (balance?.received ?? 0) + (balance?.carryIn ?? 0);
+
+  // Realizado = despesa direta já paga; comprometido inclui as pendentes.
+  const directRealized = balance?.spentDirectPaid ?? 0;
+  const directCommitted = balance?.spentDirect ?? 0;
   const directPending = directCommitted - directRealized;
 
-  // Para CCs pai: o consumo é a soma dos gastos dos filhos + despesas diretas
+  // O que o pai entregou aos filhos sai do bolso dele no momento da
+  // distribuição, tenha o filho gasto ou não — é essa a regra do envelope.
+  // A versão anterior descontava o *gasto* dos filhos, e por isso mostrava
+  // como disponível um recurso que já havia sido prometido.
   const hasChildren = children.length > 0;
-  const totalConsumed = hasChildren
-    ? childrenUsageTotal + directCommitted
-    : directCommitted;
+  const allocatedToChildren = balance?.allocatedToChildren ?? 0;
+  const totalConsumed = allocatedToChildren + directCommitted;
 
-  const remainingBalance = totalBudget - totalConsumed;
+  // Gasto de toda a subárvore, só informativo: não entra na conta do saldo.
+  const subtreeSpent = balance?.subtreeSpent ?? 0;
+
+  const remainingBalance = balance?.available ?? 0;
 
   const now = new Date();
   const isPastYear = selectedYear < now.getFullYear();
@@ -220,11 +235,11 @@ export default function CostCenterDashboard() {
 
   // Charts Data
   const budgetDistributionData = [
-    ...(hasChildren && childrenUsageTotal > 0
+    ...(hasChildren && allocatedToChildren > 0
       ? [
           {
-            name: "Gasto pelos filhos",
-            value: childrenUsageTotal,
+            name: "Distribuído aos filhos",
+            value: allocatedToChildren,
             color: "#3b82f6",
           },
         ]
@@ -240,22 +255,34 @@ export default function CostCenterDashboard() {
       : []),
   ].filter((d) => d.value > 0);
 
-  // Monthly Spending Trend from Usage Data
-  const monthlyTrendData = usageData
+  // Série mensal montada com a mesma regra de exercício do razão: a despesa
+  // pertence ao mês do pagamento quando está paga, e ao do vencimento quando
+  // não. Assim a soma das barras fecha com o gasto direto do ano acima.
+  const monthlyTrendData = yearPayables
     .reduce(
-      (acc, curr) => {
-        const [year, month] = curr.monthKey.split("-").map(Number);
-        if (year !== selectedYear) return acc;
+      (acc, tx) => {
+        if (tx.status === "rejected") return acc;
 
-        const date = new Date(year, month - 1, 1);
-        const key = format(date, "MMM", { locale: ptBR });
-        const monthIndex = month - 1;
+        const effective =
+          tx.status === "paid" && tx.paymentDate ? tx.paymentDate : tx.dueDate;
+        if (!effective || effective.getFullYear() !== selectedYear) return acc;
 
+        // Só a parte rateada para este centro de custo.
+        const amount =
+          tx.costCenterAllocation?.find((a) => a.costCenterId === id)?.amount ??
+          (tx.costCenterId === id ? (tx.finalAmount ?? tx.amount) : 0);
+        if (!amount) return acc;
+
+        const monthIndex = effective.getMonth();
         const existing = acc.find((d) => d.monthIndex === monthIndex);
         if (existing) {
-          existing.amount += curr.amount;
+          existing.amount += amount;
         } else {
-          acc.push({ name: key, amount: curr.amount, monthIndex });
+          acc.push({
+            name: format(effective, "MMM", { locale: ptBR }),
+            amount,
+            monthIndex,
+          });
         }
         return acc;
       },
@@ -331,7 +358,7 @@ export default function CostCenterDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Orçamento {selectedYear}
+              Envelope {selectedYear}
             </CardTitle>
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -348,7 +375,11 @@ export default function CostCenterDashboard() {
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Definido para este centro
+              {balance?.isRoot
+                ? "Receitas do exercício"
+                : "Recebido do centro pai"}
+              {(balance?.carryIn ?? 0) !== 0 &&
+                ` + ${formatCurrency(balance!.carryIn)} do ano anterior`}
             </p>
           </CardContent>
         </Card>
@@ -458,7 +489,7 @@ export default function CostCenterDashboard() {
         <div className="rounded-lg border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium">
-              Utilização do Orçamento {selectedYear}
+              Envelope de {selectedYear}
             </span>
             <span className="text-muted-foreground tabular-nums">
               {totalBudget > 0
@@ -469,20 +500,20 @@ export default function CostCenterDashboard() {
           </div>
           {/* Stacked bar: filhos (azul) + realizado (vermelho) + pendente (laranja) */}
           <div className="h-3 w-full rounded-full bg-muted overflow-hidden flex">
-            {hasChildren && childrenUsageTotal > 0 && (
+            {hasChildren && allocatedToChildren > 0 && (
               <div
                 className="h-full bg-blue-500 transition-all duration-700"
                 style={{
-                  width: `${Math.min((childrenUsageTotal / totalBudget) * 100, 100)}%`,
+                  width: `${Math.min((allocatedToChildren / totalBudget) * 100, 100)}%`,
                 }}
-                title={`Gasto pelos filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(childrenUsageTotal)}`}
+                title={`Distribuído aos filhos: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(allocatedToChildren)}`}
               />
             )}
             {directRealized > 0 && (
               <div
                 className="h-full bg-red-500 transition-all duration-700"
                 style={{
-                  width: `${Math.min((directRealized / totalBudget) * 100, Math.max(0, 100 - (childrenUsageTotal / totalBudget) * 100))}%`,
+                  width: `${Math.min((directRealized / totalBudget) * 100, Math.max(0, 100 - (allocatedToChildren / totalBudget) * 100))}%`,
                 }}
                 title={`Realizado: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directRealized)}`}
               />
@@ -491,7 +522,7 @@ export default function CostCenterDashboard() {
               <div
                 className="h-full bg-orange-400 transition-all duration-700"
                 style={{
-                  width: `${Math.min((directPending / totalBudget) * 100, Math.max(0, 100 - ((childrenUsageTotal + directRealized) / totalBudget) * 100))}%`,
+                  width: `${Math.min((directPending / totalBudget) * 100, Math.max(0, 100 - ((allocatedToChildren + directRealized) / totalBudget) * 100))}%`,
                 }}
                 title={`Comprometido pendente: ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(directPending)}`}
               />
@@ -503,12 +534,12 @@ export default function CostCenterDashboard() {
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-blue-500 shrink-0" />
                 <span>
-                  Gasto pelos filhos:{" "}
+                  Distribuído aos filhos:{" "}
                   <span className="font-medium text-foreground font-financial">
                     {new Intl.NumberFormat("pt-BR", {
                       style: "currency",
                       currency: "BRL",
-                    }).format(childrenUsageTotal)}
+                    }).format(allocatedToChildren)}
                   </span>
                 </span>
               </div>
@@ -555,6 +586,23 @@ export default function CostCenterDashboard() {
                 </span>
               </span>
             </div>
+            {/* Fora da barra: o gasto da subárvore não consome o envelope do
+                pai — quem consome é a distribuição. Fica como informação de
+                quanto do que foi distribuído já virou despesa. */}
+            {hasChildren && (
+              <div className="flex items-center gap-1.5">
+                <TrendingDown className="w-3 h-3 text-muted-foreground shrink-0" />
+                <span>
+                  Gasto na subárvore:{" "}
+                  <span className="font-medium text-foreground font-financial">
+                    {new Intl.NumberFormat("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    }).format(subtreeSpent)}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -650,13 +698,13 @@ export default function CostCenterDashboard() {
 
         <Card className="col-span-4 lg:col-span-3">
           <CardHeader>
-            <CardTitle>Distribuição do Orçamento</CardTitle>
+            <CardTitle>Composição do Envelope</CardTitle>
           </CardHeader>
           <CardContent>
             {budgetDistributionData.length === 0 ? (
               <div className="flex items-center justify-center h-[220px] sm:h-[300px] text-sm text-muted-foreground text-center px-4">
-                Sem dados para exibir. Configure um orçamento para ver a
-                distribuição.
+                Este centro não recebeu envelope em {selectedYear}. Distribua
+                recurso do centro pai para ver a composição.
               </div>
             ) : (
               <div className="flex flex-col h-[220px] sm:h-[300px]">
@@ -694,11 +742,11 @@ export default function CostCenterDashboard() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="flex justify-center gap-4 pt-2 flex-shrink-0">
+                <div className="flex justify-center gap-4 pt-2 shrink-0">
                   {budgetDistributionData.map((entry, index) => (
                     <div key={index} className="flex items-center gap-2">
                       <div
-                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        className="w-3 h-3 rounded-full shrink-0"
                         style={{ backgroundColor: entry.color }}
                       />
                       <span className="text-xs text-muted-foreground">
@@ -728,7 +776,7 @@ export default function CostCenterDashboard() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Nome</TableHead>
-                        <TableHead>Orçamento</TableHead>
+                        <TableHead>Envelope</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -744,7 +792,7 @@ export default function CostCenterDashboard() {
                             {child.name}
                           </TableCell>
                           <TableCell className="font-financial">
-                            {formatCurrency(child.budget || 0)}
+                            {formatCurrency(balances[child.id]?.received ?? 0)}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -771,7 +819,7 @@ export default function CostCenterDashboard() {
                         )}
                       </div>
                       <span className="text-sm font-semibold font-financial shrink-0">
-                        {formatCurrency(child.budget || 0)}
+                        {formatCurrency(balances[child.id]?.received ?? 0)}
                       </span>
                     </button>
                   ))}

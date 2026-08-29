@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/card";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { transactionService } from "@/lib/services/transactionService";
-import { usageService } from "@/lib/services/usageService";
 import {
   Loader2,
   RefreshCw,
@@ -30,10 +29,6 @@ export default function SystemSettingsPage() {
   const { selectedCompany } = useCompany();
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
-  const [isRecalculatingUsage, setIsRecalculatingUsage] = useState(false);
-  const [usageRecalcResult, setUsageRecalcResult] = useState<{
-    transactionCount: number;
-  } | null>(null);
   const [lastResult, setLastResult] = useState<{
     newBalance: number;
     transactionCount: number;
@@ -71,26 +66,6 @@ export default function SystemSettingsPage() {
       });
     } finally {
       setIsRecalculating(false);
-    }
-  };
-
-  const handleRecalculateUsage = async () => {
-    if (!selectedCompany) return;
-    try {
-      setIsRecalculatingUsage(true);
-      await usageService.recalculateAll(selectedCompany.id);
-      setUsageRecalcResult({ transactionCount: -1 });
-      toast.success("Cache Recalculado", {
-        description:
-          "O uso dos centros de custo foi recalculado com base nas transações.",
-      });
-    } catch (error) {
-      console.error(error);
-      toast.error("Erro", {
-        description: "Falha ao recalcular o cache. Tente novamente.",
-      });
-    } finally {
-      setIsRecalculatingUsage(false);
     }
   };
 
@@ -186,7 +161,7 @@ export default function SystemSettingsPage() {
                 onClick={handleRecalculate}
                 disabled={isRecalculating || !selectedCompany}
                 variant="outline"
-                className="min-w-[160px]"
+                className="min-w-40"
               >
                 {isRecalculating ? (
                   <>
@@ -261,7 +236,7 @@ export default function SystemSettingsPage() {
                 onClick={handleBackfillCostCenterIds}
                 disabled={isMigrating || !selectedCompany}
                 variant="outline"
-                className="min-w-[160px]"
+                className="min-w-40"
               >
                 {isMigrating ? (
                   <>
@@ -297,70 +272,6 @@ export default function SystemSettingsPage() {
                       {migrationResult.total} transações analisadas no total.
                     </p>
                   </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Card 3 — Recalcular Uso dos Centros de Custo */}
-        <Card
-          className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300"
-          style={{ animationDelay: "120ms", animationFillMode: "both" }}
-        >
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <RefreshCw className="h-4 w-4 text-amber-500" />
-              Recalcular Uso dos Centros de Custo
-            </CardTitle>
-            <CardDescription>
-              Recalcula o cache de uso dos centros de custo a partir das
-              transações. Use quando os valores de orçamento utilizado estiverem
-              incorretos.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-md bg-amber-50 dark:bg-amber-950/40 p-3.5 border border-amber-100 dark:border-amber-900/50">
-              <div className="flex gap-2.5">
-                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-amber-800 dark:text-amber-300">
-                  Limpa e reconstrói o cache de uso de todas as transações
-                  ativas (exceto rejeitadas). Pode levar alguns segundos. Seguro
-                  executar mais de uma vez.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={handleRecalculateUsage}
-                disabled={isRecalculatingUsage || !selectedCompany}
-                variant="outline"
-                className="min-w-[160px]"
-              >
-                {isRecalculatingUsage ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Recalculando...
-                  </>
-                ) : (
-                  "Recalcular Uso"
-                )}
-              </Button>
-              {!selectedCompany && (
-                <p className="text-xs text-muted-foreground">
-                  Selecione uma empresa para continuar.
-                </p>
-              )}
-            </div>
-
-            {usageRecalcResult && (
-              <div className="rounded-md bg-green-50 dark:bg-green-950/40 p-3.5 border border-green-100 dark:border-green-900/50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="flex gap-2.5">
-                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
-                  <p className="text-sm font-medium text-green-800 dark:text-green-300">
-                    Cache de uso dos centros de custo atualizado com sucesso.
-                  </p>
                 </div>
               </div>
             )}

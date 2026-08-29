@@ -44,9 +44,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CostCenter } from "@/lib/types";
+import { CostCenter, CostCenterBalance } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
-import { budgetService } from "@/lib/services/budgetService";
+import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
 import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 import { formatCurrency } from "@/lib/utils";
@@ -83,29 +83,19 @@ function buildTree(items: CostCenter[]): CostCenterNode[] {
   return roots;
 }
 
-// Agrega recursivamente usages e budget de toda a subárvore de um nó.
-// - total: orçamento próprio (se definido) ou soma dos orçamentos dos filhos
-// - used: soma dos usages de todos os descendentes folha
-function aggregateNode(
+// Envelope e consumo de um nó, direto do razão.
+//
+// Não há recursão aqui de propósito: cada documento do razão já carrega o
+// agregado da própria subárvore (`subtreeSpent`), então somar filhos na tela
+// seria recontar. Era o que a versão anterior fazia sobre `cost_center_usage`,
+// e por isso divergia da tela de distribuição.
+function envelopeOf(
   node: CostCenterNode,
-  usages: Record<string, number>,
+  balances: Record<string, CostCenterBalance>,
 ): { used: number; total: number } {
-  if (node.children.length === 0) {
-    return { used: usages[node.id] || 0, total: node.budget || 0 };
-  }
-
-  const childAgg = node.children.reduce(
-    (acc, child) => {
-      const c = aggregateNode(child, usages);
-      return { used: acc.used + c.used, total: acc.total + c.total };
-    },
-    { used: 0, total: 0 },
-  );
-
-  return {
-    used: childAgg.used,
-    total: (node.budget || 0) > 0 ? node.budget! : childAgg.total,
-  };
+  const b = balances[node.id];
+  if (!b) return { used: 0, total: 0 };
+  return { used: b.subtreeSpent, total: b.received + b.carryIn };
 }
 
 // Mini barra de progresso de orçamento
@@ -132,7 +122,7 @@ interface CostCenterRowProps {
   onEdit: (cc: CostCenter) => void;
   onDelete: (id: string) => void;
   canManage: boolean;
-  usages: Record<string, number>;
+  balances: Record<string, CostCenterBalance>;
 }
 
 function CostCenterRow({
@@ -142,7 +132,7 @@ function CostCenterRow({
   onEdit,
   onDelete,
   canManage,
-  usages,
+  balances,
 }: CostCenterRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = node.children.length > 0;
@@ -228,27 +218,17 @@ function CostCenterRow({
         </div>
 
         {(() => {
-          const agg = aggregateNode(node, usages);
+          const agg = envelopeOf(node, balances);
           return (
             <div className="col-span-2 flex flex-col justify-center">
               {agg.total > 0 ? (
                 <>
-                  <div className="flex items-center gap-1.5">
-                    <span>
-                      {new Intl.NumberFormat("pt-BR", {
-                        style: "currency",
-                        currency: "BRL",
-                      }).format(agg.total)}
-                    </span>
-                    {node.budgetYear && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] px-1 py-0 h-5"
-                      >
-                        {node.budgetYear}
-                      </Badge>
-                    )}
-                  </div>
+                  <span>
+                    {new Intl.NumberFormat("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    }).format(agg.total)}
+                  </span>
                   <BudgetBar used={agg.used} total={agg.total} />
                 </>
               ) : (
@@ -306,7 +286,7 @@ function CostCenterRow({
               onEdit={onEdit}
               onDelete={onDelete}
               canManage={canManage}
-              usages={usages}
+              balances={balances}
             />
           ))}
         </div>
@@ -387,17 +367,17 @@ function MobileCostCenterCard({
   onEdit,
   onDelete,
   canManage,
-  usages,
+  balances,
 }: {
   node: CostCenterNode;
   level?: number;
   onEdit: (cc: CostCenter) => void;
   onDelete: (id: string) => void;
   canManage: boolean;
-  usages: Record<string, number>;
+  balances: Record<string, CostCenterBalance>;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const agg = aggregateNode(node, usages);
+  const agg = envelopeOf(node, balances);
   const hasChildren = node.children.length > 0;
 
   return (
@@ -507,7 +487,7 @@ function MobileCostCenterCard({
             onEdit={onEdit}
             onDelete={onDelete}
             canManage={canManage}
-            usages={usages}
+            balances={balances}
           />
         ))}
     </>
@@ -518,12 +498,16 @@ export default function CostCentersPage() {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
   const { canManageCostCenters, onlyOwnPayables } = usePermissions();
-  const { costCenters, usages, isLoading, fetchCostCenters } =
-    useCostCenterStore();
+  const { costCenters, isLoading, fetchCostCenters } = useCostCenterStore();
+  const [balances, setBalances] = useState<Record<string, CostCenterBalance>>(
+    {},
+  );
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const year = new Date().getFullYear();
 
   const loadData = useCallback(
     async (forceRefresh = false) => {
@@ -540,26 +524,42 @@ export default function CostCentersPage() {
     loadData();
   }, [loadData]);
 
+  // Saldos vêm do razão de envelope — a mesma fonte da tela de distribuição e
+  // do formulário de despesa. Antes esta tela somava `cost_center_usage` e lia
+  // orçamento do campo legado, e por isso mostrava número diferente do resto.
+  useEffect(() => {
+    const loadBalances = async () => {
+      if (!selectedCompany || costCenters.length === 0) {
+        setBalances({});
+        return;
+      }
+      try {
+        setBalances(
+          await costCenterLedgerService.getBalances(
+            selectedCompany.id,
+            costCenters,
+            year,
+          ),
+        );
+      } catch (error) {
+        // Hierarquia inválida (mais de um raiz). Sem saldo confiável, a tela
+        // mostra a árvore sem números em vez de números errados.
+        console.error("Error loading cost center balances:", error);
+        setBalances({});
+      }
+    };
+    loadBalances();
+  }, [selectedCompany, costCenters, year]);
+
   const handleSubmit = async (data: CostCenterFormData) => {
     if (!selectedCompany) return;
     try {
       setIsSubmitting(true);
-      let ccId = editingId;
 
       if (editingId) {
         await costCenterService.update(editingId, data);
       } else {
-        const ref = await costCenterService.create(data, selectedCompany.id);
-        ccId = ref.id;
-      }
-
-      if (ccId && data.budget !== undefined && data.budgetYear) {
-        await budgetService.setBudget(
-          ccId,
-          data.budgetYear,
-          data.budget,
-          selectedCompany.id,
-        );
+        await costCenterService.create(data, selectedCompany.id);
       }
 
       await loadData(true);
@@ -614,11 +614,17 @@ export default function CostCentersPage() {
     (cc) => !cc.parentId || cc.parentId === "none",
   ).length;
   const totalChildren = costCenters.length - totalRoots;
-  const withoutBudget = costCenters.filter((cc) => !cc.budget).length;
-  const totalBudget = costCenters.reduce(
-    (acc, cc) => acc + (cc.budget || 0),
-    0,
-  );
+  // O total do exercício é o que entrou no raiz — receitas mais a sobra do ano
+  // anterior. Somar o envelope de todos os centros contaria o mesmo dinheiro
+  // várias vezes, porque alocação de pai para filho é transferência, não gasto.
+  const rootBalance = Object.values(balances).find((b) => b.isRoot);
+  const totalBudget = rootBalance
+    ? rootBalance.received + rootBalance.carryIn
+    : 0;
+  const withoutBudget = costCenters.filter((cc) => {
+    const b = balances[cc.id];
+    return b && !b.isRoot && b.received === 0;
+  }).length;
 
   return (
     <div className="space-y-6">
@@ -644,7 +650,7 @@ export default function CostCentersPage() {
               </span>
               <span className="text-muted-foreground/40">·</span>
               <span className="text-sm text-muted-foreground">
-                Total orçado:{" "}
+                Recurso de {year}:{" "}
                 <span className="font-medium font-financial text-foreground">
                   {formatCurrency(totalBudget)}
                 </span>
@@ -656,7 +662,7 @@ export default function CostCentersPage() {
                     variant="outline"
                     className="text-[11px] text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/20"
                   >
-                    {withoutBudget} sem orçamento
+                    {withoutBudget} sem envelope
                   </Badge>
                 </>
               )}
@@ -706,7 +712,6 @@ export default function CostCentersPage() {
                           code: cc.code,
                           description: cc.description,
                           parentId: cc.parentId,
-                          budget: cc.budget,
                           budgetYear: cc.budgetYear || new Date().getFullYear(),
                           allowedUserIds: cc.allowedUserIds,
                           approverEmail: cc.approverEmail,
@@ -749,12 +754,11 @@ export default function CostCentersPage() {
                   Nome
                   <SortIcon columnKey="name" sortConfig={sortConfig} />
                 </div>
-                <div
-                  className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
-                  onClick={() => requestSort("budget")}
-                >
-                  Orçamento
-                  <SortIcon columnKey="budget" sortConfig={sortConfig} />
+                {/* Sem ordenação: o envelope vem do razão, não do objeto que o
+                    `useSortableData` ordena, e ordenar uma árvore por valor
+                    embaralharia a hierarquia. */}
+                <div className="col-span-2 flex items-center select-none">
+                  Envelope {year}
                 </div>
                 <div
                   className="col-span-2 cursor-pointer hover:text-primary flex items-center select-none"
@@ -805,7 +809,7 @@ export default function CostCentersPage() {
                     onEdit={handleEdit}
                     onDelete={setDeleteId}
                     canManage={canManageCostCenters}
-                    usages={usages}
+                    balances={balances}
                   />
                 ))
               )}
@@ -852,7 +856,7 @@ export default function CostCentersPage() {
                       onEdit={handleEdit}
                       onDelete={setDeleteId}
                       canManage={canManageCostCenters}
-                      usages={usages}
+                      balances={balances}
                     />
                   ))}
                 </div>

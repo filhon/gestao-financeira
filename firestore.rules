@@ -251,12 +251,18 @@ service cloud.firestore {
         allow update, delete: if false;
     }
 
-    // 10. Budgets
+    // 10. Budgets e 12. Cost Center Usage — coleções aposentadas.
+    //
+    // Eram duas das quatro fontes de verdade que o orçamento por envelope
+    // substituiu. Nada as lê nem escreve mais: o saldo vive em
+    // `cost_center_ledger` e o detalhamento mensal sai das transações. O acesso
+    // fica negado para que nenhum caminho novo volte a depender delas; os
+    // documentos antigos seguem no banco até serem apagados.
     match /budgets/{budgetId} {
-      function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
-
-      allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
-      allow write: if isAuthenticated() && isManager(getCompanyId());
+      allow read, write: if false;
+    }
+    match /cost_center_usage/{usageId} {
+      allow read, write: if false;
     }
 
     // 11. Feedbacks
@@ -272,17 +278,6 @@ service cloud.firestore {
       allow update, delete: if isGlobalAdmin(); // Apenas admins
     }
 
-    // 12. Cost Center Usage (Denormalized for performance)
-    match /cost_center_usage/{usageId} {
-       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
-       
-       // Read: Same as reports/dashboard
-       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
-       
-       // Write: Only Cloud Functions or strict managers
-       allow write: if isAuthenticated() && isManager(getCompanyId());
-    }
-    
     // 12b. Cost Center Ledger (envelope budgeting — single source of truth for balance)
     match /cost_center_ledger/{ledgerId} {
        function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }

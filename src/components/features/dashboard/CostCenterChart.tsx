@@ -28,16 +28,20 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { getDaysInMonth, getDate } from "date-fns";
+import { getDayOfYear, getDaysInYear } from "date-fns";
 
 export function CostCenterChart({ year }: { year?: number }) {
   const { data, isLoading } = useBudgetProgress(year);
   const [view, setView] = useState("risk");
 
+  // Quanto do exercício já passou. O envelope é anual, então o ritmo esperado
+  // se mede contra o ano — antes se media contra o mês, porque a métrica era
+  // um orçamento mensal derivado que deixou de existir.
   const today = new Date();
-  const currentDay = getDate(today);
-  const totalDays = getDaysInMonth(today);
-  const monthProgress = (currentDay / totalDays) * 100;
+  const isCurrentYear = (year ?? today.getFullYear()) === today.getFullYear();
+  const yearProgress = isCurrentYear
+    ? (getDayOfYear(today) / getDaysInYear(today)) * 100
+    : 100;
 
   const getStatusIcon = (status: BudgetProgressData["status"]) => {
     switch (status) {
@@ -66,9 +70,8 @@ export function CostCenterChart({ year }: { year?: number }) {
   };
 
   const isBurningTooFast = (percentage: number) => {
-    // Se gastou 10% a mais do que o tempo decorrido do mês
-    // Só faz sentido se tiver orçamento
-    return percentage > monthProgress + 10;
+    // Comprometeu 10 pontos a mais do envelope do que o exercício já andou.
+    return percentage > yearProgress + 10;
   };
 
   // Sort for Volume view (highest budget or spent first, let's say spent)
@@ -81,7 +84,7 @@ export function CostCenterChart({ year }: { year?: number }) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm md:text-base font-medium leading-tight">
-            Orçamento por
+            Envelope por
             <br className="sm:hidden" /> Centro de Custo
           </CardTitle>
           <Tabs
@@ -106,14 +109,14 @@ export function CostCenterChart({ year }: { year?: number }) {
           </Tabs>
         </div>
         <div className="flex justify-between items-center text-xs text-muted-foreground min-h-4">
-          <span>Mês atual</span>
+          <span>Exercício {year ?? today.getFullYear()}</span>
           {view === "risk" && (
             <span
               className="flex items-center gap-1 text-amber-600 font-medium opacity-80"
-              title={`Progresso do mês: ${Math.round(monthProgress)}%`}
+              title={`Progresso do ano: ${Math.round(yearProgress)}%`}
             >
               <TrendingUp className="h-3 w-3" /> Ritmo Esperado:{" "}
-              {Math.round(monthProgress)}%
+              {Math.round(yearProgress)}%
             </span>
           )}
         </div>
@@ -188,7 +191,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                         <div className="flex justify-between text-[10px] text-muted-foreground group-hover:text-foreground transition-colors font-financial">
                           <span>{formatCurrency(item.spent)}</span>
                           {item.budget > 0 && (
-                            <span>meta: {formatCurrency(item.budget)}</span>
+                            <span>envelope: {formatCurrency(item.budget)}</span>
                           )}
                         </div>
                       </div>
@@ -204,7 +207,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                         <div className="grid grid-cols-2 gap-2 text-sm mt-3 pt-3 border-t">
                           <div className="flex flex-col">
                             <span className="text-[10px] uppercase text-muted-foreground">
-                              Realizado
+                              Comprometido
                             </span>
                             <span className="font-bold font-financial text-red-600">
                               {formatCurrency(item.spent)}
@@ -212,7 +215,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                           </div>
                           <div className="flex flex-col">
                             <span className="text-[10px] uppercase text-muted-foreground">
-                              Orçamento
+                              Envelope
                             </span>
                             <span className="font-bold font-financial text-emerald-600">
                               {formatCurrency(item.budget)}
@@ -220,7 +223,7 @@ export function CostCenterChart({ year }: { year?: number }) {
                           </div>
                         </div>
                         <div className="bg-muted p-2 rounded text-xs text-center mt-2">
-                          {item.percentage > monthProgress ? (
+                          {item.percentage > yearProgress ? (
                             <span className="text-amber-600 flex items-center justify-center gap-1">
                               <AlertTriangle className="h-3 w-3" />
                               Atenção: Consumo acelerado
@@ -261,10 +264,10 @@ export function CostCenterChart({ year }: { year?: number }) {
                           <div className="bg-popover border text-popover-foreground shadow-sm rounded-lg p-2 text-xs">
                             <p className="font-semibold mb-1">{data.name}</p>
                             <p className="font-financial">
-                              Realizado: {formatCurrency(data.spent)}
+                              Comprometido: {formatCurrency(data.spent)}
                             </p>
                             <p className="font-financial">
-                              Orçado: {formatCurrency(data.budget)}
+                              Envelope: {formatCurrency(data.budget)}
                             </p>
                           </div>
                         );
