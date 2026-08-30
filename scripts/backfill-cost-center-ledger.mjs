@@ -130,7 +130,6 @@ async function backfillCompany(companyId, companyName) {
     );
   }
   const rootId = roots[0].id;
-  const isLeaf = (id) => (childrenOf.get(id) || []).length === 0;
 
   // ── Orçamentos existentes ──────────────────────────────────────────────────
   const budgetSnap = await db
