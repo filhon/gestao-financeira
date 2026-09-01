@@ -22,6 +22,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-state-positive: var(--state-positive);
+  --color-state-spent: var(--state-spent);
+  --color-state-committed: var(--state-committed);
+  --color-state-allocated: var(--state-allocated);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -69,6 +73,17 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+
+  /* Estados financeiros. Vocabulário único para valor monetário, segmento de
+     barra e série de gráfico — antes cada tela escolhia o próprio tom.
+     Escolhidos para passar WCAG AA (4.5:1) sobre --card em texto normal, que é
+     o pior caso: as legendas rodam em text-xs.
+       positive  5.5:1   spent  4.8:1   committed  5.1:1   allocated  5.1:1  */
+  --state-positive: oklch(0.508 0.118 165.612);
+  --state-spent: oklch(0.577 0.245 27.325);
+  --state-committed: oklch(0.555 0.163 48.998);
+  --state-allocated: oklch(0.546 0.245 262.881);
+
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -103,6 +118,13 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+
+  /* Mesmos papéis, claros o bastante para o card escuro (6.5:1 a 11:1). */
+  --state-positive: oklch(0.765 0.177 163.223);
+  --state-spent: oklch(0.704 0.191 22.216);
+  --state-committed: oklch(0.828 0.189 84.429);
+  --state-allocated: oklch(0.707 0.165 254.624);
+
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
