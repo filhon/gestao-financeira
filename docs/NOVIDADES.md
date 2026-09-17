@@ -1,93 +1,70 @@
 # Novidades
 
-> Este documento reúne as atualizações do sistema na linguagem do usuário final. Ele é exibido como aviso na primeira vez que o usuário acessa o sistema após cada publicação. Cada nova atualização entra como uma seção no topo, com data.
+> Este documento reúne as atualizações do sistema na linguagem do usuário final. Ele é exibido como aviso na primeira vez que o usuário acessa o sistema após cada publicação. Cada nova atualização entra como uma seção `## Atualização de <d de mês de aaaa>` no topo. Dentro dela, cada `###` é uma novidade: o primeiro parágrafo é o resumo que aparece na janela; o restante fica escondido atrás de "Saiba mais".
 
 ---
 
 ## Atualização de 17 de setembro de 2026
 
-### Financeiro › Recorrências: busca por parte do nome e edição corrigida
+### Recorrências: busca por parte do nome e edição corrigida
 
-Dois problemas na tela de recorrências foram resolvidos:
+Em Financeiro › Recorrências, a busca passou a encontrar por parte do nome e editar uma recorrência voltou a funcionar. A lista também ganhou paginação com números.
 
-- **Busca por parte do nome.** Antes, o campo de busca só encontrava a recorrência se você digitasse a descrição exatamente como estava cadastrada. Agora basta um trecho: "IPT" encontra "IPTU", "agua" encontra "Conta de Água". Maiúsculas, minúsculas e acentos não fazem diferença, e o resultado aparece a cada letra digitada, sem espera.
-- **Editar recorrência voltou a funcionar.** Salvar alterações em uma recorrência (nome, valor, frequência, intervalo, próximo vencimento ou data final) falhava com "Erro ao atualizar recorrência" sempre que a recorrência não tinha data final ou regra de reajuste, ou seja, na maioria dos casos. Corrigido: a edição salva normalmente.
-- **Criar recorrência sem preencher campos opcionais.** Pelo mesmo motivo, criar uma conta recorrente em Contas a Pagar ou Contas a Receber sem informar forma de pagamento, entidade ou origem da solicitação também falhava. Agora esses campos podem ficar em branco.
+A busca agora encontra pelo trecho. Antes, o campo só achava a recorrência se você digitasse a descrição inteira, exatamente como estava cadastrada. Agora "IPT" encontra "IPTU" e "agua" encontra "Conta de Água". Maiúsculas, minúsculas e acentos não fazem diferença, e o resultado aparece enquanto você digita.
 
-**Outras melhorias na tela**
+Editar recorrência voltou a funcionar. Salvar alterações (nome, valor, frequência, intervalo, próximo vencimento ou data final) falhava com "Erro ao atualizar recorrência" sempre que a recorrência não tinha data final ou regra de reajuste, o que vale para a maioria dos cadastros. Pelo mesmo motivo, criar uma conta recorrente em Contas a Pagar ou Contas a Receber sem informar forma de pagamento, entidade ou origem da solicitação também dava erro. Os dois casos estão corrigidos e esses campos podem ficar em branco.
 
-- **Paginação com números** no lugar do botão "Carregar Mais", no mesmo padrão das demais listagens: "1–25 de 60", botões de página, setas e seletor de itens por página (25, 50 ou 100). Ao buscar ou trocar o filtro de status, a lista volta para a primeira página.
-- **Contagem exata de resultados** no celular: antes mostrava "25+ resultados" quando havia mais de uma página; agora mostra o total real.
-- **Data final pode ser removida.** Na edição, ao lado de "Data Final" aparece um link **Remover** quando há uma data preenchida; antes não havia como tirar uma data final depois de definida.
-- **Frequência correta ao abrir a edição.** O campo Frequência podia mostrar um valor diferente do cadastrado ao abrir a janela de edição (o valor salvo estava certo, só a exibição errava). Corrigido.
-- **Carregamento mais rápido.** A tela fazia duas consultas ao banco, uma para os indicadores do topo e outra para a lista; agora faz uma só, e os filtros e a busca são aplicados na hora, sem nova consulta.
+Aproveitamos para ajustar outras coisas na mesma tela:
 
-### Cadastros › Entidades no mesmo padrão das outras listagens
+- A lista ganhou paginação com números, no mesmo padrão das outras listagens: "1–25 de 60", botões de página, setas e um seletor de itens por página (25, 50 ou 100). O botão "Carregar Mais" saiu. Ao buscar ou trocar o filtro de status, a lista volta para a primeira página.
+- No celular, a contagem mostra o total real de resultados. Antes aparecia "25+ resultados" quando havia mais de uma página.
+- Na edição, ao lado de "Data Final" aparece um link Remover quando há uma data preenchida. Até então não tinha como tirar uma data final depois de definida.
+- O campo Frequência podia abrir a janela de edição mostrando um valor diferente do cadastrado (o valor salvo estava certo, só a exibição errava). Corrigimos.
+- A tela carrega mais rápido. Ela fazia duas consultas ao banco, uma para os indicadores do topo e outra para a lista, e agora faz uma só. Filtros e busca passaram a ser aplicados na hora, sobre os dados já carregados.
 
-A tela de fornecedores e clientes foi alinhada às demais listagens do sistema (Contas a Pagar, Lotes, Centros de Custo). O que muda para você:
+### Entidades no mesmo padrão das outras listagens
 
-- **Totais no cabeçalho.** Os três cartões de contagem deram lugar a uma linha logo abaixo do título: "48 entidades · 30 fornecedores · 25 clientes". Ocupa menos espaço e a lista aparece mais acima na tela. Os números agora atualizam na hora ao criar ou excluir uma entidade (antes podiam ficar defasados por alguns minutos).
-- **Paginação com números.** O botão "Carregar Mais" saiu. No rodapé da lista você vê "1–25 de 132", os botões de página (1, 2, 3 … 6) com a atual destacada, setas de anterior e próxima, e um seletor de **itens por página** (25, 50 ou 100). No celular, as setas e o indicador "3 / 6". Ao buscar ou trocar de aba, a lista volta para a primeira página.
-- **Busca instantânea.** O filtro por nome ou CNPJ/CPF aplica a cada letra digitada, sem espera. A busca ganhou um **X** para limpar o texto.
-- **Busca e abas na mesma linha.** No computador, o campo de busca e as abas Todos / Fornecedores / Clientes ficam lado a lado; no celular, empilhados.
-- **Ordenação sobre a lista inteira.** Clicar em Nome, Tipo, Categoria ou Documento ordena todas as entidades, não só as já carregadas. Cada coluna mostra o ícone de ordenação; a ativa fica destacada com a seta para cima ou para baixo.
-- **Contagem de resultados** no canto direito do cabeçalho da lista, em qualquer tamanho de tela.
-- **Editar e Excluir pelo teclado.** Os botões da linha, que apareciam só ao passar o mouse, agora também aparecem ao navegar com Tab.
-- **Nada encontrado ficou mais útil.** Ao buscar sem resultado, há um botão **Limpar busca**. Sem nada cadastrado na aba, a mensagem indica o que falta (por exemplo, "Nenhum fornecedor cadastrado") e oferece **Criar entidade** para quem tem permissão.
-- **Falha ao carregar aparece como falha.** Se a lista não puder ser carregada, você vê um aviso com **Tentar novamente**, em vez de uma lista vazia.
-- **Excluir mostra o nome.** A confirmação de exclusão agora cita a entidade ("Excluir "Fornecedor X"?") e avisa que a ação não pode ser desfeita.
-- **Tema escuro.** Etiquetas de Fornecedor / Cliente / Ambos e as iniciais coloridas passaram a ter versão para o tema escuro.
+A tela de Cadastros › Entidades ficou igual às demais listagens: paginação com números, busca instantânea, ordenação sobre a lista inteira e totais no cabeçalho.
 
-**Bom saber**
+Alinhamos a tela de fornecedores e clientes às demais listagens do sistema, como Contas a Pagar, Lotes e Centros de Custo. Os três cartões de contagem deram lugar a uma linha logo abaixo do título: "48 entidades · 30 fornecedores · 25 clientes". Ocupa menos espaço, a lista aparece mais acima e os números atualizam na hora ao criar ou excluir uma entidade. Antes podiam ficar defasados por alguns minutos.
 
-- O título da página passou a ser **Entidades** (antes repetia "Cadastros", que é o nome da seção).
-- A coluna **Ações** só aparece para quem pode gerenciar entidades.
+O botão "Carregar Mais" saiu daqui também. No rodapé da lista você vê "1–25 de 132", os botões de página (1, 2, 3 … 6) com a atual destacada, setas de anterior e próxima e o seletor de itens por página (25, 50 ou 100). No celular ficam as setas e o indicador "3 / 6". Ao buscar ou trocar de aba, a lista volta para a primeira página.
+
+A busca por nome ou CNPJ/CPF aplica a cada letra digitada e ganhou um X para limpar o texto. No computador, o campo de busca e as abas Todos / Fornecedores / Clientes ficam lado a lado; no celular, um embaixo do outro.
+
+Clicar em Nome, Tipo, Categoria ou Documento agora ordena todas as entidades, não só as que já estavam na tela. Cada coluna mostra o ícone de ordenação, e a coluna ativa fica destacada com a seta para cima ou para baixo. A contagem de resultados aparece no canto direito do cabeçalho da lista, em qualquer tamanho de tela.
+
+Alguns detalhes menores:
+
+- Os botões Editar e Excluir da linha, que apareciam só ao passar o mouse, também aparecem ao navegar com Tab.
+- Ao buscar sem resultado, há um botão Limpar busca. Sem nada cadastrado na aba, a mensagem diz o que falta ("Nenhum fornecedor cadastrado", por exemplo) e oferece Criar entidade para quem tem permissão.
+- Se a lista não puder ser carregada, você vê um aviso com Tentar novamente, em vez de uma lista vazia.
+- A confirmação de exclusão cita a entidade ("Excluir 'Fornecedor X'?") e avisa que a ação não pode ser desfeita.
+- As etiquetas de Fornecedor / Cliente / Ambos e as iniciais coloridas ganharam versão para o tema escuro.
+- O título da página passou a ser Entidades. Antes repetia "Cadastros", que é o nome da seção.
+- A coluna Ações só aparece para quem pode gerenciar entidades.
 
 ### Um clique na linha abre os detalhes
 
-Abrir o registro que você está vendo em uma lista ficou mais direto: basta clicar em qualquer ponto da linha. Não é mais preciso abrir o menu de três pontos e procurar "Ver detalhes" — esse item saiu do menu, que agora guarda só as ações de fato (confirmar pagamento, editar, excluir etc.).
+Nas listagens de Contas a Pagar, Contas a Receber, Lotes, Entidades e Centros de Custo, clicar em qualquer ponto da linha abre os detalhes. O item "Ver detalhes" saiu do menu de três pontos.
 
-**Onde vale**
+Não é mais preciso abrir o menu e procurar "Ver detalhes". O menu agora guarda só as ações de fato (confirmar pagamento, editar, excluir e assim por diante). Vale em Contas a Pagar e Contas a Receber (abre os detalhes da transação), em Lotes (detalhes do lote), em Entidades (página da entidade), em Centros de Custo (página do centro de custo; a seta que expande os filhos continua funcionando) e na tela de Feedback da administração.
 
-- **Financeiro › Contas a Pagar** e **Contas a Receber** — abre os detalhes da transação.
-- **Financeiro › Lotes** — abre os detalhes do lote.
-- **Cadastros › Entidades** — abre a página da entidade.
-- **Centros de Custo** — abre a página do centro de custo (a seta que expande os filhos continua funcionando normalmente).
-- **Feedback** (administração) — abre os detalhes do feedback.
-
-**Bom saber**
-
-- Marcar a caixa de seleção, usar o menu de ações ou os botões rápidos da linha (Aprovar, Autorizar, Excluir…) continua igual: essas ações não abrem os detalhes.
-- No celular, tocar no cartão já abria os detalhes; o item "Ver detalhes" também saiu do menu ali.
-- Pelo teclado, use Tab para chegar na linha e Enter (ou Espaço) para abrir.
-- Quando seu perfil não tem nenhuma ação disponível para o registro, o menu de três pontos não aparece.
+Marcar a caixa de seleção, usar o menu de ações ou os botões rápidos da linha (Aprovar, Autorizar, Excluir…) continua igual: essas ações não abrem os detalhes. No celular, tocar no cartão já abria os detalhes; o item "Ver detalhes" também saiu do menu ali. Pelo teclado, use Tab para chegar na linha e Enter (ou Espaço) para abrir. Quando seu perfil não tem nenhuma ação disponível para o registro, o menu de três pontos nem aparece.
 
 ### Cadastro de entidades: preenchimento automático pelo CNPJ
 
-Cadastrar um fornecedor ou cliente pessoa jurídica ficou mais rápido. Agora, ao criar uma nova entidade, basta digitar ou colar o CNPJ no campo **CPF / CNPJ** e o sistema consulta a base da Receita Federal e preenche automaticamente:
+Ao cadastrar um fornecedor ou cliente pessoa jurídica, digite o CNPJ e o sistema consulta a Receita Federal e preenche razão social, e-mail, telefone e endereço.
 
-- **Nome / Razão Social**
-- **E-mail**
-- **Telefone**
-- **Endereço** (logradouro, número, bairro, cidade, estado e CEP)
+Ao criar uma nova entidade, digite ou cole o CNPJ no campo CPF / CNPJ. Assim que os 14 dígitos estiverem lá, o sistema consulta a base da Receita Federal e preenche Nome / Razão Social, E-mail, Telefone e Endereço (logradouro, número, bairro, cidade, estado e CEP). Confira, ajuste o que precisar e salve.
 
-Os dados chegam já formatados: nomes com iniciais maiúsculas (mantendo conectivos como "de", "da", "e" em minúsculas), e-mail em minúsculas, telefone e CEP com a pontuação padrão.
+Os dados chegam formatados: nomes com iniciais maiúsculas (conectivos como "de", "da" e "e" ficam em minúsculas), e-mail em minúsculas, telefone e CEP com a pontuação padrão. Todos os campos continuam editáveis.
 
-**Como funciona**
+Mensagens que podem aparecer durante a consulta:
 
-1. Abra **Cadastros › Entidades** e clique em **Nova Entidade**.
-2. Digite ou cole o CNPJ. A consulta começa sozinha assim que os 14 dígitos são informados.
-3. Confira os campos preenchidos, ajuste o que precisar e salve.
+- "CNPJ inválido." O número digitado não passa na validação. Confira os dígitos.
+- "Este CNPJ não existe na base da Receita Federal." O número é válido, mas não há empresa registrada com ele.
+- "Este documento já está cadastrado." Já existe uma entidade com esse CNPJ na sua empresa.
+- "Não foi possível consultar o CNPJ agora. Preencha os dados manualmente." A consulta à Receita não respondeu. Nada fica bloqueado: preencha os campos e salve normalmente.
 
-**O que você pode ver durante a consulta**
-
-- **"CNPJ inválido."** — o número digitado não é um CNPJ válido. Verifique os dígitos.
-- **"Este CNPJ não existe na base da Receita Federal."** — o número é válido, mas não há empresa registrada com ele.
-- **"Este documento já está cadastrado."** — já existe uma entidade com esse CNPJ na sua empresa.
-- **"Não foi possível consultar o CNPJ agora. Preencha os dados manualmente."** — a consulta à Receita não respondeu. Nada foi bloqueado: preencha os campos normalmente e salve.
-
-**Bom saber**
-
-- O preenchimento automático acontece apenas no cadastro de **novas** entidades. Ao editar uma entidade existente, seus dados não são sobrescritos.
-- Todos os campos preenchidos continuam editáveis: você pode corrigir ou complementar qualquer informação antes de salvar.
-- A consulta usa um serviço público com limite de algumas consultas por minuto. Se você cadastrar várias empresas em sequência e receber o aviso de indisponibilidade, aguarde um instante e tente novamente, ou preencha manualmente.
+O preenchimento automático só acontece no cadastro de novas entidades. Ao editar uma entidade existente, nada é sobrescrito. A consulta usa um serviço público com limite de algumas consultas por minuto, então, se você cadastrar várias empresas em sequência e receber o aviso de indisponibilidade, espere um instante e tente de novo, ou preencha à mão.

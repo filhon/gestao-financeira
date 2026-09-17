@@ -22,7 +22,9 @@ import {
   TrendingUp,
   FileCheck,
   ReceiptText,
+  Megaphone,
 } from "lucide-react";
+import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
   Collapsible,
@@ -137,6 +139,8 @@ export function Sidebar() {
   const pathname = usePathname();
   const [openGroups, setOpenGroups] = useState<string[]>([]);
   const permissions = usePermissions();
+  const setNovidadesOpen = useGlobalStore((s) => s.setNovidadesOpen);
+  const novidadesNew = useGlobalStore((s) => s.novidadesNew);
 
   // Filter menu items based on permissions
   const menuItems = useMemo(() => {
@@ -308,6 +312,30 @@ export function Sidebar() {
           })}
         </div>
       </nav>
+
+      {/* Novidades */}
+      <div className="border-t px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setNovidadesOpen(true)}
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <div className="flex h-6 w-6 items-center justify-center">
+            <Megaphone
+              className={cn(
+                "h-4 w-4",
+                novidadesNew && "animate-pulse motion-reduce:animate-none",
+              )}
+            />
+          </div>
+          Novidades
+          {novidadesNew && (
+            <span className="ml-auto rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide text-background">
+              Novo
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Footer */}
       <div className="border-t px-5 py-4">

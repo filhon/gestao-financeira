@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // O layout raiz lê docs/NOVIDADES.md em runtime; garante que o arquivo
+  // acompanhe o bundle do servidor em qualquer rota.
+  outputFileTracingIncludes: {
+    "/**": ["./docs/NOVIDADES.md"],
+  },
+
   compiler: {
     // Remove console.log em produção, mantém console.error
     removeConsole:

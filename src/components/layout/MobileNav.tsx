@@ -17,9 +17,11 @@ import {
   Users,
   Settings,
   Map as MapIcon,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { useMemo, useState } from "react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
@@ -112,6 +114,8 @@ export function MobileNav() {
   const pathname = usePathname();
   const permissions = usePermissions();
   const [moreOpen, setMoreOpen] = useState(false);
+  const setNovidadesOpen = useGlobalStore((s) => s.setNovidadesOpen);
+  const novidadesNew = useGlobalStore((s) => s.novidadesNew);
 
   const visibleTabs = useMemo(() => {
     return mainTabs.filter((tab) => {
@@ -173,11 +177,14 @@ export function MobileNav() {
           >
             <div
               className={cn(
-                "flex items-center justify-center rounded-full px-4 h-7 transition-all duration-200",
+                "relative flex items-center justify-center rounded-full px-4 h-7 transition-all duration-200",
                 isMoreActive && "bg-primary/10",
               )}
             >
               <MoreHorizontal className="h-5 w-5" />
+              {novidadesNew && (
+                <span className="absolute right-2.5 top-0.5 h-2 w-2 rounded-full bg-foreground" />
+              )}
             </div>
             <span className="text-[10px] font-medium leading-none">Mais</span>
           </button>
@@ -234,6 +241,31 @@ export function MobileNav() {
                 </Link>
               );
             })}
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                setNovidadesOpen(true);
+              }}
+              className="flex items-center gap-3 rounded-xl bg-muted/40 px-3.5 py-3.5 text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-foreground">
+                <Megaphone
+                  className={cn(
+                    "h-[18px] w-[18px]",
+                    novidadesNew && "animate-pulse motion-reduce:animate-none",
+                  )}
+                />
+              </div>
+              <span className="text-sm font-medium leading-tight">
+                Novidades
+              </span>
+              {novidadesNew && (
+                <span className="ml-auto rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide text-background">
+                  Novo
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Company section */}

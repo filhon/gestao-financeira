@@ -13,6 +13,25 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { readFileSync } from "fs";
+import { createHash } from "crypto";
+import path from "path";
+import { NovidadesDialog } from "@/components/features/novidades/NovidadesDialog";
+import { parseNovidades } from "@/lib/novidades";
+
+// Lê docs/NOVIDADES.md no servidor; o hash serve de versão para o aviso de novidades
+function loadNovidades() {
+  const raw = readFileSync(
+    path.join(process.cwd(), "docs", "NOVIDADES.md"),
+    "utf8",
+  );
+  const releases = parseNovidades(raw);
+  const version = createHash("sha1")
+    .update(JSON.stringify(releases))
+    .digest("hex")
+    .slice(0, 10);
+  return { releases, version };
+}
 
 const inter = Inter({ subsets: ["latin"] });
 const ibmPlexSans = IBM_Plex_Sans({
@@ -75,6 +94,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const novidades = loadNovidades();
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       {/* Prevents flash of wrong theme on the landing page before React hydrates */}
@@ -101,6 +121,7 @@ export default function RootLayout({
                 <SpeedInsights />
                 <Analytics />
                 <ToastProvider />
+                <NovidadesDialog {...novidades} />
               </CompanyProvider>
             </AuthProvider>
           </QueryProvider>
