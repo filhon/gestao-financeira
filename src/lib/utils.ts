@@ -25,6 +25,31 @@ export function comprovanteProxyUrl(
   return mode === "inline" ? `${base}&inline=1` : base;
 }
 
+const PT_BR_CONNECTIVES = new Set([
+  "de",
+  "da",
+  "do",
+  "das",
+  "dos",
+  "e",
+  "em",
+  "com",
+  "para",
+  "por",
+]);
+
+/** "GLOBO COMUNICACAO E PARTICIPACOES S/A" → "Globo Comunicacao e Participacoes S/A" */
+export function titleCasePtBr(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[a-zà-ú]+/g, (word, offset: number) =>
+      offset > 0 && PT_BR_CONNECTIVES.has(word)
+        ? word
+        : word[0].toUpperCase() + word.slice(1),
+    );
+}
+
 export function formatCurrencyAbbr(value: number) {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";

@@ -21,10 +21,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Entity } from "@/lib/types";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { entityService } from "@/lib/services/entityService";
+import { cnpjService } from "@/lib/services/cnpjService";
+import { validateCnpj } from "@/lib/validations/cnpj";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { toast } from "sonner";
 import {
   Collapsible,
   CollapsibleContent,
@@ -119,15 +122,27 @@ export function EntityForm({
     },
   });
 
-  const handleDocumentBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
-    const document = e.target.value.replace(/\D/g, "");
+  const lastCheckedDocument = useRef("");
+
+  // Runs on blur and as soon as 14 digits are typed/pasted.
+  // Checks for duplicates; on a new entity with a CNPJ, also fills the form from the Receita Federal.
+  const checkDocument = async (raw: string) => {
+    const document = raw.replace(/\D/g, "");
     if (!document || !selectedCompany) return;
+    if (document === lastCheckedDocument.current) return;
 
     // If we are editing, and the document hasn't changed, don't check
     if (
       defaultValues?.document &&
       defaultValues.document.replace(/\D/g, "") === document
     ) {
+      return;
+    }
+    lastCheckedDocument.current = document;
+
+    const shouldLookup = !defaultValues?.id && document.length === 14;
+    if (shouldLookup && !validateCnpj(document)) {
+      form.setError("document", { type: "manual", message: "CNPJ inválido." });
       return;
     }
 
@@ -142,8 +157,28 @@ export function EntityForm({
           type: "manual",
           message: "Este documento já está cadastrado.",
         });
+        return;
+      }
+      form.clearErrors("document");
+      if (!shouldLookup) return;
+
+      const result = await cnpjService.lookup(document);
+      if (result.status === "not_found") {
+        form.setError("document", {
+          type: "manual",
+          message: "Este CNPJ não existe na base da Receita Federal.",
+        });
+      } else if (result.status === "unavailable") {
+        toast.warning(
+          "Não foi possível consultar o CNPJ agora. Preencha os dados manualmente.",
+        );
       } else {
-        form.clearErrors("document");
+        const { name, email, phone, address } = result.data;
+        form.setValue("name", name, { shouldValidate: true });
+        form.setValue("email", email, { shouldValidate: true });
+        form.setValue("phone", phone);
+        form.setValue("address", address);
+        toast.success("Dados preenchidos a partir da Receita Federal.");
       }
     } finally {
       setIsCheckingDocument(false);
@@ -257,9 +292,15 @@ export function EntityForm({
                       <Input
                         placeholder="000.000.000-00"
                         {...field}
+                        onChange={(e) => {
+                          field.onChange(e);
+                          if (e.target.value.replace(/\D/g, "").length === 14) {
+                            checkDocument(e.target.value);
+                          }
+                        }}
                         onBlur={(e) => {
                           field.onBlur();
-                          handleDocumentBlur(e);
+                          checkDocument(e.target.value);
                         }}
                       />
                       {isCheckingDocument && (
