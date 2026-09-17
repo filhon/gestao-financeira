@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
+import { useAuth } from "@/components/providers/AuthProvider";
 import type { NovidadeRelease, NovidadeSection } from "@/lib/novidades";
 
 const STORAGE_KEY = "novidades-seen";
@@ -31,10 +32,13 @@ export function NovidadesDialog({ releases, version }: NovidadesDialogProps) {
   const setOpen = useGlobalStore((s) => s.setNovidadesOpen);
   const setNovidadesNew = useGlobalStore((s) => s.setNovidadesNew);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
   const latestDate = releases[0]?.date ?? null;
 
-  // Abre sozinho no primeiro acesso após cada mudança no arquivo
+  // Abre sozinho no primeiro acesso após cada mudança no arquivo. Só para
+  // usuário logado: o layout raiz também envolve landing, login e magic links.
   useEffect(() => {
+    if (!user) return;
     setNovidadesNew(
       !!latestDate &&
         differenceInDays(new Date(), new Date(latestDate)) <= NEW_FOR_DAYS,
@@ -42,7 +46,7 @@ export function NovidadesDialog({ releases, version }: NovidadesDialogProps) {
     try {
       if (localStorage.getItem(STORAGE_KEY) !== version) setOpen(true);
     } catch {}
-  }, [version, latestDate, setOpen, setNovidadesNew]);
+  }, [user, version, latestDate, setOpen, setNovidadesNew]);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) {
