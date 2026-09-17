@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { RecurringTransactionTemplate } from "@/lib/types";
@@ -22,7 +22,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Loader2,
   PauseCircle,
   PlayCircle,
   Pencil,
@@ -58,15 +57,19 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pagination } from "@/components/ui/pagination";
 import { toast } from "sonner";
-import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
+import {
+  cn,
+  formatCurrency,
+  formatCurrencyAbbr,
+  normalizeText,
+} from "@/lib/utils";
 import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurrenceDialog";
 import { AnimatedCounter } from "@/components/ui/animated-counter";
 
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
-import { useDebounce } from "@/hooks/useDebounce";
-import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 
 function getFrequencyLabel(freq: string, interval: number) {
   const intervalLabel = interval > 1 ? `A cada ${interval} ` : "";
@@ -275,15 +278,14 @@ export default function RecorrenciasPage() {
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const debouncedSearchTerm = useDebounce(searchTerm, 500);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchTerm, setSearchTermState] = useState("");
+  const [statusFilter, setStatusFilterState] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const [editTemplate, setEditTemplate] =
     useState<RecurringTransactionTemplate | null>(null);
-
-  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!canViewRecurrences) {
@@ -291,48 +293,50 @@ export default function RecorrenciasPage() {
     }
   }, [canViewRecurrences, router]);
 
-  // All active templates for KPI calculation (unfiltered)
-  const kpiQueryKey = ["recurrences-kpi", selectedCompany?.id];
-  const { data: allTemplates = [], isLoading: kpiLoading } = useQuery({
-    queryKey: kpiQueryKey,
+  // ponytail: carrega tudo e filtra/pagina no cliente. Os KPIs já exigiam a
+  // lista inteira, e uma empresa tem dezenas de recorrências, não milhares.
+  // Se um tenant passar de alguns milhares, voltar ao cursor no Firestore.
+  const {
+    data: allTemplates = [],
+    isLoading,
+    isError,
+    refetch: fetchTemplates,
+  } = useQuery({
+    queryKey: ["recurrences", selectedCompany?.id],
     queryFn: () => recurrenceService.getTemplates(selectedCompany!.id),
     enabled: !!selectedCompany && canViewRecurrences,
   });
 
-  const {
-    items: templates,
-    hasMore,
-    loadMore,
-    isLoading,
-    isFetchingNextPage,
-    isError,
-    refresh: fetchTemplates,
-  } = usePaginatedQuery<RecurringTransactionTemplate>({
-    queryKey: [
-      "recurrences",
-      selectedCompany?.id,
-      statusFilter,
-      debouncedSearchTerm,
-    ],
-    queryFn: async (pageSize, lastDoc) => {
-      const filter: { active?: boolean; searchTerm?: string } = {
-        active: statusFilter === "all" ? undefined : statusFilter === "active",
-      };
-      if (debouncedSearchTerm) {
-        filter.searchTerm = debouncedSearchTerm;
-      }
-      const { templates: items, lastDoc: newLastDoc } =
-        await recurrenceService.getPaginated(
-          selectedCompany!.id,
-          pageSize,
-          lastDoc,
-          filter,
-        );
-      return { items, lastDoc: newLastDoc };
-    },
-    pageSize: 25,
-    enabled: !!selectedCompany && canViewRecurrences,
-  });
+  const filteredTemplates = useMemo(() => {
+    const term = normalizeText(searchTerm.trim());
+    return allTemplates
+      .filter(
+        (t) =>
+          (statusFilter === "all" ||
+            t.active === (statusFilter === "active")) &&
+          (!term || normalizeText(t.description ?? "").includes(term)),
+      )
+      .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
+  }, [allTemplates, statusFilter, searchTerm]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredTemplates.length / pageSize),
+  );
+  const currentPage = Math.min(page, totalPages);
+  const templates = filteredTemplates.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+
+  const setSearchTerm = (value: string) => {
+    setSearchTermState(value);
+    setPage(1);
+  };
+  const setStatusFilter = (value: string) => {
+    setStatusFilterState(value);
+    setPage(1);
+  };
 
   // KPIs derived from all active templates
   const kpis = useMemo(() => {
@@ -383,7 +387,6 @@ export default function RecorrenciasPage() {
         `Recorrência ${template.active ? "pausada" : "ativada"} com sucesso!`,
       );
       fetchTemplates();
-      queryClient.invalidateQueries({ queryKey: kpiQueryKey });
     } catch {
       toast.error("Erro ao atualizar recorrência.");
     }
@@ -396,6 +399,19 @@ export default function RecorrenciasPage() {
     active: "Ativos",
     paused: "Pausados",
   };
+
+  const pagination = (
+    <Pagination
+      page={currentPage}
+      totalItems={filteredTemplates.length}
+      pageSize={pageSize}
+      onPageChange={setPage}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -419,7 +435,7 @@ export default function RecorrenciasPage() {
             <TrendingUp className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
             MRR
           </div>
-          {kpiLoading ? (
+          {isLoading ? (
             <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
           ) : (
             <div
@@ -453,7 +469,7 @@ export default function RecorrenciasPage() {
             <TrendingDown className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
             Compromisso Fixo
           </div>
-          {kpiLoading ? (
+          {isLoading ? (
             <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
           ) : (
             <div
@@ -487,7 +503,7 @@ export default function RecorrenciasPage() {
             <RepeatIcon className="h-3.5 w-3.5" />
             Recorrências Ativas
           </div>
-          {kpiLoading ? (
+          {isLoading ? (
             <div className="mt-2 h-7 w-10 animate-pulse rounded bg-muted" />
           ) : (
             <div className="mt-1 text-xl font-bold md:text-2xl">
@@ -522,7 +538,7 @@ export default function RecorrenciasPage() {
             )}
             Atenção Necessária
           </div>
-          {kpiLoading ? (
+          {isLoading ? (
             <div className="mt-2 h-7 w-16 animate-pulse rounded bg-muted" />
           ) : (
             <>
@@ -569,7 +585,7 @@ export default function RecorrenciasPage() {
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por descrição exata..."
+                  placeholder="Buscar por descrição..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-8 w-[250px]"
@@ -591,11 +607,10 @@ export default function RecorrenciasPage() {
           {/* ── Mobile: título ─────────────────────────────────────── */}
           <div className="flex md:hidden items-center justify-between gap-2">
             <CardTitle>Modelos de Recorrência</CardTitle>
-            {!isLoading && (
+            {!isLoading && !isError && (
               <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                {templates.length}
-                {hasMore ? "+" : ""} resultado
-                {templates.length !== 1 ? "s" : ""}
+                {filteredTemplates.length} resultado
+                {filteredTemplates.length !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -688,7 +703,7 @@ export default function RecorrenciasPage() {
                 Tentar novamente
               </Button>
             </div>
-          ) : isLoading && templates.length === 0 ? (
+          ) : isLoading ? (
             <>
               <div className="hidden md:block">
                 <TableSkeleton />
@@ -887,25 +902,7 @@ export default function RecorrenciasPage() {
                   </TableBody>
                 </Table>
 
-                {hasMore && (
-                  <div className="flex justify-center border-t py-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={loadMore}
-                      disabled={isFetchingNextPage}
-                    >
-                      {isFetchingNextPage ? (
-                        <>
-                          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                          Carregando...
-                        </>
-                      ) : (
-                        "Carregar Mais"
-                      )}
-                    </Button>
-                  </div>
-                )}
+                <div className="border-t px-6 py-4">{pagination}</div>
               </div>
 
               {/* ── Mobile: Card list ────────────────────────────────── */}
@@ -951,25 +948,7 @@ export default function RecorrenciasPage() {
                       })}
                     </div>
 
-                    {hasMore && (
-                      <div className="flex justify-center border-t py-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={loadMore}
-                          disabled={isFetchingNextPage}
-                        >
-                          {isFetchingNextPage ? (
-                            <>
-                              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                              Carregando...
-                            </>
-                          ) : (
-                            "Carregar Mais"
-                          )}
-                        </Button>
-                      </div>
-                    )}
+                    <div className="border-t px-4 py-3">{pagination}</div>
                   </>
                 )}
               </div>
@@ -1034,10 +1013,7 @@ export default function RecorrenciasPage() {
         open={!!editTemplate}
         onOpenChange={(open) => !open && setEditTemplate(null)}
         template={editTemplate}
-        onSuccess={() => {
-          fetchTemplates();
-          queryClient.invalidateQueries({ queryKey: kpiQueryKey });
-        }}
+        onSuccess={() => fetchTemplates()}
       />
     </div>
   );

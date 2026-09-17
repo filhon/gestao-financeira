@@ -6,6 +6,22 @@
 
 ## Atualização de 17 de setembro de 2026
 
+### Financeiro › Recorrências: busca por parte do nome e edição corrigida
+
+Dois problemas na tela de recorrências foram resolvidos:
+
+- **Busca por parte do nome.** Antes, o campo de busca só encontrava a recorrência se você digitasse a descrição exatamente como estava cadastrada. Agora basta um trecho: "IPT" encontra "IPTU", "agua" encontra "Conta de Água". Maiúsculas, minúsculas e acentos não fazem diferença, e o resultado aparece a cada letra digitada, sem espera.
+- **Editar recorrência voltou a funcionar.** Salvar alterações em uma recorrência (nome, valor, frequência, intervalo, próximo vencimento ou data final) falhava com "Erro ao atualizar recorrência" sempre que a recorrência não tinha data final ou regra de reajuste, ou seja, na maioria dos casos. Corrigido: a edição salva normalmente.
+- **Criar recorrência sem preencher campos opcionais.** Pelo mesmo motivo, criar uma conta recorrente em Contas a Pagar ou Contas a Receber sem informar forma de pagamento, entidade ou origem da solicitação também falhava. Agora esses campos podem ficar em branco.
+
+**Outras melhorias na tela**
+
+- **Paginação com números** no lugar do botão "Carregar Mais", no mesmo padrão das demais listagens: "1–25 de 60", botões de página, setas e seletor de itens por página (25, 50 ou 100). Ao buscar ou trocar o filtro de status, a lista volta para a primeira página.
+- **Contagem exata de resultados** no celular: antes mostrava "25+ resultados" quando havia mais de uma página; agora mostra o total real.
+- **Data final pode ser removida.** Na edição, ao lado de "Data Final" aparece um link **Remover** quando há uma data preenchida; antes não havia como tirar uma data final depois de definida.
+- **Frequência correta ao abrir a edição.** O campo Frequência podia mostrar um valor diferente do cadastrado ao abrir a janela de edição (o valor salvo estava certo, só a exibição errava). Corrigido.
+- **Carregamento mais rápido.** A tela fazia duas consultas ao banco, uma para os indicadores do topo e outra para a lista; agora faz uma só, e os filtros e a busca são aplicados na hora, sem nova consulta.
+
 ### Cadastros › Entidades no mesmo padrão das outras listagens
 
 A tela de fornecedores e clientes foi alinhada às demais listagens do sistema (Contas a Pagar, Lotes, Centros de Custo). O que muda para você:

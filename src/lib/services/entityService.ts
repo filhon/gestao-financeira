@@ -19,15 +19,9 @@ import { db } from "@/lib/firebase/client";
 import { Entity } from "@/lib/types";
 import { auditService } from "./auditService";
 import { generateChanges } from "@/lib/auditFormatter";
+import { normalizeText } from "@/lib/utils";
 
 const COLLECTION_NAME = "entities";
-
-// Normalizes text: lowercase + remove diacritics (accents)
-const normalizeText = (text: string): string =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
 
 /**
  * Busca por nome (sem acento/caixa, substring) ou por documento

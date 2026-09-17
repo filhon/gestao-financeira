@@ -9,15 +9,28 @@ import {
   Timestamp,
   addDoc,
   updateDoc,
-  orderBy,
-  startAfter,
+  deleteField,
   limit,
-  QueryDocumentSnapshot,
   DocumentData,
 } from "firebase/firestore";
 import { RecurringTransactionTemplate } from "@/lib/types";
+import { stripUndefined } from "@/lib/utils";
 
 const COLLECTION_NAME = "recurring_templates";
+
+const toTemplate = (
+  id: string,
+  data: DocumentData,
+): RecurringTransactionTemplate =>
+  ({
+    id,
+    ...data,
+    nextDueDate: (data.nextDueDate as Timestamp)?.toDate(),
+    endDate: (data.endDate as Timestamp)?.toDate(),
+    lastGeneratedAt: (data.lastGeneratedAt as Timestamp)?.toDate(),
+    createdAt: (data.createdAt as Timestamp)?.toDate(),
+    updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+  }) as RecurringTransactionTemplate;
 
 export const recurrenceService = {
   createTemplate: async (
@@ -26,12 +39,17 @@ export const recurrenceService = {
       "id" | "createdAt" | "updatedAt" | "lastGeneratedAt"
     >,
   ): Promise<string> => {
-    const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-      ...data,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
-      active: true,
-    });
+    // Campos opcionais do formulário (entidade, forma de pagamento…) chegam
+    // como `undefined`, e o Firestore recusa a gravação inteira por isso.
+    const docRef = await addDoc(
+      collection(db, COLLECTION_NAME),
+      stripUndefined({
+        ...data,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        active: true,
+      }),
+    );
     return docRef.id;
   },
 
@@ -53,71 +71,7 @@ export const recurrenceService = {
     }
 
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        nextDueDate: data.nextDueDate.toDate(),
-        endDate: data.endDate?.toDate(),
-        lastGeneratedAt: data.lastGeneratedAt?.toDate(),
-        createdAt: data.createdAt.toDate(),
-        updatedAt: data.updatedAt.toDate(),
-      } as RecurringTransactionTemplate;
-    });
-  },
-
-  getPaginated: async (
-    companyId: string,
-    pageSize: number,
-    lastDoc: QueryDocumentSnapshot<DocumentData> | null,
-    filters?: {
-      active?: boolean;
-      searchTerm?: string;
-    },
-  ): Promise<{
-    templates: RecurringTransactionTemplate[];
-    lastDoc: QueryDocumentSnapshot<DocumentData> | null;
-  }> => {
-    let q = query(
-      collection(db, COLLECTION_NAME),
-      where("companyId", "==", companyId),
-    );
-
-    if (filters?.active !== undefined) {
-      q = query(q, where("active", "==", filters.active));
-    }
-
-    if (filters?.searchTerm) {
-      q = query(q, where("description", "==", filters.searchTerm));
-    }
-
-    q = query(q, orderBy("nextDueDate", "asc"));
-
-    if (lastDoc) {
-      q = query(q, startAfter(lastDoc));
-    }
-
-    q = query(q, limit(pageSize));
-
-    const snapshot = await getDocs(q);
-    const templates = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        nextDueDate: data.nextDueDate.toDate(),
-        endDate: data.endDate?.toDate(),
-        lastGeneratedAt: data.lastGeneratedAt?.toDate(),
-        createdAt: data.createdAt.toDate(),
-        updatedAt: data.updatedAt.toDate(),
-      } as RecurringTransactionTemplate;
-    });
-
-    return {
-      templates,
-      lastDoc: snapshot.docs[snapshot.docs.length - 1] || null,
-    };
+    return snapshot.docs.map((doc) => toTemplate(doc.id, doc.data()));
   },
 
   updateTemplate: async (
@@ -135,9 +89,16 @@ export const recurrenceService = {
       throw new Error("Recorrência não pertence a esta empresa");
     }
 
-    await updateDoc(docRef, {
-      ...data,
-      updatedAt: Timestamp.now(),
-    });
+    // Chave presente com `undefined` = "apague este campo" (ex.: tirar a
+    // data final). O Firestore recusa `undefined`; `deleteField()` é o jeito
+    // de dizer isso. Dentro de objetos aninhados só se pode omitir a chave.
+    const payload = Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [
+        key,
+        value === undefined ? deleteField() : stripUndefined(value),
+      ]),
+    );
+
+    await updateDoc(docRef, { ...payload, updatedAt: Timestamp.now() });
   },
 };

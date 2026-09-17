@@ -174,10 +174,7 @@ export function EditRecurrenceDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Frequência</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue />
@@ -262,7 +259,18 @@ export function EditRecurrenceDialog({
                 name="endDate"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel>Data Final (Opcional)</FormLabel>
+                    <div className="flex items-center justify-between">
+                      <FormLabel>Data Final (Opcional)</FormLabel>
+                      {field.value && (
+                        <button
+                          type="button"
+                          onClick={() => field.onChange(null)}
+                          className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                        >
+                          Remover
+                        </button>
+                      )}
+                    </div>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>

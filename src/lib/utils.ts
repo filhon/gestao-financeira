@@ -50,6 +50,31 @@ export function titleCasePtBr(text: string): string {
     );
 }
 
+/** Minúsculas e sem acento: "IPT" casa "IPTU", "agua" casa "Água". */
+export function normalizeText(text: string): string {
+  return text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+/**
+ * Remove chaves `undefined` antes de gravar no Firestore, que as rejeita.
+ * Desce só em arrays e objetos simples; Date, Timestamp e FieldValue passam intactos.
+ */
+export function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(stripUndefined) as T;
+  if (
+    value &&
+    typeof value === "object" &&
+    Object.getPrototypeOf(value) === Object.prototype
+  ) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, stripUndefined(v)]),
+    ) as T;
+  }
+  return value;
+}
+
 export function formatCurrencyAbbr(value: number) {
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
