@@ -10,5 +10,6 @@
       "Skill(impeccable)",
       "Skill(impeccable:*)"
     ]
-  }
+  },
+  "outputStyle": "Concise"
 }

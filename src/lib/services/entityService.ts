@@ -29,6 +29,27 @@ const normalizeText = (text: string): string =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
+/**
+ * Busca por nome (sem acento/caixa, substring) ou por documento
+ * (dígitos ou como digitado). Termo vazio casa com tudo.
+ */
+export function matchesEntitySearch(entity: Entity, search: string): boolean {
+  const term = search.trim();
+  if (!term) return true;
+  const cleanSearch = term.replace(/\D/g, "");
+  const isNumeric = cleanSearch.length > 0 && /^\d+$/.test(cleanSearch);
+  const normalizedSearch = normalizeText(term);
+
+  if (isNumeric && entity.document) {
+    if (entity.document.replace(/\D/g, "").includes(cleanSearch)) return true;
+  }
+  if (normalizeText(entity.name || "").includes(normalizedSearch)) return true;
+  if (!isNumeric && entity.document) {
+    if (normalizeText(entity.document).includes(normalizedSearch)) return true;
+  }
+  return false;
+}
+
 // Simple in-memory cache
 const cache: Record<string, { data: Entity[]; timestamp: number }> = {};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -109,26 +130,9 @@ export const entityService = {
         convertDates({ id: doc.id, ...doc.data() }),
       );
 
-      const cleanSearch = search.replace(/\D/g, "");
-      const isNumeric = cleanSearch.length > 0 && /^\d+$/.test(cleanSearch);
-      const normalizedSearch = normalizeText(search);
-
-      const filtered = allEntities.filter((entity) => {
-        // Match against document number (digits only)
-        if (isNumeric && entity.document) {
-          const cleanDoc = entity.document.replace(/\D/g, "");
-          if (cleanDoc.includes(cleanSearch)) return true;
-        }
-        // Match against normalized name (substring, case + accent insensitive)
-        const normalizedName = normalizeText(entity.name || "");
-        if (normalizedName.includes(normalizedSearch)) return true;
-        // Also try matching against document as typed (e.g. formatted CPF/CNPJ)
-        if (!isNumeric && entity.document) {
-          const normalizedDoc = normalizeText(entity.document);
-          if (normalizedDoc.includes(normalizedSearch)) return true;
-        }
-        return false;
-      });
+      const filtered = allEntities.filter((entity) =>
+        matchesEntitySearch(entity, search),
+      );
 
       // Apply client-side "pagination" offset based on lastDoc
       let startIndex = 0;

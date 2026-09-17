@@ -6,6 +6,27 @@
 
 ## Atualização de 17 de setembro de 2026
 
+### Cadastros › Entidades no mesmo padrão das outras listagens
+
+A tela de fornecedores e clientes foi alinhada às demais listagens do sistema (Contas a Pagar, Lotes, Centros de Custo). O que muda para você:
+
+- **Totais no cabeçalho.** Os três cartões de contagem deram lugar a uma linha logo abaixo do título: "48 entidades · 30 fornecedores · 25 clientes". Ocupa menos espaço e a lista aparece mais acima na tela. Os números agora atualizam na hora ao criar ou excluir uma entidade (antes podiam ficar defasados por alguns minutos).
+- **Paginação com números.** O botão "Carregar Mais" saiu. No rodapé da lista você vê "1–25 de 132", os botões de página (1, 2, 3 … 6) com a atual destacada, setas de anterior e próxima, e um seletor de **itens por página** (25, 50 ou 100). No celular, as setas e o indicador "3 / 6". Ao buscar ou trocar de aba, a lista volta para a primeira página.
+- **Busca instantânea.** O filtro por nome ou CNPJ/CPF aplica a cada letra digitada, sem espera. A busca ganhou um **X** para limpar o texto.
+- **Busca e abas na mesma linha.** No computador, o campo de busca e as abas Todos / Fornecedores / Clientes ficam lado a lado; no celular, empilhados.
+- **Ordenação sobre a lista inteira.** Clicar em Nome, Tipo, Categoria ou Documento ordena todas as entidades, não só as já carregadas. Cada coluna mostra o ícone de ordenação; a ativa fica destacada com a seta para cima ou para baixo.
+- **Contagem de resultados** no canto direito do cabeçalho da lista, em qualquer tamanho de tela.
+- **Editar e Excluir pelo teclado.** Os botões da linha, que apareciam só ao passar o mouse, agora também aparecem ao navegar com Tab.
+- **Nada encontrado ficou mais útil.** Ao buscar sem resultado, há um botão **Limpar busca**. Sem nada cadastrado na aba, a mensagem indica o que falta (por exemplo, "Nenhum fornecedor cadastrado") e oferece **Criar entidade** para quem tem permissão.
+- **Falha ao carregar aparece como falha.** Se a lista não puder ser carregada, você vê um aviso com **Tentar novamente**, em vez de uma lista vazia.
+- **Excluir mostra o nome.** A confirmação de exclusão agora cita a entidade ("Excluir "Fornecedor X"?") e avisa que a ação não pode ser desfeita.
+- **Tema escuro.** Etiquetas de Fornecedor / Cliente / Ambos e as iniciais coloridas passaram a ter versão para o tema escuro.
+
+**Bom saber**
+
+- O título da página passou a ser **Entidades** (antes repetia "Cadastros", que é o nome da seção).
+- A coluna **Ações** só aparece para quem pode gerenciar entidades.
+
 ### Um clique na linha abre os detalhes
 
 Abrir o registro que você está vendo em uma lista ficou mais direto: basta clicar em qualquer ponto da linha. Não é mais preciso abrir o menu de três pontos e procurar "Ver detalhes" — esse item saiu do menu, que agora guarda só as ações de fato (confirmar pagamento, editar, excluir etc.).

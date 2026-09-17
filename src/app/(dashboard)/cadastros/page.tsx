@@ -11,7 +11,7 @@ function EntidadesCard() {
     <Link href="/cadastros/entidades" className="group block">
       <div className="relative rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-indigo-200 dark:hover:border-indigo-900 overflow-hidden">
         {/* accent strip */}
-        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-gradient-to-r from-indigo-500 to-violet-400" />
+        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-indigo-500 to-violet-400" />
 
         <div className="flex items-start justify-between mb-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-950">

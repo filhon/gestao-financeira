@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { entityService } from "@/lib/services/entityService";
+import { useEffect, useMemo, useState } from "react";
+import {
+  entityService,
+  matchesEntitySearch,
+} from "@/lib/services/entityService";
 import { Entity } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,18 +33,21 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Plus,
   Pencil,
   Trash2,
   Building2,
   User,
-  Loader2,
   Search,
-  Users,
-  TruckIcon,
-  HandshakeIcon,
   MoreHorizontal,
+  X,
+  ChevronsUpDown,
+  ChevronUp,
+  ChevronDown,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -59,14 +65,99 @@ import { useSortableData } from "@/hooks/useSortableData";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
-import { useDebounce } from "@/hooks/useDebounce";
-import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useQuery } from "@tanstack/react-query";
 
 function getEntityInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getAvatarColor(name: string): string {
+  const colors = [
+    "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+    "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+    "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+    "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+    "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
+    "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+const categoryBadge: Record<string, React.ReactNode> = {
+  supplier: (
+    <Badge
+      variant="outline"
+      className="font-normal text-orange-700 border-orange-300 bg-orange-50 dark:text-orange-400 dark:border-orange-800 dark:bg-orange-950/30"
+    >
+      Fornecedor
+    </Badge>
+  ),
+  client: (
+    <Badge
+      variant="outline"
+      className="font-normal text-blue-700 border-blue-300 bg-blue-50 dark:text-blue-400 dark:border-blue-800 dark:bg-blue-950/30"
+    >
+      Cliente
+    </Badge>
+  ),
+  both: (
+    <Badge
+      variant="outline"
+      className="font-normal text-violet-700 border-violet-300 bg-violet-50 dark:text-violet-400 dark:border-violet-800 dark:bg-violet-950/30"
+    >
+      Ambos
+    </Badge>
+  ),
+};
+
+const tabEmptyLabel: Record<string, string> = {
+  all: "Nenhuma entidade cadastrada",
+  supplier: "Nenhum fornecedor cadastrado",
+  client: "Nenhum cliente cadastrado",
+};
+
+function SortIcon({
+  field,
+  sortConfig,
+}: {
+  field: string;
+  sortConfig: { key: string; direction: "asc" | "desc" } | null;
+}) {
+  if (sortConfig?.key !== field) {
+    return (
+      <ChevronsUpDown className="inline ml-1 h-3.5 w-3.5 text-muted-foreground/50" />
+    );
+  }
+  return sortConfig.direction === "asc" ? (
+    <ChevronUp className="inline ml-1 h-3.5 w-3.5 text-primary" />
+  ) : (
+    <ChevronDown className="inline ml-1 h-3.5 w-3.5 text-primary" />
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-1 py-2">
+          <Skeleton className="h-7 w-7 rounded-full" />
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-5 w-20 rounded-full" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-8 w-16 rounded" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function MobileCardSkeleton() {
@@ -89,51 +180,6 @@ function MobileCardSkeleton() {
   );
 }
 
-function getAvatarColor(name: string): string {
-  const colors = [
-    "bg-blue-100 text-blue-700",
-    "bg-emerald-100 text-emerald-700",
-    "bg-orange-100 text-orange-700",
-    "bg-violet-100 text-violet-700",
-    "bg-rose-100 text-rose-700",
-    "bg-cyan-100 text-cyan-700",
-    "bg-amber-100 text-amber-700",
-    "bg-teal-100 text-teal-700",
-  ];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-}
-
-const categoryBadge: Record<string, React.ReactNode> = {
-  supplier: (
-    <Badge
-      variant="outline"
-      className="text-orange-600 border-orange-300 bg-orange-50 font-normal"
-    >
-      Fornecedor
-    </Badge>
-  ),
-  client: (
-    <Badge
-      variant="outline"
-      className="text-blue-600 border-blue-300 bg-blue-50 font-normal"
-    >
-      Cliente
-    </Badge>
-  ),
-  both: (
-    <Badge
-      variant="outline"
-      className="text-violet-600 border-violet-300 bg-violet-50 font-normal"
-    >
-      Ambos
-    </Badge>
-  ),
-};
-
 interface MobileEntityCardProps {
   entity: Entity;
   canManage: boolean;
@@ -150,7 +196,7 @@ function MobileEntityCard({
   onDelete,
 }: MobileEntityCardProps) {
   return (
-    <div className="relative flex items-center gap-3 px-4 py-3.5 border-l-4 border-l-transparent transition-colors">
+    <div className="flex items-center gap-3 px-4 py-3.5">
       <button
         type="button"
         className="flex-1 text-left min-w-0"
@@ -224,13 +270,14 @@ export default function EntitiesPage() {
   const { canManageEntities, canViewEntities } = usePermissions();
 
   const [searchTerm, setSearchTerm] = useState("");
-  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+  const [activeTab, setActiveTab] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("all");
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [entityToDelete, setEntityToDelete] = useState<Entity | null>(null);
 
   useEffect(() => {
     if (!canViewEntities) {
@@ -238,8 +285,15 @@ export default function EntitiesPage() {
     }
   }, [canViewEntities, router]);
 
-  // KPI totals
-  const { data: allEntities = [] } = useQuery({
+  // ponytail: carrega tudo e pagina no cliente. Entidades por empresa são
+  // centenas, não milhares; o serviço já fazia isso na busca. Se um tenant
+  // passar de alguns milhares, voltar para cursor no Firestore.
+  const {
+    data: allEntities = [],
+    isLoading,
+    isError,
+    refetch: fetchEntities,
+  } = useQuery({
     queryKey: ["entities-all", selectedCompany?.id],
     queryFn: () => entityService.getAll(selectedCompany!.id),
     enabled: !!selectedCompany && canViewEntities,
@@ -254,41 +308,40 @@ export default function EntitiesPage() {
     (e) => e.category === "client" || e.category === "both",
   ).length;
 
-  const {
-    items: entities,
-    hasMore,
-    loadMore,
-    isLoading,
-    isFetchingNextPage,
-    refresh: fetchEntities,
-  } = usePaginatedQuery<Entity>({
-    queryKey: ["entities", selectedCompany?.id, activeTab, debouncedSearchTerm],
-    queryFn: async (pageSize, lastDoc) => {
-      const category =
-        activeTab === "all" ? undefined : (activeTab as "supplier" | "client");
-
-      const { entities: items, lastDoc: newLastDoc } =
-        await entityService.getPaginated(
-          selectedCompany!.id,
-          pageSize,
-          lastDoc,
-          {
-            category,
-            search: debouncedSearchTerm || undefined,
-          },
-        );
-
-      return { items, lastDoc: newLastDoc };
-    },
-    pageSize: 25,
-    enabled: !!selectedCompany && canViewEntities,
-  });
+  const filteredEntities = useMemo(
+    () =>
+      allEntities.filter(
+        (e) =>
+          (activeTab === "all" ||
+            e.category === activeTab ||
+            e.category === "both") &&
+          matchesEntitySearch(e, searchTerm),
+      ),
+    [allEntities, activeTab, searchTerm],
+  );
 
   const {
     items: sortedEntities,
     requestSort,
     sortConfig,
-  } = useSortableData(entities);
+  } = useSortableData(filteredEntities, { key: "name", direction: "asc" });
+
+  const totalPages = Math.max(1, Math.ceil(sortedEntities.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageEntities = sortedEntities.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+    setPage(1);
+  };
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    setPage(1);
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCreate = async (data: any) => {
@@ -334,11 +387,10 @@ export default function EntitiesPage() {
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
-    if (!user || !selectedCompany) return;
+    if (!entityToDelete || !user || !selectedCompany) return;
     try {
       await entityService.delete(
-        deleteId,
+        entityToDelete.id,
         { uid: user.uid, email: user.email },
         selectedCompany.id,
       );
@@ -348,7 +400,7 @@ export default function EntitiesPage() {
       console.error("Error deleting entity:", error);
       toast.error("Erro ao excluir entidade.");
     } finally {
-      setDeleteId(null);
+      setEntityToDelete(null);
     }
   };
 
@@ -364,17 +416,112 @@ export default function EntitiesPage() {
 
   if (!canViewEntities) return null;
 
+  const resultCount = !isLoading && !isError && (
+    <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+      {sortedEntities.length} resultado
+      {sortedEntities.length !== 1 ? "s" : ""}
+    </span>
+  );
+
+  const emptyState = (
+    <div className="flex flex-col items-center justify-center py-14 px-4 text-center">
+      <div className="rounded-full bg-muted p-4 mb-4">
+        <Building2 className="h-8 w-8 text-muted-foreground" />
+      </div>
+      <p className="font-medium">
+        {searchTerm
+          ? `Nenhum resultado para "${searchTerm}"`
+          : tabEmptyLabel[activeTab]}
+      </p>
+      <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+        {searchTerm
+          ? "Verifique a grafia ou tente buscar pelo CNPJ/CPF."
+          : "Cadastre fornecedores e clientes para usá-los nas contas a pagar e a receber."}
+      </p>
+      {searchTerm ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-4"
+          onClick={() => handleSearch("")}
+        >
+          Limpar busca
+        </Button>
+      ) : (
+        canManageEntities && (
+          <Button size="sm" className="mt-4" onClick={openCreateDialog}>
+            <Plus className="mr-2 h-4 w-4" /> Criar entidade
+          </Button>
+        )
+      )}
+    </div>
+  );
+
+  const errorState = (
+    <div className="flex flex-col items-center gap-3 py-16 px-4 text-center">
+      <div className="rounded-full bg-red-100 p-4 dark:bg-red-900/30">
+        <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
+      </div>
+      <div>
+        <p className="font-medium">Erro ao carregar entidades</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Não foi possível buscar os dados. Tente novamente.
+        </p>
+      </div>
+      <Button variant="outline" size="sm" onClick={() => fetchEntities()}>
+        <RefreshCw className="mr-2 h-3.5 w-3.5" />
+        Tentar novamente
+      </Button>
+    </div>
+  );
+
+  const pagination = (
+    <Pagination
+      page={currentPage}
+      totalItems={sortedEntities.length}
+      pageSize={pageSize}
+      onPageChange={setPage}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
+    />
+  );
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div>
           <h1 className="text-xl md:text-3xl font-bold tracking-tight">
-            Cadastros
+            Entidades
           </h1>
-          <p className="text-muted-foreground text-sm md:text-base">
-            Gerencie fornecedores e clientes.
-          </p>
+          {isLoading ? (
+            <Skeleton className="h-4 w-56 mt-2" />
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-muted-foreground">
+              <span>
+                <span className="font-medium text-foreground tabular-nums">
+                  {totalEntities}
+                </span>{" "}
+                {totalEntities === 1 ? "entidade" : "entidades"}
+              </span>
+              <span className="text-muted-foreground/40">·</span>
+              <span>
+                <span className="font-medium text-foreground tabular-nums">
+                  {totalSuppliers}
+                </span>{" "}
+                {totalSuppliers === 1 ? "fornecedor" : "fornecedores"}
+              </span>
+              <span className="text-muted-foreground/40">·</span>
+              <span>
+                <span className="font-medium text-foreground tabular-nums">
+                  {totalClients}
+                </span>{" "}
+                {totalClients === 1 ? "cliente" : "clientes"}
+              </span>
+            </div>
+          )}
         </div>
         {canManageEntities && (
           <Button
@@ -389,309 +536,191 @@ export default function EntitiesPage() {
         )}
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-muted">
-                <Users className="h-5 w-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Total</p>
-                <p className="text-2xl font-bold">{totalEntities}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-orange-50">
-                <TruckIcon className="h-5 w-5 text-orange-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Fornecedores</p>
-                <p className="text-2xl font-bold">{totalSuppliers}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-50">
-                <HandshakeIcon className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Clientes</p>
-                <p className="text-2xl font-bold">{totalClients}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Table Card with integrated Tabs */}
+      {/* Table card */}
       <Card>
-        <CardHeader className="pb-0 space-y-3">
-          {/* Title row */}
+        <CardHeader className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle>Entidades</CardTitle>
-            {!isLoading && (
-              <span className="md:hidden text-xs text-muted-foreground tabular-nums shrink-0">
-                {sortedEntities.length}
-                {hasMore ? "+" : ""} resultado
-                {sortedEntities.length !== 1 ? "s" : ""}
-              </span>
-            )}
-            <CardDescription className="hidden sm:block sr-only">
+            <CardTitle>Fornecedores e Clientes</CardTitle>
+            {resultCount}
+            <CardDescription className="sr-only">
               Lista de pessoas e empresas cadastradas.
             </CardDescription>
           </div>
 
-          {/* Search row */}
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar por nome ou CNPJ/CPF..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 h-10"
-            />
-          </div>
-
-          {/* Tabs */}
-          <div>
-            <Tabs defaultValue="all" onValueChange={setActiveTab}>
-              <TabsList>
-                <TabsTrigger value="all">Todos</TabsTrigger>
-                <TabsTrigger value="supplier">Fornecedores</TabsTrigger>
-                <TabsTrigger value="client">Clientes</TabsTrigger>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <div className="relative flex-1 md:flex-initial md:w-[260px]">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nome ou CNPJ/CPF..."
+                value={searchTerm}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="pl-9 pr-8 h-10 md:h-9"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => handleSearch("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Limpar busca"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <Tabs value={activeTab} onValueChange={handleTabChange}>
+              <TabsList className="w-full md:w-auto">
+                <TabsTrigger value="all" className="flex-1 md:flex-initial">
+                  Todos
+                </TabsTrigger>
+                <TabsTrigger
+                  value="supplier"
+                  className="flex-1 md:flex-initial"
+                >
+                  Fornecedores
+                </TabsTrigger>
+                <TabsTrigger value="client" className="flex-1 md:flex-initial">
+                  Clientes
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
         </CardHeader>
 
-        <CardContent className="p-0 md:p-6 md:pt-4">
-          {isLoading && entities.length === 0 ? (
+        <CardContent className="p-0">
+          {isError ? (
+            errorState
+          ) : isLoading ? (
             <>
-              {/* Desktop skeleton */}
-              <div className="hidden md:block">
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nome</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Categoria</TableHead>
-                        <TableHead>Documento</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <TableRow key={i}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Skeleton className="h-7 w-7 rounded-full" />
-                              <Skeleton className="h-4 w-40" />
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Skeleton className="h-4 w-24" />
-                          </TableCell>
-                          <TableCell>
-                            <Skeleton className="h-5 w-20 rounded-full" />
-                          </TableCell>
-                          <TableCell>
-                            <Skeleton className="h-4 w-32" />
-                          </TableCell>
-                          <TableCell className="flex justify-end gap-2">
-                            <Skeleton className="h-8 w-8 rounded-md" />
-                            <Skeleton className="h-8 w-8 rounded-md" />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+              <div className="hidden md:block px-6 py-2">
+                <TableSkeleton />
               </div>
-              {/* Mobile skeleton */}
               <div className="md:hidden">
                 <MobileCardSkeleton />
               </div>
             </>
           ) : sortedEntities.length === 0 ? (
-            /* Empty state */
-            <div className="flex flex-col items-center gap-3 text-muted-foreground py-12 px-4">
-              <Building2 className="h-10 w-10 opacity-20" />
-              <div className="space-y-1 text-center">
-                <p className="text-sm font-medium text-foreground">
-                  Nenhuma entidade encontrada
-                </p>
-                <p className="text-xs">
-                  {debouncedSearchTerm
-                    ? `Sem resultados para "${debouncedSearchTerm}"`
-                    : "Comece cadastrando seu primeiro fornecedor ou cliente."}
-                </p>
-              </div>
-              {canManageEntities && !debouncedSearchTerm && (
-                <Button size="sm" onClick={openCreateDialog}>
-                  <Plus className="h-3 w-3 mr-1" /> Criar entidade
-                </Button>
-              )}
-            </div>
+            emptyState
           ) : (
             <>
               {/* ── Desktop: Table ─────────────────────────────────────── */}
-              <div className="hidden md:block">
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead
-                          className="cursor-pointer hover:text-primary"
-                          onClick={() => requestSort("name")}
-                        >
-                          Nome{" "}
-                          {sortConfig?.key === "name" &&
-                            (sortConfig.direction === "asc" ? "↑" : "↓")}
-                        </TableHead>
-                        <TableHead
-                          className="cursor-pointer hover:text-primary"
-                          onClick={() => requestSort("type")}
-                        >
-                          Tipo{" "}
-                          {sortConfig?.key === "type" &&
-                            (sortConfig.direction === "asc" ? "↑" : "↓")}
-                        </TableHead>
-                        <TableHead
-                          className="cursor-pointer hover:text-primary"
-                          onClick={() => requestSort("category")}
-                        >
-                          Categoria{" "}
-                          {sortConfig?.key === "category" &&
-                            (sortConfig.direction === "asc" ? "↑" : "↓")}
-                        </TableHead>
-                        <TableHead
-                          className="cursor-pointer hover:text-primary"
-                          onClick={() => requestSort("document")}
-                        >
-                          Documento{" "}
-                          {sortConfig?.key === "document" &&
-                            (sortConfig.direction === "asc" ? "↑" : "↓")}
-                        </TableHead>
+              <div className="hidden md:block px-6 pb-6">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead
+                        className="cursor-pointer hover:text-primary select-none"
+                        onClick={() => requestSort("name")}
+                      >
+                        Nome
+                        <SortIcon field="name" sortConfig={sortConfig} />
+                      </TableHead>
+                      <TableHead
+                        className="cursor-pointer hover:text-primary select-none"
+                        onClick={() => requestSort("type")}
+                      >
+                        Tipo
+                        <SortIcon field="type" sortConfig={sortConfig} />
+                      </TableHead>
+                      <TableHead
+                        className="cursor-pointer hover:text-primary select-none"
+                        onClick={() => requestSort("category")}
+                      >
+                        Categoria
+                        <SortIcon field="category" sortConfig={sortConfig} />
+                      </TableHead>
+                      <TableHead
+                        className="cursor-pointer hover:text-primary select-none"
+                        onClick={() => requestSort("document")}
+                      >
+                        Documento
+                        <SortIcon field="document" sortConfig={sortConfig} />
+                      </TableHead>
+                      {canManageEntities && (
                         <TableHead className="text-right">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sortedEntities.map((entity) => (
-                        <TableRow
-                          key={entity.id}
-                          className="group"
-                          onClick={() =>
-                            router.push(`/cadastros/entidades/${entity.id}`)
-                          }
-                        >
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <Avatar className="h-7 w-7">
-                                <AvatarFallback
-                                  className={`text-xs font-medium ${getAvatarColor(entity.name)}`}
-                                >
-                                  {getEntityInitials(entity.name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span className="hover:underline">
-                                {entity.name}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1.5 text-muted-foreground">
-                              {entity.type === "company" ? (
-                                <Building2 className="h-3.5 w-3.5" />
-                              ) : (
-                                <User className="h-3.5 w-3.5" />
-                              )}
-                              <span>
-                                {entity.type === "company"
-                                  ? "Pessoa Jurídica"
-                                  : "Pessoa Física"}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {categoryBadge[entity.category] ?? entity.category}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {entity.document || "-"}
-                          </TableCell>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageEntities.map((entity) => (
+                      <TableRow
+                        key={entity.id}
+                        className="group"
+                        onClick={() =>
+                          router.push(`/cadastros/entidades/${entity.id}`)
+                        }
+                      >
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-7 w-7">
+                              <AvatarFallback
+                                className={`text-xs font-medium ${getAvatarColor(entity.name)}`}
+                              >
+                                {getEntityInitials(entity.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span>{entity.name}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5 text-muted-foreground">
+                            {entity.type === "company" ? (
+                              <Building2 className="h-3.5 w-3.5" />
+                            ) : (
+                              <User className="h-3.5 w-3.5" />
+                            )}
+                            <span>
+                              {entity.type === "company"
+                                ? "Pessoa Jurídica"
+                                : "Pessoa Física"}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {categoryBadge[entity.category] ?? entity.category}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground font-mono text-xs">
+                          {entity.document || "-"}
+                        </TableCell>
+                        {canManageEntities && (
                           <TableCell
                             className="text-right"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {canManageEntities && (
-                              <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openEditDialog(entity)}
-                                  title="Editar"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="text-red-500 hover:text-red-700"
-                                  onClick={() => setDeleteId(entity.id)}
-                                  title="Excluir"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            )}
+                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openEditDialog(entity)}
+                                aria-label={`Editar ${entity.name}`}
+                                title="Editar"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-500 hover:text-red-700"
+                                onClick={() => setEntityToDelete(entity)}
+                                aria-label={`Excluir ${entity.name}`}
+                                title="Excluir"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
 
-                {/* Desktop footer */}
-                <div className="flex items-center justify-between mt-4">
-                  <p className="text-xs text-muted-foreground">
-                    {hasMore
-                      ? `Exibindo ${sortedEntities.length} entidades`
-                      : `${sortedEntities.length} ${sortedEntities.length === 1 ? "entidade" : "entidades"} encontrada${sortedEntities.length === 1 ? "" : "s"}`}
-                    {debouncedSearchTerm &&
-                      sortedEntities.length > 0 &&
-                      ` para "${debouncedSearchTerm}"`}
-                  </p>
-                  {hasMore && entities.length > 0 && (
-                    <Button
-                      variant="outline"
-                      onClick={loadMore}
-                      disabled={isFetchingNextPage}
-                    >
-                      {isFetchingNextPage ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Carregando...
-                        </>
-                      ) : (
-                        "Carregar Mais"
-                      )}
-                    </Button>
-                  )}
-                </div>
+                <div className="pt-4">{pagination}</div>
               </div>
 
               {/* ── Mobile: Card list ───────────────────────────────────── */}
               <div className="md:hidden divide-y">
-                {sortedEntities.map((entity) => (
+                {pageEntities.map((entity) => (
                   <MobileEntityCard
                     key={entity.id}
                     entity={entity}
@@ -700,29 +729,11 @@ export default function EntitiesPage() {
                       router.push(`/cadastros/entidades/${entity.id}`)
                     }
                     onEdit={() => openEditDialog(entity)}
-                    onDelete={() => setDeleteId(entity.id)}
+                    onDelete={() => setEntityToDelete(entity)}
                   />
                 ))}
 
-                {hasMore && entities.length > 0 && (
-                  <div className="px-4 py-3">
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={loadMore}
-                      disabled={isFetchingNextPage}
-                    >
-                      {isFetchingNextPage ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Carregando...
-                        </>
-                      ) : (
-                        "Carregar Mais"
-                      )}
-                    </Button>
-                  </div>
-                )}
+                <div className="px-4 py-3">{pagination}</div>
               </div>
             </>
           )}
@@ -751,10 +762,10 @@ export default function EntitiesPage() {
       </ResponsiveModal>
 
       <ConfirmDialog
-        open={!!deleteId}
-        onOpenChange={(open) => !open && setDeleteId(null)}
+        open={!!entityToDelete}
+        onOpenChange={(open) => !open && setEntityToDelete(null)}
         title="Excluir Entidade"
-        description="Tem certeza que deseja excluir esta entidade?"
+        description={`Excluir "${entityToDelete?.name ?? ""}"? Esta ação não pode ser desfeita.`}
         confirmText="Excluir"
         variant="destructive"
         onConfirm={handleDelete}
