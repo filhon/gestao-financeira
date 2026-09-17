@@ -37,7 +37,6 @@ import {
   Building2,
   User,
   Loader2,
-  Eye,
   Search,
   Users,
   TruckIcon,
@@ -49,7 +48,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
@@ -188,37 +186,33 @@ function MobileEntityCard({
         </div>
       </button>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            className="h-11 w-11 p-0 shrink-0 -mr-2"
-            aria-label="Ações da entidade"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Ações</DropdownMenuLabel>
-          <DropdownMenuItem onClick={onView}>
-            <Eye className="mr-2 h-4 w-4" /> Ver detalhes
-          </DropdownMenuItem>
-          {canManage && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onEdit}>
-                <Pencil className="mr-2 h-4 w-4" /> Editar
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={onDelete}
-                className="text-red-600 focus:text-red-700"
-              >
-                <Trash2 className="mr-2 h-4 w-4" /> Excluir
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canManage ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              className="h-11 w-11 p-0 shrink-0 -mr-2"
+              aria-label="Ações da entidade"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+            <DropdownMenuItem onClick={onEdit}>
+              <Pencil className="mr-2 h-4 w-4" /> Editar
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={onDelete}
+              className="text-red-600 focus:text-red-700"
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Excluir
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <div className="h-11 w-11 shrink-0 -mr-2" />
+      )}
     </div>
   );
 }
@@ -595,7 +589,7 @@ export default function EntitiesPage() {
                       {sortedEntities.map((entity) => (
                         <TableRow
                           key={entity.id}
-                          className="group cursor-pointer hover:bg-muted/50"
+                          className="group"
                           onClick={() =>
                             router.push(`/cadastros/entidades/${entity.id}`)
                           }
@@ -634,49 +628,31 @@ export default function EntitiesPage() {
                           <TableCell className="text-muted-foreground">
                             {entity.document || "-"}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  router.push(
-                                    `/cadastros/entidades/${entity.id}`,
-                                  );
-                                }}
-                                title="Ver detalhes"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              {canManageEntities && (
-                                <>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditDialog(entity);
-                                    }}
-                                    title="Editar"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-red-500 hover:text-red-700"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setDeleteId(entity.id);
-                                    }}
-                                    title="Excluir"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </>
-                              )}
-                            </div>
+                          <TableCell
+                            className="text-right"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {canManageEntities && (
+                              <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openEditDialog(entity)}
+                                  title="Editar"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-red-500 hover:text-red-700"
+                                  onClick={() => setDeleteId(entity.id)}
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}

@@ -459,7 +459,7 @@ export default function AuditLogsPage() {
           <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[160px] pl-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+                <TableHead className="w-40 pl-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
                   Data/Hora
                 </TableHead>
                 <TableHead className="w-[200px] text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">

@@ -36,7 +36,6 @@ import {
   ResponsiveModalTitle,
 } from "@/components/ui/responsive-modal";
 import {
-  Eye,
   MessageCircle,
   MessageSquare,
   Loader2,
@@ -297,6 +296,7 @@ export function AdminFeedbackTable({
                 <TableRow
                   key={feedback.id}
                   className={cn(!feedback.read && "bg-primary/5")}
+                  onClick={() => handleOpenDetails(feedback)}
                 >
                   <TableCell>
                     {!feedback.read && (
@@ -333,7 +333,7 @@ export function AdminFeedbackTable({
                   >
                     {feedback.title}
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <Select
                       value={feedback.status}
                       onValueChange={(value) =>
@@ -362,25 +362,18 @@ export function AdminFeedbackTable({
                       locale: ptBR,
                     })}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleOpenDetails(feedback)}
-                        title="Ver detalhes"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleOpenResponse(feedback)}
-                        title="Responder"
-                      >
-                        <MessageCircle className="h-4 w-4" />
-                      </Button>
-                    </div>
+                  <TableCell
+                    className="text-right"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleOpenResponse(feedback)}
+                      title="Responder"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))

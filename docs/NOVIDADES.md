@@ -6,6 +6,25 @@
 
 ## Atualização de 17 de setembro de 2026
 
+### Um clique na linha abre os detalhes
+
+Abrir o registro que você está vendo em uma lista ficou mais direto: basta clicar em qualquer ponto da linha. Não é mais preciso abrir o menu de três pontos e procurar "Ver detalhes" — esse item saiu do menu, que agora guarda só as ações de fato (confirmar pagamento, editar, excluir etc.).
+
+**Onde vale**
+
+- **Financeiro › Contas a Pagar** e **Contas a Receber** — abre os detalhes da transação.
+- **Financeiro › Lotes** — abre os detalhes do lote.
+- **Cadastros › Entidades** — abre a página da entidade.
+- **Centros de Custo** — abre a página do centro de custo (a seta que expande os filhos continua funcionando normalmente).
+- **Feedback** (administração) — abre os detalhes do feedback.
+
+**Bom saber**
+
+- Marcar a caixa de seleção, usar o menu de ações ou os botões rápidos da linha (Aprovar, Autorizar, Excluir…) continua igual: essas ações não abrem os detalhes.
+- No celular, tocar no cartão já abria os detalhes; o item "Ver detalhes" também saiu do menu ali.
+- Pelo teclado, use Tab para chegar na linha e Enter (ou Espaço) para abrir.
+- Quando seu perfil não tem nenhuma ação disponível para o registro, o menu de três pontos não aparece.
+
 ### Cadastro de entidades: preenchimento automático pelo CNPJ
 
 Cadastrar um fornecedor ou cliente pessoa jurídica ficou mais rápido. Agora, ao criar uma nova entidade, basta digitar ou colar o CNPJ no campo **CPF / CNPJ** e o sistema consulta a base da Receita Federal e preenche automaticamente:

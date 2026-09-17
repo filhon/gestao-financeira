@@ -5,7 +5,6 @@ import {
   Plus,
   Loader2,
   Trash2,
-  Eye,
   Upload,
   Search,
   RotateCcw,
@@ -31,7 +30,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -405,45 +403,45 @@ function MobileTransactionCard({
       </button>
 
       {/* Actions menu — min 44×44 touch area */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            className="h-11 w-11 p-0 shrink-0 -mr-2"
-            aria-label="Ações da transação"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Ações</DropdownMenuLabel>
-          <DropdownMenuItem onClick={onViewDetails}>
-            <Eye className="mr-2 h-4 w-4" /> Ver detalhes
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {canPay && (
-            <DropdownMenuItem
-              onClick={onConfirmPayment}
-              className="text-green-600 focus:text-green-700"
+      {canPay || canRevert || canDelete ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              className="h-11 w-11 p-0 shrink-0 -mr-2"
+              aria-label="Ações da transação"
             >
-              <CheckCheck className="mr-2 h-4 w-4" /> Confirmar Pagamento
-            </DropdownMenuItem>
-          )}
-          {canRevert && (
-            <DropdownMenuItem onClick={onRevertToDraft}>
-              <RotateCcw className="mr-2 h-4 w-4" /> Reverter para Rascunho
-            </DropdownMenuItem>
-          )}
-          {canDelete && (
-            <DropdownMenuItem
-              onClick={onDelete}
-              className="text-red-600 focus:text-red-700"
-            >
-              <Trash2 className="mr-2 h-4 w-4" /> Excluir
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+            {canPay && (
+              <DropdownMenuItem
+                onClick={onConfirmPayment}
+                className="text-green-600 focus:text-green-700"
+              >
+                <CheckCheck className="mr-2 h-4 w-4" /> Confirmar Pagamento
+              </DropdownMenuItem>
+            )}
+            {canRevert && (
+              <DropdownMenuItem onClick={onRevertToDraft}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Reverter para Rascunho
+              </DropdownMenuItem>
+            )}
+            {canDelete && (
+              <DropdownMenuItem
+                onClick={onDelete}
+                className="text-red-600 focus:text-red-700"
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Excluir
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <div className="h-11 w-11 shrink-0 -mr-2" />
+      )}
     </div>
   );
 }
@@ -1835,14 +1833,22 @@ export default function AccountsPayablePage() {
                         const isOverdue =
                           UNPAID_STATUSES.includes(t.status) &&
                           isBefore(t.dueDate, startOfDay(new Date()));
+                        const canConfirm =
+                          (isAdmin || isFinancialManager) &&
+                          t.status !== "paid";
+                        const canRevert =
+                          canEditPayables && t.status === "pending_approval";
+                        const hasActions =
+                          canConfirm || canRevert || canDeletePayables;
                         return (
                           <TableRow
                             key={t.id}
                             className={
                               isOverdue ? "bg-red-50/80 dark:bg-red-950/20" : ""
                             }
+                            onClick={() => handleViewDetails(t)}
                           >
-                            <TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
                               <Checkbox
                                 checked={selectedIds.has(t.id)}
                                 onCheckedChange={() => toggleSelect(t.id)}
@@ -1911,28 +1917,26 @@ export default function AccountsPayablePage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right">
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0"
-                                  >
-                                    <span className="sr-only">Abrir menu</span>
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuLabel>Ações</DropdownMenuLabel>
-                                  <DropdownMenuItem
-                                    onClick={() => handleViewDetails(t)}
-                                  >
-                                    <Eye className="mr-2 h-4 w-4" /> Ver
-                                    detalhes
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  {(isAdmin || isFinancialManager) &&
-                                    t.status !== "paid" && (
+                            <TableCell
+                              className="text-right"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {hasActions && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      <span className="sr-only">
+                                        Abrir menu
+                                      </span>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                                    {canConfirm && (
                                       <DropdownMenuItem
                                         onClick={() =>
                                           handleOpenPaymentConfirmation(t)
@@ -1943,8 +1947,7 @@ export default function AccountsPayablePage() {
                                         Confirmar Pagamento
                                       </DropdownMenuItem>
                                     )}
-                                  {canEditPayables &&
-                                    t.status === "pending_approval" && (
+                                    {canRevert && (
                                       <DropdownMenuItem
                                         onClick={() => handleRevertToDraft(t)}
                                       >
@@ -1952,17 +1955,18 @@ export default function AccountsPayablePage() {
                                         Reverter para Rascunho
                                       </DropdownMenuItem>
                                     )}
-                                  {canDeletePayables && (
-                                    <DropdownMenuItem
-                                      onClick={() => setDeleteId(t.id)}
-                                      className="text-red-600 focus:text-red-700"
-                                    >
-                                      <Trash2 className="mr-2 h-4 w-4" />{" "}
-                                      Excluir
-                                    </DropdownMenuItem>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
+                                    {canDeletePayables && (
+                                      <DropdownMenuItem
+                                        onClick={() => setDeleteId(t.id)}
+                                        className="text-red-600 focus:text-red-700"
+                                      >
+                                        <Trash2 className="mr-2 h-4 w-4" />{" "}
+                                        Excluir
+                                      </DropdownMenuItem>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
                             </TableCell>
                           </TableRow>
                         );

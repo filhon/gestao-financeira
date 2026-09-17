@@ -14,6 +14,7 @@ import {
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -134,6 +135,7 @@ function CostCenterRow({
   canManage,
   balances,
 }: CostCenterRowProps) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = node.children.length > 0;
 
@@ -142,11 +144,16 @@ function CostCenterRow({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div className="group grid grid-cols-12 gap-4 py-3 border-b items-center hover:bg-muted/50 transition-colors text-sm">
+      {/* Linha inteira abre o detalhe; chevron e ações param a propagação */}
+      <div
+        className="group grid grid-cols-12 gap-4 py-3 border-b items-center hover:bg-muted/50 transition-colors text-sm cursor-pointer"
+        onClick={() => router.push(`/centros-custo/${node.id}`)}
+      >
         <div className="col-span-2 font-medium pl-4 truncate">
           <Link
             href={`/centros-custo/${node.id}`}
             className="hover:underline text-primary"
+            onClick={(e) => e.stopPropagation()}
           >
             {node.code}
           </Link>
@@ -197,6 +204,7 @@ function CostCenterRow({
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 p-0 shrink-0"
+                onClick={(e) => e.stopPropagation()}
               >
                 <ChevronRight
                   className={`h-4 w-4 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
@@ -251,7 +259,10 @@ function CostCenterRow({
           {node.releaserEmail || "-"}
         </div>
 
-        <div className="col-span-1 text-right pr-4">
+        <div
+          className="col-span-1 text-right pr-4"
+          onClick={(e) => e.stopPropagation()}
+        >
           {canManage && (
             <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
               <Button

@@ -5,7 +5,6 @@ import {
   Plus,
   Loader2,
   Trash2,
-  Eye,
   Upload,
   Search,
   X,
@@ -27,7 +26,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -348,34 +346,30 @@ function MobileTransactionCard({
       </button>
 
       {/* Actions menu — min 44×44 touch area */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            className="h-11 w-11 p-0 shrink-0 -mr-2"
-            aria-label="Ações da transação"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Ações</DropdownMenuLabel>
-          <DropdownMenuItem onClick={onViewDetails}>
-            <Eye className="mr-2 h-4 w-4" /> Ver detalhes
-          </DropdownMenuItem>
-          {canDelete && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={onDelete}
-                className="text-red-600 focus:text-red-700"
-              >
-                <Trash2 className="mr-2 h-4 w-4" /> Excluir
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canDelete ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              className="h-11 w-11 p-0 shrink-0 -mr-2"
+              aria-label="Ações da transação"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={onDelete}
+              className="text-red-600 focus:text-red-700"
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Excluir
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <div className="h-11 w-11 shrink-0 -mr-2" />
+      )}
     </div>
   );
 }
@@ -1383,6 +1377,7 @@ export default function AccountsReceivablePage() {
                             className={
                               isOverdue ? "bg-red-50/80 dark:bg-red-950/20" : ""
                             }
+                            onClick={() => handleViewDetails(t)}
                           >
                             <TableCell>
                               <div>
@@ -1414,27 +1409,21 @@ export default function AccountsReceivablePage() {
                             <TableCell>
                               <DunningStatus status={t.dunningStatus} />
                             </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
+                            <TableCell
+                              className="text-right"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {canDeleteReceivables && (
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => handleViewDetails(t)}
-                                  title="Ver detalhes"
+                                  className="text-red-500 hover:text-red-700"
+                                  onClick={() => setDeleteId(t.id)}
+                                  title="Excluir"
                                 >
-                                  <Eye className="h-4 w-4" />
+                                  <Trash2 className="h-4 w-4" />
                                 </Button>
-                                {canDeleteReceivables && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-red-500 hover:text-red-700"
-                                    onClick={() => setDeleteId(t.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
+                              )}
                             </TableCell>
                           </TableRow>
                         );
