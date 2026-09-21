@@ -88,8 +88,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico, favicon.svg (favicon files)
+     * - manifest.webmanifest, icons (PWA — o browser busca sem cookies)
      * - approve, approve-batch, authorize-batch (magic link pages)
      */
-    "/((?!api|_next/static|_next/image|favicon\\.ico|favicon\\.svg|approve|approve-batch|authorize-batch).*)",
+    "/((?!api|_next/static|_next/image|favicon\\.ico|favicon\\.svg|icon-dark\\.svg|manifest\\.webmanifest|icons/|approve|approve-batch|authorize-batch).*)",
   ],
 };
