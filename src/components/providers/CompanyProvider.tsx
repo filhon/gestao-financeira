@@ -22,6 +22,9 @@ const CompanyContext = createContext<CompanyContextType>({
 
 export const useCompany = () => useContext(CompanyContext);
 
+const sameJson = (a: unknown, b: unknown) =>
+  JSON.stringify(a) === JSON.stringify(b);
+
 export function CompanyProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -49,20 +52,36 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      try {
-        let allCompanies: Company[] = [];
+      const allowedIds = Object.keys(user.companyRoles ?? {});
+      const fetchCompanies = (fromCache: boolean) =>
+        user.role === "admin"
+          ? companyService.getAll(fromCache)
+          : companyService.getByIds(allowedIds, fromCache);
 
-        if (user.role === "admin") {
-          allCompanies = await companyService.getAll();
-        } else if (
-          user.companyRoles &&
-          Object.keys(user.companyRoles).length > 0
-        ) {
-          const allowedIds = Object.keys(user.companyRoles);
-          allCompanies = await companyService.getByIds(allowedIds);
-        } else {
-          allCompanies = [];
+      // Restore selection from cookie or default to first. Mantém a mesma
+      // referência quando nada mudou: telas com `selectedCompany` em deps de
+      // efeito não buscam tudo de novo quando o servidor confirma o cache.
+      const applyCompanies = (list: Company[]) => {
+        setCompanies((prev) => (sameJson(prev, list) ? prev : list));
+        const savedId = Cookies.get("selected_company_id");
+        const found = list.find((c) => c.id === savedId) || list[0];
+        setSelectedCompany((prev) => (sameJson(prev, found) ? prev : found));
+        if (!savedId && found) {
+          Cookies.set("selected_company_id", found.id);
         }
+      };
+
+      // Cache local primeiro: com as empresas já em disco a tela abre sem
+      // esperar a rede. Vazio não conta — a criação da empresa padrão abaixo
+      // só pode decidir com a resposta do servidor.
+      const cached = await fetchCompanies(true).catch(() => []);
+      if (cached.length > 0) {
+        applyCompanies(cached);
+        setIsLoading(false);
+      }
+
+      try {
+        const allCompanies: Company[] = await fetchCompanies(false);
 
         // If no companies exist, create a default one (Migration Logic)
         if (allCompanies.length === 0) {
@@ -88,17 +107,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
           setSelectedCompany(defaultCompany);
           Cookies.set("selected_company_id", defaultCompany.id);
         } else {
-          setCompanies(allCompanies);
-
-          // Restore selection from cookie or default to first
-          const savedId = Cookies.get("selected_company_id");
-          const found =
-            allCompanies.find((c) => c.id === savedId) || allCompanies[0];
-          setSelectedCompany(found);
-
-          if (!savedId && found) {
-            Cookies.set("selected_company_id", found.id);
-          }
+          applyCompanies(allCompanies);
         }
       } catch (error) {
         console.error("Failed to load companies:", error);

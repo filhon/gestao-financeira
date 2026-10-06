@@ -25,16 +25,20 @@ const convertDates = (data: DocumentData): AuditLog => {
 };
 
 export const auditService = {
+  /**
+   * Não espera o servidor confirmar: com o cache persistente do Firestore a
+   * escrita entra na fila local (IndexedDB) na hora e sincroniza sozinha,
+   * inclusive depois de recarregar a página. Assim nenhuma ação do usuário
+   * espera uma ida e volta só para registrar o log.
+   */
   log: async (data: Omit<AuditLog, "id" | "createdAt">): Promise<void> => {
-    try {
-      await addDoc(collection(db, COLLECTION_NAME), {
-        ...data,
-        createdAt: Timestamp.now(),
-      });
-    } catch (error) {
+    addDoc(collection(db, COLLECTION_NAME), {
+      ...data,
+      createdAt: Timestamp.now(),
+    }).catch((error) => {
+      // Falha no log nunca bloqueia nem desfaz a ação principal
       console.error("Failed to create audit log:", error);
-      // We don't throw here to avoid blocking the main action if logging fails
-    }
+    });
   },
 
   getPaginated: async (

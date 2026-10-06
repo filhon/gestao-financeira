@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDocsFromCache,
   getDoc,
   setDoc,
   deleteDoc,
@@ -90,9 +91,10 @@ export const companyService = {
     return null;
   },
 
-  getAll: async (): Promise<Company[]> => {
+  /** `fromCache`: lê só o cache local do Firestore (pode vir parcial ou vazio). */
+  getAll: async (fromCache = false): Promise<Company[]> => {
     const q = query(collection(db, COLLECTION_NAME), orderBy("name", "asc"));
-    const snapshot = await getDocs(q);
+    const snapshot = await (fromCache ? getDocsFromCache(q) : getDocs(q));
     return snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
@@ -104,7 +106,7 @@ export const companyService = {
     });
   },
 
-  getByIds: async (ids: string[]): Promise<Company[]> => {
+  getByIds: async (ids: string[], fromCache = false): Promise<Company[]> => {
     if (ids.length === 0) return [];
 
     // Firestore 'in' query limits to 30 items. If we ever exceed this, we need to batch.
@@ -113,7 +115,7 @@ export const companyService = {
       collection(db, COLLECTION_NAME),
       where(documentId(), "in", ids),
     );
-    const snapshot = await getDocs(q);
+    const snapshot = await (fromCache ? getDocsFromCache(q) : getDocs(q));
 
     return snapshot.docs.map((doc) => {
       const data = doc.data();

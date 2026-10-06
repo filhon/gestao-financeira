@@ -1,5 +1,14 @@
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import type jsPDF from "jspdf";
+
+// jspdf + autotable pesam ~150 KB gz: carregam só quando um PDF é gerado,
+// fora do bundle inicial da página.
+const loadPdf = async () => {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable };
+};
 import { Transaction, Entity } from "@/lib/types";
 import { format, addDays, startOfDay, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -83,6 +92,7 @@ export const reportService = {
     companyName: string,
     entities: Entity[] = [],
   ) => {
+    const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF({
       orientation: "landscape",
       unit: "mm",
@@ -926,6 +936,7 @@ export const reportService = {
     companyName: string,
     initialBalance: number = 0,
   ) => {
+    const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF();
     const reportFont = await ensureReportFont(doc);
 
@@ -1117,6 +1128,7 @@ export const reportService = {
     endDate: Date,
     companyName: string,
   ) => {
+    const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF();
     const reportFont = await ensureReportFont(doc);
 

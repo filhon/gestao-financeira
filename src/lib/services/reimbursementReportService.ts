@@ -24,8 +24,17 @@ import {
 } from "@/lib/types";
 import { format } from "date-fns";
 import { formatCurrency } from "@/lib/utils";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import type jsPDF from "jspdf";
+
+// jspdf + autotable pesam ~150 KB gz: carregam só quando um PDF é gerado,
+// fora do bundle inicial da página.
+const loadPdf = async () => {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable };
+};
 
 const COLLECTION = "reimbursement_reports";
 
@@ -355,6 +364,7 @@ export const reimbursementReportService = {
     employee: Entity,
     company: Company,
   ): Promise<void> => {
+    const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF({
       orientation: "portrait",
       unit: "mm",

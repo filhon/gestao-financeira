@@ -41,9 +41,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { importService } from "@/lib/services/importService";
-import { costCenterService } from "@/lib/services/costCenterService";
+import { useCostCenters } from "@/hooks/useCostCenters";
 import { ImportedRow, ImportStep, ImportResult } from "@/lib/types/importTypes";
-import { CostCenter } from "@/lib/types";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 
@@ -68,7 +67,6 @@ export function BulkImportDialog({
   const [step, setStep] = useState<ImportStep>("upload");
   const [rows, setRows] = useState<ImportedRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [defaultCostCenterId, setDefaultCostCenterId] = useState<string>("");
   const [bulkCostCenterId, setBulkCostCenterId] = useState<string>("");
   const [progress, setProgress] = useState(0);
@@ -80,22 +78,9 @@ export function BulkImportDialog({
   const [editValue, setEditValue] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Load cost centers
-  useEffect(() => {
-    const loadCostCenters = async () => {
-      if (selectedCompany) {
-        try {
-          const data = await costCenterService.getAll(selectedCompany.id);
-          setCostCenters(data);
-        } catch (error) {
-          console.error("Error loading cost centers:", error);
-        }
-      }
-    };
-    if (isOpen) {
-      loadCostCenters();
-    }
-  }, [selectedCompany, isOpen]);
+  const { costCenters } = useCostCenters(
+    isOpen ? selectedCompany?.id : undefined,
+  );
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -207,7 +192,7 @@ export function BulkImportDialog({
 
   // Download template
   const handleDownloadTemplate = () => {
-    importService.generateTemplate(type);
+    void importService.generateTemplate(type);
     toast.success("Modelo baixado com sucesso!");
   };
 

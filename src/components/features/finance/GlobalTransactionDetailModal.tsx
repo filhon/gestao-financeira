@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { TransactionDetailsDialog } from "./TransactionDetailsDialog";
 import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
-import { useCostCenterStore } from "@/lib/store/useCostCenterStore";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useCostCenters } from "@/hooks/useCostCenters";
 
 const TX_QUERY_KEYS = [
   "payable-transactions",
@@ -17,15 +18,15 @@ const TX_QUERY_KEYS = [
 
 export function GlobalTransactionDetailModal() {
   const { transaction, isOpen, close } = useTransactionDetailStore();
-  const { costCenters, fetchCostCenters } = useCostCenterStore();
   const { selectedCompany } = useCompany();
+  const { user } = useAuth();
+  const { onlyOwnPayables } = usePermissions();
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (isOpen && selectedCompany?.id) {
-      fetchCostCenters(selectedCompany.id);
-    }
-  }, [isOpen, selectedCompany?.id, fetchCostCenters]);
+  // Busca só ao abrir; fechado, segue usando o que já está em cache.
+  const { costCenters } = useCostCenters(
+    isOpen ? selectedCompany?.id : undefined,
+    onlyOwnPayables ? user?.uid : undefined,
+  );
 
   const handleUpdate = () => {
     queryClient.invalidateQueries({

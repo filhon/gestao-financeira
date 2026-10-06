@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { notificationService } from "@/lib/services/notificationService";
 import { Notification } from "@/lib/types";
@@ -97,23 +98,27 @@ function NotificationSkeleton() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const NO_NOTIFICATIONS: Notification[] = [];
+
 export default function NotificationsPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "unread">("all");
 
-  useEffect(() => {
-    const load = async () => {
-      if (!user) return;
-      setLoading(true);
-      const data = await notificationService.getUserNotifications(user.uid, 50);
-      setNotifications(data);
-      setLoading(false);
-    };
-    load();
-  }, [user]);
+  // Em cache: voltar à tela mostra a lista na hora e revalida em segundo plano.
+  const queryClient = useQueryClient();
+  const notificationsKey = ["notifications", user?.uid];
+  const { data: notifications = NO_NOTIFICATIONS, isPending: loading } =
+    useQuery({
+      queryKey: notificationsKey,
+      queryFn: () => notificationService.getUserNotifications(user!.uid, 50),
+      enabled: !!user,
+      staleTime: 0,
+    });
+  const setNotifications = (update: (prev: Notification[]) => Notification[]) =>
+    queryClient.setQueryData<Notification[]>(notificationsKey, (prev) =>
+      update(prev ?? []),
+    );
 
   const handleMarkAsRead = async (id: string) => {
     await notificationService.markAsRead(id);

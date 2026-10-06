@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useCostCenterStore } from "@/lib/store/useCostCenterStore";
+import { useCostCenters } from "@/hooks/useCostCenters";
 import { transactionService } from "@/lib/services/transactionService";
 import { entityService } from "@/lib/services/entityService";
 import { reportService } from "@/lib/services/reportService";
@@ -160,14 +160,10 @@ export default function ReportsPage() {
   );
   const [mobileConfigOpen, setMobileConfigOpen] = useState(false);
 
-  const { costCenters, fetchCostCenters } = useCostCenterStore();
-
-  useEffect(() => {
-    if (selectedCompany) {
-      const forUserId = onlyOwnPayables ? user?.uid : undefined;
-      fetchCostCenters(selectedCompany.id, forUserId);
-    }
-  }, [selectedCompany, user, onlyOwnPayables, fetchCostCenters]);
+  const { costCenters } = useCostCenters(
+    selectedCompany?.id,
+    onlyOwnPayables ? user?.uid : undefined,
+  );
 
   // Ao selecionar o Guia de Transferências, pré-seleciona status "Autorizado"
   // (apenas se o filtro ainda estiver no padrão "all")

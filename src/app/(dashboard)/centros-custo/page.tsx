@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import {
   Plus,
   Pencil,
@@ -47,7 +47,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { CostCenter, CostCenterBalance } from "@/lib/types";
 import { costCenterService } from "@/lib/services/costCenterService";
-import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
 import { CostCenterForm } from "@/components/features/finance/CostCenterForm";
 import { CostCenterFormData } from "@/lib/validations/costCenter";
 import { formatCurrency } from "@/lib/utils";
@@ -56,7 +55,8 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSortableData } from "@/hooks/useSortableData";
-import { useCostCenterStore } from "@/lib/store/useCostCenterStore";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCostCenterBalances, useCostCenters } from "@/hooks/useCostCenters";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 
@@ -505,13 +505,16 @@ function MobileCostCenterCard({
   );
 }
 
+const NO_BALANCES: Record<string, CostCenterBalance> = {};
+
 export default function CostCentersPage() {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
   const { canManageCostCenters, onlyOwnPayables } = usePermissions();
-  const { costCenters, isLoading, fetchCostCenters } = useCostCenterStore();
-  const [balances, setBalances] = useState<Record<string, CostCenterBalance>>(
-    {},
+  const queryClient = useQueryClient();
+  const { costCenters, isLoading } = useCostCenters(
+    selectedCompany?.id,
+    onlyOwnPayables ? user?.uid : undefined,
   );
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -520,47 +523,19 @@ export default function CostCentersPage() {
 
   const year = new Date().getFullYear();
 
-  const loadData = useCallback(
-    async (forceRefresh = false) => {
-      if (!selectedCompany) {
-        return;
-      }
-      const forUserId = onlyOwnPayables ? user?.uid : undefined;
-      await fetchCostCenters(selectedCompany.id, forUserId, forceRefresh);
-    },
-    [selectedCompany, onlyOwnPayables, user, fetchCostCenters],
-  );
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
   // Saldos vêm do razão de envelope — a mesma fonte da tela de distribuição e
   // do formulário de despesa. Antes esta tela somava `cost_center_usage` e lia
   // orçamento do campo legado, e por isso mostrava número diferente do resto.
-  useEffect(() => {
-    const loadBalances = async () => {
-      if (!selectedCompany || costCenters.length === 0) {
-        setBalances({});
-        return;
-      }
-      try {
-        setBalances(
-          await costCenterLedgerService.getBalances(
-            selectedCompany.id,
-            costCenters,
-            year,
-          ),
-        );
-      } catch (error) {
-        // Hierarquia inválida (mais de um raiz). Sem saldo confiável, a tela
-        // mostra a árvore sem números em vez de números errados.
-        console.error("Error loading cost center balances:", error);
-        setBalances({});
-      }
-    };
-    loadBalances();
-  }, [selectedCompany, costCenters, year]);
+  // Hierarquia inválida (mais de um raiz): sem saldo confiável, a tela mostra
+  // a árvore sem números em vez de números errados.
+  const { data: balances = NO_BALANCES } = useCostCenterBalances(
+    selectedCompany?.id,
+    costCenters,
+    year,
+  );
+
+  const refreshCostCenters = () =>
+    queryClient.invalidateQueries({ queryKey: ["cost-centers"] });
 
   const handleSubmit = async (data: CostCenterFormData) => {
     if (!selectedCompany) return;
@@ -573,7 +548,7 @@ export default function CostCentersPage() {
         await costCenterService.create(data, selectedCompany.id);
       }
 
-      await loadData(true);
+      await refreshCostCenters();
       setIsDialogOpen(false);
       setEditingId(null);
     } catch (error) {
@@ -594,7 +569,7 @@ export default function CostCentersPage() {
     if (!deleteId) return;
     try {
       await costCenterService.delete(deleteId);
-      await loadData(true);
+      await refreshCostCenters();
       toast.success("Centro de custo excluído com sucesso.");
     } catch (error) {
       console.error("Error deleting cost center:", error);

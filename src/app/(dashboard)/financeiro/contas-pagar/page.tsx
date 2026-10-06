@@ -88,7 +88,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CostCenter } from "@/lib/types";
-import { costCenterService } from "@/lib/services/costCenterService";
+import { useCostCenterBalances, useCostCenters } from "@/hooks/useCostCenters";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
@@ -452,7 +452,14 @@ export default function AccountsPayablePage() {
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  // Mesmo cache do formulário de despesa: abrir "Nova conta" não espera rede.
+  const { costCenters } = useCostCenters(selectedCompany?.id);
+  // Aquece os saldos do ano para o aviso de envelope do formulário.
+  useCostCenterBalances(
+    selectedCompany?.id,
+    costCenters,
+    new Date().getFullYear(),
+  );
 
   const [filterOptions, setFilterOptions] = useState<{
     status: string;
@@ -532,6 +539,7 @@ export default function AccountsPayablePage() {
     isFetchingNextPage,
     refresh: refreshTransactions,
     updateItem,
+    removeItem,
   } = usePaginatedQuery<Transaction>({
     queryKey: [
       "payable-transactions",
@@ -887,17 +895,6 @@ export default function AccountsPayablePage() {
   ]);
 
   useEffect(() => {
-    if (selectedCompany) {
-      costCenterService
-        .getAll(selectedCompany.id)
-        .then((ccs) => {
-          setCostCenters(ccs);
-        })
-        .catch((err) => console.error("Error loading cost centers", err));
-    }
-  }, [selectedCompany]);
-
-  useEffect(() => {
     // performSearch's identity changes whenever filterOptions changes (e.g.
     // "Limpar filtros" resets filters in the same tick it clears searchTerm).
     // That can re-trigger this effect before the debounce timer has caught
@@ -1135,6 +1132,8 @@ export default function AccountsPayablePage() {
 
   const handleRevertToDraft = async (transaction: Transaction) => {
     if (!user || !selectedCompany) return;
+    // Otimista: a linha muda na hora; em caso de erro o refetch desfaz.
+    updateItem(transaction.id, (t) => ({ ...t, status: "draft" }));
     try {
       await transactionService.update(
         transaction.id,
@@ -1147,24 +1146,29 @@ export default function AccountsPayablePage() {
     } catch (error) {
       console.error("Error reverting transaction:", error);
       toast.error("Erro ao reverter transação.");
+      fetchTransactions();
     }
   };
 
   const handleDelete = async () => {
     if (!deleteId || !user || !selectedCompany) return;
+    const id = deleteId;
+    // Otimista: some da lista na hora; em caso de erro o refetch traz de volta.
+    setDeleteId(null);
+    removeItem(id);
+    setSearchResults((prev) => prev?.filter((t) => t.id !== id) ?? prev);
     try {
       await transactionService.delete(
-        deleteId,
+        id,
         { uid: user.uid, email: user.email },
         selectedCompany.id,
       );
       toast.success("Transação excluída com sucesso!");
-      fetchTransactions();
     } catch (error) {
       console.error("Error deleting transaction:", error);
       toast.error("Erro ao excluir transação.");
     } finally {
-      setDeleteId(null);
+      fetchTransactions();
     }
   };
 

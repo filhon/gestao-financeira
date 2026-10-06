@@ -1,4 +1,3 @@
-import * as XLSX from "xlsx";
 import {
   ImportedRow,
   ImportResult,
@@ -88,6 +87,8 @@ export const importService = {
    * Parse a file (CSV or XLSX) and return raw imported rows
    */
   parseFile: async (file: File): Promise<ImportedRow[]> => {
+    // xlsx pesa ~140 KB gz: só carrega quando o usuário importa uma planilha.
+    const XLSX = await import("xlsx");
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
@@ -381,7 +382,8 @@ export const importService = {
   /**
    * Generate and download a template spreadsheet
    */
-  generateTemplate: (type: "payable" | "receivable") => {
+  generateTemplate: async (type: "payable" | "receivable") => {
+    const XLSX = await import("xlsx");
     const headers = [
       "Descrição",
       "Valor",

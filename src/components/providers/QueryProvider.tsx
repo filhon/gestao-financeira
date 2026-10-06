@@ -11,6 +11,9 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
           queries: {
             // Data is considered fresh for 1 minute
             staleTime: 60 * 1000,
+            // Telas visitadas há até 30 min reabrem do cache na hora (o padrão
+            // de 5 min descartava o cache durante o uso normal)
+            gcTime: 30 * 60 * 1000,
             // Retry failed queries 1 time
             retry: 1,
             // Don't refetch on window focus to save reads

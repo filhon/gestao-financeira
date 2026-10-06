@@ -82,6 +82,7 @@ import {
 } from "@/components/ui/select";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useCostCenters } from "@/hooks/useCostCenters";
 
 // ── Animated KPI number ──────────────────────────────────────────────────────
 
@@ -379,6 +380,8 @@ function MobileTransactionCard({
 export default function AccountsReceivablePage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
+  // Aquece o cache do formulário: abrir "Nova conta" não espera rede.
+  useCostCenters(selectedCompany?.id);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -440,6 +443,7 @@ export default function AccountsReceivablePage() {
     isFetchingNextPage,
     refresh: fetchTransactions,
     updateItem,
+    removeItem,
   } = usePaginatedQuery<Transaction>({
     queryKey: [
       "receivable-transactions",
@@ -762,19 +766,23 @@ export default function AccountsReceivablePage() {
 
   const handleDelete = async () => {
     if (!deleteId || !user || !selectedCompany) return;
+    const id = deleteId;
+    // Otimista: some da lista na hora; em caso de erro o refetch traz de volta.
+    setDeleteId(null);
+    removeItem(id);
+    setSearchResults((prev) => prev?.filter((t) => t.id !== id) ?? prev);
     try {
       await transactionService.delete(
-        deleteId,
+        id,
         { uid: user.uid, email: user.email },
         selectedCompany.id,
       );
       toast.success("Transação excluída com sucesso!");
-      fetchTransactions();
     } catch (error) {
       console.error("Error deleting transaction:", error);
       toast.error("Erro ao excluir transação.");
     } finally {
-      setDeleteId(null);
+      fetchTransactions();
     }
   };
 

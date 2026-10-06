@@ -21,6 +21,7 @@ import {
   writeBatch,
   runTransaction,
   deleteField,
+  type DocumentReference,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions as fbFunctions } from "@/lib/firebase/client";
@@ -229,6 +230,55 @@ async function createPayableViaLedger(
   });
 
   return doc(db, COLLECTION_NAME, data.id);
+}
+
+/**
+ * Gera o token do magic link e manda o e-mail ao aprovador de cada centro de
+ * custo. Roda em segundo plano: a despesa já está gravada e o usuário não
+ * precisa esperar o e-mail sair para seguir trabalhando.
+ *
+ * ponytail: se a aba fechar no ~1 s entre o salvar e o envio, o e-mail se
+ * perde; mover para um trigger onCreate na Cloud Function se isso aparecer.
+ */
+function requestApprovalInBackground(
+  ref: DocumentReference,
+  transactionData: Omit<
+    TransactionFormData,
+    "useInstallments" | "installmentsCount"
+  >,
+) {
+  void (async () => {
+    for (const allocation of transactionData.costCenterAllocation ?? []) {
+      const costCenter = await costCenterService.getById(
+        allocation.costCenterId,
+      );
+      if (!costCenter?.approverEmail) continue;
+
+      const token = crypto.randomUUID();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      // O token precisa estar no servidor antes do link chegar ao aprovador.
+      await updateDoc(ref, {
+        approvalToken: token,
+        approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
+      });
+
+      await emailService.sendApprovalRequest(
+        {
+          id: ref.id,
+          ...transactionData,
+          amount: transactionData.amount, // Show total amount in email
+          approvalToken: token,
+          requestOrigin: transactionData.requestOrigin,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        costCenter.approverEmail,
+      );
+    }
+  })().catch((error) =>
+    console.error("Error requesting approval by e-mail:", error),
+  );
 }
 
 export const transactionService = {
@@ -896,42 +946,10 @@ export const transactionService = {
               ),
             );
 
-      // Trigger Notification if pending approval
-      if (
-        status === "pending_approval" &&
-        transactionData.costCenterAllocation
-      ) {
-        for (const allocation of transactionData.costCenterAllocation) {
-          const costCenter = await costCenterService.getById(
-            allocation.costCenterId,
-          );
-          if (costCenter?.approverEmail) {
-            // Generate token for the first installment to allow approval start
-            // Ideally we would have a "Group Approval" but for now let's link the first one.
-            const token = crypto.randomUUID();
-            const expiresAt = new Date();
-            expiresAt.setDate(expiresAt.getDate() + 7);
-
-            // Update the first installment with the token
-            await updateDoc(refs[0], {
-              approvalToken: token,
-              approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
-            });
-
-            // Send Email
-            await emailService.sendApprovalRequest(
-              {
-                id: refs[0].id,
-                ...transactionData,
-                amount: transactionData.amount, // Show total amount in email
-                approvalToken: token,
-                requestOrigin: transactionData.requestOrigin,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              } as any,
-              costCenter.approverEmail,
-            );
-          }
-        }
+      // O link de aprovação aponta para a primeira parcela.
+      // Ideally we would have a "Group Approval" but for now let's link the first one.
+      if (status === "pending_approval") {
+        requestApprovalInBackground(refs[0], transactionData);
       }
 
       return refs[0];
@@ -967,45 +985,8 @@ export const transactionService = {
             updatedAt: serverTimestamp(),
           });
 
-    // Trigger Notification if pending approval
-    if (status === "pending_approval" && transactionData.costCenterAllocation) {
-      for (const allocation of transactionData.costCenterAllocation) {
-        const costCenter = await costCenterService.getById(
-          allocation.costCenterId,
-        );
-        if (costCenter?.approverEmail) {
-          // We need to ensure the transaction has a token if we want magic links.
-          // But `addDoc` above didn't add a token.
-          // We should probably update the doc with a token OR generate it before adding.
-          // Let's generate it before adding.
-          // But I can't change the `addDoc` call easily without a huge replace.
-          // For now, let's just send the email. If the token is missing, the email service might fail or send a broken link?
-          // `emailService` uses `transaction.approvalToken`.
-          // So we MUST generate a token.
-
-          // Strategy: Update the transaction with a token immediately.
-          const token = crypto.randomUUID();
-          const expiresAt = new Date();
-          expiresAt.setDate(expiresAt.getDate() + 7);
-
-          await updateDoc(docRef, {
-            approvalToken: token,
-            approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
-          });
-
-          await emailService.sendApprovalRequest(
-            {
-              id: docRef.id,
-              ...transactionData,
-              amount: transactionData.amount,
-              approvalToken: token,
-              requestOrigin: transactionData.requestOrigin, // Ensure this is passed
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } as any,
-            costCenter.approverEmail,
-          );
-        }
-      }
+    if (status === "pending_approval") {
+      requestApprovalInBackground(docRef, transactionData);
     }
 
     // Log Audit

@@ -8,7 +8,15 @@ import {
   onIdTokenChanged,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  getDocFromCache,
+  setDoc,
+  serverTimestamp,
+  terminate,
+  clearIndexedDbPersistence,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
 import { useRouter } from "next/navigation";
@@ -53,13 +61,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
           }
 
-          // Fetch user profile from Firestore
-          const userDocRef = doc(db, "users", firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-
-          if (userDoc.exists()) {
-            const userData = userDoc.data() as UserProfile;
-            setUser(userData);
+          const applyProfile = (userData: UserProfile) => {
+            // Mesma referência quando nada mudou: evita recarregar empresas
+            setUser((prev) =>
+              JSON.stringify(prev) === JSON.stringify(userData)
+                ? prev
+                : userData,
+            );
             profileLoadedRef.current = true;
             Cookies.set("user_role", userData.role, { expires: 7 });
 
@@ -90,6 +98,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 router.push("/dashboard");
               }
             }
+          };
+
+          const userDocRef = doc(db, "users", firebaseUser.uid);
+
+          // Cache local primeiro: com o perfil já em disco o app abre sem
+          // esperar a rede, e o servidor confirma em segundo plano. Perfil
+          // inexistente só é decidido pelo servidor (criação abaixo).
+          const cachedDoc = await getDocFromCache(userDocRef).catch(() => null);
+          if (cachedDoc?.exists()) {
+            applyProfile(cachedDoc.data() as UserProfile);
+            setLoading(false);
+            getDoc(userDocRef)
+              .then((fresh) => {
+                if (fresh.exists()) applyProfile(fresh.data() as UserProfile);
+              })
+              .catch((error) =>
+                console.error("Error revalidating user profile:", error),
+              );
+            return;
+          }
+
+          // Fetch user profile from Firestore
+          const userDoc = await getDoc(userDocRef);
+
+          if (userDoc.exists()) {
+            applyProfile(userDoc.data() as UserProfile);
           } else {
             // Create new user profile if it doesn't exist (First Login with Google usually)
             // Note: Registration flow handles this manually, but this is a fallback for Google Sign In
@@ -222,7 +256,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       Cookies.remove("auth_token");
       Cookies.remove("user_role");
       Cookies.remove("user_status");
-      router.push("/login");
+      // O cache local do Firestore guarda dados financeiros em disco e leituras
+      // do cache não passam pelas rules: limpa antes do próximo usuário.
+      // terminate() inutiliza a instância, por isso o reload completo.
+      await terminate(db);
+      // ponytail: falha se outra aba ainda segura o cache; ele fica até o
+      // próximo logout sem abas abertas.
+      await clearIndexedDbPersistence(db).catch(() => {});
+      window.location.assign("/login");
     } catch (error) {
       console.error("Error logging out:", error);
     }

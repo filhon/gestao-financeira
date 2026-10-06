@@ -1,6 +1,12 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
@@ -14,9 +20,22 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const isNewApp = !getApps().length;
+const app = isNewApp ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
-const db = getFirestore(app);
+// Cache em IndexedDB: listeners e leituras offline respondem do disco antes da
+// rede. No servidor (SSR) não há IndexedDB, então fica em memória. Com HMR o
+// módulo reavalia e o Firestore já existe — initializeFirestore lançaria erro.
+const db = isNewApp
+  ? initializeFirestore(app, {
+      localCache:
+        typeof window === "undefined"
+          ? memoryLocalCache()
+          : persistentLocalCache({
+              tabManager: persistentMultipleTabManager(),
+            }),
+    })
+  : getFirestore(app);
 const storage = getStorage(app);
 const functions = getFunctions(app, "us-central1"); // Default region
 

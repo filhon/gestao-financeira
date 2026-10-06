@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { reimbursementReportService } from "@/lib/services/reimbursementReportService";
@@ -61,13 +62,13 @@ const STATUS_CONFIG: Record<
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+const NO_REPORTS: ReimbursementReport[] = [];
+const NO_ENTITIES: Entity[] = [];
+
 export default function ReembolsosPage() {
   const { selectedCompany } = useCompany();
   const { isAdmin, isFinancialManager } = usePermissions();
 
-  const [reports, setReports] = useState<ReimbursementReport[]>([]);
-  const [individuals, setIndividuals] = useState<Entity[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<string | null>(null);
 
   // Filters
@@ -82,27 +83,36 @@ export default function ReembolsosPage() {
 
   const canManage = isAdmin || isFinancialManager;
 
-  const loadData = useCallback(async () => {
-    if (!selectedCompany) return;
-    setIsLoading(true);
-    try {
+  // Em cache: voltar à tela mostra a lista na hora e revalida em segundo plano.
+  const {
+    data,
+    isPending: isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ["reimbursement-reports", selectedCompany?.id],
+    queryFn: async () => {
       const [reps, ents] = await Promise.all([
-        reimbursementReportService.getAll(selectedCompany.id),
-        entityService.getAll(selectedCompany.id),
+        reimbursementReportService.getAll(selectedCompany!.id),
+        entityService.getAll(selectedCompany!.id),
       ]);
-      setReports(reps);
-      setIndividuals(ents.filter((e) => e.type === "individual"));
-    } catch (err) {
-      console.error("Erro ao carregar relatórios de reembolso:", err);
-      toast.error("Erro ao carregar relatórios.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedCompany]);
+      return {
+        reports: reps,
+        individuals: ents.filter((e) => e.type === "individual"),
+      };
+    },
+    enabled: !!selectedCompany,
+    staleTime: 0,
+  });
+  const reports: ReimbursementReport[] = data?.reports ?? NO_REPORTS;
+  const individuals: Entity[] = data?.individuals ?? NO_ENTITIES;
+  const loadData = () => {
+    void refetch();
+  };
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (isError) toast.error("Erro ao carregar relatórios.");
+  }, [isError]);
 
   // Listen for download PDF event dispatched by the details dialog
   useEffect(() => {

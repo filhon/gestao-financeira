@@ -33,9 +33,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Workbook, Style } from "exceljs";
+import type { Style } from "exceljs";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { costCenterService } from "@/lib/services/costCenterService";
+import { useQueryClient } from "@tanstack/react-query";
+import { costCentersQuery } from "@/hooks/useCostCenters";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "sonner";
@@ -233,6 +234,8 @@ export function BatchDetailsDialog({
     }
   };
 
+  const queryClient = useQueryClient();
+
   const handleExport = async () => {
     if (!batch || !user) return;
     setIsExporting(true);
@@ -240,7 +243,7 @@ export function BatchDetailsDialog({
     try {
       // 1. Fetch Data
       const [costCenters, metrics] = await Promise.all([
-        costCenterService.getAll(batch.companyId),
+        queryClient.fetchQuery(costCentersQuery(batch.companyId)),
         dashboardService.getFinancialMetrics(batch.companyId),
       ]);
 
@@ -301,6 +304,8 @@ export function BatchDetailsDialog({
       });
 
       // 4. Create Workbook
+      // exceljs pesa ~250 KB gz: só carrega quando o lote é exportado.
+      const { Workbook } = (await import("exceljs")).default;
       const workbook = new Workbook();
       const worksheet = workbook.addWorksheet("Lote de Pagamento");
 

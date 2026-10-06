@@ -33,6 +33,12 @@ import {
 
 const db = () => admin.firestore();
 
+/**
+ * Toda despesa passa por estes callables ao criar, editar ou mudar de status.
+ * Uma instância sempre quente evita o cold start de 2–5 s no clique.
+ */
+const HOT_PATH: functions.RuntimeOptions = { minInstances: 1 };
+
 /** Rejeitadas não reservam recurso; todo o resto sim, inclusive rascunho. */
 const CONSUMES_BUDGET = (status?: string) => status !== "rejected";
 
@@ -333,8 +339,9 @@ export const syncCostCenterLedger = functions.firestore
  *   • nenhum ancestral pode estar negativo — se a receita prevista não entrou,
  *     a árvore trava até o gestor realocar.
  */
-export const createPayableTransaction = functions.https.onCall(
-  async (data, context) => {
+export const createPayableTransaction = functions
+  .runWith(HOT_PATH)
+  .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -546,8 +553,7 @@ export const createPayableTransaction = functions.https.onCall(
     });
 
     return { success: true, id: txRef.id };
-  },
-);
+  });
 
 /**
  * Verifica se uma despesa caberia no envelope, sem gravar nada.
@@ -635,8 +641,9 @@ export async function checkBudgetFit(
  * faz o parcelamento que atravessa a virada do ano ser validado contra o
  * orçamento certo de cada lado.
  */
-export const createPayableInstallments = functions.https.onCall(
-  async (data, context) => {
+export const createPayableInstallments = functions
+  .runWith(HOT_PATH)
+  .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -871,8 +878,7 @@ export const createPayableInstallments = functions.https.onCall(
     });
 
     return { success: true, ids: refs.map((r) => r.id) };
-  },
-);
+  });
 
 /** Hierarquia de centros de custo da empresa, montada uma vez por chamada. */
 async function loadCcIndex(companyId: string) {
@@ -1213,8 +1219,9 @@ async function commitValidatedPatch(
  * Sem isto o bloqueio da criação seria contornável em dois passos: lançar um
  * valor que cabe e depois editá-lo para um que não cabe.
  */
-export const updatePayableTransaction = functions.https.onCall(
-  async (data, context) => {
+export const updatePayableTransaction = functions
+  .runWith(HOT_PATH)
+  .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -1261,8 +1268,7 @@ export const updatePayableTransaction = functions.https.onCall(
     );
 
     return { success: true, budgetChanged: outcome.budgetChanged };
-  },
-);
+  });
 
 /**
  * Avisa administradores e gestores financeiros de que algo furou o envelope.
@@ -1683,8 +1689,9 @@ const TRANSACTION_STATUSES = new Set([
  * recusar o pagamento não desfaz a dívida. Ela nasce marcada e os gestores são
  * avisados, do mesmo jeito que a recorrência noturna.
  */
-export const setTransactionStatus = functions.https.onCall(
-  async (data, context) => {
+export const setTransactionStatus = functions
+  .runWith(HOT_PATH)
+  .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -1792,5 +1799,4 @@ export const setTransactionStatus = functions.https.onCall(
       budgetExceeded: outcome.budgetExceeded,
       budgetExceededReason: outcome.budgetExceededReason,
     };
-  },
-);
+  });

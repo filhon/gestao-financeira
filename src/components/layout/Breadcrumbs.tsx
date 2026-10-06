@@ -6,7 +6,8 @@ import { ChevronRight, Home } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { userService } from "@/lib/services/userService";
-import { costCenterService } from "@/lib/services/costCenterService";
+import { useQueryClient } from "@tanstack/react-query";
+import { costCentersQuery } from "@/hooks/useCostCenters";
 import { entityService } from "@/lib/services/entityService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 
@@ -34,6 +35,7 @@ const pathNames: Record<string, string> = {
 
 export function Breadcrumbs() {
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const [dynamicLabels, setDynamicLabels] = useState<Record<string, string>>(
@@ -78,8 +80,9 @@ export function Breadcrumbs() {
           else if (prevSegment === "centros-custo") {
             if (selectedCompany) {
               try {
-                const costCenters = await costCenterService.getAll(
-                  selectedCompany.id,
+                // Reaproveita o cache da tela de centros de custo
+                const costCenters = await queryClient.fetchQuery(
+                  costCentersQuery(selectedCompany.id),
                 );
                 const cc = costCenters.find((c) => c.id === segment);
                 labels[segment] = cc?.name || "Detalhes";
@@ -109,7 +112,7 @@ export function Breadcrumbs() {
     };
 
     fetchDynamicLabels();
-  }, [pathname, user, selectedCompany, segments]);
+  }, [pathname, user, selectedCompany, segments, queryClient]);
 
   // Don't show breadcrumbs on root - this return is now AFTER all hooks
   if (pathname === "/" || pathname === "/login") {

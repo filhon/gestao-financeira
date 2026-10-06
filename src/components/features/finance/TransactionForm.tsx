@@ -49,14 +49,10 @@ import {
   FolderTree,
   ChevronRight,
 } from "lucide-react";
-import { CostCenter } from "@/lib/types";
 import { storageService } from "@/lib/services/storageService";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import {
-  costCenterService,
-  getHierarchicalCostCenters,
-} from "@/lib/services/costCenterService";
-import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
+import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
+import { useCostCenterBalances, useCostCenters } from "@/hooks/useCostCenters";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -93,10 +89,6 @@ export function TransactionForm({
   type,
 }: TransactionFormProps) {
   const { selectedCompany } = useCompany();
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
-  const [costCenterBalances, setCostCenterBalances] = useState<
-    Record<string, number>
-  >({});
   const [isUploading, setIsUploading] = useState(false);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [useEntity, setUseEntity] = useState(true);
@@ -178,50 +170,41 @@ export function TransactionForm({
     ? new Date(watchedDueDate).getFullYear()
     : new Date().getFullYear();
 
-  useEffect(() => {
-    const loadCostCenters = async () => {
-      if (selectedCompany && user) {
-        // For 'user' role, pass forUserId to filter in Firestore query
-        // This matches Firestore rules and prevents permission errors.
-        //
-        // Receita fica de fora do filtro: ela não escolhe centro, só precisa
-        // saber qual é a raiz. Filtrar aqui esconderia a raiz de quem não a tem
-        // entre os centros permitidos, e o lançamento travaria numa validação
-        // que o usuário não teria como resolver.
-        const forUserId =
-          onlyOwnPayables && type === "payable" ? user.uid : undefined;
-        const data = await costCenterService.getAll(
-          selectedCompany.id,
-          forUserId,
-        );
-        setCostCenters(data);
+  // For 'user' role, pass forUserId to filter in Firestore query
+  // This matches Firestore rules and prevents permission errors.
+  //
+  // Receita fica de fora do filtro: ela não escolhe centro, só precisa
+  // saber qual é a raiz. Filtrar aqui esconderia a raiz de quem não a tem
+  // entre os centros permitidos, e o lançamento travaria numa validação
+  // que o usuário não teria como resolver.
+  const forUserId =
+    onlyOwnPayables && type === "payable" ? user?.uid : undefined;
+  const { costCenters } = useCostCenters(
+    user ? selectedCompany?.id : undefined,
+    forUserId,
+  );
 
-        // Saldo vem do razão de envelopes, a mesma fonte que a Cloud Function
-        // consulta ao aceitar ou recusar o lançamento. Com o cálculo legado, o
-        // aviso do formulário e a decisão do servidor discordavam.
-        if (type === "payable") {
-          try {
-            const balances = await costCenterLedgerService.getBalances(
-              selectedCompany.id,
-              data,
-              balanceYear,
-            );
-            setCostCenterBalances(
-              Object.fromEntries(
-                Object.entries(balances).map(([id, b]) => [id, b.available]),
-              ),
-            );
-          } catch (error) {
-            // Hierarquia inválida ou razão ausente: sem aviso preventivo, mas o
-            // servidor continua sendo a autoridade no momento de gravar.
-            console.error("Não foi possível carregar saldos:", error);
-            setCostCenterBalances({});
-          }
-        }
-      }
-    };
-    loadCostCenters();
-  }, [selectedCompany, user, onlyOwnPayables, type, balanceYear]);
+  // Saldo vem do razão de envelopes, a mesma fonte que a Cloud Function
+  // consulta ao aceitar ou recusar o lançamento. Com o cálculo legado, o
+  // aviso do formulário e a decisão do servidor discordavam. Se a hierarquia
+  // for inválida ou o razão faltar, fica sem aviso preventivo — o servidor
+  // continua sendo a autoridade no momento de gravar.
+  const { data: ledgerBalances } = useCostCenterBalances(
+    selectedCompany?.id,
+    costCenters,
+    balanceYear,
+    type === "payable",
+  );
+  const costCenterBalances = useMemo<Record<string, number>>(
+    () =>
+      Object.fromEntries(
+        Object.entries(ledgerBalances ?? {}).map(([id, b]) => [
+          id,
+          b.available,
+        ]),
+      ),
+    [ledgerBalances],
+  );
 
   /** Raiz da árvore — é ela que recebe toda receita da empresa. */
   const rootCostCenter = useMemo(
