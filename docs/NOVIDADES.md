@@ -4,6 +4,24 @@
 
 ---
 
+## Atualização de 6 de outubro de 2026
+
+### Dados bancários do fornecedor nos detalhes da transação
+
+Ao abrir os detalhes de uma conta, aparecem a chave PIX, o banco, a agência e a conta cadastrados na entidade vinculada. Não é mais preciso sair da tela e ir até o cadastro para pagar.
+
+Os dados aparecem no bloco Dados para Pagamento, logo abaixo de Solicitado por e Método de Pagamento. Ao lado da chave PIX há um botão para copiá-la; agência e conta podem ser selecionadas e copiadas com um clique duplo. O tipo da chave (CPF, CNPJ, E-mail, Telefone ou Aleatória) e o tipo da conta (Corrente ou Poupança) aparecem entre parênteses quando estão cadastrados.
+
+As informações são lidas do cadastro da entidade no momento em que você abre os detalhes. Se os dados bancários do fornecedor mudarem, a transação já mostra os novos. O bloco só aparece quando a transação está vinculada a uma entidade (opção "Usar Cadastros") e essa entidade tem pelo menos um dado bancário preenchido.
+
+### Todos os bancos do país no cadastro, com busca pelo código
+
+O campo Banco do cadastro de entidades passou de 20 opções para todas as instituições com código de compensação no Brasil, cerca de 460, e aceita busca pelo código ou pelo nome.
+
+Abra Dados Bancários no cadastro da entidade, clique em Banco e digite. Números buscam pelo código: "341" encontra o Itaú, "260" o Nubank, "77" o Inter. Letras buscam pelo nome, sem diferença entre maiúsculas, minúsculas e acentos: "caixa" encontra a Caixa Econômica Federal. Cada opção mostra o código ao lado do nome.
+
+A lista segue o cadastro de participantes do Banco Central e inclui bancos, cooperativas de crédito e instituições de pagamento, como Mercado Pago, Stone, Cora, Banco Pan, Banrisul, Unicred e Ailos. Os mais usados aparecem com o nome conhecido; os demais, com o nome registrado no Banco Central (por exemplo, "BANCO INBURSA"). Entidades já cadastradas mantêm o banco que tinham.
+
 ## Atualização de 17 de setembro de 2026
 
 ### Recorrências: busca por parte do nome e edição corrigida

@@ -9,7 +9,12 @@ import {
   ResponsiveModalTitle,
 } from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
-import { Transaction, TransactionStatus, CostCenter } from "@/lib/types";
+import {
+  Transaction,
+  TransactionStatus,
+  CostCenter,
+  Entity,
+} from "@/lib/types";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +58,14 @@ import { TransactionForm } from "./TransactionForm";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
 import { usePermissions } from "@/hooks/usePermissions";
+
+const PIX_KEY_TYPE_LABELS: Record<NonNullable<Entity["pixKeyType"]>, string> = {
+  cpf: "CPF",
+  cnpj: "CNPJ",
+  email: "E-mail",
+  phone: "Telefone",
+  random: "Aleatória",
+};
 
 interface TransactionDetailsDialogProps {
   transaction: Transaction | null;
@@ -100,6 +113,30 @@ export function TransactionDetailsDialog({
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
   const [comprovanteId, setComprovanteId] = useState<string | null>(null);
+  const [fetchedEntity, setEntity] = useState<Entity | null>(null);
+  // Ignore a previous transaction's entity until the new one loads.
+  const entity =
+    fetchedEntity && fetchedEntity.id === transaction?.entityId
+      ? fetchedEntity
+      : null;
+
+  // Bank/PIX details live on the entity, not on the transaction — read them fresh on open.
+  useEffect(() => {
+    const entityId = transaction?.entityId;
+    const companyId = transaction?.companyId;
+    if (!isOpen || !entityId) return;
+    let cancelled = false;
+    getDoc(doc(db, "entities", entityId))
+      .then((snap) => {
+        if (cancelled || !snap.exists() || snap.data().companyId !== companyId)
+          return;
+        setEntity({ id: snap.id, ...snap.data() } as Entity);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, transaction?.entityId, transaction?.companyId]);
 
   // Reset edit mode when dialog closes, but delayed to allow exit animations to complete cleanly
   // without mutating the DOM mid-animation. This prevents Radix safelyDetachRef crashes.
@@ -488,6 +525,76 @@ export function TransactionDetailsDialog({
           </div>
         )}
       </div>
+
+      {entity &&
+        (entity.pixKey ||
+          entity.bankName ||
+          entity.agency ||
+          entity.account) && (
+          <>
+            <Separator />
+            <div>
+              <h4 className="text-sm font-medium text-muted-foreground mb-2">
+                Dados para Pagamento
+              </h4>
+              <div className="grid grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-3">
+                {entity.pixKey && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">
+                      Chave PIX
+                      {entity.pixKeyType &&
+                        ` (${PIX_KEY_TYPE_LABELS[entity.pixKeyType]})`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono break-all select-all">
+                        {entity.pixKey}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(entity.pixKey!);
+                          toast.success("Chave PIX copiada!");
+                        }}
+                        className="text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                        title="Copiar chave PIX"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {entity.bankName && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Banco</p>
+                    <p className="text-sm">{entity.bankName}</p>
+                  </div>
+                )}
+                {entity.agency && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Agência</p>
+                    <p className="text-sm font-mono select-all">
+                      {entity.agency}
+                    </p>
+                  </div>
+                )}
+                {entity.account && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      Conta
+                      {entity.accountType &&
+                        (entity.accountType === "savings"
+                          ? " (Poupança)"
+                          : " (Corrente)")}
+                    </p>
+                    <p className="text-sm font-mono select-all">
+                      {entity.account}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
 
       {transaction.details && (
         <>

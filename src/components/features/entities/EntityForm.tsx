@@ -33,30 +33,34 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { Check, ChevronDown, ChevronsUpDown, Loader2 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { BRAZILIAN_BANKS } from "@/lib/banks";
+import { cn, normalizeText } from "@/lib/utils";
 
-const BRAZILIAN_BANKS = [
-  { code: "001", name: "Banco do Brasil" },
-  { code: "033", name: "Santander" },
-  { code: "104", name: "Caixa Econômica Federal" },
-  { code: "237", name: "Bradesco" },
-  { code: "341", name: "Itaú" },
-  { code: "077", name: "Inter" },
-  { code: "260", name: "Nubank" },
-  { code: "336", name: "C6 Bank" },
-  { code: "290", name: "PagBank" },
-  { code: "380", name: "PicPay" },
-  { code: "655", name: "Votorantim" },
-  { code: "422", name: "Safra" },
-  { code: "748", name: "Sicredi" },
-  { code: "756", name: "Sicoob" },
-  { code: "212", name: "Original" },
-  { code: "637", name: "Sofisa" },
-  { code: "070", name: "BRB" },
-  { code: "218", name: "Bonsucesso" },
-  { code: "654", name: "Digimais" },
-  { code: "208", name: "BTG Pactual" },
-].sort((a, b) => a.name.localeCompare(b.name));
+// Item value is "<code> - <name>". Digits search the code by prefix ("1" → 001, 104…); text searches the name.
+function filterBank(value: string, search: string) {
+  const term = normalizeText(search.trim());
+  if (!term) return 1;
+  const [code, ...rest] = value.split(" - ");
+  if (/^\d+$/.test(term))
+    return code.startsWith(term) || code.replace(/^0+/, "").startsWith(term)
+      ? 1
+      : 0;
+  return normalizeText(rest.join(" - ")).includes(term) ? 1 : 0;
+}
 
 const entitySchema = z.object({
   name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
@@ -102,6 +106,7 @@ export function EntityForm({
   const { selectedCompany } = useCompany();
   const [isCheckingDocument, setIsCheckingDocument] = useState(false);
   const [isBankOpen, setIsBankOpen] = useState(false);
+  const [isBankPickerOpen, setIsBankPickerOpen] = useState(false);
   const form = useForm<EntityFormData>({
     resolver: zodResolver(entitySchema),
     defaultValues: {
@@ -391,28 +396,74 @@ export function EntityForm({
                       control={form.control}
                       name="bankName"
                       render={({ field }) => (
-                        <FormItem>
+                        <FormItem className="flex flex-col">
                           <FormLabel>Banco</FormLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            defaultValue={field.value}
+                          <Popover
+                            open={isBankPickerOpen}
+                            onOpenChange={setIsBankPickerOpen}
                           >
-                            <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Selecione o banco" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {BRAZILIAN_BANKS.map((bank) => (
-                                <SelectItem
-                                  key={bank.code}
-                                  value={`${bank.code} - ${bank.name}`}
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn(
+                                    "w-full justify-between font-normal",
+                                    !field.value && "text-muted-foreground",
+                                  )}
                                 >
-                                  {bank.code} - {bank.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                                  <span className="truncate">
+                                    {field.value || "Selecione o banco"}
+                                  </span>
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                              <Command filter={filterBank}>
+                                <CommandInput placeholder="Código ou nome do banco..." />
+                                <CommandList
+                                  onWheel={(e) => {
+                                    e.stopPropagation();
+                                    e.currentTarget.scrollTop += e.deltaY;
+                                  }}
+                                >
+                                  <CommandEmpty>
+                                    Nenhum banco encontrado.
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    {BRAZILIAN_BANKS.map((bank) => {
+                                      const value = `${bank.code} - ${bank.name}`;
+                                      return (
+                                        <CommandItem
+                                          key={bank.code}
+                                          value={value}
+                                          onSelect={() => {
+                                            field.onChange(value);
+                                            setIsBankPickerOpen(false);
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              field.value === value
+                                                ? "opacity-100"
+                                                : "opacity-0",
+                                            )}
+                                          />
+                                          <span className="font-mono text-muted-foreground mr-2">
+                                            {bank.code}
+                                          </span>
+                                          {bank.name}
+                                        </CommandItem>
+                                      );
+                                    })}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                           <FormMessage />
                         </FormItem>
                       )}
