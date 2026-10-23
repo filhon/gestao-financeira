@@ -53,6 +53,12 @@ export interface Company {
 
   // Reimbursement report counter
   rdCounter?: number;
+
+  /**
+   * Exercício a partir do qual toda conta precisa de conta do plano de contas
+   * (por ano de vencimento). Ausente: a classificação é opcional.
+   */
+  chartOfAccountsRequiredFrom?: number;
 }
 
 export interface UserProfile {
@@ -181,6 +187,48 @@ export interface CostCenterBalance {
   available: number;
 }
 
+/** Sintética agrupa e totaliza; só a analítica recebe lançamento. */
+export type AccountType = "synthetic" | "analytic";
+
+/** Receita (natureza credora, entrada) ou despesa (devedora, saída). */
+export type AccountNature = "revenue" | "expense";
+
+/** Linha da DRE gerencial em que a conta é apresentada. */
+export type DreGroup =
+  | "gross_revenue"
+  | "revenue_deductions"
+  | "direct_costs"
+  | "operating_expenses"
+  | "financial_revenue"
+  | "financial_expenses"
+  | "other_revenue"
+  | "other_expenses"
+  | "income_taxes"
+  | "investments"
+  | "financing";
+
+/**
+ * Conta do plano de contas gerencial.
+ *
+ * A hierarquia é o próprio código ("3.1.02" é filha de "3.1"), como no plano
+ * estruturado contábil: não há `parentId` para dessincronizar.
+ */
+export interface ChartAccount {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  nature: AccountNature;
+  /** Obrigatório na analítica; opcional na sintética (só para exibição). */
+  dreGroup?: DreGroup;
+  description?: string;
+  /** Fora dos seletores de lançamento novo; histórico segue válido. */
+  archived?: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface CostCenterAllocation {
   costCenterId: string;
   percentage: number;
@@ -266,6 +314,8 @@ export interface Transaction {
   entityId?: string; // Link to Entity
   costCenterId?: string;
   costCenterAllocation?: CostCenterAllocation[];
+  /** Conta analítica do plano de contas. */
+  accountId?: string;
   recurrence?: TransactionRecurrence;
   installments?: TransactionInstallments;
   requestOrigin?: RequestOrigin;
@@ -426,7 +476,8 @@ export interface AuditLog {
     | "batch"
     | "recurrence"
     | "budget"
-    | "comprovante";
+    | "comprovante"
+    | "chart_account";
   entityId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details: Record<string, any>;

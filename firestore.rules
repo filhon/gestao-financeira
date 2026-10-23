@@ -81,14 +81,17 @@ service cloud.firestore {
     // 2. Companies Collection
     // - Read: Authenticated users.
     // - Create: Authenticated users (Invite-Only / Setup flow).
-    // - Update/Delete: Global Admin only; Financial Manager can increment rdCounter.
+    // - Update/Delete: Global Admin only; Financial Manager can increment rdCounter
+    //   and set the year the chart of accounts becomes mandatory.
     match /companies/{companyId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow delete: if isGlobalAdmin();
       allow update: if isGlobalAdmin() ||
         (hasCompanyRole(companyId, ['financial_manager', 'user']) &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rdCounter']));
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rdCounter'])) ||
+        (isManager(companyId) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom']));
 
       // Subcoleção: sugestões de lotes geradas pela Cloud Function noturna.
       // Leitura: roles que gerenciam lotes de pagamento.
@@ -217,6 +220,17 @@ service cloud.firestore {
 
        allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
        
+       allow write: if isAuthenticated() && isManager(getCompanyId());
+    }
+
+    // 6b. Chart of Accounts (plano de contas gerencial)
+    // Todos os papéis leem: quem lança precisa escolher a conta. Só o gestor
+    // mantém o plano.
+    match /chart_of_accounts/{accountId} {
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+
        allow write: if isAuthenticated() && isManager(getCompanyId());
     }
 

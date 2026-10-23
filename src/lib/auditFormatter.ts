@@ -153,6 +153,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   batch: "Lote de Pagamento",
   recurrence: "Recorrência",
   budget: "Orçamento",
+  chart_account: "Plano de Contas",
 };
 
 /**
@@ -517,6 +518,8 @@ export function getEntityLink(entity: string, entityId: string): string | null {
       return `/configuracoes/empresas`;
     case "batch":
       return entityId ? `/financeiro` : null;
+    case "chart_account":
+      return `/cadastros/plano-de-contas`;
     default:
       return null;
   }

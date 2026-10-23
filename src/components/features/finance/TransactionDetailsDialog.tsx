@@ -58,6 +58,7 @@ import { TransactionForm } from "./TransactionForm";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 
 const PIX_KEY_TYPE_LABELS: Record<NonNullable<Entity["pixKeyType"]>, string> = {
   cpf: "CPF",
@@ -100,6 +101,13 @@ export function TransactionDetailsDialog({
     cachedTransactionRef.current = propTransaction;
   }
   const transaction = isOpen ? propTransaction : cachedTransactionRef.current;
+
+  const { accounts } = useChartOfAccounts(
+    isOpen ? transaction?.companyId : undefined,
+  );
+  const account = transaction?.accountId
+    ? accounts.find((a) => a.id === transaction.accountId)
+    : undefined;
 
   const [activeTab, setActiveTab] = useState<"details" | "billing">("details");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -605,6 +613,29 @@ export function TransactionDetailsDialog({
             </h4>
             <p className="text-sm whitespace-pre-wrap leading-relaxed">
               {transaction.details}
+            </p>
+          </div>
+        </>
+      )}
+
+      {account && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium text-muted-foreground mb-1">
+              Conta do Plano de Contas
+            </h4>
+            <p className="text-sm">
+              <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                {account.code}
+              </span>
+              {account.name}
+              {account.archived && (
+                <span className="text-xs text-muted-foreground">
+                  {" "}
+                  (arquivada)
+                </span>
+              )}
             </p>
           </div>
         </>

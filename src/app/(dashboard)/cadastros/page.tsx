@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils";
 
 function EntidadesCard() {
   return (
-    <Link href="/cadastros/entidades" className="group block">
-      <div className="relative rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-indigo-200 dark:hover:border-indigo-900 overflow-hidden">
+    <Link href="/cadastros/entidades" className="group block h-full">
+      <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-indigo-200 dark:hover:border-indigo-900 overflow-hidden">
         {/* accent strip */}
         <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-indigo-500 to-violet-400" />
 
@@ -45,16 +45,36 @@ function EntidadesCard() {
   );
 }
 
+function PlanoDeContasCard() {
+  return (
+    <Link href="/cadastros/plano-de-contas" className="group block h-full">
+      <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-emerald-200 dark:hover:border-emerald-900 overflow-hidden">
+        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-emerald-500 to-teal-400" />
+
+        <div className="flex items-start justify-between mb-6">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-950">
+            <LayoutGrid className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-emerald-500" />
+        </div>
+
+        <p className="text-sm font-medium text-muted-foreground mb-1">
+          Plano de Contas
+        </p>
+        <p className="text-2xl font-bold tracking-tight text-foreground">
+          Classificação e DRE
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Estrutura de receitas e despesas, com importação por planilha
+        </p>
+      </div>
+    </Link>
+  );
+}
+
 // ─── Planned modules (coming soon) ───────────────────────────────────────────
 
 const plannedModules = [
-  {
-    title: "Plano de Contas",
-    description: "Estrutura contábil e categorias de lançamento.",
-    icon: LayoutGrid,
-    accent: "text-emerald-600 dark:text-emerald-400",
-    bg: "bg-emerald-50 dark:bg-emerald-950",
-  },
   {
     title: "Categorias",
     description: "Tags e classificações para transações.",
@@ -109,12 +129,13 @@ export default function CadastrosPage() {
         </p>
       </div>
 
-      {/* Featured module */}
+      {/* Featured modules */}
       <div
-        className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+        className="grid gap-4 lg:grid-cols-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
         style={{ animationDelay: "0ms", animationFillMode: "both" }}
       >
         <EntidadesCard />
+        <PlanoDeContasCard />
       </div>
 
       {/* Divider */}

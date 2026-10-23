@@ -42,6 +42,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { importService } from "@/lib/services/importService";
 import { useCostCenters } from "@/hooks/useCostCenters";
+import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
+import { AccountContext } from "@/lib/services/importService";
 import { ImportedRow, ImportStep, ImportResult } from "@/lib/types/importTypes";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -86,6 +88,18 @@ export function BulkImportDialog({
   const costCenters = useMemo(
     () => allCostCenters.filter((cc) => !cc.archived),
     [allCostCenters],
+  );
+
+  const { accounts, requiredFrom } = useChartOfAccounts(
+    isOpen ? selectedCompany?.id : undefined,
+  );
+  const accountCtx = useMemo<AccountContext>(
+    () => ({
+      accounts,
+      requiredFrom,
+      nature: type === "payable" ? "expense" : "revenue",
+    }),
+    [accounts, requiredFrom, type],
   );
 
   // Reset state when dialog closes
@@ -151,7 +165,11 @@ export function BulkImportDialog({
         setProgress(100);
 
         // Validate rows
-        let validatedRows = importService.validateRows(parsed, costCenters);
+        let validatedRows = importService.validateRows(
+          parsed,
+          costCenters,
+          accountCtx,
+        );
 
         // Apply default cost center if set
         if (defaultCostCenterId) {
@@ -162,6 +180,7 @@ export function BulkImportDialog({
           validatedRows = importService.validateRows(
             validatedRows,
             costCenters,
+            accountCtx,
           );
         }
 
@@ -177,7 +196,7 @@ export function BulkImportDialog({
         setStep("upload");
       }
     },
-    [costCenters, defaultCostCenterId],
+    [costCenters, defaultCostCenterId, accountCtx],
   );
 
   const handleDrop = useCallback(
@@ -230,7 +249,7 @@ export function BulkImportDialog({
       selectedIds,
       bulkCostCenterId,
     );
-    updated = importService.validateRows(updated, costCenters);
+    updated = importService.validateRows(updated, costCenters, accountCtx);
     setRows(updated);
     setSelectedIds(new Set());
     setBulkCostCenterId("");
@@ -266,7 +285,7 @@ export function BulkImportDialog({
         }
         return row;
       });
-      return importService.validateRows(updated, costCenters);
+      return importService.validateRows(updated, costCenters, accountCtx);
     });
 
     setEditingCell(null);
@@ -290,7 +309,7 @@ export function BulkImportDialog({
       }
       return row;
     });
-    updated = importService.validateRows(updated, costCenters);
+    updated = importService.validateRows(updated, costCenters, accountCtx);
     setRows(updated);
   };
 

@@ -4,6 +4,20 @@
 
 ---
 
+## Atualização de 23 de outubro de 2026
+
+### Plano de contas e DRE gerencial
+
+Em Cadastros › Plano de Contas você monta a estrutura de receitas e despesas da organização, e cada conta a pagar ou a receber pode ser classificada numa conta do plano. A DRE em Relatórios passa a ser montada a partir dessa classificação.
+
+Para começar há três caminhos: aplicar um modelo pronto (Empresas, ou Entidades sem fins lucrativos, com recursos de uso restrito separados conforme a ITG 2002), importar uma planilha Excel ou CSV, ou cadastrar conta por conta. A tela de importação oferece o modelo em branco, com listas de opções e uma aba de instruções, e os planos sugeridos em planilha para você ajustar antes de importar. Se a planilha tiver algum problema, nada é gravado e a tela mostra a linha de cada erro. Importar de novo atualiza as contas pelo código e cria as novas, sem excluir nenhuma.
+
+O código define a hierarquia: 4.2.01 fica dentro de 4.2, que fica dentro de 4. Contas sintéticas agrupam e totalizam; só as analíticas recebem lançamentos. Cada analítica indica a linha da DRE em que aparece (receita bruta, deduções, custos, despesas operacionais, resultado financeiro, investimentos etc.). Conta com lançamentos não pode ser excluída, mas pode ser arquivada: sai dos formulários e os relatórios antigos continuam fechando.
+
+A classificação pode ser opcional ou passar a ser obrigatória a partir de um exercício, por exemplo 2027. A escolha fica no topo da tela do plano. Enquanto for opcional, nada muda para quem lança. Quando passar a ser obrigatória, contas com vencimento naquele ano ou depois só são salvas com a conta preenchida. Recorrências ativas sem conta aparecem com a etiqueta "sem conta" em Financeiro › Recorrências. Classifique cada uma pela edição antes da virada, para que as contas geradas por elas já cheguem classificadas.
+
+A DRE Gerencial em PDF mostra cada grupo com subtotais e a análise vertical (participação sobre a receita líquida). No Excel ela vem mês a mês, com uma segunda aba listando os lançamentos que formam cada linha. Ao filtrar por centro de custo, entra só a parte do rateio daquele centro. Lançamentos sem conta aparecem numa linha própria, e contas rejeitadas deixaram de ser somadas, como acontecia antes. A planilha de importação de contas a pagar e a receber ganhou a coluna "Conta Contábil", que aceita o código ou o nome da conta.
+
 ## Atualização de 6 de outubro de 2026
 
 ### Dados bancários do fornecedor nos detalhes da transação

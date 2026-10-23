@@ -6,11 +6,25 @@ import {
   COLUMN_MAP,
   PAYMENT_METHOD_MAP,
 } from "@/lib/types/importTypes";
-import { CostCenter, PaymentMethod } from "@/lib/types";
+import {
+  AccountNature,
+  ChartAccount,
+  CostCenter,
+  PaymentMethod,
+} from "@/lib/types";
 import { transactionService } from "./transactionService";
+import { accountRequiredFor } from "@/lib/chartOfAccounts";
+import { normalizeText } from "@/lib/utils";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { parse, isValid, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+/** Plano de contas da empresa, para resolver a coluna "Conta Contábil". */
+export interface AccountContext {
+  accounts: ChartAccount[];
+  nature: AccountNature;
+  requiredFrom: number | null;
+}
 
 // Helper to generate unique IDs
 const generateId = () => crypto.randomUUID();
@@ -164,10 +178,15 @@ export const importService = {
   /**
    * Validate a single row and return it with errors/warnings populated
    */
-  validateRow: (row: ImportedRow, costCenters: CostCenter[]): ImportedRow => {
+  validateRow: (
+    row: ImportedRow,
+    costCenters: CostCenter[],
+    accountCtx?: AccountContext,
+  ): ImportedRow => {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
     let costCenterId = row.costCenterId;
+    let accountId: string | undefined;
 
     // Validate description
     if (!row.description || row.description.toString().trim().length < 3) {
@@ -228,6 +247,41 @@ export const importService = {
       });
     }
 
+    // Conta do plano: por código ou nome, só analítica ativa da natureza certa.
+    // Sem conta é aviso, exceto quando o plano já é obrigatório no vencimento.
+    if (accountCtx && accountCtx.accounts.length > 0) {
+      const raw = row.accountCode?.toString().trim() ?? "";
+      if (raw) {
+        const key = normalizeText(raw);
+        const found = accountCtx.accounts.find(
+          (a) =>
+            a.type === "analytic" &&
+            !a.archived &&
+            a.nature === accountCtx.nature &&
+            (a.code === raw || normalizeText(a.name) === key),
+        );
+        if (found) accountId = found.id;
+        else
+          errors.push({
+            field: "accountCode",
+            message: `Conta "${raw}" não encontrada entre as contas analíticas de ${accountCtx.nature === "expense" ? "despesa" : "receita"}`,
+          });
+      } else if (
+        dueDate &&
+        accountRequiredFor(accountCtx.requiredFrom, dueDate)
+      ) {
+        errors.push({
+          field: "accountCode",
+          message: `Conta do plano de contas obrigatória a partir de ${accountCtx.requiredFrom}`,
+        });
+      } else {
+        warnings.push({
+          field: "accountCode",
+          message: "Conta do plano de contas não informada",
+        });
+      }
+    }
+
     // Validate payment method if provided
     let paymentMethod: string | undefined = undefined;
     if (row.paymentMethod) {
@@ -244,6 +298,7 @@ export const importService = {
     return {
       ...row,
       costCenterId,
+      accountId,
       paymentMethod: paymentMethod || row.paymentMethod,
       errors,
       warnings,
@@ -257,8 +312,11 @@ export const importService = {
   validateRows: (
     rows: ImportedRow[],
     costCenters: CostCenter[],
+    accountCtx?: AccountContext,
   ): ImportedRow[] => {
-    return rows.map((row) => importService.validateRow(row, costCenters));
+    return rows.map((row) =>
+      importService.validateRow(row, costCenters, accountCtx),
+    );
   },
 
   /**
@@ -358,6 +416,7 @@ export const importService = {
               amount,
             },
           ],
+          accountId: row.accountId,
           paymentMethod: row.paymentMethod as PaymentMethod | undefined,
           details: row.details?.toString(),
           notes: row.notes?.toString(),
@@ -390,6 +449,7 @@ export const importService = {
       "Vencimento",
       type === "payable" ? "Fornecedor" : "Cliente",
       "Centro de Custo",
+      "Conta Contábil",
       "Forma de Pagamento",
       "Observações",
     ];
@@ -401,6 +461,7 @@ export const importService = {
         format(new Date(), "dd/MM/yyyy"),
         type === "payable" ? "Imobiliária XYZ" : "Cliente ABC",
         "ADM",
+        type === "payable" ? "4.2.01" : "1.1.02",
         "PIX",
         "Referente ao mês de dezembro",
       ],
@@ -410,6 +471,7 @@ export const importService = {
         format(new Date(), "dd/MM/yyyy"),
         type === "payable" ? "CEMIG" : "Cliente 123",
         "OPE",
+        type === "payable" ? "Energia elétrica" : "1.1.02",
         "Boleto",
         "",
       ],
@@ -424,6 +486,7 @@ export const importService = {
       { wch: 12 }, // Vencimento
       { wch: 25 }, // Fornecedor/Cliente
       { wch: 15 }, // Centro de Custo
+      { wch: 18 }, // Conta Contábil (código ou nome)
       { wch: 18 }, // Forma de Pagamento
       { wch: 35 }, // Observações
     ];

@@ -71,6 +71,11 @@ import { formatCurrency } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertTriangle, Sparkles } from "lucide-react";
 import { useDocumentExtraction } from "@/hooks/useDocumentExtraction";
+import {
+  accountRequiredFor,
+  useChartOfAccounts,
+} from "@/hooks/useChartOfAccounts";
+import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSelect";
 import { toast } from "sonner";
 
 interface TransactionFormProps {
@@ -163,6 +168,32 @@ export function TransactionForm({
 
   const { user } = useAuth();
   const { onlyOwnPayables } = usePermissions();
+
+  // Plano de contas: só aparece quando a empresa tem contas desta natureza, e
+  // só é exigido a partir do exercício configurado.
+  const nature = type === "payable" ? "expense" : "revenue";
+  const { accounts, requiredFrom } = useChartOfAccounts(selectedCompany?.id);
+  const hasAccounts = accounts.some(
+    (a) => a.nature === nature && a.type === "analytic" && !a.archived,
+  );
+  const accountRequired =
+    hasAccounts && accountRequiredFor(requiredFrom, form.watch("dueDate"));
+  const selectedAccount = accounts.find(
+    (a) => a.id === form.watch("accountId"),
+  );
+
+  const handleValidSubmit = (data: TransactionFormData) => {
+    if (accountRequired && !data.accountId) {
+      form.setError("accountId", {
+        message: `Obrigatória para vencimentos a partir de ${requiredFrom}.`,
+      });
+      document
+        .getElementById("transaction-account")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    return onSubmit(data);
+  };
 
   // Watch dueDate to get the year for balance calculation
   const watchedDueDate = form.watch("dueDate");
@@ -492,7 +523,7 @@ export function TransactionForm({
   return (
     <Form {...form}>
       <form
-        onSubmit={form.handleSubmit(onSubmit, (errors) =>
+        onSubmit={form.handleSubmit(handleValidSubmit, (errors) =>
           console.error("Validation Errors:", errors),
         )}
         className="space-y-6"
@@ -853,6 +884,43 @@ export function TransactionForm({
                   )}
                 </div>
               </div>
+
+              {hasAccounts && (
+                <div className="col-span-12" id="transaction-account">
+                  <FormField
+                    control={form.control}
+                    name="accountId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          Conta do plano de contas
+                          {!accountRequired && (
+                            <span className="text-muted-foreground font-normal">
+                              {" "}
+                              (opcional)
+                            </span>
+                          )}
+                        </FormLabel>
+                        <AccountSelect
+                          accounts={accounts}
+                          nature={nature}
+                          value={field.value}
+                          onChange={(id) => {
+                            field.onChange(id);
+                            form.clearErrors("accountId");
+                          }}
+                        />
+                        {selectedAccount?.description && (
+                          <FormDescription>
+                            {selectedAccount.description}
+                          </FormDescription>
+                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
 
               {type === "payable" && (
                 <div className="col-span-12">

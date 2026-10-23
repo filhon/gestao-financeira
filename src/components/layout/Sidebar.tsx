@@ -23,6 +23,7 @@ import {
   FileCheck,
   ReceiptText,
   Megaphone,
+  ListTree,
 } from "lucide-react";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
@@ -107,6 +108,12 @@ const allMenuItems: MenuItem[] = [
         href: "/centros-custo",
         icon: Building2,
         permission: "canViewCostCenters",
+      },
+      {
+        title: "Plano de Contas",
+        href: "/cadastros/plano-de-contas",
+        icon: ListTree,
+        permission: "canViewChartOfAccounts",
       },
       {
         title: "Outros Cadastros", // Entities, etc.

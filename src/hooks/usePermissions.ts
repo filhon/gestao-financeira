@@ -42,6 +42,9 @@ export interface Permissions {
   canViewEntities: boolean; // Suppliers/Clients
   canManageEntities: boolean; // Create/Edit/Delete
 
+  canViewChartOfAccounts: boolean;
+  canManageChartOfAccounts: boolean; // Create/Edit/Import/Archive
+
   canViewReports: boolean;
 
   // Admin & Settings
@@ -193,6 +196,18 @@ export function usePermissions(): Permissions {
         "releaser",
       ]),
       canManageEntities: isAdminOrManager,
+
+      // Chart of accounts
+      // Everyone who launches transactions picks accounts (the form reads the
+      // collection), but the page itself is for the roles that read reports.
+      canViewChartOfAccounts: isOneOf([
+        "admin",
+        "financial_manager",
+        "approver",
+        "releaser",
+        "auditor",
+      ]),
+      canManageChartOfAccounts: isAdminOrManager,
 
       // Reports
       // User: No.

@@ -51,6 +51,10 @@ export const transactionSchema = z.object({
       return Math.abs(total - 100) < 0.1; // Allow small float error
     }, "A soma das porcentagens deve ser 100%"),
 
+  // Obrigatória só a partir do exercício configurado no plano de contas; o
+  // formulário confere isso no envio, porque depende da empresa e da data.
+  accountId: z.string().optional(),
+
   attachments: z
     .array(
       z.object({

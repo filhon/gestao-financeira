@@ -5,6 +5,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCostCenters } from "@/hooks/useCostCenters";
+import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { transactionService } from "@/lib/services/transactionService";
 import { entityService } from "@/lib/services/entityService";
 import { reportService } from "@/lib/services/reportService";
@@ -80,8 +81,9 @@ const REPORT_TYPES = [
   },
   {
     value: "dre",
-    label: "DRE",
-    description: "Demonstrativo de Resultados do Exercício",
+    label: "DRE Gerencial",
+    description:
+      "Resultado pelo plano de contas, com análise vertical; mês a mês no Excel",
     icon: BarChart3,
     accentClass: "text-violet-600 dark:text-violet-400",
     bgClass: "bg-violet-50 dark:bg-violet-950/60",
@@ -164,6 +166,7 @@ export default function ReportsPage() {
     selectedCompany?.id,
     onlyOwnPayables ? user?.uid : undefined,
   );
+  const { accounts } = useChartOfAccounts(selectedCompany?.id);
 
   // Ao selecionar o Guia de Transferências, pré-seleciona status "Autorizado"
   // (apenas se o filtro ainda estiver no padrão "all")
@@ -354,9 +357,29 @@ export default function ReportsPage() {
         return;
       }
 
+      const dreFilters = {
+        costCenterId: costCenterFilter !== "all" ? costCenterFilter : undefined,
+        costCenterName:
+          costCenterFilter !== "all"
+            ? costCenters.find((c) => c.id === costCenterFilter)?.name
+            : undefined,
+        statusLabel:
+          statusFilter !== "all" ? STATUS_LABELS[statusFilter] : undefined,
+      };
+
       if (formatType === "csv") {
-        reportService.exportToCSV(filtered);
+        reportService.exportToCSV(filtered, accounts);
         toast.success("Exportação CSV concluída!");
+      } else if (formatType === "excel" && reportType === "dre") {
+        await reportService.exportDREExcel(
+          filtered,
+          start,
+          end,
+          selectedCompany.name,
+          accounts,
+          dreFilters,
+        );
+        toast.success("DRE exportada para Excel!");
       } else if (formatType === "excel") {
         await reportService.exportToExcel(
           filtered,
@@ -381,6 +404,8 @@ export default function ReportsPage() {
             start,
             end,
             selectedCompany.name,
+            accounts,
+            dreFilters,
           );
         } else if (reportType === "consolidated") {
           await reportService.generateConsolidatedCashFlowPDF(

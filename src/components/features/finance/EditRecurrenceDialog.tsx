@@ -8,6 +8,11 @@ import { RecurringTransactionTemplate } from "@/lib/types";
 import { recurrenceService } from "@/lib/services/recurrenceService";
 import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { useCostCenters } from "@/hooks/useCostCenters";
+import {
+  accountRequiredFor,
+  useChartOfAccounts,
+} from "@/hooks/useChartOfAccounts";
+import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSelect";
 import { Button } from "@/components/ui/button";
 import {
   ResponsiveModal,
@@ -60,6 +65,7 @@ const recurrenceSchema = z.object({
     })
     .optional(),
   costCenterId: z.string().optional(),
+  accountId: z.string().optional(),
 });
 
 type RecurrenceFormData = z.infer<typeof recurrenceSchema>;
@@ -98,6 +104,16 @@ export function EditRecurrenceDialog({
     (cc) => !cc.archived || cc.id === currentCostCenterId,
   );
 
+  // Conta do plano: é copiada para cada lançamento gerado, então classificar
+  // aqui classifica tudo que a recorrência ainda vai gerar.
+  const { accounts, requiredFrom } = useChartOfAccounts(
+    open ? template?.companyId : undefined,
+  );
+  const accountNature = template?.type === "receivable" ? "revenue" : "expense";
+  const hasAccounts = accounts.some(
+    (a) => a.nature === accountNature && a.type === "analytic",
+  );
+
   const form = useForm<RecurrenceFormData>({
     resolver: zodResolver(recurrenceSchema),
     defaultValues: {
@@ -122,6 +138,7 @@ export function EditRecurrenceDialog({
         adjustmentRule: template.adjustmentRule,
         costCenterId:
           template.baseTransactionData?.costCenterAllocation?.[0]?.costCenterId,
+        accountId: template.baseTransactionData?.accountId,
       });
     }
   }, [template, form]);
@@ -134,9 +151,22 @@ export function EditRecurrenceDialog({
       });
       return;
     }
+    if (
+      hasAccounts &&
+      !data.accountId &&
+      accountRequiredFor(requiredFrom, data.nextDueDate)
+    ) {
+      form.setError("accountId", {
+        message: `Obrigatória para vencimentos a partir de ${requiredFrom}.`,
+      });
+      return;
+    }
 
     try {
       setIsSubmitting(true);
+      const accountChanged =
+        (data.accountId ?? null) !==
+        (template.baseTransactionData?.accountId ?? null);
       await recurrenceService.updateTemplate(template.id, template.companyId, {
         description: data.description,
         amount: data.amount,
@@ -148,16 +178,19 @@ export function EditRecurrenceDialog({
         // A alocação é regravada com o valor atual mesmo sem trocar o centro:
         // antes a edição mudava só `amount` e a alocação antiga ficava para
         // trás.
-        ...(canPickCostCenter && {
+        ...((canPickCostCenter || accountChanged) && {
           baseTransactionData: {
             ...template.baseTransactionData,
-            costCenterAllocation: [
-              {
-                costCenterId: data.costCenterId!,
-                percentage: 100,
-                amount: data.amount,
-              },
-            ],
+            accountId: data.accountId,
+            ...(canPickCostCenter && {
+              costCenterAllocation: [
+                {
+                  costCenterId: data.costCenterId!,
+                  percentage: 100,
+                  amount: data.amount,
+                },
+              ],
+            }),
           },
         }),
       });
@@ -240,6 +273,29 @@ export function EditRecurrenceDialog({
                         ))}
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
+            {hasAccounts && (
+              <FormField
+                control={form.control}
+                name="accountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Conta do plano de contas</FormLabel>
+                    <AccountSelect
+                      accounts={accounts}
+                      nature={accountNature}
+                      value={field.value}
+                      onChange={(id) => {
+                        field.onChange(id);
+                        form.clearErrors("accountId");
+                      }}
+                      allowClear
+                    />
                     <FormMessage />
                   </FormItem>
                 )}

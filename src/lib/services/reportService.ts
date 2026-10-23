@@ -9,10 +9,49 @@ const loadPdf = async () => {
   ]);
   return { jsPDF, autoTable };
 };
-import { Transaction, Entity } from "@/lib/types";
+import { Transaction, Entity, ChartAccount } from "@/lib/types";
 import { format, addDays, startOfDay, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { formatCurrency } from "@/lib/utils";
+import {
+  buildDre,
+  dreAmount,
+  DreRow,
+  DRE_GROUP_LABEL,
+  effectiveDate,
+  groupResolver,
+} from "@/lib/chartOfAccounts";
+
+/** Filtros da tela de relatórios que mudam o que a DRE mostra. */
+export interface DreFilters {
+  costCenterId?: string;
+  costCenterName?: string;
+  statusLabel?: string;
+}
+
+const dreFilterText = (f: DreFilters) =>
+  (f.costCenterName ? `  ·  Centro de custo: ${f.costCenterName}` : "") +
+  (f.statusLabel ? `  ·  ${f.statusLabel}` : "");
+
+/** Saída entre parênteses, como na DRE publicada. */
+const formatDreValue = (v: number) =>
+  v < 0
+    ? `(${new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2 }).format(-v)})`
+    : new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2 }).format(v);
+
+const formatAv = (v: number, base: number) =>
+  base > 0
+    ? `${((v / base) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+    : "";
+
+const dreRowLabel = (r: DreRow) => {
+  if (r.kind === "account") {
+    return `${"    ".repeat(Math.max(r.level - 1, 0))}${r.code}  ${r.label}`;
+  }
+  if (r.kind === "info") return `    ${r.label}`;
+  if (r.kind === "subtotal" || r.kind === "result") return `(=) ${r.label}`;
+  return r.label;
+};
 
 let interFontCache: string | null = null;
 
@@ -1122,50 +1161,287 @@ export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
   // DRE
   // ─────────────────────────────────────────────────────────────────────────
+  /**
+   * DRE gerencial pelo plano de contas. Sem plano, todo lançamento cai em
+   * "sem conta contábil" e o relatório vira o resumo receitas − despesas de
+   * antes — mas agora sem contar as rejeitadas.
+   */
   generateDREPDF: async (
     transactions: Transaction[],
     startDate: Date,
     endDate: Date,
     companyName: string,
+    accounts: ChartAccount[] = [],
+    filters: DreFilters = {},
   ) => {
+    const dre = buildDre(transactions, accounts, {
+      start: startDate,
+      end: endDate,
+      costCenterId: filters.costCenterId,
+    });
+
     const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF();
     const reportFont = await ensureReportFont(doc);
+    const pageWidth = doc.internal.pageSize.getWidth();
 
-    doc.setFontSize(18);
-    doc.text("Demonstrativo de Resultados (DRE)", 14, 20);
-    doc.setFontSize(12);
-    doc.text(companyName, 14, 30);
+    doc.setFontSize(15);
+    doc.setTextColor(15, 23, 42);
+    doc.text("Demonstração do Resultado — DRE Gerencial", 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(71, 85, 105);
+    doc.text(companyName, 14, 25);
     doc.text(
-      `Período: ${format(startDate, "dd/MM/yyyy")} a ${format(endDate, "dd/MM/yyyy")}`,
+      `Período: ${format(startDate, "dd/MM/yyyy")} a ${format(endDate, "dd/MM/yyyy")}` +
+        dreFilterText(filters),
       14,
-      36,
+      30.5,
     );
 
-    const revenue = transactions
-      .filter((t) => t.type === "receivable")
-      .reduce((acc, t) => acc + t.amount, 0);
-    const expenses = transactions
-      .filter((t) => t.type === "payable")
-      .reduce((acc, t) => acc + t.amount, 0);
-    const result = revenue - expenses;
-
-    const tableData = [
-      ["Receita Bruta", formatCurrency(revenue)],
-      ["(-) Despesas Operacionais", formatCurrency(expenses)],
-      ["(=) Resultado Operacional", formatCurrency(result)],
-    ];
-
     autoTable(doc, {
-      startY: 45,
-      head: [["Descrição", "Valor"]],
-      body: tableData,
-      showHead: "firstPage",
-      styles: { font: reportFont, fontSize: 10, cellPadding: 3 },
-      headStyles: { font: reportFont, fontStyle: "bold" },
+      startY: 37,
+      head: [["Conta", "Valor (R$)", "AV %"]],
+      body: dre.rows.map((r) => [
+        dreRowLabel(r),
+        r.kind === "heading" ? "" : formatDreValue(r.total),
+        r.kind === "heading" ? "" : formatAv(r.total, dre.base),
+      ]),
+      showHead: "everyPage",
+      theme: "plain",
+      styles: {
+        font: reportFont,
+        fontSize: 8.5,
+        cellPadding: { top: 1.6, bottom: 1.6, left: 2, right: 2 },
+        textColor: [30, 41, 59],
+      },
+      headStyles: {
+        font: reportFont,
+        fontStyle: "bold",
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+      },
+      columnStyles: {
+        1: { halign: "right", cellWidth: 38 },
+        2: { halign: "right", cellWidth: 18 },
+      },
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        const row = dre.rows[data.row.index];
+        const s = data.cell.styles;
+        if (row.kind === "group") {
+          s.fontStyle = "bold";
+          s.fillColor = [241, 245, 249];
+        } else if (row.kind === "subtotal") {
+          s.fontStyle = "bold";
+          s.fillColor = [226, 232, 240];
+        } else if (row.kind === "result") {
+          s.fontStyle = "bold";
+          s.fillColor = [15, 23, 42];
+          s.textColor = [255, 255, 255];
+        } else if (row.kind === "heading") {
+          s.fontStyle = "bold";
+          s.textColor = [100, 116, 139];
+          s.cellPadding = { top: 4, bottom: 1.6, left: 2, right: 2 };
+        } else {
+          s.textColor = row.kind === "info" ? [180, 83, 9] : [51, 65, 85];
+        }
+        if (data.column.index > 0 && row.total < 0 && row.kind !== "result") {
+          s.textColor = [185, 28, 28];
+        }
+      },
     });
 
-    doc.save(`dre_${format(new Date(), "yyyyMMdd")}.pdf`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let y = (doc as any).lastAutoTable.finalY + 6;
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    const notes = [
+      "Valores pela data efetiva: pagamento para contas pagas ou recebidas, vencimento para as demais. Rejeitadas não entram.",
+      "AV % (análise vertical): participação de cada linha sobre a receita líquida do período. Valores entre parênteses são saídas.",
+      ...(dre.unclassifiedCount > 0
+        ? [
+            `${dre.unclassifiedCount} lançamento(s) sem conta contábil aparecem em linha própria e não entram nos grupos da DRE.`,
+          ]
+        : []),
+    ];
+    for (const note of notes) {
+      const lines = doc.splitTextToSize(note, pageWidth - 28);
+      doc.text(lines, 14, y);
+      y += lines.length * 3.6;
+    }
+
+    doc.save(
+      `dre_${format(startDate, "yyyyMM")}_${format(endDate, "yyyyMM")}.pdf`,
+    );
+  },
+
+  /**
+   * DRE em Excel, mês a mês, com total e análise vertical, e uma segunda aba
+   * com os lançamentos que formam cada linha — para conferir ou entregar ao
+   * contador.
+   */
+  exportDREExcel: async (
+    transactions: Transaction[],
+    startDate: Date,
+    endDate: Date,
+    companyName: string,
+    accounts: ChartAccount[] = [],
+    filters: DreFilters = {},
+  ) => {
+    const dre = buildDre(transactions, accounts, {
+      start: startDate,
+      end: endDate,
+      costCenterId: filters.costCenterId,
+    });
+
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "FinControl";
+    workbook.created = new Date();
+
+    const MONEY = '#,##0.00;[Red](#,##0.00);"-"';
+    const sheet = workbook.addWorksheet("DRE", {
+      views: [{ state: "frozen", ySplit: 4, xSplit: 2 }],
+      properties: { outlineLevelRow: 3 },
+    });
+    sheet.columns = [
+      { width: 12 },
+      { width: 52 },
+      ...dre.columns.map(() => ({ width: 14 })),
+      { width: 16 },
+      { width: 9 },
+    ];
+    const lastCol = 2 + dre.columns.length + 2;
+
+    sheet.mergeCells(1, 1, 1, lastCol);
+    sheet.getCell(1, 1).value = `${companyName} — DRE Gerencial`;
+    sheet.getCell(1, 1).font = { bold: true, size: 13 };
+    sheet.mergeCells(2, 1, 2, lastCol);
+    sheet.getCell(2, 1).value =
+      `Período: ${format(startDate, "dd/MM/yyyy")} a ${format(endDate, "dd/MM/yyyy")}` +
+      dreFilterText(filters) +
+      `  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
+    sheet.getCell(2, 1).font = { size: 9, color: { argb: "FF64748B" } };
+    sheet.getRow(3).height = 4;
+
+    const header = sheet.addRow([
+      "Código",
+      "Conta",
+      ...dre.columns.map((c) => c.label),
+      "Total",
+      "AV %",
+    ]);
+    header.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+    });
+    header.height = 20;
+
+    for (const r of dre.rows) {
+      const isHeading = r.kind === "heading";
+      const row = sheet.addRow([
+        r.code ?? "",
+        r.kind === "account" || r.kind === "info"
+          ? r.label
+          : r.label.toUpperCase(),
+        ...(isHeading ? dre.columns.map(() => null) : r.values),
+        isHeading ? null : r.total,
+        isHeading || dre.base <= 0 ? null : r.total / dre.base,
+      ]);
+      row.getCell(2).alignment = { indent: r.kind === "account" ? r.level : 0 };
+      for (let c = 3; c <= lastCol - 1; c++) row.getCell(c).numFmt = MONEY;
+      row.getCell(lastCol).numFmt = "0.0%";
+      if (r.kind === "account") row.outlineLevel = Math.min(r.level, 3);
+
+      const fill = (argb: string) =>
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+        });
+      if (r.kind === "group") {
+        row.font = { bold: true };
+        fill("FFF1F5F9");
+      } else if (r.kind === "subtotal") {
+        row.font = { bold: true };
+        fill("FFE2E8F0");
+      } else if (r.kind === "result") {
+        row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        fill("FF0F172A");
+      } else if (isHeading) {
+        row.font = { bold: true, color: { argb: "FF64748B" } };
+      } else if (r.kind === "info") {
+        row.font = { italic: true, color: { argb: "FFB45309" } };
+      }
+    }
+
+    sheet.addRow([]);
+    for (const note of [
+      "Valores pela data efetiva: pagamento para contas pagas ou recebidas, vencimento para as demais. Rejeitadas não entram.",
+      "AV %: participação sobre a receita líquida do período. Entradas positivas, saídas negativas.",
+    ]) {
+      sheet.addRow(["", note]).font = { size: 8, color: { argb: "FF64748B" } };
+    }
+
+    // Aba de lançamentos: a origem de cada número da DRE.
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    const groupOf = groupResolver(accounts);
+    const detail = workbook.addWorksheet("Lançamentos", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    detail.columns = [
+      { header: "Data efetiva", width: 13 },
+      { header: "Descrição", width: 42 },
+      { header: "Favorecido", width: 30 },
+      { header: "Tipo", width: 10 },
+      { header: "Status", width: 13 },
+      { header: "Código", width: 11 },
+      { header: "Conta", width: 36 },
+      { header: "Linha da DRE", width: 30 },
+      { header: "Valor", width: 15 },
+    ];
+    detail.getRow(1).font = { bold: true };
+    const included = transactions
+      .filter((t) => t.status !== "rejected")
+      .map((t) => ({ t, date: effectiveDate(t) }))
+      .filter(({ date }) => date >= startDate && date <= endDate)
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+    for (const { t, date } of included) {
+      const account = t.accountId ? byId.get(t.accountId) : undefined;
+      const group = account ? groupOf(account.code) : undefined;
+      const amount = dreAmount(t, filters.costCenterId);
+      if (!amount) continue;
+      const row = detail.addRow([
+        date,
+        t.description,
+        t.supplierOrClient ?? "",
+        t.type === "payable" ? "Despesa" : "Receita",
+        STATUS_LABEL[t.status] ?? t.status,
+        account?.code ?? "",
+        account?.name ?? "Sem conta contábil",
+        group ? DRE_GROUP_LABEL[group] : "",
+        t.type === "payable" ? -amount : amount,
+      ]);
+      row.getCell(1).numFmt = "dd/mm/yyyy";
+      row.getCell(9).numFmt = MONEY;
+    }
+    detail.autoFilter = { from: "A1", to: "I1" };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dre_${format(startDate, "yyyyMM")}_${format(endDate, "yyyyMM")}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1943,10 +2219,15 @@ export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
   // EXPORTAR CSV
   // ─────────────────────────────────────────────────────────────────────────
-  exportToCSV: (transactions: Transaction[]) => {
+  exportToCSV: (transactions: Transaction[], accounts: ChartAccount[] = []) => {
     const escapeCSV = (value: string | undefined | null): string => {
       const str = value ?? "";
       return `"${str.replace(/"/g, '""')}"`;
+    };
+    const accountById = new Map(accounts.map((a) => [a.id, a]));
+    const accountText = (id?: string) => {
+      const a = id ? accountById.get(id) : undefined;
+      return a ? `${a.code} ${a.name}` : "";
     };
 
     const headers = [
@@ -1959,6 +2240,7 @@ export const reportService = {
       "Valor Final",
       "Status",
       "Centro de Custo",
+      "Conta Contábil",
       "Forma de Pagamento",
       "Detalhes",
       "Observações",
@@ -1974,6 +2256,7 @@ export const reportService = {
       (t.finalAmount ?? t.amount).toFixed(2),
       t.status,
       t.costCenterId ?? "",
+      escapeCSV(accountText(t.accountId)),
       t.paymentMethod ?? "",
       escapeCSV(t.details),
       escapeCSV(t.notes),

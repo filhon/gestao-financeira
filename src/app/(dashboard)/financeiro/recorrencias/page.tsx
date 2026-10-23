@@ -66,6 +66,7 @@ import {
   normalizeText,
 } from "@/lib/utils";
 import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurrenceDialog";
+import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { AnimatedCounter } from "@/components/ui/animated-counter";
 
 import { usePermissions } from "@/hooks/usePermissions";
@@ -159,14 +160,29 @@ interface MobileRecurrenceCardProps {
   template: RecurringTransactionTemplate;
   urgency: string | null;
   canManage: boolean;
+  missingAccount: boolean;
   onEdit: () => void;
   onToggleActive: () => void;
+}
+
+/** Ativa e sem conta do plano: os lançamentos que ela gerar chegam sem classificação. */
+function MissingAccountBadge() {
+  return (
+    <Badge
+      variant="outline"
+      className="h-5 px-1.5 text-[10px] font-medium border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400"
+      title="Os lançamentos gerados chegam sem conta do plano de contas"
+    >
+      sem conta
+    </Badge>
+  );
 }
 
 function MobileRecurrenceCard({
   template: t,
   urgency,
   canManage,
+  missingAccount,
   onEdit,
   onToggleActive,
 }: MobileRecurrenceCardProps) {
@@ -235,6 +251,7 @@ function MobileRecurrenceCard({
           >
             {t.active ? "Ativo" : "Pausado"}
           </Badge>
+          {missingAccount && <MissingAccountBadge />}
         </div>
       </div>
 
@@ -277,6 +294,9 @@ export default function RecorrenciasPage() {
   const { selectedCompany } = useCompany();
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
+  const { accounts } = useChartOfAccounts(selectedCompany?.id);
+  const missingAccount = (t: RecurringTransactionTemplate) =>
+    accounts.length > 0 && t.active && !t.baseTransactionData?.accountId;
 
   const [searchTerm, setSearchTermState] = useState("");
   const [statusFilter, setStatusFilterState] = useState<string>("all");
@@ -787,6 +807,7 @@ export default function RecorrenciasPage() {
                                   {getFrequencyIcon(t.frequency)}
                                 </span>
                                 {t.description}
+                                {missingAccount(t) && <MissingAccountBadge />}
                               </div>
                             </TableCell>
 
@@ -941,6 +962,7 @@ export default function RecorrenciasPage() {
                             template={t}
                             urgency={urgency}
                             canManage={canManageRecurrences}
+                            missingAccount={missingAccount(t)}
                             onEdit={() => setEditTemplate(t)}
                             onToggleActive={() => handleToggleActive(t)}
                           />

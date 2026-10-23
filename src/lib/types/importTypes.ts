@@ -9,6 +9,8 @@ export interface ImportedRow {
   supplierOrClient: string;
   costCenterCode?: string;
   costCenterId?: string; // Resolved from costCenterCode or bulk assignment
+  accountCode?: string; // Código (ou nome) da conta do plano de contas
+  accountId?: string; // Resolvido a partir de accountCode a cada validação
   paymentMethod?: string;
   details?: string;
   notes?: string;
@@ -74,6 +76,11 @@ export const COLUMN_MAP: Record<string, keyof ImportedRow> = {
   "cost center": "costCenterCode",
   costcenter: "costCenterCode",
   cc: "costCenterCode",
+  "conta contábil": "accountCode",
+  "conta contabil": "accountCode",
+  "plano de contas": "accountCode",
+  "conta do plano": "accountCode",
+  categoria: "accountCode",
   "forma de pagamento": "paymentMethod",
   "payment method": "paymentMethod",
   pagamento: "paymentMethod",

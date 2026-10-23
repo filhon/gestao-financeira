@@ -20,6 +20,7 @@ const pathNames: Record<string, string> = {
   recorrencias: "Recorrências",
   cadastros: "Cadastros",
   entidades: "Entidades",
+  "plano-de-contas": "Plano de Contas",
   "centros-custo": "Centros de Custo",
   configuracoes: "Configurações",
   empresas: "Empresas",

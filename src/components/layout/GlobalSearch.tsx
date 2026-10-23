@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   ShieldCheck,
+  ListTree,
   ClipboardList,
   Layers,
   Scale,
@@ -151,6 +152,20 @@ const navigationPages: NavigationPage[] = [
     icon: ClipboardList,
     keywords: ["cadastro", "registro"],
     permission: "canViewEntities",
+  },
+  {
+    name: "Plano de Contas",
+    href: "/cadastros/plano-de-contas",
+    icon: ListTree,
+    keywords: [
+      "plano",
+      "contas",
+      "contabil",
+      "categoria",
+      "dre",
+      "classificacao",
+    ],
+    permission: "canViewChartOfAccounts",
   },
   {
     name: "Entidades",

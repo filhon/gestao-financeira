@@ -719,6 +719,7 @@ export default function AccountsReceivablePage() {
           active: true,
           baseTransactionData: {
             costCenterAllocation: data.costCenterAllocation,
+            accountId: data.accountId,
             supplierOrClient: data.supplierOrClient,
             entityId: data.entityId,
             paymentMethod: data.paymentMethod,
