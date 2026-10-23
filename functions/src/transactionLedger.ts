@@ -1014,6 +1014,24 @@ interface PatchOutcome {
  *     trava o financeiro. O razão registra o estouro e a árvore trava para
  *     novos lançamentos, que é o efeito pretendido pela regra do envelope.
  */
+/**
+ * Conta em disputa: a baixa e a entrada em lote esperam o desbloqueio
+ * (aprovar ou rejeitar segue livre). Os três callables de escrita passam por
+ * `commitValidatedPatch`; o de lote confere também antes de gravar o primeiro.
+ */
+function assertNotHeld(current: TxShape, patch: Record<string, unknown>) {
+  const hold = (current as { paymentHold?: unknown }).paymentHold;
+  const releasing = "paymentHold" in patch && !patch.paymentHold;
+  const paying = patch.status === "paid" && current.status !== "paid";
+  const batching = "batchId" in patch && !!patch.batchId;
+  if (hold && !releasing && (paying || batching)) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "O pagamento desta conta está bloqueado. Libere o bloqueio antes de seguir.",
+    );
+  }
+}
+
 async function commitValidatedPatch(
   companyId: string,
   txRef: admin.firestore.DocumentReference,
@@ -1021,6 +1039,8 @@ async function commitValidatedPatch(
   patch: Record<string, unknown>,
   opts: { enforce: boolean },
 ): Promise<PatchOutcome> {
+  assertNotHeld(current, patch);
+
   const { byId, parentIdOf, rootId, hasChildren, archived } =
     await loadCcIndex(companyId);
 
@@ -1433,6 +1453,7 @@ export const applyTransactionPatches = functions
           `Transação ${item.transactionId} não encontrada.`,
         );
       }
+      assertNotHeld(snap.data() as TxShape, item.patch);
       loaded.push({ ref, current: snap.data() as TxShape, patch: item.patch });
     }
 

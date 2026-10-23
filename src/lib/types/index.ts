@@ -294,6 +294,10 @@ export interface Entity {
   pixKeyType?: "cpf" | "cnpj" | "email" | "phone" | "random";
   pixKey?: string;
 
+  // Encargos por atraso (padrão quando ausentes: 2% de multa + 1% a.m.)
+  lateFeePercent?: number | null;
+  monthlyInterestPercent?: number | null;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -376,6 +380,22 @@ export interface Transaction {
   // Reimbursement
   isReimbursement?: boolean;
   reimbursementReportId?: string;
+
+  /** Pagamento suspenso (conta em disputa): não pode ser paga nem entrar em lote. */
+  paymentHold?: {
+    reason: string;
+    by: string;
+    byEmail?: string;
+    at: Date;
+  } | null;
+
+  /** Data em que o cliente prometeu pagar (contas a receber). */
+  paymentPromise?: {
+    date: Date;
+    note?: string;
+    by: string;
+    at: Date;
+  } | null;
 }
 
 export type PaymentBatchStatus =
@@ -466,7 +486,10 @@ export interface AuditLog {
     | "confirm_match"
     | "reject_match"
     | "remove_match"
-    | "delete_comprovante";
+    | "delete_comprovante"
+    | "hold"
+    | "release_hold"
+    | "promise";
   entity:
     | "transaction"
     | "company"

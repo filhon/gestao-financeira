@@ -18,6 +18,7 @@ import {
   getCountFromServer,
   getAggregateFromServer,
   sum,
+  count,
   writeBatch,
   runTransaction,
   deleteField,
@@ -59,8 +60,84 @@ const convertDates = (data: DocumentData): Transaction => {
         ? data.approvalTokenExpiresAt
         : (data.approvalTokenExpiresAt as Timestamp)?.toDate()
       : undefined,
+    paymentHold: data.paymentHold
+      ? {
+          ...data.paymentHold,
+          at: (data.paymentHold.at as Timestamp)?.toDate(),
+        }
+      : data.paymentHold,
+    paymentPromise: data.paymentPromise
+      ? {
+          ...data.paymentPromise,
+          date: (data.paymentPromise.date as Timestamp)?.toDate(),
+          at: (data.paymentPromise.at as Timestamp)?.toDate(),
+        }
+      : data.paymentPromise,
   } as Transaction;
 };
+
+/**
+ * Monta a consulta de uma aba da lista. `statuses`/`excludeStatus` não combinam
+ * com `array-contains-any` (vários centros de custo); nesse caso o filtro de
+ * status volta como `memoryStatus`, para ser aplicado depois da leitura.
+ */
+type ListFilter = {
+  type?: string;
+  status?: string;
+  statuses?: string[];
+  excludeStatus?: string[];
+  startDate?: Date;
+  endDate?: Date;
+  createdBy?: string;
+  costCenterIds?: string[];
+};
+
+function listConstraints(companyId: string, filters: ListFilter) {
+  const constraints = [where("companyId", "==", companyId)];
+  let memoryStatus: ((status: string) => boolean) | null = null;
+
+  if (filters.type) constraints.push(where("type", "==", filters.type));
+
+  const ccIds = filters.costCenterIds ?? [];
+  const multiCc = ccIds.length > 1;
+  if (ccIds.length === 1) {
+    constraints.push(where("costCenterIds", "array-contains", ccIds[0]));
+  } else if (multiCc) {
+    // ponytail: array-contains-any aceita até 30 valores; acima disso o filtro
+    // corta os descendentes excedentes.
+    constraints.push(
+      where("costCenterIds", "array-contains-any", ccIds.slice(0, 30)),
+    );
+  }
+
+  if (filters.status) {
+    constraints.push(where("status", "==", filters.status));
+  } else if (filters.statuses?.length) {
+    const list = filters.statuses;
+    if (multiCc) memoryStatus = (s) => list.includes(s);
+    else constraints.push(where("status", "in", list));
+  } else if (filters.excludeStatus?.length) {
+    const list = filters.excludeStatus;
+    if (multiCc) memoryStatus = (s) => !list.includes(s);
+    else constraints.push(where("status", "not-in", list));
+  }
+
+  if (filters.createdBy) {
+    constraints.push(where("createdBy", "==", filters.createdBy));
+  }
+  if (filters.startDate) {
+    constraints.push(
+      where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
+    );
+  }
+  if (filters.endDate) {
+    constraints.push(
+      where("dueDate", "<=", Timestamp.fromDate(endOfDay(filters.endDate))),
+    );
+  }
+
+  return { constraints, memoryStatus };
+}
 
 // Helper to remove undefined values for Firestore
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -436,352 +513,72 @@ export const transactionService = {
   },
 
   /**
-   * Aggregate KPIs for the payables page using server-side aggregation.
-   * Returns accurate totals independent of how many pages have been loaded.
+   * Contagem e soma de cada aba da lista, agregadas no servidor — não dependem
+   * de quantas páginas a tela já carregou.
    *
-   * When multiple cost center IDs are selected, Firestore prohibits combining
-   * `array-contains-any` with `in`/`not-in`. In that case we fall back to:
-   *   - paidAmount via aggregate (status equality is OK with array-contains-any)
-   *   - pendingAmount = totalAmount − paidAmount (avoids `in`)
-   *   - overdue/dueSoon via a small doc fetch (narrow date ranges)
+   * Com vários centros de custo (`array-contains-any`) o filtro de status não
+   * entra na consulta; aí os documentos são lidos e somados em memória.
+   * ponytail: teto de 2000 documentos por aba nesse caminho.
    */
-  getPayableKpis: async (
+  getTabTotals: async (
     companyId: string,
-    filters: {
-      startDate?: Date;
-      endDate?: Date;
-      costCenterIds?: string[];
-      createdBy?: string;
-    },
-  ): Promise<{
-    pendingAmount: number;
-    overdueCount: number;
-    overdueAmount: number;
-    dueSoonCount: number;
-    dueSoonAmount: number;
-    paidAmount: number;
-  }> => {
-    const UNPAID = [
-      "draft",
-      "pending_approval",
-      "approved",
-      "pending_authorization",
-      "authorized",
-      "rejected",
-    ];
-
-    const hasMultipleCostCenters = (filters.costCenterIds?.length ?? 0) > 1;
-
-    // Normalize to end-of-day so a same-day endDate includes transactions
-    // due later that day (e.g. AI-extracted boletos, stamped at noon).
-    const normalizedEndDate = filters.endDate
-      ? endOfDay(filters.endDate)
-      : undefined;
-
-    // Base query: payable transactions in the selected company
-    const baseConstraints = [
-      where("companyId", "==", companyId),
-      where("type", "==", "payable"),
-    ];
-
-    if (filters.createdBy) {
-      baseConstraints.push(where("createdBy", "==", filters.createdBy));
-    }
-
-    // Cost center filter (Firestore limits array-contains-any to 10 items)
-    if (filters.costCenterIds && filters.costCenterIds.length > 0) {
-      if (filters.costCenterIds.length === 1) {
-        baseConstraints.push(
-          where("costCenterIds", "array-contains", filters.costCenterIds[0]),
+    filters: Array<ListFilter | null>,
+  ): Promise<Array<{ count: number; total: number }>> => {
+    return Promise.all(
+      filters.map(async (filter) => {
+        if (!filter) return { count: 0, total: 0 };
+        const { constraints, memoryStatus } = listConstraints(
+          companyId,
+          filter,
         );
-      } else {
-        baseConstraints.push(
-          where(
-            "costCenterIds",
-            "array-contains-any",
-            filters.costCenterIds.slice(0, 10),
-          ),
-        );
-      }
-    }
+        const q = query(collection(db, COLLECTION_NAME), ...constraints);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dayAfterTomorrow = new Date(today);
-    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+        if (memoryStatus) {
+          const snap = await getDocs(query(q, limit(2000)));
+          const docs = snap.docs
+            .map((d) => d.data())
+            .filter((d) => memoryStatus(d.status));
+          return {
+            count: docs.length,
+            total: docs.reduce((acc, d) => acc.add(d.amount || 0), currency(0))
+              .value,
+          };
+        }
 
-    // ── Paid in date range (works in all cases — equality status) ──────
-    const paidConstraints = [...baseConstraints, where("status", "==", "paid")];
-    if (filters.startDate) {
-      paidConstraints.push(
-        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
-      );
-    }
-    if (normalizedEndDate) {
-      paidConstraints.push(
-        where("dueDate", "<=", Timestamp.fromDate(normalizedEndDate)),
-      );
-    }
-    const paidQuery = query(
-      collection(db, COLLECTION_NAME),
-      ...paidConstraints,
+        const snap = await getAggregateFromServer(q, {
+          count: count(),
+          total: sum("amount"),
+        });
+        return {
+          count: snap.data().count,
+          total: currency(snap.data().total || 0).value,
+        };
+      }),
     );
-
-    // ── Branch: array-contains-any can't combine with `in` ─────────────
-    if (hasMultipleCostCenters) {
-      // Total amount in date range (no status filter → no `in` conflict)
-      const totalConstraints = [...baseConstraints];
-      if (filters.startDate) {
-        totalConstraints.push(
-          where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
-        );
-      }
-      if (normalizedEndDate) {
-        totalConstraints.push(
-          where("dueDate", "<=", Timestamp.fromDate(normalizedEndDate)),
-        );
-      }
-      const totalQuery = query(
-        collection(db, COLLECTION_NAME),
-        ...totalConstraints,
-      );
-
-      // Overdue docs: narrow range (startDate..today), fetch docs & filter status in memory
-      const overdueConstraints = [
-        ...baseConstraints,
-        where("dueDate", "<", Timestamp.fromDate(today)),
-      ];
-      if (filters.startDate) {
-        overdueConstraints.push(
-          where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
-        );
-      }
-      const overdueDocsQuery = query(
-        collection(db, COLLECTION_NAME),
-        ...overdueConstraints,
-        limit(2000),
-      );
-
-      // Due soon docs: today..dayAfterTomorrow (very narrow)
-      const dueSoonDocsQuery = query(
-        collection(db, COLLECTION_NAME),
-        ...baseConstraints,
-        where("dueDate", ">=", Timestamp.fromDate(today)),
-        where("dueDate", "<", Timestamp.fromDate(dayAfterTomorrow)),
-        limit(500),
-      );
-
-      const [totalSnap, paidSnap, overdueDocs, dueSoonDocs] = await Promise.all(
-        [
-          getAggregateFromServer(totalQuery, { total: sum("amount") }),
-          getAggregateFromServer(paidQuery, { total: sum("amount") }),
-          getDocs(overdueDocsQuery),
-          getDocs(dueSoonDocsQuery),
-        ],
-      );
-
-      const totalAmount = totalSnap.data().total || 0;
-      const paidAmount = paidSnap.data().total || 0;
-
-      // Filter unpaid statuses in memory
-      const overdueItems = overdueDocs.docs
-        .map((d) => d.data())
-        .filter((d) => UNPAID.includes(d.status));
-      const dueSoonItems = dueSoonDocs.docs
-        .map((d) => d.data())
-        .filter((d) => UNPAID.includes(d.status));
-
-      return {
-        pendingAmount: totalAmount - paidAmount,
-        overdueCount: overdueItems.length,
-        overdueAmount: overdueItems.reduce(
-          (acc, d) => acc + (d.amount || 0),
-          0,
-        ),
-        dueSoonCount: dueSoonItems.length,
-        dueSoonAmount: dueSoonItems.reduce(
-          (acc, d) => acc + (d.amount || 0),
-          0,
-        ),
-        paidAmount,
-      };
-    }
-
-    // ── Standard path: array-contains (single) or no CC filter ─────────
-    // `status in [...]` is safe here.
-    const pendingConstraints = [
-      ...baseConstraints,
-      where("status", "in", UNPAID),
-    ];
-    if (filters.startDate) {
-      pendingConstraints.push(
-        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
-      );
-    }
-    if (normalizedEndDate) {
-      pendingConstraints.push(
-        where("dueDate", "<=", Timestamp.fromDate(normalizedEndDate)),
-      );
-    }
-    const pendingQuery = query(
-      collection(db, COLLECTION_NAME),
-      ...pendingConstraints,
-    );
-
-    const overdueConstraints = [
-      ...baseConstraints,
-      where("status", "in", UNPAID),
-      where("dueDate", "<", Timestamp.fromDate(today)),
-    ];
-    if (filters.startDate) {
-      overdueConstraints.push(
-        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
-      );
-    }
-    const overdueQuery = query(
-      collection(db, COLLECTION_NAME),
-      ...overdueConstraints,
-    );
-
-    const dueSoonQuery = query(
-      collection(db, COLLECTION_NAME),
-      ...baseConstraints,
-      where("status", "in", UNPAID),
-      where("dueDate", ">=", Timestamp.fromDate(today)),
-      where("dueDate", "<", Timestamp.fromDate(dayAfterTomorrow)),
-    );
-
-    // Run all aggregations in parallel (sums + counts)
-    const [
-      pendingSnap,
-      overdueSnap,
-      overdueCountSnap,
-      dueSoonSnap,
-      dueSoonCountSnap,
-      paidSnap,
-    ] = await Promise.all([
-      getAggregateFromServer(pendingQuery, { total: sum("amount") }),
-      getAggregateFromServer(overdueQuery, { total: sum("amount") }),
-      getCountFromServer(overdueQuery),
-      getAggregateFromServer(dueSoonQuery, { total: sum("amount") }),
-      getCountFromServer(dueSoonQuery),
-      getAggregateFromServer(paidQuery, { total: sum("amount") }),
-    ]);
-
-    return {
-      pendingAmount: pendingSnap.data().total || 0,
-      overdueCount: overdueCountSnap.data().count,
-      overdueAmount: overdueSnap.data().total || 0,
-      dueSoonCount: dueSoonCountSnap.data().count,
-      dueSoonAmount: dueSoonSnap.data().total || 0,
-      paidAmount: paidSnap.data().total || 0,
-    };
   },
 
   getPaginated: async (
     companyId: string,
     pageSize: number,
     lastDoc: QueryDocumentSnapshot<DocumentData> | null,
-    filters?: {
-      type?: string;
-      status?: string;
-      excludeStatus?: string[];
-      startDate?: Date;
-      endDate?: Date;
-      createdBy?: string;
-      costCenterIds?: string[];
-      sortField?: string;
-      sortDirection?: "asc" | "desc";
-    },
+    filters: ListFilter = {},
   ): Promise<{
     transactions: Transaction[];
     lastDoc: QueryDocumentSnapshot<DocumentData> | null;
   }> => {
+    const { constraints, memoryStatus } = listConstraints(companyId, filters);
     let q = query(
       collection(db, COLLECTION_NAME),
-      where("companyId", "==", companyId),
+      ...constraints,
+      orderBy("dueDate", "asc"),
     );
-
-    if (filters?.type) {
-      q = query(q, where("type", "==", filters.type));
-    }
-
-    let hasInFilter = false;
-
-    if (filters?.costCenterIds && filters.costCenterIds.length > 0) {
-      if (filters.costCenterIds.length === 1) {
-        q = query(
-          q,
-          where("costCenterIds", "array-contains", filters.costCenterIds[0]),
-        );
-      } else {
-        // Split into chunks if > 10 (Firestore limit for 'array-contains-any')
-        const limit = 10;
-        if (filters.costCenterIds.length <= limit) {
-          q = query(
-            q,
-            where("costCenterIds", "array-contains-any", filters.costCenterIds),
-          );
-          hasInFilter = true;
-        } else {
-          console.warn(
-            `Too many cost centers selected for filter, truncating to ${limit}`,
-          );
-          q = query(
-            q,
-            where(
-              "costCenterIds",
-              "array-contains-any",
-              filters.costCenterIds.slice(0, limit),
-            ),
-          );
-          hasInFilter = true;
-        }
-      }
-    }
-
-    let clientSideStatusFilter: string[] | null = null;
-
-    if (filters?.status) {
-      q = query(q, where("status", "==", filters.status));
-    } else if (filters?.excludeStatus && filters.excludeStatus.length > 0) {
-      // Cannot combine 'in' (from costCenterIds) with 'not-in' (status)
-      if (hasInFilter) {
-        // Defer to client-side filtering
-        clientSideStatusFilter = filters.excludeStatus;
-      } else {
-        q = query(q, where("status", "not-in", filters.excludeStatus));
-      }
-    }
-
-    if (filters?.createdBy) {
-      q = query(q, where("createdBy", "==", filters.createdBy));
-    }
-
-    if (filters?.startDate) {
-      q = query(
-        q,
-        where("dueDate", ">=", Timestamp.fromDate(filters.startDate)),
-      );
-    }
-    if (filters?.endDate) {
-      q = query(
-        q,
-        where("dueDate", "<=", Timestamp.fromDate(endOfDay(filters.endDate))),
-      );
-    }
-
-    // Dynamic sort — uses sortField/sortDirection when provided, else defaults to dueDate asc
-    const sortField = filters?.sortField ?? "dueDate";
-    const sortDirection = filters?.sortDirection ?? "asc";
-    q = query(q, orderBy(sortField, sortDirection));
 
     if (lastDoc) {
       q = query(q, startAfter(lastDoc));
     }
 
     // When client-side filtering is needed, over-fetch to ensure full pages
-    const fetchSize = clientSideStatusFilter ? pageSize * 2 : pageSize;
+    const fetchSize = memoryStatus ? pageSize * 2 : pageSize;
     q = query(q, limit(fetchSize));
 
     const snapshot = await getDocs(q);
@@ -792,11 +589,9 @@ export const transactionService = {
       transaction: convertDates({ id: snapshotDoc.id, ...snapshotDoc.data() }),
     }));
 
-    // Apply client-side filtering if needed
-    const filtered = clientSideStatusFilter
-      ? docsWithData.filter(
-          ({ transaction }) =>
-            !clientSideStatusFilter!.includes(transaction.status),
+    const filtered = memoryStatus
+      ? docsWithData.filter(({ transaction }) =>
+          memoryStatus(transaction.status),
         )
       : docsWithData;
 
@@ -817,6 +612,116 @@ export const transactionService = {
       transactions: truncated.map(({ transaction }) => transaction),
       lastDoc: cursorDoc,
     };
+  },
+
+  /**
+   * Atraso médio de cada cliente nos recebimentos dos últimos 12 meses, em
+   * dias corridos (negativo = costuma pagar adiantado).
+   * ponytail: lê até 3000 recebimentos; agregar por cliente num documento
+   * próprio se a base crescer além disso.
+   */
+  getPunctuality: async (
+    companyId: string,
+  ): Promise<Record<string, { avgDays: number; count: number }>> => {
+    const since = addMonths(new Date(), -12);
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTION_NAME),
+        where("companyId", "==", companyId),
+        where("type", "==", "receivable"),
+        where("status", "==", "paid"),
+        where("paymentDate", ">=", Timestamp.fromDate(since)),
+        limit(3000),
+      ),
+    );
+
+    const sums: Record<string, { days: number; count: number }> = {};
+    for (const d of snap.docs) {
+      const t = convertDates({ id: d.id, ...d.data() });
+      const key = t.entityId || (t.supplierOrClient ?? "").trim().toLowerCase();
+      if (!key || !t.paymentDate || !t.dueDate) continue;
+      const entry = (sums[key] ??= { days: 0, count: 0 });
+      entry.days += differenceInCalendarDays(t.paymentDate, t.dueDate);
+      entry.count++;
+    }
+
+    return Object.fromEntries(
+      Object.entries(sums).map(([key, { days, count }]) => [
+        key,
+        { avgDays: Math.round(days / count), count },
+      ]),
+    );
+  },
+
+  /**
+   * Suspende (ou libera, com `reason = null`) o pagamento de uma conta.
+   * Não mexe em orçamento, então grava direto; as rules e o callable de baixa
+   * recusam pagar ou pôr em lote enquanto o bloqueio existir.
+   */
+  setPaymentHold: async (
+    id: string,
+    reason: string | null,
+    user: { uid: string; email: string },
+    companyId: string,
+  ) => {
+    const hold = reason
+      ? {
+          reason,
+          by: user.uid,
+          byEmail: user.email,
+          at: Timestamp.now(),
+        }
+      : null;
+    await updateDoc(doc(db, COLLECTION_NAME, id), {
+      paymentHold: hold,
+      updatedAt: serverTimestamp(),
+    });
+    await auditService.log({
+      companyId,
+      userId: user.uid,
+      userEmail: user.email,
+      action: reason ? "hold" : "release_hold",
+      entity: "transaction",
+      entityId: id,
+      details: reason ? { reason } : {},
+    });
+    return hold ? { ...hold, at: hold.at.toDate() } : null;
+  },
+
+  /** Registra (ou apaga, com `promise = null`) a data prometida pelo cliente. */
+  setPaymentPromise: async (
+    id: string,
+    promise: { date: Date; note?: string } | null,
+    user: { uid: string; email: string },
+    companyId: string,
+  ) => {
+    const value = promise
+      ? stripUndefined({
+          date: Timestamp.fromDate(promise.date),
+          note: promise.note || undefined,
+          by: user.uid,
+          at: Timestamp.now(),
+        })
+      : null;
+    await updateDoc(doc(db, COLLECTION_NAME, id), {
+      paymentPromise: value,
+      updatedAt: serverTimestamp(),
+    });
+    await auditService.log({
+      companyId,
+      userId: user.uid,
+      userEmail: user.email,
+      action: "promise",
+      entity: "transaction",
+      entityId: id,
+      details: promise
+        ? stripUndefined({
+            date: format(promise.date, "dd/MM/yyyy"),
+            note: promise.note || undefined,
+          })
+        : { removed: true },
+    });
+    return promise ? { ...promise, by: user.uid, at: new Date() } : null;
   },
 
   getByCostCenter: async (
@@ -1375,10 +1280,9 @@ export const transactionService = {
     if (!updatedDoc.exists()) {
       throw new Error("Transaction not found after update");
     }
-    return {
-      id: updatedDoc.id,
-      ...updatedDoc.data(),
-    } as Transaction;
+    // Datas convertidas: a lista grava este objeto direto no cache e formata
+    // `dueDate` — um Timestamp cru quebraria a linha.
+    return convertDates({ id: updatedDoc.id, ...updatedDoc.data() });
   },
 
   delete: async (

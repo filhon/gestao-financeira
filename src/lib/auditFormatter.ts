@@ -54,6 +54,11 @@ export const FIELD_LABELS: Record<string, string> = {
   accountType: "Tipo de Conta",
   pixKeyType: "Tipo de Chave PIX",
   pixKey: "Chave PIX",
+  lateFeePercent: "Multa por Atraso (%)",
+  monthlyInterestPercent: "Juros de Mora (% a.m.)",
+  paymentHold: "Bloqueio de Pagamento",
+  paymentPromise: "Promessa de Pagamento",
+  reason: "Motivo",
 
   // Common
   createdAt: "Criado em",
@@ -141,6 +146,9 @@ export const ACTION_LABELS: Record<string, string> = {
   pay: "pagou",
   authorize: "autorizou",
   release: "liberou",
+  hold: "bloqueou o pagamento de",
+  release_hold: "desbloqueou o pagamento de",
+  promise: "registrou promessa de pagamento em",
 };
 
 // Entity translations

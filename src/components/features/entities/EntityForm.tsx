@@ -78,6 +78,9 @@ const entitySchema = z.object({
   accountType: z.enum(["checking", "savings"]).optional(),
   pixKeyType: z.enum(["cpf", "cnpj", "email", "phone", "random"]).optional(),
   pixKey: z.string().optional(),
+  // null = usar o padrão (2% de multa + 1% a.m.)
+  lateFeePercent: z.number().min(0).max(100).nullable().optional(),
+  monthlyInterestPercent: z.number().min(0).max(100).nullable().optional(),
 });
 
 type EntityFormData = z.infer<typeof entitySchema>;
@@ -206,6 +209,8 @@ export function EntityForm({
         accountType: defaultValues.accountType,
         pixKeyType: defaultValues.pixKeyType,
         pixKey: defaultValues.pixKey || "",
+        lateFeePercent: defaultValues.lateFeePercent ?? null,
+        monthlyInterestPercent: defaultValues.monthlyInterestPercent ?? null,
       });
     }
   }, [defaultValues, form]);
@@ -366,6 +371,48 @@ export function EntityForm({
               )}
             />
           </div>
+
+          {(
+            [
+              ["lateFeePercent", "Multa por atraso (%)", "2"],
+              ["monthlyInterestPercent", "Juros de mora (% ao mês)", "1"],
+            ] as const
+          ).map(([name, label, placeholder]) => (
+            <div key={name} className="col-span-6 md:col-span-3">
+              <FormField
+                control={form.control}
+                name={name}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{label}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        max={100}
+                        step={0.01}
+                        placeholder={placeholder}
+                        value={field.value ?? ""}
+                        onChange={(e) =>
+                          field.onChange(
+                            e.target.value === ""
+                              ? null
+                              : e.target.valueAsNumber,
+                          )
+                        }
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          ))}
+          <p className="col-span-12 md:col-span-6 self-end pb-2 text-xs text-muted-foreground">
+            Usados para calcular o valor corrigido de contas vencidas. Em
+            branco, vale o padrão: 2% de multa e 1% ao mês.
+          </p>
         </div>
 
         <Collapsible open={isBankOpen} onOpenChange={setIsBankOpen}>

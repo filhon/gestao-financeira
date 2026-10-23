@@ -6,6 +6,18 @@
 
 ## Atualização de 23 de outubro de 2026
 
+### Contas a pagar e a receber organizadas por situação
+
+As listas de contas a pagar e a receber agora abrem em abas: Vencidas, Hoje, Próximos 7 dias, Futuras, Pagas (ou Recebidas) e Todas, cada uma com a quantidade e o total em reais. A aba Vencidas mostra todo o atraso em aberto, qualquer que seja o período escolhido. Antes, uma conta vencida podia ficar fora da tela por causa do filtro de datas.
+
+O filtro de período passou a valer só para as abas Pagas e Todas. As vencidas aparecem agrupadas por faixa de atraso (1 a 30, 31 a 60, 61 a 90 e mais de 90 dias); as próximas, por dia, com o subtotal e o saldo previsto ao fim de cada dia. Cada linha mostra há quantos dias a conta venceu e o valor corrigido com multa e juros. O padrão é 2% de multa e 1% ao mês, e pode ser ajustado por fornecedor ou cliente no cadastro de entidades, em Multa por atraso e Juros de mora. Ao confirmar o pagamento de uma conta vencida, o valor sugerido já inclui os encargos da data escolhida. Contas rejeitadas deixaram de contar como vencidas e de entrar nos totais a pagar.
+
+Quem aprova ou libera pagamentos ganhou a aba Minha fila, com o que espera a sua ação e há quantos dias está parado. Uma conta a pagar pode ser bloqueada, com o motivo registrado (por exemplo, nota divergente): enquanto estiver bloqueada, não pode ser paga nem entrar em lote. Nas contas a receber dá para registrar a data que o cliente prometeu pagar, e a lista mostra o atraso médio de cada cliente nos últimos 12 meses.
+
+As linhas também avisam quando há possível duplicata (mesmo fornecedor, valor e vencimento), conta paga sem comprovante ou sem centro de custo. A linha digitável do boleto pode ser copiada direto da lista. Os detalhes abrem num painel ao lado, sem esconder a lista, com setas para ir à conta anterior ou à próxima. O rodapé da lista mostra o total da aba e, ao selecionar contas, o total selecionado e as ações em lote. A aba escolhida e os filtros ficam guardados para a próxima visita.
+
+No computador, dá para usar o teclado: j e k sobem e descem na lista, x seleciona, Enter abre, p confirma o pagamento, c copia o boleto, / vai para a busca e os números de 1 a 7 trocam de aba. A busca agora procura em todas as datas e situações.
+
 ### Plano de contas e DRE gerencial
 
 Em Cadastros › Plano de Contas você monta a estrutura de receitas e despesas da organização, e cada conta a pagar ou a receber pode ser classificada numa conta do plano. A DRE em Relatórios passa a ser montada a partir dessa classificação.

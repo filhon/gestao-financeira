@@ -23,6 +23,8 @@ import {
 import { cn } from "@/lib/utils";
 import { ptBR } from "date-fns/locale";
 import { CurrencyInput } from "@/components/ui/currency-input";
+import currency from "currency.js";
+import { lateCharges, type LateFeeRule } from "@/lib/transactionTabs";
 
 interface PaymentDialogProps {
   isOpen: boolean;
@@ -35,6 +37,8 @@ interface PaymentDialogProps {
   }) => Promise<void>;
   transaction: Transaction;
   type: "pay" | "receive";
+  /** Quando informado, sugere o valor com multa e juros pela data escolhida. */
+  lateFee?: LateFeeRule;
 }
 
 export function PaymentDialog({
@@ -43,18 +47,38 @@ export function PaymentDialog({
   onConfirm,
   transaction,
   type,
+  lateFee,
 }: PaymentDialogProps) {
   const [date, setDate] = useState<Date>(new Date());
   // Estado numérico limpo — CurrencyInput gerencia a exibição pt-BR internamente
   const [finalAmount, setFinalAmount] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Depois que o usuário digita um valor, trocar a data não o sobrescreve.
+  const [amountEdited, setAmountEdited] = useState(false);
+
+  const charges = lateFee
+    ? lateCharges(transaction.amount, transaction.dueDate, date, lateFee)
+    : null;
+
+  // Primitivos nas dependências: a regra chega como objeto novo a cada render.
+  const feePercent = lateFee?.feePercent;
+  const monthlyInterestPercent = lateFee?.monthlyInterestPercent;
 
   useEffect(() => {
     if (isOpen && transaction) {
-      setDate(new Date());
-      setFinalAmount(transaction.amount);
+      const today = new Date();
+      setDate(today);
+      setAmountEdited(false);
+      setFinalAmount(
+        feePercent !== undefined && monthlyInterestPercent !== undefined
+          ? lateCharges(transaction.amount, transaction.dueDate, today, {
+              feePercent,
+              monthlyInterestPercent,
+            }).total
+          : transaction.amount,
+      );
     }
-  }, [isOpen, transaction]);
+  }, [isOpen, transaction, feePercent, monthlyInterestPercent]);
 
   const handleConfirm = async () => {
     if (!date || finalAmount <= 0) return;
@@ -67,9 +91,9 @@ export function PaymentDialog({
       let interest = 0;
 
       if (finalAmount < originalAmount) {
-        discount = originalAmount - finalAmount;
+        discount = currency(originalAmount).subtract(finalAmount).value;
       } else if (finalAmount > originalAmount) {
-        interest = finalAmount - originalAmount;
+        interest = currency(finalAmount).subtract(originalAmount).value;
       }
 
       await onConfirm({
@@ -120,7 +144,20 @@ export function PaymentDialog({
                 <Calendar
                   mode="single"
                   selected={date}
-                  onSelect={(d) => d && setDate(d)}
+                  onSelect={(d) => {
+                    if (!d) return;
+                    setDate(d);
+                    if (lateFee && !amountEdited) {
+                      setFinalAmount(
+                        lateCharges(
+                          transaction.amount,
+                          transaction.dueDate,
+                          d,
+                          lateFee,
+                        ).total,
+                      );
+                    }
+                  }}
                   initialFocus
                 />
               </PopoverContent>
@@ -130,22 +167,42 @@ export function PaymentDialog({
             <Label>Valor {type === "pay" ? "Pago" : "Recebido"}</Label>
             {/* CurrencyInput aceita `number` e expõe `number` — sem parseFloat manual.
                 Formata automaticamente no padrão pt-BR (pontos de milhar, vírgula decimal). */}
-            <CurrencyInput value={finalAmount} onChange={setFinalAmount} />
+            <CurrencyInput
+              value={finalAmount}
+              onChange={(v) => {
+                setAmountEdited(true);
+                setFinalAmount(v);
+              }}
+            />
             <p className="text-xs text-muted-foreground font-financial">
               Valor original: {formatCurrency(transaction.amount)}
+              {charges && charges.days > 0 && (
+                <>
+                  {" "}
+                  · {charges.days} dia{charges.days !== 1 && "s"} de atraso:
+                  multa {formatCurrency(charges.fee)} + juros{" "}
+                  {formatCurrency(charges.interest)} ={" "}
+                  {formatCurrency(charges.total)}
+                </>
+              )}
             </p>
           </div>
           {finalAmount > 0 && (
             <div className="text-sm">
               {finalAmount < transaction.amount && (
                 <p className="text-green-600 font-financial">
-                  Desconto: {formatCurrency(transaction.amount - finalAmount)}
+                  Desconto:{" "}
+                  {formatCurrency(
+                    currency(transaction.amount).subtract(finalAmount).value,
+                  )}
                 </p>
               )}
               {finalAmount > transaction.amount && (
                 <p className="text-red-600 font-financial">
                   Juros/Multa:{" "}
-                  {formatCurrency(finalAmount - transaction.amount)}
+                  {formatCurrency(
+                    currency(finalAmount).subtract(transaction.amount).value,
+                  )}
                 </p>
               )}
             </div>

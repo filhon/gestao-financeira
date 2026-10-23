@@ -5,6 +5,8 @@
  *
  * Desktop → Dialog (centered modal)
  * Mobile  → Sheet side="bottom" (bottom drawer, drag-friendly)
+ * `panel` → Sheet side="right" no desktop (painel lateral que mantém a lista
+ *           visível ao lado)
  *
  * API mirrors Dialog exactly so migration is a find-and-replace:
  *   Dialog            → ResponsiveModal
@@ -43,7 +45,10 @@ import { cn } from "@/lib/utils";
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
-const ResponsiveModalContext = React.createContext(false);
+const ResponsiveModalContext = React.createContext<{
+  sheet: boolean;
+  side: "bottom" | "right";
+}>({ sheet: false, side: "bottom" });
 
 function useResponsiveModal() {
   return React.useContext(ResponsiveModalContext);
@@ -55,13 +60,27 @@ interface ResponsiveModalProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
+  /** No desktop, abre como painel lateral em vez de modal centralizado. */
+  panel?: boolean;
 }
 
-function ResponsiveModal({ children, ...props }: ResponsiveModalProps) {
+function ResponsiveModal({
+  children,
+  panel = false,
+  ...props
+}: ResponsiveModalProps) {
   const isMobile = useMediaQuery("(max-width: 767px)");
-  const Root = isMobile ? Sheet : Dialog;
+  const sheet = isMobile || panel;
+  const Root = sheet ? Sheet : Dialog;
+  const value = React.useMemo(
+    () => ({
+      sheet,
+      side: isMobile ? ("bottom" as const) : ("right" as const),
+    }),
+    [sheet, isMobile],
+  );
   return (
-    <ResponsiveModalContext.Provider value={isMobile}>
+    <ResponsiveModalContext.Provider value={value}>
       <Root {...props}>{children}</Root>
     </ResponsiveModalContext.Provider>
   );
@@ -74,8 +93,8 @@ function ResponsiveModal({ children, ...props }: ResponsiveModalProps) {
 function ResponsiveModalTrigger(
   props: React.ComponentProps<typeof DialogTrigger>,
 ) {
-  const isMobile = useResponsiveModal();
-  const Trigger = isMobile ? SheetTrigger : DialogTrigger;
+  const { sheet } = useResponsiveModal();
+  const Trigger = sheet ? SheetTrigger : DialogTrigger;
   return <Trigger {...props} />;
 }
 
@@ -93,9 +112,25 @@ function ResponsiveModalContent({
   children,
   ...props
 }: ResponsiveModalContentProps) {
-  const isMobile = useResponsiveModal();
+  const { sheet, side } = useResponsiveModal();
 
-  if (isMobile) {
+  if (sheet && side === "right") {
+    return (
+      <SheetContent
+        side="right"
+        overlayClassName="bg-black/15"
+        className={cn(
+          "w-full sm:max-w-xl lg:max-w-2xl overflow-y-auto px-6 pb-6 pt-5",
+          sheetClassName,
+        )}
+        {...props}
+      >
+        {children}
+      </SheetContent>
+    );
+  }
+
+  if (sheet) {
     return (
       <SheetContent
         side="bottom"
@@ -122,24 +157,24 @@ function ResponsiveModalContent({
 // ─── Header ───────────────────────────────────────────────────────────────────
 
 function ResponsiveModalHeader(props: React.ComponentProps<"div">) {
-  const isMobile = useResponsiveModal();
-  const Header = isMobile ? SheetHeader : DialogHeader;
+  const { sheet } = useResponsiveModal();
+  const Header = sheet ? SheetHeader : DialogHeader;
   return <Header {...props} />;
 }
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
 
 function ResponsiveModalFooter(props: React.ComponentProps<"div">) {
-  const isMobile = useResponsiveModal();
-  const Footer = isMobile ? SheetFooter : DialogFooter;
+  const { sheet } = useResponsiveModal();
+  const Footer = sheet ? SheetFooter : DialogFooter;
   return <Footer {...props} />;
 }
 
 // ─── Title ────────────────────────────────────────────────────────────────────
 
 function ResponsiveModalTitle(props: React.ComponentProps<typeof DialogTitle>) {
-  const isMobile = useResponsiveModal();
-  const Title = isMobile ? SheetTitle : DialogTitle;
+  const { sheet } = useResponsiveModal();
+  const Title = sheet ? SheetTitle : DialogTitle;
   return <Title {...props} />;
 }
 
@@ -148,16 +183,16 @@ function ResponsiveModalTitle(props: React.ComponentProps<typeof DialogTitle>) {
 function ResponsiveModalDescription(
   props: React.ComponentProps<typeof DialogDescription>,
 ) {
-  const isMobile = useResponsiveModal();
-  const Description = isMobile ? SheetDescription : DialogDescription;
+  const { sheet } = useResponsiveModal();
+  const Description = sheet ? SheetDescription : DialogDescription;
   return <Description {...props} />;
 }
 
 // ─── Close ────────────────────────────────────────────────────────────────────
 
 function ResponsiveModalClose(props: React.ComponentProps<typeof DialogClose>) {
-  const isMobile = useResponsiveModal();
-  const Close = isMobile ? SheetClose : DialogClose;
+  const { sheet } = useResponsiveModal();
+  const Close = sheet ? SheetClose : DialogClose;
   return <Close {...props} />;
 }
 

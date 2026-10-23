@@ -163,6 +163,25 @@ service cloud.firestore {
                request.resource.data.get('status', '') == 'rejected';
       }
 
+      // Conta em disputa: enquanto houver `paymentHold`, não é paga nem entra
+      // em lote (aprovar ou rejeitar segue livre). Liberar o bloqueio na mesma
+      // escrita é permitido — é o próprio desbloqueio. Pôr ou tirar o bloqueio
+      // é de quem aprova ou paga; o `user` não destrava a conta que alguém
+      // travou nele.
+      function respectsHold() {
+        return resource.data.get('paymentHold', null) == null ||
+               request.resource.data.get('paymentHold', null) == null ||
+               ((request.resource.data.get('status', '') != 'paid' ||
+                 resource.data.get('status', '') == 'paid') &&
+                request.resource.data.get('batchId', null) == resource.data.get('batchId', null));
+      }
+
+      function canChangeHold() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentHold']) ||
+               isManager(getCompanyId()) ||
+               hasCompanyRole(getCompanyId(), ['approver', 'releaser']);
+      }
+
       // READ
       allow read: if isAuthenticated() && (
         // Admin, Manager, Approver, Releaser, Auditor: Can view ALL in the company
@@ -182,7 +201,8 @@ service cloud.firestore {
       // UPDATE — numa despesa, tudo que não mexe em orçamento continua livre:
       // vínculo com lote, conciliação, comprovante, anexo, observação, token de
       // aprovação e as mudanças de status do fluxo.
-      allow update: if isAuthenticated() && canWrite() && (
+      allow update: if isAuthenticated() && canWrite() &&
+         respectsHold() && canChangeHold() && (
          !isPayableWrite() || (keepsBudgetFields() && keepsRejection())
       );
 

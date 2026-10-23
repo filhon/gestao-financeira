@@ -40,7 +40,19 @@ import {
   MessageCircle,
   FileCheck,
   Download,
+  ChevronUp,
+  ChevronDown,
+  Lock,
+  Handshake,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  isOpen as isOpenTx,
+  isOverdue,
+  lateCharges,
+  lateFeeRule,
+} from "@/lib/transactionTabs";
 import { PaymentDialog } from "./PaymentDialog";
 import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
@@ -74,6 +86,14 @@ interface TransactionDetailsDialogProps {
   onClose: () => void;
   onUpdate: (updatedTransaction?: Transaction) => void;
   costCenters?: CostCenter[];
+  /** Abre como painel lateral no desktop (a lista continua visível). */
+  panel?: boolean;
+  /** Anterior (-1) / próxima (1) conta da lista. */
+  onNavigate?: (delta: number) => void;
+  /** Já abre com o formulário de bloqueio ou de promessa expandido. */
+  focusAction?: "hold" | "promise" | null;
+  /** Atraso médio do cliente (contas a receber). */
+  punctuality?: { avgDays: number; count: number };
 }
 
 export function TransactionDetailsDialog({
@@ -82,6 +102,10 @@ export function TransactionDetailsDialog({
   onClose,
   onUpdate,
   costCenters = [],
+  panel = false,
+  onNavigate,
+  focusAction = null,
+  punctuality,
 }: TransactionDetailsDialogProps) {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
@@ -91,6 +115,13 @@ export function TransactionDetailsDialog({
     canPayPayables,
     canEditReceivables,
   } = usePermissions();
+
+  const [holdReason, setHoldReason] = useState("");
+  const [showHoldForm, setShowHoldForm] = useState(false);
+  const [promiseDate, setPromiseDate] = useState("");
+  const [promiseNote, setPromiseNote] = useState("");
+  const [showPromiseForm, setShowPromiseForm] = useState(false);
+  const [isSavingAction, setIsSavingAction] = useState(false);
 
   // Cache the transaction synchronously to avoid sudden unmounts of references during Radix animations,
   // which causes the "Maximum update depth exceeded" infinite loop in `usePresence`.
@@ -400,6 +431,78 @@ export function TransactionDetailsDialog({
   const canEdit = isPayable ? canEditPayables : canEditReceivables;
   const canApprove = isPayable ? canApprovePayables : canEditReceivables;
   const canPay = isPayable ? canPayPayables : canEditReceivables;
+  const canHold = isPayable && (canApprovePayables || canPayPayables);
+  const canPromise = isReceivable && canEditReceivables;
+  const held = !!transaction?.paymentHold;
+  const charges =
+    transaction && isOverdue(transaction)
+      ? lateCharges(
+          transaction.amount,
+          transaction.dueDate,
+          new Date(),
+          lateFeeRule(entity),
+        )
+      : null;
+
+  // Cada conta aberta no painel começa com os formulários no estado pedido.
+  const promise = transaction?.paymentPromise;
+  useEffect(() => {
+    if (!isOpen) return;
+    setShowHoldForm(focusAction === "hold");
+    setShowPromiseForm(focusAction === "promise");
+    setHoldReason("");
+    setPromiseDate(promise?.date ? format(promise.date, "yyyy-MM-dd") : "");
+    setPromiseNote(promise?.note ?? "");
+  }, [isOpen, transaction?.id, focusAction, promise]);
+
+  const handleHold = async (reason: string | null) => {
+    if (!user || !transaction || !selectedCompany) return;
+    setIsSavingAction(true);
+    try {
+      const paymentHold = await transactionService.setPaymentHold(
+        transaction.id,
+        reason,
+        { uid: user.uid, email: user.email },
+        selectedCompany.id,
+      );
+      onUpdate({ ...transaction, paymentHold });
+      setShowHoldForm(false);
+      toast.success(reason ? "Pagamento bloqueado." : "Pagamento liberado.");
+    } catch (error) {
+      toast.error(friendlyError(error, "Erro ao atualizar o bloqueio."));
+    } finally {
+      setIsSavingAction(false);
+    }
+  };
+
+  const handlePromise = async (remove = false) => {
+    if (!user || !transaction || !selectedCompany) return;
+    if (!remove && !promiseDate) {
+      toast.error("Informe a data prometida.");
+      return;
+    }
+    setIsSavingAction(true);
+    try {
+      const paymentPromise = await transactionService.setPaymentPromise(
+        transaction.id,
+        remove
+          ? null
+          : {
+              date: new Date(`${promiseDate}T00:00:00`),
+              note: promiseNote.trim(),
+            },
+        { uid: user.uid, email: user.email },
+        selectedCompany.id,
+      );
+      onUpdate({ ...transaction, paymentPromise });
+      setShowPromiseForm(false);
+      toast.success(remove ? "Promessa removida." : "Promessa registrada.");
+    } catch (error) {
+      toast.error(friendlyError(error, "Erro ao salvar a promessa."));
+    } finally {
+      setIsSavingAction(false);
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -427,6 +530,176 @@ export function TransactionDetailsDialog({
   // ── Detail block (JSX constant, only used when transaction is non-null) ─────
   const detailsContent = transaction ? (
     <div className="grid gap-6 py-4">
+      {transaction.paymentHold && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2.5 dark:border-amber-800/60 dark:bg-amber-950/30">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
+          <div className="min-w-0 flex-1 text-sm">
+            <p className="font-medium">Pagamento bloqueado</p>
+            <p className="whitespace-pre-wrap">
+              {transaction.paymentHold.reason}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {transaction.paymentHold.byEmail ?? "—"}
+              {transaction.paymentHold.at &&
+                ` em ${format(transaction.paymentHold.at, "dd/MM/yyyy HH:mm")}`}
+            </p>
+          </div>
+          {canHold && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isSavingAction}
+              onClick={() => handleHold(null)}
+            >
+              Liberar
+            </Button>
+          )}
+        </div>
+      )}
+
+      {canHold && !held && isOpenTx(transaction) && showHoldForm && (
+        <div className="space-y-2 rounded-lg border px-3 py-3">
+          <label htmlFor="hold-reason" className="text-sm font-medium">
+            Motivo do bloqueio
+          </label>
+          <Textarea
+            id="hold-reason"
+            autoFocus
+            rows={2}
+            placeholder="Ex.: nota fiscal divergente, serviço não entregue…"
+            value={holdReason}
+            onChange={(e) => setHoldReason(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Enquanto bloqueada, a conta não pode ser paga nem entrar em lote.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowHoldForm(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              disabled={!holdReason.trim() || isSavingAction}
+              onClick={() => handleHold(holdReason.trim())}
+            >
+              Bloquear pagamento
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {charges && (
+        <div className="rounded-lg border border-red-200 px-3 py-2.5 text-sm dark:border-red-900/60">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-red-700 dark:text-red-400">
+              Vencida há {charges.days} {charges.days === 1 ? "dia" : "dias"}
+            </span>
+            <span className="font-financial font-semibold">
+              {formatCurrency(charges.total)}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground font-financial">
+            Valor corrigido hoje: multa {lateFeeRule(entity).feePercent}% (
+            {formatCurrency(charges.fee)}) + juros{" "}
+            {lateFeeRule(entity).monthlyInterestPercent}% a.m. (
+            {formatCurrency(charges.interest)})
+            {entity?.lateFeePercent == null &&
+              entity?.monthlyInterestPercent == null &&
+              " · padrão, ajustável no cadastro"}
+          </p>
+        </div>
+      )}
+
+      {isReceivable && (promise || punctuality || canPromise) && (
+        <div className="space-y-2 rounded-lg border px-3 py-2.5 text-sm">
+          {punctuality && (
+            <p className="text-muted-foreground">
+              {punctuality.avgDays > 0
+                ? `Este cliente paga, em média, ${punctuality.avgDays} dias depois do vencimento`
+                : "Este cliente costuma pagar em dia"}{" "}
+              ({punctuality.count} recebimento{punctuality.count !== 1 && "s"}{" "}
+              nos últimos 12 meses).
+            </p>
+          )}
+          {promise && !showPromiseForm && (
+            <div className="flex items-start gap-2">
+              <Handshake className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 dark:text-sky-400" />
+              <p className="flex-1">
+                Prometeu pagar em{" "}
+                <span className="font-medium">
+                  {format(promise.date, "dd/MM/yyyy")}
+                </span>
+                {promise.note && (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {promise.note}
+                  </span>
+                )}
+              </p>
+              {canPromise && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  disabled={isSavingAction}
+                  onClick={() => handlePromise(true)}
+                >
+                  Remover
+                </Button>
+              )}
+            </div>
+          )}
+          {canPromise && isOpenTx(transaction) && showPromiseForm && (
+            <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+              <Input
+                type="date"
+                autoFocus
+                aria-label="Data prometida"
+                value={promiseDate}
+                onChange={(e) => setPromiseDate(e.target.value)}
+              />
+              <Input
+                placeholder="Observação (opcional)"
+                aria-label="Observação da promessa"
+                value={promiseNote}
+                onChange={(e) => setPromiseNote(e.target.value)}
+              />
+              <div className="flex justify-end gap-2 sm:col-span-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowPromiseForm(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={isSavingAction}
+                  onClick={() => handlePromise()}
+                >
+                  Salvar promessa
+                </Button>
+              </div>
+            </div>
+          )}
+          {canPromise && isOpenTx(transaction) && !showPromiseForm && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => setShowPromiseForm(true)}
+            >
+              <Handshake className="mr-1.5 h-3.5 w-3.5" />
+              {promise ? "Alterar promessa" : "Registrar promessa de pagamento"}
+            </Button>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <h4 className="text-sm font-medium text-muted-foreground">
@@ -824,16 +1097,45 @@ export function TransactionDetailsDialog({
   // the "Maximum update depth exceeded" loop (setState called inside safelyDetachRef).
   return (
     <>
-      <ResponsiveModal open={isOpen} onOpenChange={onClose}>
-        <ResponsiveModalContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
+      <ResponsiveModal open={isOpen} onOpenChange={onClose} panel={panel}>
+        <ResponsiveModalContent
+          className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto"
+          data-panel={panel || undefined}
+        >
           {transaction && selectedCompany ? (
             <>
               <ResponsiveModalHeader>
-                <div className="flex items-center justify-between pr-8">
+                <div className="flex items-center justify-between gap-2 pr-8">
                   <ResponsiveModalTitle>
                     {isEditing ? "Editar Transação" : "Detalhes da Transação"}
                   </ResponsiveModalTitle>
-                  {!isEditing && getStatusBadge(transaction.status)}
+                  <div className="flex items-center gap-1">
+                    {!isEditing && getStatusBadge(transaction.status)}
+                    {onNavigate && !isEditing && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Conta anterior (k)"
+                          aria-label="Conta anterior"
+                          onClick={() => onNavigate(-1)}
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Próxima conta (j)"
+                          aria-label="Próxima conta"
+                          onClick={() => onNavigate(1)}
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <ResponsiveModalDescription asChild>
                   <div className="flex flex-col gap-1 mt-1">
@@ -965,7 +1267,20 @@ export function TransactionDetailsDialog({
               )}
 
               {!isEditing && (
-                <ResponsiveModalFooter className="gap-2 sm:gap-2">
+                <ResponsiveModalFooter className="gap-2 sm:gap-2 flex-wrap">
+                  {canHold &&
+                    !held &&
+                    isOpenTx(transaction) &&
+                    !showHoldForm && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowHoldForm(true)}
+                        disabled={isProcessing}
+                      >
+                        <Lock className="mr-2 h-4 w-4" />
+                        Bloquear pagamento
+                      </Button>
+                    )}
                   {canEdit && (
                     <Button
                       variant="outline"
@@ -1029,7 +1344,8 @@ export function TransactionDetailsDialog({
                       <Button
                         className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
                         onClick={() => setIsPaymentDialogOpen(true)}
-                        disabled={isProcessing}
+                        disabled={isProcessing || held}
+                        title={held ? "Pagamento bloqueado" : undefined}
                       >
                         {isProcessing ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1070,6 +1386,7 @@ export function TransactionDetailsDialog({
               onConfirm={handlePaymentConfirm}
               transaction={transaction}
               type={transaction.type === "payable" ? "pay" : "receive"}
+              lateFee={lateFeeRule(entity)}
             />
           )}
 

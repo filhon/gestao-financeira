@@ -220,6 +220,21 @@ export async function GET(request: NextRequest) {
         approvalTokenExpiresAt: data.approvalTokenExpiresAt
           ? (data.approvalTokenExpiresAt as Timestamp).toDate().toISOString()
           : null,
+        paymentHold: data.paymentHold
+          ? {
+              ...data.paymentHold,
+              at: (data.paymentHold.at as Timestamp)?.toDate().toISOString(),
+            }
+          : null,
+        paymentPromise: data.paymentPromise
+          ? {
+              ...data.paymentPromise,
+              date: (data.paymentPromise.date as Timestamp)
+                ?.toDate()
+                .toISOString(),
+              at: (data.paymentPromise.at as Timestamp)?.toDate().toISOString(),
+            }
+          : null,
       });
     }
 

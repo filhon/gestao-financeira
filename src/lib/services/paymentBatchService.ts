@@ -273,6 +273,13 @@ export const paymentBatchService = {
   },
 
   addTransactions: async (batchId: string, transactions: Transaction[]) => {
+    const held = transactions.filter((t) => t.paymentHold);
+    if (held.length > 0) {
+      throw new Error(
+        `${held.length} conta(s) com pagamento bloqueado não podem entrar em lote.`,
+      );
+    }
+
     const batch = writeBatch(db);
     const batchRef = doc(db, COLLECTION_NAME, batchId);
 
