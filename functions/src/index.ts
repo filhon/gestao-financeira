@@ -26,7 +26,11 @@ export {
   approveTransactionByToken,
   rejectTransactionByToken,
 } from "./transactionLedger";
-import { checkBudgetFit, notifyBudgetExceeded } from "./transactionLedger";
+import {
+  checkBudgetFit,
+  notifyBudgetExceeded,
+  scaleAllocation,
+} from "./transactionLedger";
 
 /**
  * Trigger que atualiza o saldo da empresa (company_stats)
@@ -608,8 +612,10 @@ export const processRecurringTemplates = functions
               status: "draft",
               amount: preData.amount,
               dueDate: preData.nextDueDate,
-              costCenterAllocation:
+              costCenterAllocation: scaleAllocation(
                 preData.baseTransactionData?.costCenterAllocation,
+                preData.amount,
+              ),
             });
           } catch (err) {
             console.error("Falha ao checar orçamento da recorrência:", err);
@@ -650,8 +656,14 @@ export const processRecurringTemplates = functions
               ) || [];
             const costCenterId = costCenterIds[0] || null;
 
+            const costCenterAllocation = scaleAllocation(
+              data.baseTransactionData?.costCenterAllocation,
+              data.amount,
+            );
+
             const newTransactionData = {
               ...data.baseTransactionData,
+              ...(costCenterAllocation ? { costCenterAllocation } : {}),
               description: `${data.description} (Recorrência)`,
               amount: data.amount,
               type: data.type,

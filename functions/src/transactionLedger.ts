@@ -119,6 +119,39 @@ function allocationsOf(tx: TxShape): Array<{ id: string; cents: number }> {
 }
 
 /**
+ * Alocação de um modelo de recorrência reescalada para o valor atual dele.
+ *
+ * O modelo guarda a alocação em reais da época em que nasceu. Editar o valor ou
+ * aplicar reajuste muda só `amount`, e a alocação velha seguia para cada conta
+ * gerada — e é a alocação, não `amount`, que o razão consome. A proporção vem
+ * de `percentage`; sem ela, dos valores antigos. A sobra de arredondamento fica
+ * na última linha, para a soma fechar no centavo.
+ */
+export function scaleAllocation<
+  T extends { amount?: unknown; percentage?: unknown },
+>(allocation: T[] | undefined, amount: unknown): T[] | undefined {
+  if (!Array.isArray(allocation) || allocation.length === 0) return allocation;
+
+  const total = toCents(amount);
+  const weights = allocation.map(
+    (a) => Number(a.percentage) || toCents(a.amount) || 0,
+  );
+  const weightSum = weights.reduce((s, w) => s + w, 0);
+
+  let assigned = 0;
+  return allocation.map((a, i) => {
+    const cents =
+      i === allocation.length - 1
+        ? total - assigned
+        : weightSum > 0
+          ? Math.round((total * weights[i]) / weightSum)
+          : 0;
+    assigned += cents;
+    return { ...a, amount: toReais(cents) };
+  });
+}
+
+/**
  * Quanto uma receita credita no razão, e em qual exercício.
  *
  * Toda receita credita o centro de custo **raiz**, seja qual for o centro que a

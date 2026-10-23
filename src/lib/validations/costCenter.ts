@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const costCenterSchema = z.object({
   name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
-  code: z.string().min(2, "Código deve ter pelo menos 2 caracteres"),
+  code: z.string().trim().min(1, "Código é obrigatório"),
   parentId: z.string().optional(),
   description: z.string().optional(),
   // Sem `budget`: o orçamento de um centro é o envelope anual, que vive no

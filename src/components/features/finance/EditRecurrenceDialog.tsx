@@ -6,6 +6,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { RecurringTransactionTemplate } from "@/lib/types";
 import { recurrenceService } from "@/lib/services/recurrenceService";
+import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
+import { useCostCenters } from "@/hooks/useCostCenters";
 import { Button } from "@/components/ui/button";
 import {
   ResponsiveModal,
@@ -57,6 +59,7 @@ const recurrenceSchema = z.object({
       monthToApply: z.number(),
     })
     .optional(),
+  costCenterId: z.string().optional(),
 });
 
 type RecurrenceFormData = z.infer<typeof recurrenceSchema>;
@@ -75,6 +78,25 @@ export function EditRecurrenceDialog({
   onSuccess,
 }: EditRecurrenceDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { costCenters } = useCostCenters(
+    open ? template?.companyId : undefined,
+  );
+
+  // Receita credita a raiz sozinha, e modelo com rateio em vários centros
+  // segue sendo editado pelo valor (o gerador reescala a alocação).
+  const allocation = template?.baseTransactionData?.costCenterAllocation ?? [];
+  const canPickCostCenter =
+    template?.type === "payable" && allocation.length <= 1;
+  const currentCostCenterId = allocation[0]?.costCenterId;
+
+  // Só folha recebe despesa; arquivado aparece apenas se já é o atual.
+  const hierarchical = getHierarchicalCostCenters(costCenters);
+  const parentIds = new Set(
+    costCenters.map((cc) => cc.parentId).filter(Boolean),
+  );
+  const costCenterOptions = hierarchical.filter(
+    (cc) => !cc.archived || cc.id === currentCostCenterId,
+  );
 
   const form = useForm<RecurrenceFormData>({
     resolver: zodResolver(recurrenceSchema),
@@ -98,12 +120,20 @@ export function EditRecurrenceDialog({
         nextDueDate: template.nextDueDate,
         endDate: template.endDate || null,
         adjustmentRule: template.adjustmentRule,
+        costCenterId:
+          template.baseTransactionData?.costCenterAllocation?.[0]?.costCenterId,
       });
     }
   }, [template, form]);
 
   const onSubmit = async (data: RecurrenceFormData) => {
     if (!template) return;
+    if (canPickCostCenter && !data.costCenterId) {
+      form.setError("costCenterId", {
+        message: "Selecione o centro de custo",
+      });
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -115,6 +145,21 @@ export function EditRecurrenceDialog({
         nextDueDate: data.nextDueDate,
         endDate: data.endDate || undefined,
         adjustmentRule: data.adjustmentRule,
+        // A alocação é regravada com o valor atual mesmo sem trocar o centro:
+        // antes a edição mudava só `amount` e a alocação antiga ficava para
+        // trás.
+        ...(canPickCostCenter && {
+          baseTransactionData: {
+            ...template.baseTransactionData,
+            costCenterAllocation: [
+              {
+                costCenterId: data.costCenterId!,
+                percentage: 100,
+                amount: data.amount,
+              },
+            ],
+          },
+        }),
       });
       toast.success("Recorrência atualizada com sucesso!");
       onSuccess();
@@ -166,6 +211,40 @@ export function EditRecurrenceDialog({
                 </FormItem>
               )}
             />
+
+            {canPickCostCenter && (
+              <FormField
+                control={form.control}
+                name="costCenterId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Centro de Custo</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecione..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {costCenterOptions.map((cc) => (
+                          <SelectItem
+                            key={cc.id}
+                            value={cc.id}
+                            disabled={parentIds.has(cc.id)}
+                          >
+                            <span style={{ paddingLeft: `${cc.level * 12}px` }}>
+                              {cc.code} — {cc.name}
+                              {cc.archived ? " (arquivado)" : ""}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <FormField
