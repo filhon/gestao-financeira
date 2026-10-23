@@ -385,20 +385,8 @@ export const createPayableTransaction = functions
       );
     }
 
-    const ccSnap = await db()
-      .collection("cost_centers")
-      .where("companyId", "==", companyId)
-      .get();
-    const ccs = ccSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<{
-      id: string;
-      name?: string;
-      parentId?: string;
-    }>;
-    const { byId, parentIdOf, rootId } = indexHierarchy(ccs);
-
-    const hasChildren = new Set(
-      ccs.map((c) => parentIdOf(c.id)).filter(Boolean) as string[],
-    );
+    const { byId, parentIdOf, rootId, hasChildren, archived } =
+      await loadCcIndex(companyId);
 
     // Consolida alocações repetidas no mesmo centro antes de validar.
     const perCc = new Map<string, number>();
@@ -416,6 +404,7 @@ export const createPayableTransaction = functions
             "Despesas só podem ser lançadas em centros de custo de último grau.",
         );
       }
+      assertNotArchived(archived, byId, alloc.id);
       perCc.set(alloc.id, (perCc.get(alloc.id) || 0) + alloc.cents);
     }
 
@@ -675,19 +664,8 @@ export const createPayableInstallments = functions
       );
     }
 
-    const ccSnap = await db()
-      .collection("cost_centers")
-      .where("companyId", "==", companyId)
-      .get();
-    const ccs = ccSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<{
-      id: string;
-      name?: string;
-      parentId?: string;
-    }>;
-    const { byId, parentIdOf, rootId } = indexHierarchy(ccs);
-    const hasChildren = new Set(
-      ccs.map((c) => parentIdOf(c.id)).filter(Boolean) as string[],
-    );
+    const { byId, parentIdOf, rootId, hasChildren, archived } =
+      await loadCcIndex(companyId);
 
     // Soma o efeito de todas as parcelas por (centro, exercício).
     const totals = new Map<
@@ -724,6 +702,7 @@ export const createPayableInstallments = functions
               "Despesas só podem ser lançadas em centros de custo de último grau.",
           );
         }
+        assertNotArchived(archived, byId, ccId);
         const key = `${ccId}_${e.year}`;
         const cur = totals.get(key) || {
           ccId,
@@ -890,12 +869,33 @@ async function loadCcIndex(companyId: string) {
     id: string;
     name?: string;
     parentId?: string;
+    archived?: boolean;
   }>;
   const { byId, parentIdOf, rootId } = indexHierarchy(ccs);
   const hasChildren = new Set(
     ccs.map((c) => parentIdOf(c.id)).filter(Boolean) as string[],
   );
-  return { byId, parentIdOf, rootId, hasChildren };
+  const archived = new Set(ccs.filter((c) => c.archived).map((c) => c.id));
+  return { byId, parentIdOf, rootId, hasChildren, archived };
+}
+
+/**
+ * Centro arquivado não recebe despesa nova. O que já está nele continua
+ * podendo ser aprovado, pago e editado — por isso o patch só recusa o centro
+ * que entra, não o que já estava.
+ */
+function assertNotArchived(
+  archived: Set<string>,
+  byId: Map<string, { name?: string }>,
+  ccId: string,
+) {
+  if (archived.has(ccId)) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `${byId.get(ccId)?.name || "O centro de custo"} está arquivado e não ` +
+        "recebe novas despesas.",
+    );
+  }
 }
 
 interface LedgerDelta {
@@ -988,12 +988,14 @@ async function commitValidatedPatch(
   patch: Record<string, unknown>,
   opts: { enforce: boolean },
 ): Promise<PatchOutcome> {
-  const { byId, parentIdOf, rootId, hasChildren } =
+  const { byId, parentIdOf, rootId, hasChildren, archived } =
     await loadCcIndex(companyId);
 
   const merged: TxShape = { ...current, ...(patch as TxShape) };
+  const currentCcIds = new Set(allocationsOf(current).map((a) => a.id));
 
   for (const ccId of ledgerEffect(merged).keys()) {
+    if (!currentCcIds.has(ccId)) assertNotArchived(archived, byId, ccId);
     if (!byId.has(ccId)) {
       throw new functions.https.HttpsError(
         "not-found",

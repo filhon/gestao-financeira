@@ -160,9 +160,14 @@ export function CostCenterForm({
     return result;
   }, [editingId, availableCostCenters]);
 
-  // Filter out self and all descendants to prevent circular references
+  // Filter out self and all descendants to prevent circular references.
+  // Arquivado não recebe filho novo; o pai atual fica na lista para o select
+  // continuar mostrando o valor.
   const potentialParents = availableCostCenters.filter(
-    (cc) => cc.id !== editingId && !descendantIds.has(cc.id),
+    (cc) =>
+      cc.id !== editingId &&
+      !descendantIds.has(cc.id) &&
+      (!cc.archived || cc.id === defaultValues?.parentId),
   );
 
   // A empresa tem exatamente um centro raiz — é ele que recebe as receitas e
@@ -545,6 +550,33 @@ export function CostCenterForm({
                 )}
               />
             </div>
+
+            {editingId && editingId !== existingRoot?.id && (
+              <div className="col-span-12 md:col-span-6">
+                <FormField
+                  control={form.control}
+                  name="archived"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start gap-3 rounded-md border p-3">
+                      <FormControl>
+                        <Checkbox
+                          checked={!!field.value}
+                          onCheckedChange={(v) => field.onChange(v === true)}
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel>Arquivado</FormLabel>
+                        <FormDescription>
+                          Sai dos formulários de despesa nova. As contas já
+                          lançadas seguem podendo ser aprovadas, pagas e
+                          editadas, e o centro ainda pode receber envelope.
+                        </FormDescription>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+            )}
           </div>
 
           <FormField

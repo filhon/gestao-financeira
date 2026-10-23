@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Upload,
   Download,
@@ -78,8 +78,14 @@ export function BulkImportDialog({
   const [editValue, setEditValue] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const { costCenters } = useCostCenters(
+  const { costCenters: allCostCenters } = useCostCenters(
     isOpen ? selectedCompany?.id : undefined,
+  );
+  // Importação só cria lançamento novo: centro arquivado não entra, nem por
+  // código vindo da planilha.
+  const costCenters = useMemo(
+    () => allCostCenters.filter((cc) => !cc.archived),
+    [allCostCenters],
   );
 
   // Reset state when dialog closes

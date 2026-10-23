@@ -91,6 +91,8 @@ export interface CostCenter {
   description?: string;
   budget?: number;
   budgetYear?: number;
+  /** Fora dos formulários de despesa nova; histórico e envelope seguem valendo. */
+  archived?: boolean;
 
   // Permissions
   allowedUserIds?: string[]; // Users allowed to create expenses

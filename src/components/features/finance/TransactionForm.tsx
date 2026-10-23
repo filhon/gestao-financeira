@@ -1388,6 +1388,10 @@ export function TransactionForm({
                                           costCenterBalances[cc.id];
                                         const isSelected =
                                           field.value === cc.id;
+                                        // Arquivado só aparece na conta que
+                                        // já está nele.
+                                        if (cc.archived && !isSelected)
+                                          return null;
                                         // Despesa só entra em centro de último
                                         // grau. Os intermediários continuam à
                                         // vista para dar contexto da árvore, mas

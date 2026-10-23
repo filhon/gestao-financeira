@@ -9,6 +9,7 @@ export const costCenterSchema = z.object({
   // razão e só é definido por `setCostCenterEnvelope`. O ano continua aqui
   // porque o formulário mostra o saldo do exercício selecionado.
   budgetYear: z.number().min(2000),
+  archived: z.boolean().optional(),
 
   // Permissions
   allowedUserIds: z.array(z.string()).optional(),

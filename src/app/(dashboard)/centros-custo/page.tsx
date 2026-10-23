@@ -214,13 +214,25 @@ function CostCenterRow({
           ) : (
             <div className="w-6 shrink-0" />
           )}
-          <span className="truncate">{node.name}</span>
+          <span
+            className={`truncate ${node.archived ? "text-muted-foreground" : ""}`}
+          >
+            {node.name}
+          </span>
           {hasChildren && (
             <Badge
               variant="outline"
               className="text-[10px] px-1 py-0 h-4 ml-1 shrink-0"
             >
               {node.children.length}
+            </Badge>
+          )}
+          {node.archived && (
+            <Badge
+              variant="secondary"
+              className="text-[10px] px-1 py-0 h-4 ml-1 shrink-0"
+            >
+              Arquivado
             </Badge>
           )}
         </div>
@@ -425,7 +437,9 @@ function MobileCostCenterCard({
               <span className="text-[11px] font-mono text-muted-foreground">
                 {node.code}
               </span>
-              <p className="text-sm font-medium leading-snug truncate">
+              <p
+                className={`text-sm font-medium leading-snug truncate ${node.archived ? "text-muted-foreground" : ""}`}
+              >
                 {node.name}
               </p>
             </div>
@@ -435,6 +449,14 @@ function MobileCostCenterCard({
                 className="shrink-0 text-[10px] py-0 h-4 align-middle"
               >
                 {node.children.length}
+              </Badge>
+            )}
+            {node.archived && (
+              <Badge
+                variant="secondary"
+                className="shrink-0 text-[10px] py-0 h-4 align-middle"
+              >
+                Arquivado
               </Badge>
             )}
           </div>
@@ -707,6 +729,7 @@ export default function CostCentersPage() {
                           approverEmail: cc.approverEmail,
                           releaserEmail: cc.releaserEmail,
                           budgetLimit: cc.budgetLimit,
+                          archived: !!cc.archived,
                         };
                       })()
                     : undefined
