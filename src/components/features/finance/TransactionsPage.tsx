@@ -7,11 +7,13 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
-  ResponsiveModal,
-  ResponsiveModalContent,
-  ResponsiveModalHeader,
-  ResponsiveModalTitle,
-} from "@/components/ui/responsive-modal";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BulkImportDialog } from "@/components/features/finance/BulkImportDialog";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import {
@@ -64,11 +66,25 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
   );
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isFormDirty, setIsFormDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (data: TransactionFormData) => {
-    if (!user || !selectedCompany) return;
+  const closeForm = () => {
+    setIsFormOpen(false);
+    setIsFormDirty(false);
+  };
+  // Fechar com Esc, no X ou em Cancelar não descarta o que foi digitado sem
+  // perguntar.
+  const requestClose = () =>
+    isFormDirty ? setConfirmDiscard(true) : closeForm();
+
+  const handleSubmit = async (
+    data: TransactionFormData,
+    { keepOpen }: { keepOpen: boolean },
+  ) => {
+    if (!user || !selectedCompany) return false;
     try {
       setIsSubmitting(true);
       if (data.recurrence?.isRecurring) {
@@ -81,7 +97,10 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
           frequency: data.recurrence.frequency as any,
           interval: data.recurrence.interval || 1,
           nextDueDate: data.dueDate,
+          ...(data.recurrence.endDate && { endDate: data.recurrence.endDate }),
           active: true,
+          // Linha digitável, nº do documento, competência e anexos são de cada
+          // ocorrência: copiá-los para o modelo repetiria o mesmo boleto todo mês.
           baseTransactionData: {
             costCenterAllocation: data.costCenterAllocation,
             accountId: data.accountId,
@@ -89,26 +108,33 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
             entityId: data.entityId,
             paymentMethod: data.paymentMethod,
             requestOrigin: data.requestOrigin,
+            isReimbursement: data.isReimbursement ?? false,
             details: data.details || "",
             notes: data.notes || "",
           },
         });
-        toast.success("Recorrência criada com sucesso!");
+        toast.success("Recorrência criada.");
       } else {
         await transactionService.create(
           data,
           { uid: user.uid, email: user.email },
           selectedCompany.id,
         );
-        toast.success(copy.created);
+        toast.success(
+          data.status === "pending_approval"
+            ? "Conta enviada para aprovação."
+            : copy.created,
+        );
       }
       refreshTransactionList(qc, type);
-      setIsFormOpen(false);
+      if (!keepOpen) closeForm();
+      return true;
     } catch (error) {
       console.error("Error saving transaction:", error);
       // A recusa por saldo vem do servidor já redigida com os valores em jogo;
       // trocá-la por um texto genérico esconderia justamente o que resolve.
       toast.error(friendlyError(error, copy.error));
+      return false;
     } finally {
       setIsSubmitting(false);
     }
@@ -150,19 +176,47 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
         onCreate={canCreate ? () => setIsFormOpen(true) : undefined}
       />
 
-      <ResponsiveModal open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <ResponsiveModalContent className="sm:max-w-[50vw] max-h-[90vh] overflow-y-auto">
-          <ResponsiveModalHeader>
-            <ResponsiveModalTitle>{copy.modalTitle}</ResponsiveModalTitle>
-          </ResponsiveModalHeader>
-          <TransactionForm
-            type={type}
-            onSubmit={handleSubmit}
-            isLoading={isSubmitting}
-            onCancel={() => setIsFormOpen(false)}
-          />
-        </ResponsiveModalContent>
-      </ResponsiveModal>
+      <Sheet
+        open={isFormOpen}
+        onOpenChange={(open) => (open ? setIsFormOpen(true) : requestClose())}
+      >
+        <SheetContent
+          // Clique fora não fecha: no painel lateral é fácil errar o alvo.
+          onInteractOutside={(e) => e.preventDefault()}
+          // Só o corpo rola: título e empresa ficam sempre à vista.
+          className="w-full gap-0 overflow-hidden p-0 sm:max-w-4xl"
+        >
+          <SheetHeader className="shrink-0 gap-0.5 border-b px-6 py-4">
+            <SheetTitle className="text-lg">{copy.modalTitle}</SheetTitle>
+            {/* Quem troca de empresa o dia todo precisa ver onde vai gravar. */}
+            <SheetDescription>em {selectedCompany?.name}</SheetDescription>
+          </SheetHeader>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto px-6 pt-5"
+            style={{ "--form-inset": "1.5rem" } as React.CSSProperties}
+          >
+            <TransactionForm
+              type={type}
+              variant="create"
+              onSubmit={handleSubmit}
+              isLoading={isSubmitting}
+              onCancel={requestClose}
+              onDirtyChange={setIsFormDirty}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <ConfirmDialog
+        open={confirmDiscard}
+        onOpenChange={setConfirmDiscard}
+        title="Descartar lançamento?"
+        description="O que foi preenchido será perdido."
+        confirmText="Descartar"
+        cancelText="Continuar editando"
+        variant="destructive"
+        onConfirm={closeForm}
+      />
 
       <BulkImportDialog
         isOpen={isImportOpen}

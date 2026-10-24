@@ -1145,6 +1145,7 @@ export function ReconciliationDashboard() {
           </ResponsiveModalHeader>
           {selectedBankTx && (
             <TransactionForm
+              variant="reconcile"
               type={selectedBankTx.type === "debit" ? "payable" : "receivable"}
               defaultValues={{
                 amount: Math.abs(selectedBankTx.amount),

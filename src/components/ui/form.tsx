@@ -105,9 +105,13 @@ function FormLabel({
     >
       {children}
       {required && (
-        <span className="text-destructive ml-0.5" aria-hidden="true">
-          *
-        </span>
+        <>
+          <span className="text-muted-foreground ml-0.5" aria-hidden="true">
+            *
+          </span>
+          {/* O asterisco é visual; o leitor de tela ouve a palavra. */}
+          <span className="sr-only">(obrigatório)</span>
+        </>
       )}
     </Label>
   );

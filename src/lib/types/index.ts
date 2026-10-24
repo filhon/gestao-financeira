@@ -330,6 +330,10 @@ export interface Transaction {
   details?: string; // Texto livre escrito pelo usuário no cadastro
   notes?: string; // Observações — preenchidas automaticamente (IA/importação)
   barcode?: string; // Linha digitável do boleto
+  /** Número da nota fiscal, fatura ou contrato. */
+  documentNumber?: string;
+  /** Mês de competência (yyyy-MM). Ausente: a DRE usa a data efetiva. */
+  competence?: string;
 
   /**
    * Recorrência gerada pelo job noturno sem saldo no centro de custo.

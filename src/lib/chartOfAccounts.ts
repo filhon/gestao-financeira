@@ -452,6 +452,7 @@ type DreTx = Pick<
   | "costCenterAllocation"
   | "dueDate"
   | "paymentDate"
+  | "competence"
 >;
 
 const isSettled = (t: DreTx) =>
@@ -505,7 +506,8 @@ const SECTIONS: Array<
 ];
 
 /**
- * DRE gerencial do período, mês a mês.
+ * DRE gerencial do período, mês a mês, pela competência quando o lançamento
+ * a tem, senão pela data efetiva.
  *
  * Valores com sinal: entrada positiva, saída negativa, então todo subtotal é
  * a soma acumulada do que veio acima. Rejeitadas ficam fora. Lançamento sem
@@ -543,7 +545,13 @@ export function buildDre(
 
   for (const t of transactions) {
     if (t.status === "rejected") continue;
-    const col = colIndex.get(format(effectiveDate(t), "yyyy-MM"));
+    // Competência manda quando informada: é o mês a que o resultado pertence.
+    // ponytail: a tela de relatórios busca pelo período da data efetiva, então
+    // um lançamento com competência no período e vencimento fora dele não
+    // entra; buscar também por `competence` se isso aparecer.
+    const col = colIndex.get(
+      t.competence ?? format(effectiveDate(t), "yyyy-MM"),
+    );
     if (col === undefined) continue;
     const raw = dreAmount(t, opts.costCenterId);
     if (!raw) continue;

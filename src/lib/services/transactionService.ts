@@ -755,6 +755,112 @@ export const transactionService = {
     );
   },
 
+  /**
+   * Último lançamento da entidade, para o formulário sugerir forma de
+   * pagamento, conta e centro de custo. `createdBy` é obrigatório para o papel
+   * `user`, que só lê o que ele mesmo lançou.
+   */
+  getLastForEntity: async (
+    companyId: string,
+    entityId: string,
+    createdBy?: string,
+  ): Promise<Transaction | null> => {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", companyId),
+      where("entityId", "==", entityId),
+      ...(createdBy ? [where("createdBy", "==", createdBy)] : []),
+      orderBy("createdAt", "desc"),
+      limit(1),
+    );
+    const snap = await getDocs(q);
+    return snap.empty
+      ? null
+      : convertDates({ id: snap.docs[0].id, ...snap.docs[0].data() });
+  },
+
+  /**
+   * Procura um lançamento já existente que pareça o mesmo documento: mesma
+   * linha digitável, mesmo fornecedor e número de documento, ou mesmo
+   * fornecedor, valor e vencimento. Rejeitados não contam.
+   *
+   * Só consultas de igualdade: nenhuma pede índice composto.
+   */
+  findDuplicate: async (
+    companyId: string,
+    candidate: {
+      type: "payable" | "receivable";
+      entityId?: string;
+      supplierOrClient?: string;
+      documentNumber?: string;
+      barcode?: string;
+      amount?: number;
+      dueDate?: Date;
+    },
+    createdBy?: string,
+  ): Promise<{ transaction: Transaction; reason: string } | null> => {
+    const base = [
+      where("companyId", "==", companyId),
+      where("type", "==", candidate.type),
+      ...(createdBy ? [where("createdBy", "==", createdBy)] : []),
+    ];
+    const who = candidate.entityId
+      ? where("entityId", "==", candidate.entityId)
+      : candidate.supplierOrClient?.trim()
+        ? where("supplierOrClient", "==", candidate.supplierOrClient.trim())
+        : null;
+
+    type Check = [
+      ReturnType<typeof where>[],
+      string,
+      (d: DocumentData) => boolean,
+    ];
+    const any = () => true;
+    const checks: Check[] = [];
+    if (candidate.barcode) {
+      checks.push([
+        [where("barcode", "==", candidate.barcode)],
+        "mesma linha digitável",
+        any,
+      ]);
+    }
+    if (who && candidate.documentNumber?.trim()) {
+      checks.push([
+        [who, where("documentNumber", "==", candidate.documentNumber.trim())],
+        "mesmo número de documento",
+        any,
+      ]);
+    }
+    if (who && candidate.amount && candidate.dueDate) {
+      // O horário do vencimento varia conforme a origem (calendário, IA,
+      // importação): o dia é comparado aqui, não na consulta.
+      const day = format(candidate.dueDate, "yyyy-MM-dd");
+      checks.push([
+        [who, where("amount", "==", candidate.amount)],
+        "mesmo valor e vencimento",
+        (d) =>
+          !!d.dueDate &&
+          format((d.dueDate as Timestamp).toDate(), "yyyy-MM-dd") === day,
+      ]);
+    }
+
+    for (const [filters, reason, matches] of checks) {
+      const snap = await getDocs(
+        query(collection(db, COLLECTION_NAME), ...base, ...filters, limit(20)),
+      );
+      const hit = snap.docs.find(
+        (d) => d.data().status !== "rejected" && matches(d.data()),
+      );
+      if (hit) {
+        return {
+          transaction: convertDates({ id: hit.id, ...hit.data() }),
+          reason,
+        };
+      }
+    }
+    return null;
+  },
+
   create: async (
     data: TransactionFormData,
     user: { uid: string; email: string },
@@ -819,8 +925,11 @@ export const transactionService = {
           installmentAllocations?.map((a) => a.costCenterId) || [];
         const costCenterId = costCenterIds[0];
 
+        // Cada parcela tem boleto próprio: a linha digitável informada é a da 1ª.
+        const { barcode, ...shared } = transactionData;
         const txData = {
-          ...transactionData,
+          ...shared,
+          ...(i === 1 && barcode ? { barcode } : {}),
           description,
           amount: installmentAmount,
           costCenterAllocation: installmentAllocations,

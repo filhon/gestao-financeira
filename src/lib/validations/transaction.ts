@@ -1,25 +1,56 @@
 import { z } from "zod";
+import { parseBoleto } from "@/lib/boleto";
+
+// Mensagens padrão do Zod em português para toda regra sem texto próprio.
+z.config(z.locales.pt());
 
 export const transactionSchema = z.object({
   type: z.enum(["payable", "receivable"]),
   description: z.string().min(3, "Descrição deve ter pelo menos 3 caracteres"),
   amount: z.coerce.number().min(0.01, "Valor deve ser maior que zero"),
-  dueDate: z.date(),
+  dueDate: z.date({ error: "Informe o vencimento" }),
   paymentDate: z.date().optional(),
   finalAmount: z.number().optional(),
+  // Todos os status: a edição de uma conta já autorizada também passa por aqui.
   status: z
-    .enum(["draft", "pending_approval", "approved", "paid", "rejected"])
+    .enum([
+      "draft",
+      "pending_approval",
+      "approved",
+      "pending_authorization",
+      "authorized",
+      "paid",
+      "received",
+      "rejected",
+    ])
     .default("draft"),
 
-  supplierOrClient: z.string().min(2, "Fornecedor/Cliente é obrigatório"),
+  supplierOrClient: z.string().trim().min(2, "Informe o fornecedor ou cliente"),
   entityId: z.string().optional(),
 
-  requestOrigin: z
-    .object({
-      type: z.enum(["director", "department", "sector"]),
-      name: z.string().min(2, "Nome da origem é obrigatório"),
-    })
+  /** Número da nota fiscal, fatura ou contrato. */
+  documentNumber: z.string().trim().max(60).optional(),
+  /** Mês de competência (yyyy-MM): o mês a que a despesa ou receita pertence. */
+  competence: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/, "Competência inválida")
     .optional(),
+
+  // Opcional de verdade: os dois campos vazios contam como "não informado".
+  requestOrigin: z.preprocess(
+    (v) => {
+      const o = v as { type?: string; name?: string } | undefined;
+      return o?.type || o?.name?.trim() ? o : undefined;
+    },
+    z
+      .object({
+        type: z.enum(["director", "department", "sector"], {
+          error: "Escolha o tipo da área",
+        }),
+        name: z.string().trim().min(2, "Informe o nome da área"),
+      })
+      .optional(),
+  ),
 
   recurrence: z
     .object({
@@ -34,13 +65,17 @@ export const transactionSchema = z.object({
     .optional(),
 
   // Form-only field to capture installment intent
-  installmentsCount: z.coerce.number().min(2).max(120).optional(),
+  installmentsCount: z.coerce
+    .number()
+    .min(2, "Mínimo de 2 parcelas")
+    .max(120, "Máximo de 120 parcelas")
+    .optional(),
   useInstallments: z.boolean().optional(),
 
   costCenterAllocation: z
     .array(
       z.object({
-        costCenterId: z.string().min(1, "Centro de custo é obrigatório"),
+        costCenterId: z.string().min(1, "Escolha o centro de custo"),
         percentage: z.number().min(0).max(100),
         amount: z.number(),
       }),
@@ -75,7 +110,13 @@ export const transactionSchema = z.object({
     .max(2000, "Detalhes devem ter no máximo 2000 caracteres")
     .optional(),
   notes: z.string().optional(),
-  barcode: z.string().optional(),
+  barcode: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || parseBoleto(v).valid,
+      "Linha digitável inválida: confira os dígitos",
+    ),
   dunningStatus: z
     .object({
       emailSent: z.boolean(),

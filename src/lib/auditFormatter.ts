@@ -26,7 +26,10 @@ export const FIELD_LABELS: Record<string, string> = {
   discount: "Desconto",
   interest: "Juros",
   attachments: "Anexos",
-  requestOrigin: "Origem da Solicitação",
+  barcode: "Linha Digitável",
+  documentNumber: "Nº do Documento",
+  competence: "Competência",
+  requestOrigin: "Área Solicitante",
   installments: "Parcelas",
   recurrence: "Recorrência",
 
