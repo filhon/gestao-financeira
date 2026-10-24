@@ -55,7 +55,11 @@ interface CostCenterDoc {
 }
 
 /** Admin global, ou admin/gestor financeiro na empresa em questão. */
-async function assertCanManageBudget(uid: string, companyId: string) {
+export async function assertCanManageBudget(
+  uid: string,
+  companyId: string,
+  message = "Apenas administradores e gestores financeiros podem alocar recursos.",
+) {
   const userSnap = await db().collection("users").doc(uid).get();
   if (!userSnap.exists) {
     throw new functions.https.HttpsError(
@@ -74,10 +78,7 @@ async function assertCanManageBudget(uid: string, companyId: string) {
     companyRole === "financial_manager";
 
   if (!allowed) {
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      "Apenas administradores e gestores financeiros podem alocar recursos.",
-    );
+    throw new functions.https.HttpsError("permission-denied", message);
   }
 }
 

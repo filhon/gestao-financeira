@@ -13,6 +13,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -81,6 +82,7 @@ const entitySchema = z.object({
   // null = usar o padrão (2% de multa + 1% a.m.)
   lateFeePercent: z.number().min(0).max(100).nullable().optional(),
   monthlyInterestPercent: z.number().min(0).max(100).nullable().optional(),
+  relatedParty: z.boolean().optional(),
 });
 
 type EntityFormData = z.infer<typeof entitySchema>;
@@ -211,6 +213,7 @@ export function EntityForm({
         pixKey: defaultValues.pixKey || "",
         lateFeePercent: defaultValues.lateFeePercent ?? null,
         monthlyInterestPercent: defaultValues.monthlyInterestPercent ?? null,
+        relatedParty: defaultValues.relatedParty ?? false,
       });
     }
   }, [defaultValues, form]);
@@ -413,6 +416,31 @@ export function EntityForm({
             Usados para calcular o valor corrigido de contas vencidas. Em
             branco, vale o padrão: 2% de multa e 1% ao mês.
           </p>
+
+          <div className="col-span-12">
+            <FormField
+              control={form.control}
+              name="relatedParty"
+              render={({ field }) => (
+                <FormItem className="flex items-start gap-3 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={!!field.value}
+                      onCheckedChange={(v) => field.onChange(v === true)}
+                    />
+                  </FormControl>
+                  <div className="space-y-0.5">
+                    <FormLabel>Parte relacionada</FormLabel>
+                    <p className="text-xs text-muted-foreground">
+                      Mantenedora, coligada, dirigente ou empresa ligada à
+                      organização. Aparece destacada na cobrança e nos alertas
+                      de caixa, porque esses valores pedem divulgação à parte.
+                    </p>
+                  </div>
+                </FormItem>
+              )}
+            />
+          </div>
         </div>
 
         <Collapsible open={isBankOpen} onOpenChange={setIsBankOpen}>

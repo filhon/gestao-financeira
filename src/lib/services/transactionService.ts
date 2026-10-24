@@ -533,26 +533,36 @@ export const transactionService = {
         );
         const q = query(collection(db, COLLECTION_NAME), ...constraints);
 
-        if (memoryStatus) {
+        const inMemory = async () => {
           const snap = await getDocs(query(q, limit(2000)));
           const docs = snap.docs
             .map((d) => d.data())
-            .filter((d) => memoryStatus(d.status));
+            .filter((d) => !memoryStatus || memoryStatus(d.status));
           return {
             count: docs.length,
             total: docs.reduce((acc, d) => acc.add(d.amount || 0), currency(0))
               .value,
           };
-        }
-
-        const snap = await getAggregateFromServer(q, {
-          count: count(),
-          total: sum("amount"),
-        });
-        return {
-          count: snap.data().count,
-          total: currency(snap.data().total || 0).value,
         };
+
+        if (memoryStatus) return inMemory();
+
+        try {
+          const snap = await getAggregateFromServer(q, {
+            count: count(),
+            total: sum("amount"),
+          });
+          return {
+            count: snap.data().count,
+            total: currency(snap.data().total || 0).value,
+          };
+        } catch (error) {
+          // A soma exige índice composto terminado em `amount`
+          // (firestore.indexes.json). Sem ele publicado, ou enquanto é
+          // construído, soma em memória em vez de deixar a aba sem total.
+          console.warn("Agregação indisponível; somando em memória.", error);
+          return inMemory();
+        }
       }),
     );
   },

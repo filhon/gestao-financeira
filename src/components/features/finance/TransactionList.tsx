@@ -6,7 +6,12 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { differenceInCalendarDays, format, startOfDay } from "date-fns";
+import {
+  differenceInCalendarDays,
+  format,
+  parseISO,
+  startOfDay,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
 import currency from "currency.js";
@@ -253,12 +258,23 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const prefsLoaded = useRef(false);
   useEffect(() => {
+    let saved: Partial<Prefs> = {};
     try {
-      const saved = JSON.parse(localStorage.getItem(prefsKey(type)) ?? "{}");
-      setPrefs({ ...DEFAULT_PREFS, ...saved });
+      saved = JSON.parse(localStorage.getItem(prefsKey(type)) ?? "{}");
     } catch {
       // armazenamento indisponível: segue com o padrão
     }
+    // Links do dashboard abrem uma aba e um período: ?tab=paid&de=2026-01-01&ate=2026-12-31
+    const params = new URLSearchParams(window.location.search);
+    const urlTab = params.get("tab") as TabId | null;
+    const from = params.get("de");
+    const to = params.get("ate");
+    setPrefs({
+      ...DEFAULT_PREFS,
+      ...saved,
+      ...(urlTab ? { tab: urlTab } : {}),
+    });
+    if (from && to) setPeriod({ from: parseISO(from), to: parseISO(to) });
     prefsLoaded.current = true;
   }, [type]);
   useEffect(() => {

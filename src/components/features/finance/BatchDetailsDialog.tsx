@@ -424,7 +424,7 @@ export function BatchDetailsDialog({
         currentRowIndex++;
       };
 
-      const currentBalance = metrics?.balance || 0;
+      const currentBalance = metrics?.cashBalance || 0;
       // Compute total from live transaction data to reflect any edits made after batch creation
       const liveTotal = data.reduce((sum, t) => sum + t.effectiveAmount, 0);
       const balanceAfter = currentBalance - liveTotal;

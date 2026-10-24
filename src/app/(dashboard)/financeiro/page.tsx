@@ -12,10 +12,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
-import {
-  useDashboardMetrics,
-  useOverdueTransactions,
-} from "@/hooks/useDashboardData";
+import { useDashboardMetrics, useActionQueue } from "@/hooks/useDashboardData";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ─── Featured modules (primary) ──────────────────────────────────────────────
@@ -35,7 +32,7 @@ function PayablesCard({
     <Link href="/financeiro/contas-pagar" className="group block h-full">
       <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-rose-200 dark:hover:border-rose-900 overflow-hidden">
         {/* accent strip */}
-        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-gradient-to-r from-rose-500 to-red-400" />
+        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-rose-500 to-red-400" />
 
         <div className="flex items-start justify-between mb-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-950">
@@ -94,7 +91,7 @@ function ReceivablesCard({
     <Link href="/financeiro/contas-receber" className="group block h-full">
       <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-emerald-200 dark:hover:border-emerald-900 overflow-hidden">
         {/* accent strip */}
-        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-gradient-to-r from-emerald-500 to-teal-400" />
+        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-emerald-500 to-teal-400" />
 
         <div className="flex items-start justify-between mb-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-950">
@@ -218,10 +215,10 @@ function UtilityCard({
 
 export default function FinanceiroPage() {
   const { data: metrics, isLoading: metricsLoading } = useDashboardMetrics();
-  const { data: overdue } = useOverdueTransactions();
+  const { data: queue } = useActionQueue();
 
   const overduePayablesCount =
-    overdue?.filter((t) => t.type === "payable").length ?? 0;
+    queue?.find((s) => s.id === "payable-overdue")?.count ?? 0;
 
   return (
     <div className="space-y-8">

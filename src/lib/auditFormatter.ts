@@ -56,6 +56,7 @@ export const FIELD_LABELS: Record<string, string> = {
   pixKey: "Chave PIX",
   lateFeePercent: "Multa por Atraso (%)",
   monthlyInterestPercent: "Juros de Mora (% a.m.)",
+  relatedParty: "Parte Relacionada",
   paymentHold: "Bloqueio de Pagamento",
   paymentPromise: "Promessa de Pagamento",
   reason: "Motivo",

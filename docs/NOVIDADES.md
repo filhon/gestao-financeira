@@ -6,6 +6,22 @@
 
 ## Atualização de 23 de outubro de 2026
 
+### Dashboard começa pelo que precisa ser resolvido hoje
+
+O dashboard agora abre com o que espera ação: contas a pagar vencidas, contas que vencem hoje, recebimentos em atraso e, para quem aprova ou autoriza, a sua fila. Cada bloco mostra a quantidade e o total reais, os mesmos das abas das listas, e as contas abrem direto no painel de detalhes.
+
+As contas vencidas aparecem agrupadas por fornecedor ou cliente, com o total e há quanto tempo está a mais antiga; um clique abre as contas do grupo.
+
+Os indicadores foram revistos para não se contradizerem. "Saldo pelas baixas" é o saldo formado pelos pagamentos e recebimentos registrados, e "Saldo previsto" é o último ponto do gráfico de fluxo de caixa. O antigo "Saldo Realizado" era, na verdade, o resultado do exercício (recebido menos pago) e agora aparece como tal, junto ao saldo. Recebido e pago mostram a variação contra o mesmo período do ano anterior, e cada indicador leva à lista correspondente.
+
+A projeção de caixa ficou conservadora: contas a pagar em atraso saem do caixa hoje, porque são dívida certa, e contas a receber em atraso ficam fora, porque podem não entrar. Quando o caixa fica negativo, o aviso no topo diz em quais dias (por exemplo, "amanhã e a partir de 31/10"), o pior saldo, a entrada grande de que a projeção depende e quais clientes em atraso cobririam o buraco, começando pelos atrasos mais recentes. No gráfico, o trecho abaixo de zero aparece em vermelho e o menor saldo fica marcado; o cenário com os atrasados recebidos pode ser ligado pela legenda. O saldo aparece em degraus, como ele muda de fato no dia de cada vencimento, e as simulações funcionam também na visão do exercício inteiro.
+
+A projeção respeita dias úteis: uma conta que vence no sábado, no domingo ou num feriado bancário nacional (incluindo Carnaval, Sexta-feira Santa e Corpus Christi) entra no saldo do dia útil seguinte, que é quando o dinheiro de fato se move. Assim o painel não acusa saldo negativo num fim de semana que se resolve na segunda.
+
+Na fila, os atrasados mostram há quanto tempo está a conta mais antiga e quanto passa de 90 dias, para separar o que é cobrança de rotina do que é crédito duvidoso. No cadastro de entidades há a opção "Parte relacionada" (mantenedora, coligada, dirigente ou empresa ligada); essas contrapartes aparecem destacadas na fila e no aviso de saldo. O seletor de exercício passou a incluir o ano seguinte, para planejar os envelopes antes da virada.
+
+No envelope por centro de custo, a barra mostra o que já foi pago (escuro) e o que está comprometido (claro). Vermelho é só quem passou do envelope. Amarelo é quem está pagando mais rápido que o ritmo do ano, marcado por um traço em cada barra, ou quem chegou a 95% com contas ainda por pagar e o ano pela frente: nesse caso a próxima despesa será recusada, e o detalhe leva direto à redistribuição. Empenhar o ano inteiro em janeiro não gera alerta, e um centro que já pagou tudo o que comprometeu aparece como "Esgotado", sem alerta. A exportação de lotes passou a usar o saldo real na linha "Saldo atual".
+
 ### Contas a pagar e a receber organizadas por situação
 
 As listas de contas a pagar e a receber agora abrem em abas: Vencidas, Hoje, Próximos 7 dias, Futuras, Pagas (ou Recebidas) e Todas, cada uma com a quantidade e o total em reais. A aba Vencidas mostra todo o atraso em aberto, qualquer que seja o período escolhido. Antes, uma conta vencida podia ficar fora da tela por causa do filtro de datas.

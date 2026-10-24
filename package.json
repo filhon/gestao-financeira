@@ -12,7 +12,8 @@
     "backfill:ledger": "node scripts/backfill-cost-center-ledger.mjs",
     "verify:ledger": "node scripts/verify-cost-center-ledger.mjs",
     "check:chart-of-accounts": "jiti scripts/check-chart-of-accounts.ts",
-    "check:transaction-tabs": "jiti scripts/check-transaction-tabs.ts"
+    "check:transaction-tabs": "jiti scripts/check-transaction-tabs.ts",
+    "check:dashboard": "jiti scripts/check-dashboard.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

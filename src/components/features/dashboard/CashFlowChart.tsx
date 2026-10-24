@@ -1,10 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import currency from "currency.js";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Segmented } from "./Segmented";
 import {
   Popover,
   PopoverContent,
@@ -17,11 +23,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ProjectedCashFlowData } from "@/lib/services/dashboardService";
+import {
+  dashboardService,
+  ProjectedCashFlowData,
+} from "@/lib/services/dashboardService";
 import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -29,97 +39,89 @@ import {
   YAxis,
 } from "recharts";
 import {
+  AlertCircle,
   AlertTriangle,
-  Calendar,
   FlaskConical,
-  Maximize2,
-  Minimize2,
   Plus,
+  RefreshCcw,
   Trash2,
   X,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
-import { useProjectedCashFlow } from "@/hooks/useDashboardData";
+import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
+import {
+  DASHBOARD_QUERY_KEYS,
+  useProjectedCashFlow,
+} from "@/hooks/useDashboardData";
+import { useCompany } from "@/components/providers/CompanyProvider";
+import { usePermissions } from "@/hooks/usePermissions";
 import { format, parseISO } from "date-fns";
+import {
+  annotateWithSimulations,
+  negativeRuns,
+  niceTicks,
+  type SimulatedEntry,
+} from "@/lib/dashboardRules";
 
-// ─── Simulated entry type (lightweight — no need for full Transaction fields) ─
-interface SimulatedEntry {
-  id: string;
-  amount: number;
-  type: "receivable" | "payable";
-  date: string; // "yyyy-MM-dd"
-}
+// No eixo, marcas redondas dispensam o ",0": "R$ 300 mil", "R$ 1,2 mi".
+const axisFormat = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+const axisMoney = (v: number) => axisFormat.format(v);
 
-// Extended point type — adds simulatedBalance alongside the original balance.
+const REAL = "var(--chart-cash)";
+const SIMULATED = "var(--chart-sim)";
+const NEGATIVE = "var(--destructive)";
+
 type ChartPoint = ProjectedCashFlowData & { simulatedBalance?: number };
 
-// Annotates each data point with `simulatedBalance` (real balance + cumulative
-// simulation delta). The original `balance` field is left untouched so both
-// lines can be rendered simultaneously in the same AreaChart.
-function annotateWithSimulations(
-  data: ProjectedCashFlowData[],
-  simulations: SimulatedEntry[],
-): ChartPoint[] {
-  if (simulations.length === 0) return data;
-
-  // Determine which label format the chart uses ("dd/MM" vs. "MMM")
-  const usesMonthFormat =
-    data.length > 0 && /^[A-Za-z]/.test(data[0]?.date ?? "");
-
-  // Build a lookup: chartDateLabel → net delta per slot
-  const deltas = new Map<string, number>();
-  for (const sim of simulations) {
-    const d = parseISO(sim.date);
-    const key = usesMonthFormat ? format(d, "MMM") : format(d, "dd/MM");
-    const sign = sim.type === "receivable" ? 1 : -1;
-    deltas.set(key, (deltas.get(key) ?? 0) + sign * sim.amount);
-  }
-
-  // Walk through data points accumulating the delta into simulatedBalance
-  let cumulativeDelta = 0;
-  return data.map((point) => {
-    const delta = deltas.get(point.date);
-    if (delta !== undefined) cumulativeDelta += delta;
-    return {
-      ...point,
-      simulatedBalance: point.balance + cumulativeDelta,
-    };
-  });
+function lowestPoint<T extends { balance: number }>(points: T[]) {
+  return points.reduce<T | undefined>(
+    (min, p) => (!min || p.balance < min.balance ? p : min),
+    undefined,
+  );
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
 export function CashFlowChart({ year }: { year?: number }) {
-  const [mode, setMode] = useState<"30days" | "year">("30days");
-  const { data: result, isLoading } = useProjectedCashFlow(mode, year);
+  const [chosenMode, setMode] = useState<"30days" | "year">("30days");
+  // Exercício futuro ainda não tem saldo de partida: a projeção do ano
+  // começaria de hoje e pularia os meses até lá. Só os 30 dias valem.
+  const futureYear =
+    (year ?? new Date().getFullYear()) > new Date().getFullYear();
+  const mode = futureYear ? "30days" : chosenMode;
+  const {
+    data: result,
+    isLoading,
+    isError,
+    refetch,
+  } = useProjectedCashFlow(mode, year);
+  const { selectedCompany } = useCompany();
+  const { isAdmin, isFinancialManager } = usePermissions();
+  const queryClient = useQueryClient();
+  const [recalculating, setRecalculating] = useState(false);
 
-  // Simulation state
   const [simulatedTransactions, setSimulatedTransactions] = useState<
     SimulatedEntry[]
   >([]);
   const [popoverOpen, setPopoverOpen] = useState(false);
-
-  // Form state inside the popover
-  const [formAmount, setFormAmount] = useState("");
-  const [formType, setFormType] = useState<"receivable" | "payable">(
-    "receivable",
-  );
-  // Default date = today
+  const [formAmount, setFormAmount] = useState<number | undefined>();
+  const [formType, setFormType] = useState<"receivable" | "payable">("payable");
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const [formDate, setFormDate] = useState(todayStr);
 
   const hasCompanyStats = result?.hasCompanyStats ?? true;
 
-  // Annotate each point with `simulatedBalance` while keeping `balance` intact.
-  // Use result?.data as the stable dependency — the `?? []` fallback lives inside
-  // the callback so a new empty array is NOT created on every render.
   const data = useMemo(
     () => annotateWithSimulations(result?.data ?? [], simulatedTransactions),
     [result?.data, simulatedTransactions],
   );
 
   const isSimulating = simulatedTransactions.length > 0;
-
-  // Compute min across both balance and simulatedBalance for the red reference line
+  const first = data[0];
+  const last = data.at(-1);
+  const lowest = lowestPoint(data);
   const minBalance =
     data.length > 0
       ? Math.min(
@@ -129,38 +131,79 @@ export function CashFlowChart({ year }: { year?: number }) {
         )
       : 0;
   const hasNegative = minBalance < 0;
+  const overdueIncome = result?.overdueIncome ?? 0;
+  const [showOverdue, setShowOverdue] = useState(false);
+  const runs = negativeRuns(data);
 
-  // ── Handlers ──
+  // Escala pela série conservadora (e pela simulação). O cenário otimista só
+  // entra na escala quando ligado: senão o pico dele achata o trecho negativo.
+  const scaleValues = data.flatMap((d) => [
+    d.balance,
+    ...(d.simulatedBalance !== undefined ? [d.simulatedBalance] : []),
+    ...(showOverdue && d.balanceWithOverdue !== undefined
+      ? [d.balanceWithOverdue]
+      : []),
+  ]);
+  const ticks = niceTicks(
+    Math.min(0, ...scaleValues),
+    Math.max(0, ...scaleValues),
+  );
+
+  // Onde o gradiente troca de cor: no zero, relativo ao alcance do saldo.
+  const balances = data.map((d) => d.balance);
+  const bMax = Math.max(...balances, 0);
+  const bMin = Math.min(...balances, 0);
+  const zeroOffset = bMax === bMin ? 1 : bMax / (bMax - bMin);
+  const rangeMax = last
+    ? mode === "year"
+      ? `${last.isoDate.slice(0, 4)}-12-31`
+      : last.isoDate
+    : undefined;
+
   function addSimulation() {
-    const amt = parseFloat(formAmount.replace(",", "."));
-    if (isNaN(amt) || amt <= 0 || !formDate) return;
-
-    const entry: SimulatedEntry = {
-      id: crypto.randomUUID(),
-      amount: amt,
-      type: formType,
-      date: formDate,
-    };
-    setSimulatedTransactions((prev) => [...prev, entry]);
-    setFormAmount("");
+    if (!formAmount || formAmount <= 0 || !formDate) return;
+    setSimulatedTransactions((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        amount: currency(formAmount).value,
+        type: formType,
+        date: formDate,
+      },
+    ]);
+    setFormAmount(undefined);
     setFormDate(todayStr);
     setPopoverOpen(false);
   }
 
-  function removeSimulation(id: string) {
-    setSimulatedTransactions((prev) => prev.filter((s) => s.id !== id));
-  }
-
-  function clearAll() {
-    setSimulatedTransactions([]);
+  async function recalculate() {
+    if (!selectedCompany) return;
+    setRecalculating(true);
+    try {
+      const r = await dashboardService.recalculateBalance(selectedCompany.id);
+      toast.success(
+        `Saldo recalculado: ${formatCurrency(r.newBalance)} (${r.transactionCount} baixas).`,
+      );
+      DASHBOARD_QUERY_KEYS.forEach((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] }),
+      );
+    } catch {
+      toast.error("Não foi possível recalcular o saldo.");
+    } finally {
+      setRecalculating(false);
+    }
   }
 
   return (
-    <Card className="col-span-full md:col-span-4">
+    <Card id="fluxo-caixa" className="col-span-full scroll-mt-20 md:col-span-4">
       <CardHeader className="flex flex-col gap-2 pb-2 md:flex-row md:items-center md:justify-between md:gap-0 md:space-y-0">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-sm md:text-base font-medium">
-            Fluxo de Caixa Projetado
+          <CardTitle
+            role="heading"
+            aria-level={2}
+            className="text-sm md:text-base font-medium"
+          >
+            Fluxo de caixa projetado
           </CardTitle>
           {isSimulating && (
             <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-950/50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-400">
@@ -169,74 +212,62 @@ export function CashFlowChart({ year }: { year?: number }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Simulation button + popover */}
+        <div className="flex flex-wrap items-center gap-2">
           <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 md:h-8 text-xs border-dashed px-2 md:px-2.5"
-              >
-                <Plus className="h-3 w-3 sm:mr-1" />
-                <span className="hidden sm:inline">Adicionar Simulação</span>
+              <Button variant="outline" size="sm" className="h-8 text-xs">
+                <Plus className="mr-1 h-3 w-3" />
+                Simular lançamento
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-72 p-4" align="end">
-              <p className="text-sm font-semibold mb-3">Nova simulação</p>
+              <p className="text-sm font-semibold">E se…</p>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Veja o efeito de uma entrada ou saída no saldo. Nada é gravado.
+              </p>
               <div className="space-y-3">
-                {/* Amount */}
                 <div className="space-y-1">
                   <Label htmlFor="sim-amount" className="text-xs">
-                    Valor (R$)
+                    Valor
                   </Label>
-                  <Input
+                  <CurrencyInput
                     id="sim-amount"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="0,00"
+                    inputMode="numeric"
                     value={formAmount}
-                    onChange={(e) => setFormAmount(e.target.value)}
+                    onChange={setFormAmount}
                     className="h-8 text-sm"
                   />
                 </div>
 
-                {/* Type */}
                 <div className="space-y-1">
-                  <Label className="text-xs">Tipo</Label>
+                  <Label htmlFor="sim-type" className="text-xs">
+                    Tipo
+                  </Label>
                   <Select
                     value={formType}
                     onValueChange={(v) =>
                       setFormType(v as "receivable" | "payable")
                     }
                   >
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger id="sim-type" className="h-8 text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="receivable">
-                        <span className="text-emerald-600 font-medium">
-                          ↑ Entrada
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="payable">
-                        <span className="text-red-600 font-medium">
-                          ↓ Saída
-                        </span>
-                      </SelectItem>
+                      <SelectItem value="receivable">↑ Entrada</SelectItem>
+                      <SelectItem value="payable">↓ Saída</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* Date */}
                 <div className="space-y-1">
                   <Label htmlFor="sim-date" className="text-xs">
-                    Data de vencimento
+                    Data
                   </Label>
                   <Input
                     id="sim-date"
                     type="date"
+                    min={first?.isoDate}
+                    max={rangeMax}
                     value={formDate}
                     onChange={(e) => setFormDate(e.target.value)}
                     className="h-8 text-sm"
@@ -244,7 +275,7 @@ export function CashFlowChart({ year }: { year?: number }) {
                 </div>
 
                 <Button
-                  className="w-full h-8 text-xs"
+                  className="h-8 w-full text-xs"
                   onClick={addSimulation}
                   disabled={!formAmount || !formDate}
                 >
@@ -253,46 +284,44 @@ export function CashFlowChart({ year }: { year?: number }) {
                 </Button>
               </div>
 
-              {/* List of existing simulations */}
               {simulatedTransactions.length > 0 && (
                 <div className="mt-4 border-t pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-muted-foreground font-medium">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground">
                       Simulações ativas
                     </p>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-5 px-1 text-[10px] text-muted-foreground hover:text-destructive"
-                      onClick={clearAll}
+                      className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-destructive"
+                      onClick={() => setSimulatedTransactions([])}
                     >
                       Limpar todas
                     </Button>
                   </div>
-                  <ul className="space-y-1.5 max-h-40 overflow-y-auto">
+                  <ul className="max-h-40 space-y-1.5 overflow-y-auto">
                     {simulatedTransactions.map((sim) => (
                       <li
                         key={sim.id}
-                        className="flex items-center justify-between text-xs rounded-md bg-muted/50 px-2 py-1.5"
+                        className="flex items-center justify-between rounded-md bg-muted/50 px-2 py-1.5 text-xs"
                       >
-                        <span
-                          className={
-                            sim.type === "receivable"
-                              ? "text-emerald-600 font-medium font-financial"
-                              : "text-red-600 font-medium font-financial"
-                          }
-                        >
-                          {sim.type === "receivable" ? "+" : "−"}
+                        <span className="font-medium font-financial">
+                          {sim.type === "receivable" ? "+" : "-"}
                           {formatCurrency(sim.amount)}
                         </span>
-                        <span className="text-muted-foreground mx-2">
+                        <span className="mx-2 text-muted-foreground">
                           {format(parseISO(sim.date), "dd/MM")}
                         </span>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
-                          onClick={() => removeSimulation(sim.id)}
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                          aria-label="Remover simulação"
+                          onClick={() =>
+                            setSimulatedTransactions((prev) =>
+                              prev.filter((s) => s.id !== sim.id),
+                            )
+                          }
                         >
                           <X className="h-3 w-3" />
                         </Button>
@@ -304,247 +333,395 @@ export function CashFlowChart({ year }: { year?: number }) {
             </PopoverContent>
           </Popover>
 
-          {/* Clear simulations shortcut (outside popover) */}
           {isSimulating && (
             <Button
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+              aria-label="Limpar simulações"
               title="Limpar simulações"
-              onClick={clearAll}
+              onClick={() => setSimulatedTransactions([])}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           )}
 
-          {/* Mode toggle buttons */}
-          <Button
-            variant={mode === "30days" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setMode("30days")}
-            className="h-7 md:h-8 text-xs px-2.5"
-          >
-            <Calendar className="mr-1 h-3 w-3" />
-            30 dias
-          </Button>
-          <Button
-            variant={mode === "year" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setMode("year")}
-            className="h-7 md:h-8 text-xs px-2.5"
-          >
-            {mode === "year" ? (
-              <Minimize2 className="mr-1 h-3 w-3" />
-            ) : (
-              <Maximize2 className="mr-1 h-3 w-3" />
-            )}
-            <span className="hidden sm:inline">Ano Completo</span>
-            <span className="sm:hidden">Ano</span>
-          </Button>
+          <Segmented
+            label="Período da projeção"
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "30days", label: "30 dias" },
+              ...(futureYear
+                ? []
+                : [
+                    {
+                      value: "year" as const,
+                      label: `Exercício ${year ?? new Date().getFullYear()}`,
+                    },
+                  ]),
+            ]}
+          />
         </div>
       </CardHeader>
       <CardContent className="pl-2">
         {!hasCompanyStats && !isLoading && (
-          <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 text-xs rounded-md px-3 py-2 mb-2">
+          <div className="mb-2 ml-4 flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Saldo base calculado a partir de R$0,00. Recalcule o saldo para
-              projeções mais precisas.
+            <span className="flex-1">
+              O saldo de partida ainda não foi calculado e está em R$ 0,00.
             </span>
+            {(isAdmin || isFinancialManager) && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={recalculate}
+                disabled={recalculating}
+              >
+                <RefreshCcw
+                  className={cn(
+                    "mr-1 h-3 w-3",
+                    recalculating && "animate-spin",
+                  )}
+                />
+                Recalcular saldo
+              </Button>
+            )}
           </div>
         )}
         {isSimulating && !isLoading && (
-          <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400 text-xs rounded-md px-3 py-2 mb-2">
+          <div className="mb-2 ml-4 flex items-center gap-2 rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-700 dark:bg-violet-950/30 dark:text-violet-400">
             <FlaskConical className="h-3.5 w-3.5 shrink-0" />
             <span>
-              Exibindo projeção com{" "}
-              <strong>{simulatedTransactions.length}</strong>{" "}
+              Linha tracejada: projeção com {simulatedTransactions.length}{" "}
               {simulatedTransactions.length === 1
-                ? "transação simulada"
-                : "transações simuladas"}
-              . Os dados reais não são afetados.
+                ? "lançamento simulado"
+                : "lançamentos simulados"}
+              . Os dados reais não mudam.
             </span>
           </div>
         )}
+
         {isLoading ? (
-          <div className="flex h-[200px] md:h-[350px] items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Skeleton className="ml-4 h-[220px] md:h-[370px]" />
+        ) : isError ? (
+          <div className="flex h-[220px] flex-col items-center justify-center gap-3 md:h-[370px]">
+            <AlertCircle className="h-6 w-6 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              Não foi possível carregar a projeção.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => refetch()}
+            >
+              <RefreshCcw className="mr-1.5 h-3 w-3" />
+              Tentar novamente
+            </Button>
           </div>
         ) : (
-          <div className="h-[200px] md:h-[350px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={data}
-                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-              >
-                <defs>
-                  {/* Real balance gradient — always blue */}
-                  <linearGradient
-                    id="cfGradientReal"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.04} />
-                  </linearGradient>
-                  {/* Simulated balance gradient — violet, shown only when simulating */}
-                  <linearGradient
-                    id="cfGradientSim"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  dataKey="date"
-                  stroke="#888888"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  interval={mode === "year" ? 3 : 2}
-                />
-                <YAxis
-                  stroke="#888888"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => {
-                    if (Math.abs(value) >= 1000) {
-                      return `R$${(value / 1000).toFixed(0)}k`;
-                    }
-                    return `R$${value}`;
-                  }}
-                />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (active && payload && payload.length) {
+          <>
+            {first && last && lowest && (
+              <dl className="mb-3 ml-4 flex min-h-4 flex-wrap gap-x-6 gap-y-1 text-xs">
+                {/* No modo 30 dias, hoje, o menor e o fim já estão nos KPIs
+                    e no alerta logo acima; aqui só no exercício. */}
+                {mode === "year" && (
+                  <>
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">Em {first.date}</dt>
+                      <dd className="font-medium font-financial">
+                        {formatCurrency(first.balance)}
+                      </dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">
+                        Menor saldo, {lowest.date}
+                      </dt>
+                      <dd
+                        className={cn(
+                          "font-medium font-financial",
+                          lowest.balance < 0 && "text-destructive",
+                        )}
+                      >
+                        {formatCurrency(lowest.balance)}
+                      </dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">Em {last.date}</dt>
+                      <dd
+                        className={cn(
+                          "font-medium font-financial",
+                          last.balance < 0 && "text-destructive",
+                        )}
+                      >
+                        {formatCurrency(last.balance)}
+                      </dd>
+                    </div>
+                  </>
+                )}
+                {overdueIncome > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <dt>
+                      {/* A legenda liga e desliga o cenário otimista. */}
+                      <button
+                        type="button"
+                        aria-pressed={showOverdue}
+                        onClick={() => setShowOverdue((v) => !v)}
+                        className="flex items-center gap-1.5 rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <span
+                          className={cn(
+                            "inline-block w-4 border-t-2 border-dashed",
+                            showOverdue
+                              ? "border-foreground"
+                              : "border-muted-foreground/50",
+                          )}
+                          aria-hidden
+                        />
+                        {showOverdue ? "Ocultar" : "Mostrar"} cenário com{" "}
+                        {formatCurrencyAbbr(overdueIncome)} em atraso recebidos
+                      </button>
+                    </dt>
+                  </div>
+                )}
+              </dl>
+            )}
+            {/* figure, não role="img": img tornaria o conteúdo apresentacional
+                e esconderia a camada de teclado do Recharts (setas percorrem os
+                dias e o tooltip é lido). */}
+            <figure
+              className="h-[200px] md:h-[330px]"
+              aria-label={
+                lowest
+                  ? `Saldo projetado. ${
+                      runs.length === 0
+                        ? "Não fica negativo."
+                        : `Negativo ${runs.map((r) => (r.start === r.end ? `em ${r.start.date}` : `de ${r.start.date} a ${r.end.date}`)).join(" e ")}.`
+                    } Menor saldo ${formatCurrency(lowest.balance)} em ${lowest.date}.`
+                  : "Saldo projetado"
+              }
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={data}
+                  margin={{ top: 16, right: 16, left: 4, bottom: 0 }}
+                  accessibilityLayer
+                >
+                  <defs>
+                    {/* Acima de zero azul, abaixo vermelho. */}
+                    <linearGradient
+                      id="cfSplitStroke"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop offset={zeroOffset} stopColor={REAL} />
+                      <stop offset={zeroOffset} stopColor={NEGATIVE} />
+                    </linearGradient>
+                    <linearGradient
+                      id="cfSplitFill"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset={zeroOffset}
+                        stopColor={REAL}
+                        stopOpacity={0.08}
+                      />
+                      <stop
+                        offset={zeroOffset}
+                        stopColor={NEGATIVE}
+                        stopOpacity={0.18}
+                      />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    className="stroke-muted"
+                  />
+                  <XAxis
+                    dataKey="date"
+                    stroke="var(--muted-foreground)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    stroke="var(--muted-foreground)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    width={72}
+                    domain={[ticks[0], ticks[ticks.length - 1]]}
+                    ticks={ticks}
+                    interval={0}
+                    tickFormatter={axisMoney}
+                  />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
                       const point = payload[0].payload as ChartPoint;
                       return (
-                        <div className="rounded-lg border bg-popover p-3 shadow-md min-w-44">
-                          <p className="text-sm font-medium text-popover-foreground mb-2">
-                            {label}
+                        <div className="min-w-44 rounded-lg border bg-popover p-3 shadow-md">
+                          <p className="mb-2 text-sm font-medium text-popover-foreground">
+                            {mode === "year" ? `Semana de ${label}` : label}
                           </p>
-                          {/* Real balance row */}
                           <div className="flex items-center justify-between gap-3">
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <span className="inline-block h-2 w-4 rounded-sm bg-blue-500" />
-                              Real
+                            <span className="text-xs text-muted-foreground">
+                              Saldo
                             </span>
                             <span
-                              className={
-                                point.balance >= 0
-                                  ? "text-emerald-600 font-medium text-xs font-financial"
-                                  : "text-red-600 font-medium text-xs font-financial"
-                              }
+                              className={cn(
+                                "text-xs font-medium font-financial",
+                                point.balance < 0 && "text-destructive",
+                              )}
                             >
                               {formatCurrency(point.balance)}
                             </span>
                           </div>
-                          {/* Simulated balance row — only when a simulation is active */}
+                          {showOverdue &&
+                            point.balanceWithOverdue !== undefined && (
+                              <div className="mt-1 flex items-center justify-between gap-3">
+                                <span className="text-xs text-muted-foreground">
+                                  Se os atrasados entrarem
+                                </span>
+                                <span className="text-xs font-medium font-financial">
+                                  {formatCurrency(point.balanceWithOverdue)}
+                                </span>
+                              </div>
+                            )}
                           {isSimulating &&
                             point.simulatedBalance !== undefined && (
-                              <div className="flex items-center justify-between gap-3 mt-1">
-                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <span
-                                    className="inline-block h-2 w-4 rounded-sm bg-violet-500 opacity-70"
-                                    style={{
-                                      background:
-                                        "repeating-linear-gradient(90deg,#8b5cf6 0,#8b5cf6 3px,transparent 3px,transparent 8px)",
-                                    }}
-                                  />
+                              <div className="mt-1 flex items-center justify-between gap-3">
+                                <span className="text-xs text-muted-foreground">
                                   Simulado
                                 </span>
                                 <span
-                                  className={
-                                    point.simulatedBalance >= 0
-                                      ? "text-violet-600 font-medium text-xs font-financial"
-                                      : "text-red-500 font-medium text-xs font-financial"
-                                  }
+                                  className={cn(
+                                    "text-xs font-medium font-financial",
+                                    point.simulatedBalance < 0 &&
+                                      "text-destructive",
+                                  )}
                                 >
                                   {formatCurrency(point.simulatedBalance)}
                                 </span>
                               </div>
                             )}
-                          {/* Income / expense detail */}
                           {(point.income > 0 || point.expense > 0) && (
-                            <div className="mt-2 pt-2 border-t space-y-0.5">
+                            <div className="mt-2 space-y-0.5 border-t pt-2 text-xs font-financial">
                               {point.income > 0 && (
-                                <p className="text-xs text-emerald-600 font-financial">
-                                  + {formatCurrency(point.income)} receitas
-                                </p>
+                                <p>+ {formatCurrency(point.income)} entradas</p>
                               )}
                               {point.expense > 0 && (
-                                <p className="text-xs text-red-600 font-financial">
-                                  − {formatCurrency(point.expense)} despesas
-                                </p>
+                                <p>- {formatCurrency(point.expense)} saídas</p>
                               )}
                             </div>
                           )}
                         </div>
                       );
-                    }
-                    return null;
-                  }}
-                />
-                <ReferenceLine y={0} stroke="#888888" strokeDasharray="3 3" />
-                {hasNegative && (
+                    }}
+                  />
                   <ReferenceLine
                     y={0}
-                    stroke="#ef4444"
-                    strokeWidth={2}
-                    label={{
-                      value: "Saldo Zero",
-                      position: "right",
-                      fill: "#ef4444",
-                      fontSize: 10,
-                    }}
+                    stroke={
+                      hasNegative ? "var(--destructive)" : "var(--border)"
+                    }
+                    strokeWidth={hasNegative ? 1.5 : 1}
                   />
-                )}
-                {/* ── Real balance line — always rendered, always blue ── */}
-                <Area
-                  type="monotone"
-                  dataKey="balance"
-                  name="Real"
-                  stroke="#3b82f6"
-                  strokeWidth={2.5}
-                  fill="url(#cfGradientReal)"
-                  dot={false}
-                  activeDot={{
-                    r: 5,
-                    fill: "#3b82f6",
-                    stroke: "#fff",
-                    strokeWidth: 2,
-                  }}
-                />
-                {/* ── Simulated balance line — violet dashed, only when simulating ── */}
-                {isSimulating && (
+                  {/* Saldo muda no dia do vencimento: degrau, não curva. */}
                   <Area
-                    type="monotone"
-                    dataKey="simulatedBalance"
-                    name="Simulado"
-                    stroke="#8b5cf6"
+                    type="stepAfter"
+                    dataKey="balance"
+                    name="Saldo"
+                    // Gradiente só quando cruza o zero: numa linha reta a
+                    // caixa do traço tem altura zero e o SVG o descartaria.
+                    stroke={hasNegative ? "url(#cfSplitStroke)" : REAL}
                     strokeWidth={2}
-                    strokeDasharray="5 5"
-                    fill="url(#cfGradientSim)"
+                    fill="url(#cfSplitFill)"
                     dot={false}
-                    activeDot={{
-                      r: 5,
-                      fill: "#8b5cf6",
-                      stroke: "#fff",
-                      strokeWidth: 2,
-                    }}
+                    activeDot={(props: {
+                      cx?: number;
+                      cy?: number;
+                      payload?: ChartPoint;
+                    }) => (
+                      <circle
+                        cx={props.cx}
+                        cy={props.cy}
+                        r={4}
+                        fill={
+                          (props.payload?.balance ?? 0) < 0 ? NEGATIVE : REAL
+                        }
+                        stroke="var(--background)"
+                        strokeWidth={2}
+                      />
+                    )}
+                    isAnimationActive={false}
                   />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+                  {showOverdue && overdueIncome > 0 && (
+                    <Area
+                      type="stepAfter"
+                      dataKey="balanceWithOverdue"
+                      name="Se os atrasados entrarem"
+                      stroke="var(--muted-foreground)"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 4"
+                      fill="none"
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={false}
+                    />
+                  )}
+                  {isSimulating && (
+                    <Area
+                      type="stepAfter"
+                      dataKey="simulatedBalance"
+                      name="Simulado"
+                      stroke={SIMULATED}
+                      strokeWidth={2}
+                      strokeDasharray="5 5"
+                      fill="none"
+                      dot={false}
+                      activeDot={{
+                        r: 4,
+                        fill: SIMULATED,
+                        stroke: "var(--background)",
+                        strokeWidth: 2,
+                      }}
+                      isAnimationActive={false}
+                    />
+                  )}
+                  {lowest && (
+                    <ReferenceDot
+                      x={lowest.date}
+                      y={lowest.balance}
+                      r={4}
+                      fill={
+                        lowest.balance < 0
+                          ? "var(--destructive)"
+                          : "var(--muted-foreground)"
+                      }
+                      stroke="var(--background)"
+                      strokeWidth={2}
+                      label={{
+                        value: "Menor saldo",
+                        position: "bottom",
+                        fontSize: 11,
+                        fill: "var(--muted-foreground)",
+                      }}
+                    />
+                  )}
+                </AreaChart>
+              </ResponsiveContainer>
+            </figure>
+          </>
         )}
       </CardContent>
     </Card>

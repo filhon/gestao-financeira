@@ -8,20 +8,35 @@ import {
   Timestamp,
   getAggregateFromServer,
   sum,
-  limit,
   doc,
   getDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { CostCenter, CostCenterBalance, Transaction } from "@/lib/types";
+import currency from "currency.js";
+import {
+  CostCenter,
+  CostCenterBalance,
+  Transaction,
+  UserRole,
+} from "@/lib/types";
 import { costCenterLedgerService } from "./costCenterLedgerService";
+import { transactionService } from "./transactionService";
+import {
+  queueStatuses,
+  tabFilter,
+  type TabContext,
+  type TabFilter,
+} from "@/lib/transactionTabs";
 import {
   startOfMonth,
   endOfMonth,
   format,
   addDays,
+  startOfDay,
+  endOfDay,
   startOfYear,
   endOfYear,
+  subYears,
   isBefore,
   isAfter,
   isSameDay,
@@ -30,15 +45,42 @@ import {
   addYears,
 } from "date-fns";
 import { recurrenceService } from "./recurrenceService";
+import {
+  envelopePace,
+  envelopeRank,
+  envelopeStatus,
+  nextBusinessDay,
+  type EnvelopeStatus,
+} from "@/lib/dashboardRules";
 
 const TRANSACTIONS_COLLECTION = "transactions";
 const COST_CENTERS_COLLECTION = "cost_centers";
 const COMPANY_STATS_COLLECTION = "company_stats";
 
+/** Tudo que ainda espera pagamento. Mesma regra das listas (CLOSED_STATUSES). */
+const OPEN_STATUSES = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "pending_authorization",
+  "authorized",
+];
+
 export interface DashboardMetrics {
+  /** Recebido no exercício (data efetiva = paymentDate). */
   totalRevenue: number;
+  /** Pago no exercício (data efetiva = paymentDate). */
   totalExpenses: number;
-  balance: number;
+  /** Resultado de caixa do exercício: recebido − pago. Não é saldo bancário. */
+  result: number;
+  /** Mesmos totais no período de comparação (ano anterior). */
+  previousRevenue: number;
+  previousExpenses: number;
+  /** true = comparação até a mesma data do ano anterior; false = ano cheio. */
+  comparisonIsPartial: boolean;
+  /** Saldo em caixa hoje (company_stats), a mesma base do fluxo projetado. */
+  cashBalance: number;
+  hasCompanyStats: boolean;
   pendingPayables: number;
   pendingReceivables: number;
   /** Recebíveis pendentes com vencimento nos próximos 30 dias */
@@ -49,8 +91,14 @@ export interface DashboardMetrics {
 }
 
 export interface ProjectedCashFlowData {
+  /** Rótulo do eixo (dd/MM). */
   date: string;
+  /** Início do balde (yyyy-MM-dd): diário no modo 30 dias, semanal no ano. */
+  isoDate: string;
+  /** Saldo conservador: sem os recebíveis vencidos. */
   balance: number;
+  /** Cenário em que os recebíveis vencidos entram hoje. Só de hoje em diante. */
+  balanceWithOverdue?: number;
   income: number;
   expense: number;
 }
@@ -58,6 +106,10 @@ export interface ProjectedCashFlowData {
 export interface ProjectedCashFlowResult {
   data: ProjectedCashFlowData[];
   hasCompanyStats: boolean;
+  /** A receber vencido em aberto: fora de `balance`. */
+  overdueIncome: number;
+  /** A pagar vencido em aberto: lançado no dia de hoje. */
+  overdueExpense: number;
 }
 
 export interface CostCenterData {
@@ -68,72 +120,190 @@ export interface CostCenterData {
 export interface BudgetProgressData {
   id: string;
   name: string;
+  /** Comprometido: gasto direto (pago ou não) + distribuído aos filhos. */
   spent: number;
+  /** Gasto direto já pago. */
+  paid: number;
+  paidPercentage: number;
+  /** Tudo comprometido já pago e nada disponível: concluído. */
+  exhausted: boolean;
+  /** A 95% ou mais com exercício pela frente: a próxima despesa é recusada. */
+  tight: boolean;
+  spentDirect: number;
+  allocated: number;
   budget: number;
+  available: number;
   percentage: number;
-  status: "success" | "warning" | "danger" | "no-budget";
+  isLeaf: boolean;
+  status: EnvelopeStatus;
+}
+
+export interface QueueSection {
+  id: string;
+  label: string;
+  href: string;
+  tone: "danger" | "warning" | "neutral";
+  count: number;
+  total: number;
+  /** Agrupar por contraparte (vencidas) ou listar conta a conta. */
+  grouped: boolean;
+  /** Por vencimento, mais antigos primeiro: até 100 se agrupado, senão 5. */
+  items: Transaction[];
+}
+
+async function readCompanyBalance(companyId: string) {
+  try {
+    const snap = await getDoc(doc(db, COMPANY_STATS_COLLECTION, companyId));
+    if (snap.exists()) {
+      return {
+        balance: Number(snap.data().currentBalance) || 0,
+        hasCompanyStats: true,
+      };
+    }
+  } catch (error) {
+    console.error("Error fetching company stats for balance:", error);
+  }
+  return { balance: 0, hasCompanyStats: false };
+}
+
+/**
+ * Recebido e pago em cada janela pela data efetiva (paymentDate), numa leitura
+ * só para todas as janelas. A consulta vai por dueDate com folga de ±90 dias
+ * para pegar pagamentos antecipados ou atrasados; o corte fino é em memória.
+ * ponytail: lê os documentos porque 92% das baixas não têm `finalAmount` e
+ * algumas não têm `paymentDate`, o que impede somar no servidor. Preencher
+ * esses campos num backfill libera `sum()` por paymentDate.
+ */
+async function paidTotals(
+  companyId: string,
+  userId: string | undefined,
+  windows: { start: Date; end: Date }[],
+) {
+  const from = new Date(Math.min(...windows.map((w) => w.start.getTime())));
+  const to = new Date(Math.max(...windows.map((w) => w.end.getTime())));
+  let q = query(
+    collection(db, TRANSACTIONS_COLLECTION),
+    where("companyId", "==", companyId),
+    where("status", "==", "paid"),
+    where("dueDate", ">=", Timestamp.fromDate(addDays(from, -90))),
+    where("dueDate", "<=", Timestamp.fromDate(addDays(to, 90))),
+  );
+  if (userId) q = query(q, where("createdBy", "==", userId));
+
+  const snapshot = await getDocs(q);
+  const totals = windows.map(() => ({
+    revenue: currency(0),
+    expenses: currency(0),
+  }));
+  snapshot.docs.forEach((d) => {
+    const data = d.data();
+    const effDate: Date = data.paymentDate
+      ? (data.paymentDate as Timestamp).toDate()
+      : (data.dueDate as Timestamp).toDate();
+    // finalAmount é o valor efetivamente pago (com juros/desconto)
+    const amount = Number(data.finalAmount ?? data.amount) || 0;
+    windows.forEach((w, i) => {
+      if (effDate < w.start || effDate > w.end) return;
+      if (data.type === "receivable")
+        totals[i].revenue = totals[i].revenue.add(amount);
+      else if (data.type === "payable")
+        totals[i].expenses = totals[i].expenses.add(amount);
+    });
+  });
+  return totals.map((t) => ({
+    revenue: t.revenue.value,
+    expenses: t.expenses.value,
+  }));
 }
 
 export const dashboardService = {
-  getOverdueTransactions: async (
+  /**
+   * O que espera ação hoje, com contagem e total reais (agregados no
+   * servidor). Usa os mesmos filtros das abas das listas, então o número do
+   * painel bate com o da aba que o link abre.
+   */
+  getActionQueue: async (
     companyId: string,
-    userId?: string,
-  ): Promise<Transaction[]> => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    role: UserRole | null,
+    /** Papel "user": só as próprias contas a pagar, sem recebíveis. */
+    createdBy?: string,
+  ): Promise<QueueSection[]> => {
+    const today = startOfDay(new Date());
+    const ctx = (type: "payable" | "receivable"): TabContext => ({
+      type,
+      today,
+      status: "all",
+      queue: [],
+      createdBy,
+    });
 
-    let q = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("type", "==", "payable"),
-      where("status", "not-in", ["paid", "rejected"]),
-      where("dueDate", "<", Timestamp.fromDate(today)),
-      orderBy("dueDate", "asc"),
-      limit(5),
+    const defs: Array<
+      Omit<QueueSection, "count" | "total" | "items"> & {
+        filter: TabFilter | null;
+      }
+    > = [
+      {
+        id: "payable-overdue",
+        label: "A pagar vencidas",
+        href: "/financeiro/contas-pagar?tab=overdue",
+        tone: "danger",
+        grouped: true,
+        filter: tabFilter("overdue", ctx("payable")),
+      },
+      {
+        id: "payable-today",
+        label: "A pagar hoje",
+        href: "/financeiro/contas-pagar?tab=today",
+        tone: "warning",
+        grouped: false,
+        filter: tabFilter("today", ctx("payable")),
+      },
+      {
+        id: "receivable-overdue",
+        label: "A receber em atraso",
+        href: "/financeiro/contas-receber?tab=overdue",
+        tone: "danger",
+        grouped: true,
+        filter: createdBy ? null : tabFilter("overdue", ctx("receivable")),
+      },
+      ...queueStatuses(role).map((status) => ({
+        id: status,
+        label:
+          status === "pending_approval" ? "Para aprovar" : "Para autorizar",
+        href: "/financeiro/contas-pagar?tab=queue",
+        tone: "neutral" as const,
+        grouped: false,
+        filter: { type: "payable" as const, status },
+      })),
+    ];
+
+    const totals = await transactionService.getTabTotals(
+      companyId,
+      defs.map((d) => d.filter),
+    );
+    // ponytail: agrupamento usa as 100 vencidas mais antigas; acima disso os
+    // grupos são parciais (a tela avisa). Agregar por entityId no servidor se
+    // a carteira crescer.
+    const items = await Promise.all(
+      defs.map((d, i) =>
+        d.filter && totals[i].count > 0
+          ? transactionService
+              .getPaginated(companyId, d.grouped ? 100 : 5, null, d.filter)
+              .then((r) => r.transactions)
+          : Promise.resolve([]),
+      ),
     );
 
-    if (userId) {
-      q = query(q, where("createdBy", "==", userId));
-    }
-
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
-        id: doc.id,
-        dueDate: (data.dueDate as Timestamp).toDate(),
-        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
-      } as Transaction;
-    });
-  },
-
-  getPendingApprovals: async (
-    companyId: string,
-    userId?: string,
-  ): Promise<Transaction[]> => {
-    let q = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("status", "==", "pending_approval"),
-      orderBy("dueDate", "asc"),
-      limit(5),
-    );
-
-    if (userId) {
-      q = query(q, where("createdBy", "==", userId));
-    }
-
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        ...data,
-        id: doc.id,
-        dueDate: (data.dueDate as Timestamp).toDate(),
-        paymentDate: (data.paymentDate as Timestamp)?.toDate(),
-      } as Transaction;
-    });
+    return defs.map((d, i) => ({
+      id: d.id,
+      label: d.label,
+      href: d.href,
+      tone: d.tone,
+      grouped: d.grouped,
+      count: totals[i].count,
+      total: totals[i].total,
+      items: items[i],
+    }));
   },
 
   getFinancialMetrics: async (
@@ -156,39 +326,25 @@ export const dashboardService = {
     const applyUserFilter = (q: any) =>
       userId ? query(q, where("createdBy", "==", userId)) : q;
 
-    const pendingStatuses = ["draft", "pending_approval", "approved"];
+    const pendingStatuses = OPEN_STATUSES;
 
-    // --- Paid totals: use paymentDate as effective date ---
-    // Expand dueDate query window ±90 days to capture early/late payments,
-    // then filter in memory by effectiveDate (paymentDate if paid, else dueDate).
-    const paidQueryStart = Timestamp.fromDate(addDays(yearStartDate, -90));
-    const paidQueryEnd = Timestamp.fromDate(addDays(yearEndDate, 90));
+    // Exercício corrente compara com o mesmo período do ano anterior; um
+    // exercício já encerrado compara com o ano anterior inteiro.
+    const comparisonIsPartial = targetYear === todayDate.getFullYear();
+    const previousStart = startOfYear(new Date(targetYear - 1, 0, 1));
+    const previousEnd = comparisonIsPartial
+      ? endOfDay(subYears(todayDate, 1))
+      : endOfYear(previousStart);
 
-    let paidQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("companyId", "==", companyId),
-      where("status", "==", "paid"),
-      where("dueDate", ">=", paidQueryStart),
-      where("dueDate", "<=", paidQueryEnd),
-    );
-    if (userId) paidQuery = query(paidQuery, where("createdBy", "==", userId));
-
-    const paidSnapshot = await getDocs(paidQuery);
-    let totalRevenue = 0;
-    let totalExpenses = 0;
-
-    paidSnapshot.docs.forEach((d) => {
-      const data = d.data();
-      // Use paymentDate as effective date for paid transactions
-      const effDate: Date = data.paymentDate
-        ? (data.paymentDate as Timestamp).toDate()
-        : (data.dueDate as Timestamp).toDate();
-      if (effDate < yearStartDate || effDate > yearEndDate) return;
-      // Prefer finalAmount (actual amount paid) over amount
-      const amount = Number(data.finalAmount ?? data.amount) || 0;
-      if (data.type === "receivable") totalRevenue += amount;
-      else if (data.type === "payable") totalExpenses += amount;
-    });
+    const [[current, previous], cash] = await Promise.all([
+      paidTotals(companyId, userId, [
+        { start: yearStartDate, end: yearEndDate },
+        { start: previousStart, end: previousEnd },
+      ]),
+      readCompanyBalance(companyId),
+    ]);
+    const totalRevenue = current.revenue;
+    const totalExpenses = current.expenses;
 
     // --- Pending totals: dueDate is correct (no paymentDate yet) ---
     const pendingBaseQuery = query(
@@ -348,7 +504,12 @@ export const dashboardService = {
     return {
       totalRevenue,
       totalExpenses,
-      balance: totalRevenue - totalExpenses,
+      result: currency(totalRevenue).subtract(totalExpenses).value,
+      previousRevenue: previous.revenue,
+      previousExpenses: previous.expenses,
+      comparisonIsPartial,
+      cashBalance: cash.balance,
+      hasCompanyStats: cash.hasCompanyStats,
       pendingPayables,
       pendingReceivables,
       shortTermReceivables,
@@ -461,28 +622,40 @@ export const dashboardService = {
 
     const combinedTransactions = [...transactions, ...projectedTransactions];
 
-    // PERFORMANCE FIX: Snapshot + Delta approach
-    // Instead of aggregating all history, we read the current balance from company_stats
-    let startingBalance = 0;
-    let hasCompanyStats = false;
-    try {
-      const statsRef = doc(db, COMPANY_STATS_COLLECTION, companyId);
-      const statsSnap = await getDoc(statsRef);
-      if (statsSnap.exists()) {
-        startingBalance = statsSnap.data().currentBalance || 0;
-        hasCompanyStats = true;
-      }
-    } catch (error) {
-      console.error("Error fetching company stats for balance:", error);
-    }
+    // Snapshot + delta: o saldo de hoje vem de company_stats, sem varrer o
+    // histórico. Os vencidos em aberto (de qualquer ano) são tratados de forma
+    // assimétrica, como manda a prudência: a pagar vencido é dívida certa e
+    // sai do caixa hoje; a receber vencido pode não entrar nunca, então fica
+    // fora do saldo e vira uma série à parte (`balanceWithOverdue`).
+    const overdueCtx = (type: "payable" | "receivable"): TabContext => ({
+      type,
+      today,
+      status: "all",
+      queue: [],
+    });
+    const [{ balance: startingBalance, hasCompanyStats }, overdueTotals] =
+      await Promise.all([
+        readCompanyBalance(companyId),
+        transactionService.getTabTotals(companyId, [
+          tabFilter("overdue", overdueCtx("receivable")),
+          tabFilter("overdue", overdueCtx("payable")),
+        ]),
+      ]);
+    const overdueIncome = overdueTotals[0].total;
+    const overdueExpense = overdueTotals[1].total;
 
     // PERFORMANCE: Pre-group transactions by date key for O(n+m) instead of O(n*m)
-    // Use effectiveDate: paymentDate for paid transactions, dueDate otherwise
+    // Data efetiva: paymentDate para pagas; para as abertas, o dia útil em que
+    // o dinheiro de fato se move (vencimento no sábado compensa na segunda).
     const dateKeyFormat = mode === "year" ? "yyyy-MM-dd" : "yyyy-MM-dd";
     const txByDateKey = new Map<string, Transaction[]>();
     combinedTransactions.forEach((t) => {
       const effDate =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+        t.status === "paid" && t.paymentDate
+          ? t.paymentDate
+          : t.status === "paid"
+            ? t.dueDate
+            : nextBusinessDay(t.dueDate);
       const key = format(effDate, dateKeyFormat);
       if (!txByDateKey.has(key)) txByDateKey.set(key, []);
       txByDateKey.get(key)!.push(t);
@@ -490,7 +663,8 @@ export const dashboardService = {
 
     const result: ProjectedCashFlowData[] = [];
 
-    let currentBalance = startingBalance;
+    // Somas em centavos (currency.js): o saldo acumula centenas de lançamentos.
+    let currentBalance = currency(startingBalance);
 
     // RECONSTRUCTION LOGIC
     // If we are showing the full year, we start at Jan 1st.
@@ -505,25 +679,22 @@ export const dashboardService = {
 
       const netChangeBeforeToday = pastTransactions.reduce((acc, t) => {
         const amount = Number(t.finalAmount ?? t.amount) || 0;
-        if (t.type === "receivable") {
-          return acc + amount;
-        } else {
-          return acc - amount;
-        }
-      }, 0);
+        return t.type === "receivable" ? acc.add(amount) : acc.subtract(amount);
+      }, currency(0));
 
-      currentBalance = startingBalance - netChangeBeforeToday;
+      currentBalance = currency(startingBalance).subtract(netChangeBeforeToday);
     }
 
     let currentDate = new Date(startDate);
 
     // Use daily for 30 days, weekly for year view
     const interval = mode === "year" ? 7 : 1;
+    let reachedToday = false;
 
     while (!isAfter(currentDate, endDate)) {
       const nextDate = addDays(currentDate, interval);
-      let dayIncome = 0;
-      let dayExpense = 0;
+      let dayIncome = currency(0);
+      let dayExpense = currency(0);
 
       // Collect transactions for this period using pre-grouped map
       let daysToCheck = new Date(currentDate);
@@ -539,7 +710,9 @@ export const dashboardService = {
             // transactions actually affected the real balance on those days —
             // overdue/unpaid ones were never realized, so including them here
             // would permanently skew today's and every future balance.
-            if (isBefore(daysToCheck, today) && t.status !== "paid") return;
+            // Aberta com vencimento antes de hoje é vencida: entra hoje pelo
+            // total de vencidos, não pelo dia útil deslocado (contaria duas vezes).
+            if (t.status !== "paid" && isBefore(t.dueDate, today)) return;
 
             // '30days' mode starts 'currentBalance' from the live
             // company_stats balance, which already reflects everything paid
@@ -560,11 +733,11 @@ export const dashboardService = {
 
             const amount = Number(t.finalAmount ?? t.amount) || 0;
             if (t.type === "receivable") {
-              dayIncome += amount;
-              currentBalance += amount;
+              dayIncome = dayIncome.add(amount);
+              currentBalance = currentBalance.add(amount);
             } else {
-              dayExpense += amount;
-              currentBalance -= amount;
+              dayExpense = dayExpense.add(amount);
+              currentBalance = currentBalance.subtract(amount);
             }
           });
         }
@@ -573,17 +746,31 @@ export const dashboardService = {
         daysToCheck = addDays(daysToCheck, 1);
       }
 
+      // Balde que contém hoje recebe os vencidos a pagar.
+      const holdsToday =
+        !isBefore(today, currentDate) && isBefore(today, nextDate);
+      if (holdsToday) {
+        dayExpense = dayExpense.add(overdueExpense);
+        currentBalance = currentBalance.subtract(overdueExpense);
+        reachedToday = true;
+      }
+
       result.push({
         date: format(currentDate, "dd/MM"),
-        balance: Math.round(currentBalance * 100) / 100,
-        income: Math.round(dayIncome * 100) / 100,
-        expense: Math.round(dayExpense * 100) / 100,
+        isoDate: format(currentDate, "yyyy-MM-dd"),
+        balance: currentBalance.value,
+        balanceWithOverdue:
+          reachedToday && overdueIncome > 0
+            ? currentBalance.add(overdueIncome).value
+            : undefined,
+        income: dayIncome.value,
+        expense: dayExpense.value,
       });
 
       currentDate = nextDate;
     }
 
-    return { data: result, hasCompanyStats };
+    return { data: result, hasCompanyStats, overdueIncome, overdueExpense };
   },
 
   getExpensesByCostCenter: async (
@@ -698,48 +885,53 @@ export const dashboardService = {
         currentYear,
       );
     } catch (error) {
-      // Hierarquia inválida (mais de um raiz): sem saldo confiável, o gráfico
-      // fica vazio em vez de mostrar número errado.
+      // Hierarquia inválida (mais de um raiz): sem saldo confiável, a tela
+      // mostra o erro em vez de um número errado ou um falso "nenhum centro".
       console.error("Error loading cost center balances:", error);
-      return [];
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível calcular os envelopes.",
+      );
     }
+
+    const pace = envelopePace(currentYear);
 
     const result: BudgetProgressData[] = costCenters.map((cc) => {
       const b = balances[cc.id];
-      const envelope = b ? b.received + b.carryIn : 0;
-      const committed = b ? b.allocatedToChildren + b.spentDirect : 0;
-
-      const percentage =
-        envelope > 0 ? Math.round((committed / envelope) * 100) : 0;
-
-      let status: BudgetProgressData["status"];
-      if (envelope === 0) {
-        status = "no-budget";
-      } else if (percentage >= 100) {
-        status = "danger";
-      } else if (percentage >= 80) {
-        status = "warning";
-      } else {
-        status = "success";
-      }
+      const envelope = b ? currency(b.received).add(b.carryIn).value : 0;
+      const committed = b
+        ? currency(b.allocatedToChildren).add(b.spentDirect).value
+        : 0;
+      const isLeaf = b?.isLeaf ?? true;
+      const paid = b?.spentDirectPaid ?? 0;
+      const { percentage, paidPercentage, status, exhausted, tight } =
+        envelopeStatus(envelope, committed, paid, isLeaf, pace);
 
       return {
         id: cc.id,
         name: cc.name,
-        spent: Math.round(committed * 100) / 100,
-        budget: Math.round(envelope * 100) / 100,
+        spent: committed,
+        paid,
+        paidPercentage,
+        exhausted,
+        tight,
+        spentDirect: b?.spentDirect ?? 0,
+        allocated: b?.allocatedToChildren ?? 0,
+        budget: envelope,
+        available: b?.available ?? 0,
         percentage,
+        isLeaf,
         status,
       };
     });
 
-    // Sort by percentage (highest first), then by spent amount
-    return result.sort((a, b) => {
-      if (a.status === "no-budget" && b.status !== "no-budget") return 1;
-      if (a.status !== "no-budget" && b.status === "no-budget") return -1;
-      if (b.percentage !== a.percentage) return b.percentage - a.percentage;
-      return b.spent - a.spent;
-    });
+    return result.sort(
+      (a, b) =>
+        envelopeRank(a) - envelopeRank(b) ||
+        b.percentage - a.percentage ||
+        b.spent - a.spent,
+    );
   },
 
   recalculateBalance: async (companyId: string) => {

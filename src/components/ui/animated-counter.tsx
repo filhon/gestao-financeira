@@ -29,12 +29,16 @@ export function AnimatedCounter({
     prevValue.current = to;
 
     if (from === to) return;
+    // Movimento reduzido: pula direto para o valor final no primeiro quadro.
+    const reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
 
     const startTime = performance.now();
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
+      const progress = reduced ? 1 : Math.min(elapsed / duration, 1);
 
       // Ease-out cubic for smooth deceleration
       const eased = 1 - Math.pow(1 - progress, 3);

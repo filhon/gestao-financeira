@@ -298,6 +298,9 @@ export interface Entity {
   lateFeePercent?: number | null;
   monthlyInterestPercent?: number | null;
 
+  /** Mantenedora, coligada ou outra ligada à organização (ITG 2002 / NBC TG 05). */
+  relatedParty?: boolean;
+
   createdAt: Date;
   updatedAt: Date;
 }

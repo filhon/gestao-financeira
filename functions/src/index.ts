@@ -16,6 +16,7 @@ const db = admin.firestore();
 // Orçamento por envelope — mutação do razão, isolada em módulo próprio porque
 // é o único caminho de escrita permitido em `cost_center_ledger`.
 export { setCostCenterEnvelope } from "./costCenterLedger";
+import { assertCanManageBudget } from "./costCenterLedger";
 export {
   syncCostCenterLedger,
   createPayableTransaction,
@@ -278,6 +279,14 @@ export const recalculateCompanyBalance = functions.https.onCall(
         "Company ID é obrigatório.",
       );
     }
+
+    // Sem isto, qualquer usuário autenticado podia recalcular (e reescrever)
+    // o saldo de qualquer empresa.
+    await assertCanManageBudget(
+      context.auth.uid,
+      companyId,
+      "Apenas administradores e gestores financeiros podem recalcular o saldo.",
+    );
 
     try {
       const snapshot = await db

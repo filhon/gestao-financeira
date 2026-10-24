@@ -75,17 +75,18 @@ export function stripUndefined<T>(value: T): T {
   return value;
 }
 
+const compactBRL = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  notation: "compact",
+  // Precisão fixa: "R$ 4,0 mi" ao lado de "R$ 4,1 mi", nunca "R$ 4 mi".
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/** "R$ 1,2 mi", "R$ 400,0 mil", "-R$ 47,6 mil". Abaixo de mil, valor cheio. */
 export function formatCurrencyAbbr(value: number) {
-  const abs = Math.abs(value);
-  const sign = value < 0 ? "-" : "";
-  if (abs >= 1_000_000_000) {
-    return `${sign}R$\u00A0${(abs / 1_000_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}B`;
-  }
-  if (abs >= 1_000_000) {
-    return `${sign}R$\u00A0${(abs / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}M`;
-  }
-  if (abs >= 1_000) {
-    return `${sign}R$\u00A0${(abs / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}K`;
-  }
-  return formatCurrency(value);
+  return Math.abs(value) >= 1_000
+    ? compactBRL.format(value)
+    : formatCurrency(value);
 }
