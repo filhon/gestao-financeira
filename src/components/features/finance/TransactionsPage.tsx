@@ -37,7 +37,7 @@ const COPY = {
   },
   receivable: {
     title: "Contas a Receber",
-    newButton: "Nova Receita",
+    newButton: "Nova Conta",
     modalTitle: "Nova Conta a Receber",
     created: "Conta a receber criada com sucesso!",
     error: "Erro ao salvar conta a receber.",

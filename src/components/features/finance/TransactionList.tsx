@@ -30,6 +30,7 @@ import {
   Lock,
   MoreHorizontal,
   Handshake,
+  Repeat,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -71,7 +72,6 @@ import {
 } from "@/components/ui/responsive-modal";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
 import { PaymentDialog } from "@/components/features/finance/PaymentDialog";
-import { DunningStatus } from "@/components/features/finance/DunningStatus";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -89,6 +89,7 @@ import { friendlyError } from "@/lib/errors";
 import type { CostCenter, PaymentBatch, Transaction } from "@/lib/types";
 import {
   agingBucket,
+  agingRange,
   counterpartKey,
   defaultPeriod,
   duplicateKey,
@@ -98,8 +99,10 @@ import {
   isOverdue,
   lateCharges,
   lateFeeRule,
+  periodLabel,
   queueStatuses,
   relativeDue,
+  splitDescription,
   tabFilter,
   type LateFeeRule,
   type TabContext,
@@ -121,7 +124,7 @@ const COPY = {
     paidTab: "Recebidas",
     pay: "Receber",
     empty: "Nenhuma conta a receber cadastrada",
-    create: "Criar primeira receita",
+    create: "Criar primeira conta",
   },
 } as const;
 
@@ -129,27 +132,38 @@ const STATUS: Record<
   string,
   { label: string; receivable?: string; className: string }
 > = {
-  draft: {
-    label: "Rascunho",
-    className: "bg-secondary text-secondary-foreground",
+  // Rascunho é o estado comum: texto apagado, sem badge (ver StatusBadge).
+  draft: { label: "Rascunho", className: "" },
+  pending_approval: {
+    label: "Pendente",
+    className:
+      "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
   },
-  pending_approval: { label: "Pendente", className: "bg-amber-500 text-white" },
   approved: {
     label: "Aprovado",
     receivable: "Ag. Recebimento",
-    className: "bg-emerald-500 text-white",
+    className:
+      "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
   },
   pending_authorization: {
     label: "Ag. Autorização",
-    className: "bg-violet-500 text-white",
+    className:
+      "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
   },
-  authorized: { label: "Autorizado", className: "bg-indigo-500 text-white" },
+  authorized: {
+    label: "Autorizado",
+    className:
+      "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300",
+  },
   paid: {
     label: "Pago",
     receivable: "Recebido",
-    className: "bg-blue-500 text-white",
+    className: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
   },
-  rejected: { label: "Rejeitado", className: "bg-red-500 text-white" },
+  rejected: {
+    label: "Rejeitado",
+    className: "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300",
+  },
 };
 
 const statusLabel = (status: string, type: Kind) =>
@@ -158,6 +172,13 @@ const statusLabel = (status: string, type: Kind) =>
   status;
 
 function StatusBadge({ status, type }: { status: string; type: Kind }) {
+  if (status === "draft") {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {statusLabel(status, type)}
+      </span>
+    );
+  }
   return (
     <Badge className={cn("font-medium border-0", STATUS[status]?.className)}>
       {statusLabel(status, type)}
@@ -444,6 +465,16 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       ),
     [projectionQuery.data],
   );
+  // Primeiro dia em que o caixa previsto fica negativo: o número que decide o dia.
+  const firstNegative = useMemo(() => {
+    if (!projectionQuery.data?.hasCompanyStats) return null;
+    const from = format(today, "yyyy-MM-dd");
+    return (
+      projectionQuery.data.data.find(
+        (d) => d.isoDate >= from && d.balance < 0,
+      ) ?? null
+    );
+  }, [projectionQuery.data, today]);
 
   const rawRows = useMemo(() => {
     let rows = searching ? (searchQuery.data ?? []) : list.items;
@@ -553,6 +584,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     }
     return [...map.values()].map((g) => ({
       ...g,
+      drafts: g.rows.filter((t) => t.status === "draft").length,
       total: g.rows.reduce((acc, t) => acc.add(t.amount), currency(0)).value,
       corrected:
         tab === "overdue"
@@ -571,6 +603,67 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     () => (groups ? groups.flatMap((g) => g.rows) : rows),
     [groups, rows],
   );
+  // O servidor entrega por vencimento crescente; qualquer outra ordem é local.
+  const customSort =
+    sortConfig?.key !== "dueDate" || sortConfig.direction !== "asc";
+
+  // Nas abas agrupadas por dia o cabeçalho já diz quando vence.
+  const showRelative = !groups || tab === "overdue";
+
+  // Pontualidade é do cliente, não da conta: aparece na primeira linha dele em cada grupo.
+  const punctualityRows = useMemo(() => {
+    const ids = new Set<string>();
+    for (const groupRows of groups?.map((g) => g.rows) ?? [rows]) {
+      const seen = new Set<string>();
+      for (const t of groupRows) {
+        const key = counterpartKey(t);
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          ids.add(t.id);
+        }
+      }
+    }
+    return ids;
+  }, [groups, rows]);
+
+  // O último grupo pode atravessar a paginação (um dia com 80 contas, 50 por
+  // página): contagem, soma e rascunhos dele vêm do servidor, não das linhas.
+  // O servidor pagina por vencimento crescente: o grupo incompleto é o de
+  // vencimento mais tardio, último na ordem crescente e primeiro na decrescente.
+  const lastGroupKey = (
+    sortConfig?.direction === "desc" ? groups?.[0] : groups?.at(-1)
+  )?.key;
+  const lastGroupFilters = useMemo(() => {
+    if (!lastGroupKey || !hasMore || !activeFilter) return null;
+    // Lote é filtrado depois da leitura: o servidor não saberia somar igual.
+    if (prefs.batchFilter !== "all") return null;
+    const range =
+      tab === "overdue"
+        ? agingRange(lastGroupKey, today)
+        : {
+            startDate: parseISO(lastGroupKey),
+            endDate: parseISO(lastGroupKey),
+          };
+    if (!range) return null;
+    const group = { ...activeFilter, ...range };
+    const drafts =
+      group.status && group.status !== "draft"
+        ? null
+        : { ...group, status: "draft", excludeStatus: undefined };
+    return [group, drafts];
+  }, [lastGroupKey, hasMore, activeFilter, prefs.batchFilter, tab, today]);
+  const lastGroupTotals = useQuery({
+    queryKey: [
+      "tx-tabs",
+      type,
+      companyId,
+      "group",
+      JSON.stringify(lastGroupFilters),
+    ],
+    queryFn: () =>
+      transactionService.getTabTotals(companyId!, lastGroupFilters!),
+    enabled: !!companyId && !!lastGroupFilters,
+  }).data;
 
   // ── Seleção, foco e painel ───────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -594,13 +687,30 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   const allSelected =
     flat.length > 0 && flat.every((t) => selectedIds.has(t.id));
 
-  const toggleSelect = (id: string) =>
+  const setMany = (ids: string[], on: boolean) =>
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
+
+  // Shift estende a seleção desde a última linha marcada.
+  const lastToggled = useRef<string | null>(null);
+  const toggleSelect = (id: string, range = false) => {
+    const from = flat.findIndex((t) => t.id === lastToggled.current);
+    const to = flat.findIndex((t) => t.id === id);
+    const ids =
+      range && from >= 0 && to >= 0
+        ? flat
+            .slice(Math.min(from, to), Math.max(from, to) + 1)
+            .map((t) => t.id)
+        : [id];
+    setMany(ids, !selectedIds.has(id));
+    lastToggled.current = id;
+  };
 
   const openPanel = (
     t: Transaction,
@@ -875,10 +985,14 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         return;
       }
       const active = flat.find((t) => t.id === activeId);
+      // Setas só com o foco numa linha, para não roubar a rolagem da página.
+      const arrow =
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        !!target.closest("[data-row-id]");
 
-      if (e.key === "j" || e.key === "k") {
+      if (e.key === "j" || e.key === "k" || arrow) {
         e.preventDefault();
-        moveActive(e.key === "j" ? 1 : -1);
+        moveActive(e.key === "j" || e.key === "ArrowDown" ? 1 : -1);
       } else if (panelOpen) {
         return;
       } else if (e.key === "/") {
@@ -887,8 +1001,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       } else if (/^[1-9]$/.test(e.key) && tabs[Number(e.key) - 1]) {
         setPref("tab", tabs[Number(e.key) - 1].id);
         setSearchTerm("");
-      } else if (e.key === "x" && active) {
-        toggleSelect(active.id);
+      } else if ((e.key === "x" || e.key === "X") && active) {
+        toggleSelect(active.id, e.shiftKey);
       } else if (e.key === "Enter" && active) {
         e.preventDefault();
         openPanel(active);
@@ -1023,7 +1137,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Com e sem lote</SelectItem>
+            <SelectItem value="all">Lote: todos</SelectItem>
             <SelectItem value="in_batch">Em lote</SelectItem>
             <SelectItem value="not_in_batch">Sem lote</SelectItem>
           </SelectContent>
@@ -1065,10 +1179,12 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     activeFilterCount === 0 &&
     !!totals &&
     totals.every((t) => t.count === 0);
+  const listEmpty =
+    !isLoading && !seekingBatch && !isError && flat.length === 0;
+  const weekTotals = totals?.[tabs.findIndex((t) => t.id === "week")];
 
-  const gridCols = isPayable
-    ? "md:grid-cols-[2rem_7rem_minmax(0,2fr)_minmax(0,1.2fr)_9.5rem_10rem_6.5rem]"
-    : "md:grid-cols-[2rem_7rem_minmax(0,2fr)_minmax(0,1.2fr)_9.5rem_10rem_5rem_6.5rem]";
+  const gridCols =
+    "md:grid-cols-[2rem_7rem_minmax(0,2fr)_minmax(0,1.2fr)_9.5rem_9rem_6.5rem]";
 
   const SortHead = ({
     field,
@@ -1113,6 +1229,29 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     const selected = selectedIds.has(t.id);
     const active = activeId === t.id;
     const payAllowed = canPayRow(t);
+    const desc = splitDescription(t.description);
+    const installment = t.installments
+      ? `${t.installments.current}/${t.installments.total}`
+      : desc.installment;
+    const description = (
+      <>
+        {desc.text}
+        {installment && (
+          <span className="ml-1.5 font-normal tabular-nums text-muted-foreground">
+            {installment}
+          </span>
+        )}
+        {desc.recurring && (
+          <span title="Recorrente" className="text-muted-foreground">
+            <Repeat
+              className="ml-1.5 inline h-3 w-3 align-[-1px]"
+              aria-hidden
+            />
+            <span className="sr-only"> (recorrente)</span>
+          </span>
+        )}
+      </>
+    );
 
     const flags = (
       <>
@@ -1153,12 +1292,15 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       </>
     );
 
-    const dueLabel = due?.label && (
+    const dueLabel = showRelative && due?.label && (
       <span
         className={cn(
           "text-xs",
+          // Vermelho só passado um mês: com tudo vermelho, nada se destaca.
           due.tone === "overdue" &&
-            "text-red-600 dark:text-red-400 font-medium",
+            (differenceInCalendarDays(today, t.dueDate) > 30
+              ? "text-red-600 dark:text-red-400 font-medium"
+              : "text-amber-700 dark:text-amber-400 font-medium"),
           due.tone === "today" &&
             "text-amber-600 dark:text-amber-400 font-medium",
           due.tone === "soon" && "text-muted-foreground",
@@ -1235,7 +1377,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       <li
         key={t.id}
         data-row-id={t.id}
-        tabIndex={-1}
+        // Tab entra na lista pela linha ativa (ou a primeira); setas e j/k andam dentro dela.
+        tabIndex={t.id === (activeId ?? flat[0]?.id) ? 0 : -1}
         data-selected={selected || undefined}
         onClick={() => openPanel(t)}
         onFocus={() => setActiveId(t.id)}
@@ -1252,10 +1395,14 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             gridCols,
           )}
         >
-          <div onClick={(e) => e.stopPropagation()}>
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSelect(t.id, e.shiftKey);
+            }}
+          >
             <Checkbox
               checked={selected}
-              onCheckedChange={() => toggleSelect(t.id)}
               aria-label={`Selecionar ${t.description}`}
             />
           </div>
@@ -1267,7 +1414,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
           </div>
           <div className="min-w-0">
             <p className="truncate font-medium" title={t.description}>
-              {t.description}
+              {description}
             </p>
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 empty:hidden">
               {flags}
@@ -1277,7 +1424,9 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             <p className="truncate" title={t.supplierOrClient}>
               {t.supplierOrClient || "—"}
             </p>
-            {punctuality && <PunctualityNote {...punctuality} />}
+            {punctuality && punctualityRows.has(t.id) && (
+              <PunctualityNote {...punctuality} />
+            )}
           </div>
           <div className="text-right font-financial tabular-nums">
             <p className="font-semibold">{formatCurrency(t.amount)}</p>
@@ -1297,7 +1446,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
                 </p>
               )}
           </div>
-          <div className="flex flex-col items-start gap-0.5">
+          {/* Recuo separa o status do valor: sem ele, "R$ 2.500,00 Rascunho" lia como uma coisa só. */}
+          <div className="flex flex-col items-start gap-0.5 pl-3">
             <StatusBadge status={t.status} type={type} />
             {tab === "queue" && t.updatedAt && (
               <span className="text-xs text-muted-foreground">
@@ -1305,11 +1455,6 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
               </span>
             )}
           </div>
-          {!isPayable && (
-            <div>
-              <DunningStatus status={t.dunningStatus} />
-            </div>
-          )}
           <div
             className="flex items-center justify-end gap-0.5"
             onClick={(e) => e.stopPropagation()}
@@ -1368,7 +1513,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
           <div className="min-w-0 flex-1 py-1">
             <div className="flex items-start justify-between gap-2">
               <p className="flex-1 truncate text-sm font-medium">
-                {t.description}
+                {description}
               </p>
               <span className="shrink-0 text-sm font-semibold font-financial tabular-nums">
                 {formatCurrency(t.amount)}
@@ -1465,6 +1610,13 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
                     <span className="hidden sm:inline">
                       {formatCurrency(totals[i].total)}
                     </span>
+                    {/* Só estas abas filtram por período: sem o rótulo, "Todas" parece menor que "Futuras". */}
+                    {(t.id === "paid" || t.id === "all") && (
+                      <span className="font-sans">
+                        {" "}
+                        · {periodLabel(period)}
+                      </span>
+                    )}
                   </>
                 ) : (
                   " "
@@ -1542,11 +1694,59 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         )}
       </div>
 
+      {/* ── Caixa negativo previsto ───────────────────────────────────── */}
+      {showProjection && firstNegative && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-red-50 px-4 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-300"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            Saldo previsto fica negativo em{" "}
+            <span className="font-medium">
+              {format(parseISO(firstNegative.isoDate), "EEEE, dd/MM", {
+                locale: ptBR,
+              })}
+            </span>
+            :{" "}
+            <span className="font-financial font-semibold tabular-nums">
+              {formatCurrency(firstNegative.balance)}
+            </span>
+          </span>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-red-800 dark:text-red-300"
+            onClick={() => {
+              const el = document.getElementById(
+                `grupo-${firstNegative.isoDate}`,
+              );
+              if (el) {
+                el.scrollIntoView({ block: "start", behavior: "smooth" });
+                return;
+              }
+              const days = differenceInCalendarDays(
+                parseISO(firstNegative.isoDate),
+                today,
+              );
+              setPref(
+                "tab",
+                days <= 0 ? "today" : days <= 7 ? "week" : "future",
+              );
+              setSearchTerm("");
+            }}
+          >
+            Ver o dia
+          </Button>
+        </div>
+      )}
+
       {/* ── Cabeçalho das colunas ─────────────────────────────────────── */}
       <div
         className={cn(
           "hidden md:grid items-center gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground",
           gridCols,
+          listEmpty && "md:hidden",
         )}
       >
         <Checkbox
@@ -1560,8 +1760,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         <SortHead field="description" label="Descrição" />
         <SortHead field="supplierOrClient" label={copy.counterpart} />
         <SortHead field="amount" label="Valor" className="justify-end" />
-        <SortHead field="status" label="Status" />
-        {!isPayable && <span>Cobrança</span>}
+        <SortHead field="status" label="Status" className="pl-3" />
         <span className="sr-only">Ações</span>
       </div>
 
@@ -1609,54 +1808,118 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
               {copy.create}
             </Button>
           )}
-          {!searching && !noData && tab === "overdue" && (
-            <Button
-              variant="link"
-              size="sm"
-              className="h-auto p-0 text-xs"
-              onClick={() => setPref("tab", "week")}
-            >
-              Ver os próximos 7 dias
-            </Button>
-          )}
+          {!searching &&
+            !noData &&
+            (tab === "overdue" || tab === "today") &&
+            weekTotals?.count !== 0 && (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
+                onClick={() => setPref("tab", "week")}
+              >
+                Ver os próximos 7 dias
+                {weekTotals && ` (${weekTotals.count})`}
+              </Button>
+            )}
         </div>
       ) : (
         <ul aria-label="Contas">
           {groups
-            ? groups.map((g) => (
-                <li key={g.key}>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-b bg-muted/20 px-4 py-1.5 text-xs">
-                    <span className="font-medium text-foreground">
-                      {g.label}
-                      <span className="ml-1.5 font-normal text-muted-foreground">
-                        {g.rows.length}{" "}
-                        {g.rows.length === 1 ? "conta" : "contas"}
-                      </span>
-                    </span>
-                    <span className="flex gap-4 font-financial tabular-nums text-muted-foreground">
-                      <span>
-                        <span className="text-foreground">
-                          {formatCurrency(g.total)}
+            ? groups.map((g) => {
+                const negative = g.balance !== undefined && g.balance < 0;
+                const partial = hasMore && g.key === lastGroupKey;
+                const server = partial ? lastGroupTotals : undefined;
+                const count = server?.[0].count ?? g.rows.length;
+                const total = server?.[0].total ?? g.total;
+                const drafts = server ? server[1].count : g.drafts;
+                // Encargos dependem da regra de cada entidade: só fecham com o grupo inteiro.
+                const corrected = partial ? undefined : g.corrected;
+                const picked = g.rows.filter((t) =>
+                  selectedIds.has(t.id),
+                ).length;
+                return (
+                  <li
+                    key={g.key}
+                    id={`grupo-${g.key}`}
+                    className="scroll-mt-16"
+                  >
+                    {/* Mesma grade das linhas: o total cai sob a coluna Valor. */}
+                    <div
+                      className={cn(
+                        "flex flex-wrap items-center gap-x-4 gap-y-0.5 border-b px-4 py-1.5 text-xs md:grid md:gap-3",
+                        gridCols,
+                        negative
+                          ? "bg-red-50 dark:bg-red-950/30"
+                          : "bg-muted/20",
+                      )}
+                    >
+                      <div className="hidden md:flex">
+                        <Checkbox
+                          checked={
+                            picked === 0
+                              ? false
+                              : picked === g.rows.length
+                                ? true
+                                : "indeterminate"
+                          }
+                          onCheckedChange={(c) =>
+                            setMany(
+                              g.rows.map((t) => t.id),
+                              c === true,
+                            )
+                          }
+                          aria-label={`Selecionar ${g.label}`}
+                        />
+                      </div>
+                      <span className="font-medium text-foreground md:col-[2/5]">
+                        {g.label}
+                        <span className="ml-1.5 font-normal text-muted-foreground">
+                          {count} {count === 1 ? "conta" : "contas"}
+                          {isPayable && tab !== "future" && drafts > 0 && (
+                            <>
+                              {" · "}
+                              {drafts === count
+                                ? drafts === 1
+                                  ? "em rascunho"
+                                  : "todas em rascunho"
+                                : `${drafts} em rascunho`}
+                            </>
+                          )}
+                          {partial && !server && (
+                            <span title="Soma só das contas já carregadas; role para carregar o resto">
+                              {" · parcial"}
+                            </span>
+                          )}
                         </span>
                       </span>
-                      {g.corrected !== undefined && (
-                        <span>c/ encargos {formatCurrency(g.corrected)}</span>
-                      )}
-                      {g.balance !== undefined && (
+                      <span className="ml-auto font-financial font-medium tabular-nums text-foreground md:ml-0 md:text-right">
+                        {formatCurrency(total)}
+                      </span>
+                      {(corrected !== undefined || g.balance !== undefined) && (
                         <span
                           className={cn(
-                            g.balance < 0 && "text-red-600 dark:text-red-400",
+                            "whitespace-nowrap font-financial tabular-nums md:col-[6/-1]",
+                            negative
+                              ? "font-medium text-red-700 dark:text-red-300"
+                              : "text-muted-foreground",
                           )}
-                          title="Saldo previsto no fim do dia, somando contas a pagar e a receber"
+                          title={
+                            g.balance !== undefined
+                              ? "Saldo previsto no fim do dia, somando contas a pagar e a receber"
+                              : undefined
+                          }
                         >
-                          saldo previsto {formatCurrency(g.balance)}
+                          {corrected !== undefined
+                            ? `c/ encargos ${formatCurrency(corrected)}`
+                            : `saldo previsto ${formatCurrency(g.balance!)}`}
                         </span>
                       )}
-                    </span>
-                  </div>
-                  <ul>{g.rows.map(renderRow)}</ul>
-                </li>
-              ))
+                    </div>
+                    <ul>{g.rows.map(renderRow)}</ul>
+                  </li>
+                );
+              })
             : flat.map(renderRow)}
         </ul>
       )}
@@ -1684,6 +1947,11 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
               <span className="font-financial tabular-nums text-muted-foreground">
                 {formatCurrency(selectedTotal)}
               </span>
+              {allSelected && !searching && hasMore && (
+                <span className="text-xs text-amber-700 dark:text-amber-400">
+                  · só entre as {flat.length} carregadas
+                </span>
+              )}
             </span>
             <div className="ml-auto flex items-center gap-2">
               {isPayable && (perms.isAdmin || perms.isFinancialManager) && (
@@ -1726,7 +1994,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         ) : (
           <>
             <span className="text-sm text-muted-foreground">
-              {activeTotals ? (
+              {/* Vazia, a aba e a lista já dizem "0": o rodapé não repete. */}
+              {activeTotals && activeTotals.count > 0 ? (
                 <>
                   <span className="font-medium text-foreground tabular-nums">
                     {activeTotals.count}
@@ -1736,7 +2005,16 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
                     {formatCurrency(activeTotals.total)}
                   </span>
                   {!searching && activeTotals.count > flat.length && (
-                    <span> · {flat.length} carregadas</span>
+                    <span>
+                      {" "}
+                      · {flat.length} carregadas
+                      {customSort && (
+                        <span className="text-amber-700 dark:text-amber-400">
+                          {" "}
+                          (a ordenação vale só para elas)
+                        </span>
+                      )}
+                    </span>
                   )}
                 </>
               ) : (
@@ -1744,10 +2022,10 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
               )}
             </span>
             <span className="ml-auto hidden text-xs text-muted-foreground lg:inline">
-              <Kbd>j</Kbd>/<Kbd>k</Kbd> navegar · <Kbd>x</Kbd> selecionar ·{" "}
-              <Kbd>Enter</Kbd> abrir · <Kbd>p</Kbd> {copy.pay.toLowerCase()} ·{" "}
-              <Kbd>c</Kbd> copiar boleto · <Kbd>/</Kbd> buscar · <Kbd>1</Kbd>–
-              <Kbd>{tabs.length}</Kbd> abas
+              <Kbd>j</Kbd>/<Kbd>k</Kbd> navegar · <Kbd>x</Kbd> selecionar (
+              <Kbd>Shift</Kbd> intervalo) · <Kbd>Enter</Kbd> abrir ·{" "}
+              <Kbd>p</Kbd> {copy.pay.toLowerCase()} · <Kbd>c</Kbd> copiar boleto
+              · <Kbd>/</Kbd> buscar · <Kbd>1</Kbd>–<Kbd>{tabs.length}</Kbd> abas
             </span>
           </>
         )}

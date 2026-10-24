@@ -3,9 +3,14 @@ import {
   addDays,
   differenceInCalendarDays,
   endOfMonth,
+  endOfYear,
+  format,
+  isSameDay,
   startOfDay,
   startOfMonth,
+  startOfYear,
 } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import type { Entity, Transaction, UserRole } from "@/lib/types";
 
 /**
@@ -80,6 +85,20 @@ export const defaultPeriod = (today = new Date()) => ({
   from: startOfMonth(today),
   to: endOfMonth(today),
 });
+
+/** Rótulo curto do período de "Pagas" e "Todas": "out/26", "2026" ou "01/10/26 a 15/10/26". */
+export function periodLabel(period?: { from?: Date; to?: Date }) {
+  const { from, to } = period ?? {};
+  if (!from) return "todas as datas";
+  if (!to) return `desde ${format(from, "dd/MM/yy")}`;
+  if (isSameDay(from, startOfMonth(from)) && isSameDay(to, endOfMonth(from))) {
+    return format(from, "MMM/yy", { locale: ptBR });
+  }
+  if (isSameDay(from, startOfYear(from)) && isSameDay(to, endOfYear(from))) {
+    return format(from, "yyyy");
+  }
+  return `${format(from, "dd/MM/yy")} a ${format(to, "dd/MM/yy")}`;
+}
 
 /** Filtro de consulta de cada aba. `null` = combinação que não tem resultado. */
 export function tabFilter(tab: TabId, ctx: TabContext): TabFilter | null {
@@ -168,6 +187,18 @@ export function agingBucket(daysLate: number) {
   return AGING_BUCKETS.find((b) => daysLate <= b.max)!.label;
 }
 
+/** Vencimentos de uma faixa de atraso: "31 a 60 dias" = de hoje−60 a hoje−31. */
+export function agingRange(label: string, today: Date) {
+  const i = AGING_BUCKETS.findIndex((b) => b.label === label);
+  if (i < 0) return null;
+  const max = AGING_BUCKETS[i].max;
+  const min = i === 0 ? 1 : AGING_BUCKETS[i - 1].max + 1;
+  return {
+    startDate: max === Infinity ? undefined : addDays(startOfDay(today), -max),
+    endDate: addDays(startOfDay(today), -min),
+  };
+}
+
 // ── Encargos por atraso ────────────────────────────────────────────────────
 
 export interface LateFeeRule {
@@ -217,11 +248,30 @@ export function lateCharges(
 
 // ── Alertas de qualidade ───────────────────────────────────────────────────
 
-/** Mesmo fornecedor/cliente, mesmo valor e mesmo vencimento. */
+const DESCRIPTION_TAG = /\s*\((\d+\/\d+|recorrência)\)\s*$/i;
+
+/** Separa o sufixo que o sistema anexa à descrição: parcela "(3/12)" ou "(Recorrência)". */
+export function splitDescription(description: string) {
+  const m = description.match(DESCRIPTION_TAG);
+  const text = m ? description.slice(0, m.index).trim() : description;
+  if (!m || !text)
+    return { text: description, installment: null, recurring: false };
+  const recurring = m[1].toLowerCase() === "recorrência";
+  return { text, installment: recurring ? null : m[1], recurring };
+}
+
+/**
+ * Mesmo fornecedor/cliente, valor, vencimento e descrição (sem o sufixo de
+ * parcela). Sem a descrição, projetos diferentes do mesmo fornecedor com o
+ * mesmo valor mensal viravam falso alarme.
+ */
 export function duplicateKey(t: Transaction) {
   const who = t.entityId || (t.supplierOrClient ?? "").trim().toLowerCase();
   if (!who) return null;
-  return `${who}|${currency(t.amount).intValue}|${startOfDay(t.dueDate).getTime()}`;
+  const what = splitDescription(t.description ?? "")
+    .text.trim()
+    .toLowerCase();
+  return `${who}|${currency(t.amount).intValue}|${startOfDay(t.dueDate).getTime()}|${what}`;
 }
 
 export function hasComprovante(t: Transaction) {
