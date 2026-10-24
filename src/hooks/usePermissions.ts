@@ -35,6 +35,7 @@ export interface Permissions {
 
   canViewReconciliation: boolean; // View bank statement / matches
   canManageReconciliation: boolean; // Import statements, confirm/ignore matches, clear session
+  canManageReconciliationRules: boolean; // Create/toggle/delete reconciliation rules
 
   canViewCostCenters: boolean;
   canManageCostCenters: boolean; // Create/Edit/Delete
@@ -179,6 +180,8 @@ export function usePermissions(): Permissions {
         "financial_manager",
         "releaser",
       ]),
+      // Regras classificam dinheiro sozinhas: só o gestor (espelha firestore.rules).
+      canManageReconciliationRules: isAdminOrManager,
 
       // Cost Centers
       // User: View assigned (canView = true).

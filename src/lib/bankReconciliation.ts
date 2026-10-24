@@ -4,7 +4,11 @@ import type {
   BankAccount,
   BankAccountClosing,
   BankTransaction,
+  ReconciliationRule,
 } from "@/lib/types";
+import type { TransactionFormData } from "@/lib/validations/transaction";
+// Relativo: o script de verificação roda fora do Next, sem o alias "@/".
+import { normalizeText } from "./utils";
 
 // Datas comparadas pelo dia civil: o saldo de abertura e o de fechamento valem
 // "ao fim do dia", e uma linha do extrato daquele mesmo dia já está dentro dele.
@@ -82,5 +86,80 @@ export function summarizeAccount(
     pending,
     canClose:
       difference === 0 && pending === 0 && !!until && until > day(base.date),
+  };
+}
+
+// ─── Regras ───────────────────────────────────────────────────────────────────
+
+/**
+ * Forma comparável de um histórico. Dígitos saem: "TARIFA PACOTE 10/2026" e
+ * "TARIFA PACOTE 11/2026" são a mesma tarifa em meses diferentes.
+ */
+export const rulePattern = (description: string) =>
+  normalizeText(description)
+    .replace(/[^a-z\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Regra ativa que cobre a linha; a de padrão mais longo (mais específica) vence. */
+export function findRule(
+  tx: BankTransaction,
+  rules: ReconciliationRule[],
+): ReconciliationRule | undefined {
+  const text = rulePattern(tx.description);
+  const direction = tx.amount < 0 ? "debit" : "credit";
+  return rules
+    .filter(
+      (r) =>
+        r.active &&
+        r.pattern &&
+        r.direction === direction &&
+        text.includes(r.pattern),
+    )
+    .sort((a, b) => b.pattern.length - a.pattern.length)[0];
+}
+
+/**
+ * Linhas ainda pendentes que alguma regra cobre viram sugestão. Título casado
+ * vence regra: quem chama passa as linhas depois do casamento com o sistema.
+ * Devolve a mesma referência para o que não mudou.
+ */
+export function applyRules(
+  lines: BankTransaction[],
+  rules: ReconciliationRule[],
+): BankTransaction[] {
+  return lines.map((tx) => {
+    if (tx.status !== "unmatched") return tx;
+    const rule = findRule(tx, rules);
+    return rule ? { ...tx, status: "potential_match", ruleId: rule.id } : tx;
+  });
+}
+
+/**
+ * Lançamento já quitado para uma linha do extrato: valor e data são os do
+ * banco, o resto vem do modelo (regra ou lançamento direto).
+ */
+export function lineTransaction(
+  tx: BankTransaction,
+  template: NonNullable<ReconciliationRule["template"]>,
+): TransactionFormData {
+  const amount = Math.abs(tx.amount);
+  const date = new Date(tx.date);
+  const isPayable = tx.amount < 0;
+  return {
+    type: isPayable ? "payable" : "receivable",
+    // A baixa do sistema grava "paid" também para receita; "received" é legado.
+    status: "paid",
+    description: template.description,
+    supplierOrClient: template.supplierOrClient,
+    accountId: template.accountId,
+    amount,
+    finalAmount: amount,
+    dueDate: date,
+    paymentDate: date,
+    paymentMethod: "transfer",
+    costCenterAllocation: [
+      { costCenterId: template.costCenterId, percentage: 100, amount },
+    ],
   };
 }

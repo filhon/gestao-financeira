@@ -512,7 +512,8 @@ export interface AuditLog {
     | "budget"
     | "comprovante"
     | "chart_account"
-    | "bank_account";
+    | "bank_account"
+    | "reconciliation_rule";
   entityId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details: Record<string, any>;
@@ -690,6 +691,8 @@ export interface BankTransaction {
   matchedBundleDetails?: Transaction[]; // Full transaction objects for bundled matches
   matchCandidates?: ReconciliationMatchCandidate[]; // Top candidates for manual review
   confidence?: number; // 0-100 score of match quality
+  /** Sugestão (ou conciliação) que veio de uma regra, não de um título. */
+  ruleId?: string;
 }
 
 /** Fechamento de conciliação: até `through` o saldo do sistema bateu com `balance`. */
@@ -724,24 +727,28 @@ export interface BankAccount {
   updatedAt: Date;
 }
 
+/**
+ * Regra de conciliação: linha do extrato cujo histórico contém `pattern` vira
+ * sugestão — ignorar, ou lançar com o modelo. Nunca aplica sozinha: a sugestão
+ * passa pela confirmação, como qualquer outra.
+ */
 export interface ReconciliationRule {
   id: string;
   companyId: string;
-  name: string;
+  /** Normalizado (minúsculo, sem acento nem dígitos); procurado no histórico. */
+  pattern: string;
+  direction: "debit" | "credit";
+  action: "ignore" | "create";
+  /** Modelo do lançamento; valor e data vêm da linha do extrato. */
+  template?: {
+    description: string;
+    supplierOrClient: string;
+    costCenterId: string;
+    accountId?: string;
+  };
   active: boolean;
-
-  // Conditions
-  conditionField: "description" | "amount";
-  conditionOperator: "contains" | "equals" | "starts_with" | "ends_with";
-  conditionValue: string;
-
-  // Actions
-  actionCategoryId?: string; // Link to cost center?
-  actionEntityId?: string;
-  actionDescription?: string;
-
+  createdBy: string;
   createdAt: Date;
-  updatedAt: Date;
 }
 
 // ─── Reimbursement Reports ────────────────────────────────────────────────────

@@ -377,6 +377,17 @@ service cloud.firestore {
               closingsOf(request.resource.data)[0:closingsOf(resource.data).size()] == closingsOf(resource.data))))
          );
     }
+
+    // Regras de conciliação: decidem como o dinheiro é classificado, por isso
+    // só o gestor cria e muda. Quem concilia só lê para aplicar as sugestões.
+    match /reconciliation_rules/{ruleId} {
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor']);
+       allow create, delete: if isAuthenticated() && isManager(getCompanyId());
+       allow update: if isAuthenticated() && isManager(getCompanyId()) &&
+         request.resource.data.companyId == resource.data.companyId;
+    }
     
     // ── API Externa ──────────────────────────────────────────────────────────
 

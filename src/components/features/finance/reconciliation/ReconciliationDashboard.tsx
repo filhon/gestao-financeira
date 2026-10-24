@@ -2,13 +2,27 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UploadStatement } from "@/components/features/finance/reconciliation/UploadStatement";
 import {
   ReconciliationTable,
   StatusBadge,
   ReconciliationAction,
+  RuleNote,
 } from "@/components/features/finance/reconciliation/ReconciliationTable";
+import {
+  QuickLaunchSheet,
+  LaunchTemplate,
+} from "@/components/features/finance/reconciliation/QuickLaunchSheet";
+import { RulesSheet } from "@/components/features/finance/reconciliation/RulesSheet";
+import {
+  reconciliationRuleService,
+  ReconciliationRuleDraft,
+} from "@/lib/services/reconciliationRuleService";
+import {
+  accountRequiredFor,
+  useChartOfAccounts,
+} from "@/hooks/useChartOfAccounts";
 import { BalanceStrip } from "@/components/features/finance/reconciliation/BalanceStrip";
 import {
   SettleFromStatementSheet,
@@ -34,9 +48,10 @@ import {
   Landmark,
   HandCoins,
   Lock,
+  ListChecks,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BankTransaction, Transaction } from "@/lib/types";
+import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
 import { subDays, addDays, format } from "date-fns";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -65,7 +80,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
-import { isLocked, summarizeAccount } from "@/lib/bankReconciliation";
+import {
+  applyRules,
+  isLocked,
+  lineTransaction,
+  rulePattern,
+  summarizeAccount,
+} from "@/lib/bankReconciliation";
 
 const ACCOUNT_KEY = (companyId: string) =>
   `reconciliation-account-${companyId}`;
@@ -76,12 +97,16 @@ function MobileBankTxCard({
   readOnly,
   locked,
   canSettle,
+  canLaunch,
+  rule,
 }: {
   tx: BankTransaction;
   onAction: (id: string, action: ReconciliationAction) => void;
   readOnly?: boolean;
   locked?: boolean;
   canSettle?: boolean;
+  canLaunch?: boolean;
+  rule?: ReconciliationRule;
 }) {
   return (
     <div className="px-4 py-3.5">
@@ -128,6 +153,10 @@ function MobileBankTxCard({
             </span>
           </div>
         </div>
+      ) : tx.ruleId ? (
+        <div className="mt-2">
+          <RuleNote rule={rule} />
+        </div>
       ) : tx.matchCandidates && tx.matchCandidates.length > 0 ? (
         <div className="mt-2 text-xs text-muted-foreground bg-muted/50 rounded p-2">
           {tx.matchCandidates.length} sugestão(ões) disponível(eis)
@@ -165,15 +194,17 @@ function MobileBankTxCard({
                     Baixar título
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-xs"
-                  onClick={() => onAction(tx.id, "create")}
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Lançar
-                </Button>
+                {canLaunch && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs"
+                    onClick={() => onAction(tx.id, "create")}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Lançar
+                  </Button>
+                )}
               </>
             )}
             {(tx.status === "potential_match" || tx.status === "unmatched") && (
@@ -221,7 +252,10 @@ export function ReconciliationDashboard() {
     canManageReconciliation,
     canPayPayables,
     canEditReceivables,
+    canCreatePayables,
+    canCreateReceivables,
     canManageBankAccounts,
+    canManageReconciliationRules,
   } = usePermissions();
   const queryClient = useQueryClient();
   const companyId = selectedCompany?.id;
@@ -319,6 +353,44 @@ export function ReconciliationDashboard() {
   const canSettleFor = (tx: BankTransaction) =>
     canManageReconciliation &&
     (tx.amount < 0 ? canPayPayables : canEditReceivables);
+  // Lançar cria título: quem libera pagamento concilia, mas não cria despesa.
+  const canLaunchFor = (tx: BankTransaction) =>
+    canManageReconciliation &&
+    (tx.amount < 0 ? canCreatePayables : canCreateReceivables);
+
+  // ── Regras ─────────────────────────────────────────────────────────────────
+  const rulesKey = ["reconciliation-rules", companyId];
+  const { data: rules = [] } = useQuery({
+    queryKey: rulesKey,
+    queryFn: () => reconciliationRuleService.getAll(companyId!),
+    enabled: !!companyId && canViewReconciliation,
+  });
+  const ruleFor = (tx: BankTransaction) =>
+    rules.find((r) => r.id === tx.ruleId);
+
+  // Plano de contas: obrigatório a partir do exercício configurado.
+  const { accounts: chartAccounts, requiredFrom } =
+    useChartOfAccounts(companyId);
+  const missingAccount = (tx: BankTransaction, accountId?: string) => {
+    const nature = tx.amount < 0 ? "expense" : "revenue";
+    return (
+      !accountId &&
+      accountRequiredFor(requiredFrom, new Date(tx.date)) &&
+      chartAccounts.some(
+        (a) => a.nature === nature && a.type === "analytic" && !a.archived,
+      )
+    );
+  };
+
+  /** Sugestão que a confirmação em lote consegue resolver sozinha. */
+  const selectableFor = (tx: BankTransaction) => {
+    if (tx.status !== "potential_match" || lockedFor(tx)) return false;
+    if (!tx.ruleId) return true;
+    const rule = ruleFor(tx);
+    return !!rule && (rule.action === "ignore" || canLaunchFor(tx));
+  };
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirming, setBulkConfirming] = useState(false);
 
   // ── Modais e filtros ───────────────────────────────────────────────────────
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -326,6 +398,11 @@ export function ReconciliationDashboard() {
     null,
   );
   const [settlingTx, setSettlingTx] = useState<BankTransaction | null>(null);
+  const [launchingTx, setLaunchingTx] = useState<BankTransaction | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [ruleToDelete, setRuleToDelete] = useState<ReconciliationRule | null>(
+    null,
+  );
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -366,6 +443,13 @@ export function ReconciliationDashboard() {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [transactions, searchTerm, statusFilter, hideReconciled]);
 
+  // Seleção vale só para o que está à vista: filtrar e confirmar nunca pega
+  // linha escondida.
+  const visibleSuggestions = filteredTransactions.filter(selectableFor);
+  const selection = visibleSuggestions
+    .filter((t) => selected.has(t.id))
+    .map((t) => t.id);
+
   const actor = user ? { uid: user.uid, email: user.email } : null;
 
   const updateStatusAndSync = async (
@@ -397,6 +481,254 @@ export function ReconciliationDashboard() {
       ),
     );
 
+  /** Cria o lançamento já pago com valor e data da linha, e concilia. */
+  const launchAndReconcile = async (
+    tx: BankTransaction,
+    template: LaunchTemplate,
+    ruleId?: string,
+  ) => {
+    if (missingAccount(tx, template.accountId)) {
+      throw new Error(
+        `Lançamentos de ${new Date(tx.date).getFullYear()} precisam de conta contábil. Lance esta linha direto e escolha a conta.`,
+      );
+    }
+    const draft = lineTransaction(tx, template);
+    const ref = await transactionService.create(draft, actor!, companyId!);
+    await reconcileAll([ref.id], tx);
+    await updateStatusAndSync(tx.id, "matched", {
+      matchedTransactionId: ref.id,
+      matchedDetails: {
+        id: ref.id,
+        type: draft.type,
+        status: "paid",
+        description: draft.description,
+        supplierOrClient: draft.supplierOrClient,
+        amount: draft.amount,
+        dueDate: draft.dueDate,
+        paymentDate: draft.paymentDate,
+      } as Transaction,
+      confidence: 100,
+      ruleId,
+    });
+  };
+
+  /** Confirma uma sugestão — de título (`candidateId` escolhe outro) ou de regra. */
+  const confirmLine = async (tx: BankTransaction, candidateId?: string) => {
+    if (tx.ruleId && !candidateId) {
+      const rule = ruleFor(tx);
+      if (!rule) throw new Error("A regra desta sugestão foi excluída.");
+      if (rule.action === "ignore" || !rule.template) {
+        await updateStatusAndSync(tx.id, "ignored");
+      } else {
+        await launchAndReconcile(tx, rule.template, rule.id);
+      }
+      return;
+    }
+
+    const selectedCandidate = candidateId
+      ? tx.matchCandidates?.find((c) => c.id === candidateId)
+      : undefined;
+    const matchedIds = selectedCandidate?.id
+      ? [selectedCandidate.id]
+      : tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0
+        ? tx.matchedTransactionIds
+        : tx.matchedTransactionId
+          ? [tx.matchedTransactionId]
+          : [];
+
+    await reconcileAll(matchedIds, tx);
+    await updateStatusAndSync(tx.id, "matched", {
+      matchedTransactionId: selectedCandidate?.id || tx.matchedTransactionId,
+      matchedDetails: selectedCandidate?.transaction || tx.matchedDetails,
+      confidence: tx.confidence || 100,
+      ruleId: undefined,
+    });
+  };
+
+  // Uma por vez: cada lançamento passa pela validação de saldo do servidor, e
+  // a falha de uma não deve derrubar as outras.
+  const confirmSelected = async (ids: string[]) => {
+    setBulkConfirming(true);
+    let done = 0;
+    const failures: string[] = [];
+    for (const id of ids) {
+      const tx = transactions.find((t) => t.id === id);
+      if (!tx) continue;
+      try {
+        await confirmLine(tx);
+        done++;
+      } catch (error) {
+        console.error(error);
+        failures.push(friendlyError(error, "Erro ao confirmar"));
+      }
+    }
+    setSelected(new Set());
+    setBulkConfirming(false);
+    if (failures.length === 0) {
+      toast.success(`${done} sugestão(ões) confirmada(s)`);
+    } else {
+      toast.warning(
+        `${done} confirmada(s), ${failures.length} não foi(ram) possível`,
+        { description: failures[0] },
+      );
+    }
+  };
+
+  /**
+   * Grava a regra e já aplica nas outras linhas pendentes (de todas as contas
+   * abertas): quem cria a regra quer ver o efeito na hora.
+   */
+  const createRuleAndApply = async (
+    draft: ReconciliationRuleDraft,
+    exceptId: string,
+  ) => {
+    const id = await reconciliationRuleService.create(
+      draft,
+      companyId!,
+      actor!,
+    );
+    queryClient.invalidateQueries({ queryKey: ["reconciliation-rules"] });
+    const rule = {
+      ...draft,
+      id,
+      companyId: companyId!,
+      active: true,
+      createdBy: actor!.uid,
+      createdAt: new Date(),
+    };
+    // Estado atual, não o do render: o "Sempre ignorar" do toast roda depois.
+    const pending = useReconciliationStore.getState().transactions.filter(
+      (t) =>
+        t.id !== exceptId &&
+        !isLocked(
+          t,
+          accounts.find((a) => a.id === t.bankAccountId),
+        ),
+    );
+    const hits = applyRules(pending, [rule]).filter((t, i) => t !== pending[i]);
+    if (hits.length > 0) {
+      await reconciliationSessionService.bulkUpdateItems(
+        companyId!,
+        hits.map((t) => ({
+          id: t.id,
+          data: { status: t.status, ruleId: t.ruleId },
+        })),
+      );
+    }
+    return hits.length;
+  };
+
+  const ignoreAlways = async (tx: BankTransaction) => {
+    const pattern = rulePattern(tx.description);
+    if (pattern.length < 3) {
+      toast.error("O histórico desta linha é curto demais para virar regra.");
+      return;
+    }
+    try {
+      const hits = await createRuleAndApply(
+        {
+          pattern,
+          direction: tx.amount < 0 ? "debit" : "credit",
+          action: "ignore",
+        },
+        tx.id,
+      );
+      toast.success(`Regra criada: ignorar “${pattern}”`, {
+        description:
+          hits > 0
+            ? `${hits} outra(s) linha(s) viraram sugestão para confirmar.`
+            : undefined,
+      });
+    } catch (error) {
+      console.error(error);
+      toast.error(friendlyError(error, "Erro ao criar a regra"));
+    }
+  };
+
+  const handleQuickLaunch = async (
+    template: LaunchTemplate,
+    pattern: string | null,
+  ) => {
+    const tx = launchingTx;
+    if (!tx || !actor || !companyId) return;
+    try {
+      await launchAndReconcile(tx, template);
+    } catch (error) {
+      console.error(error);
+      toast.error(friendlyError(error, "Erro ao lançar"));
+      throw error;
+    }
+    if (!pattern) {
+      toast.success("Lançado e conciliado");
+      return;
+    }
+    // O lançamento já foi gravado: falha na regra não desfaz nada.
+    try {
+      const hits = await createRuleAndApply(
+        {
+          pattern,
+          direction: tx.amount < 0 ? "debit" : "credit",
+          action: "create",
+          template,
+        },
+        tx.id,
+      );
+      toast.success("Lançado, conciliado e regra criada", {
+        description:
+          hits > 0
+            ? `${hits} outra(s) linha(s) viraram sugestão para confirmar.`
+            : undefined,
+      });
+    } catch (error) {
+      console.error(error);
+      toast.warning("Lançado e conciliado, mas a regra não foi criada", {
+        description: friendlyError(error, "Tente de novo pela próxima linha."),
+      });
+    }
+  };
+
+  const handleRuleToggle = async (
+    rule: ReconciliationRule,
+    active: boolean,
+  ) => {
+    if (!actor) return;
+    try {
+      await reconciliationRuleService.setActive(rule, active, actor);
+      await queryClient.invalidateQueries({
+        queryKey: ["reconciliation-rules"],
+      });
+    } catch (error) {
+      toast.error(friendlyError(error, "Erro ao atualizar a regra"));
+    }
+  };
+
+  // Sugestões ainda abertas da regra voltam a pendente; as já confirmadas ficam.
+  const handleRuleDelete = async () => {
+    const rule = ruleToDelete;
+    if (!rule || !actor || !companyId) return;
+    try {
+      await reconciliationRuleService.delete(rule, actor);
+      const open = allItems.filter(
+        (t) => t.ruleId === rule.id && t.status === "potential_match",
+      );
+      if (open.length > 0) {
+        await reconciliationSessionService.bulkUpdateItems(
+          companyId,
+          open.map((t) => ({
+            id: t.id,
+            data: { status: "unmatched", ruleId: undefined },
+          })),
+        );
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["reconciliation-rules"],
+      });
+      toast.success("Regra excluída");
+    } catch (error) {
+      toast.error(friendlyError(error, "Erro ao excluir a regra"));
+    }
+  };
+
   const handleAction = async (
     id: string,
     action: ReconciliationAction,
@@ -407,44 +739,30 @@ export function ReconciliationDashboard() {
     if (!tx || lockedFor(tx)) return;
 
     if (action === "confirm") {
-      const selectedCandidate = matchedId
-        ? tx.matchCandidates?.find((c) => c.id === matchedId)
-        : undefined;
-      const matchedIds = selectedCandidate?.id
-        ? [selectedCandidate.id]
-        : tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0
-          ? tx.matchedTransactionIds
-          : tx.matchedTransactionId
-            ? [tx.matchedTransactionId]
-            : [];
-
       try {
-        await reconcileAll(matchedIds, tx);
-        await updateStatusAndSync(id, "matched", {
-          matchedTransactionId:
-            selectedCandidate?.id || tx.matchedTransactionId,
-          matchedDetails: selectedCandidate?.transaction || tx.matchedDetails,
-          confidence: tx.confidence || 100,
-        });
+        await confirmLine(tx, matchedId);
         toast.success("Conciliação confirmada");
       } catch (error) {
         console.error(error);
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Erro ao confirmar conciliação",
-        );
+        toast.error(friendlyError(error, "Erro ao confirmar conciliação"));
       }
     } else if (action === "ignore") {
       try {
         await updateStatusAndSync(id, "ignored");
+        if (canManageReconciliationRules && !tx.ruleId) {
+          toast("Linha ignorada", {
+            action: {
+              label: "Sempre ignorar",
+              onClick: () => ignoreAlways(tx),
+            },
+          });
+        }
       } catch (error) {
         console.error(error);
         toast.error(friendlyError(error, "Erro ao ignorar lançamento"));
       }
     } else if (action === "create") {
-      setSelectedBankTx(tx);
-      setCreateModalOpen(true);
+      setLaunchingTx(tx);
     } else if (action === "settle") {
       setSettlingTx(tx);
     } else if (action === "unreconcile") {
@@ -473,6 +791,7 @@ export function ReconciliationDashboard() {
           matchedDetails: undefined,
           matchedBundleDetails: undefined,
           confidence: undefined,
+          ruleId: undefined,
         });
         toast.success(
           tx.status === "ignored"
@@ -598,10 +917,23 @@ export function ReconciliationDashboard() {
         }),
       );
 
+      // Título vence regra: a linha que achou título larga a sugestão da regra.
+      // O que sobrou pendente passa pelas regras.
+      const withRules = applyRules(
+        processed.map((tx, i) =>
+          tx !== open[i] &&
+          tx.ruleId &&
+          (tx.matchedTransactionId || tx.matchedTransactionIds?.length)
+            ? { ...tx, ruleId: undefined }
+            : tx,
+        ),
+        rules,
+      );
+
       // Only the entries the matcher actually touched need to be persisted —
       // runAutoReconciliation keeps the same object reference for anything
       // it skipped (already matched/ignored), so a reference check is a cheap diff.
-      const changed = processed.filter((tx, i) => tx !== open[i]);
+      const changed = withRules.filter((tx, i) => tx !== open[i]);
       const changedById = new Map(changed.map((tx) => [tx.id, tx]));
       setTransactions(allItems.map((t) => changedById.get(t.id) ?? t));
       if (changed.length > 0) {
@@ -612,11 +944,20 @@ export function ReconciliationDashboard() {
       }
 
       const auto = changed.filter((t) => t.status === "matched").length;
-      const suggested = changed.length - auto;
+      const byRule = changed.filter(
+        (t) => t.status === "potential_match" && t.ruleId,
+      ).length;
+      const suggested = changed.length - auto - byRule;
       toast.success(
         changed.length === 0
           ? "Nenhuma correspondência nova encontrada."
           : `${auto} conciliada(s) automaticamente, ${suggested} sugestão(ões) para revisar.`,
+        {
+          description:
+            byRule > 0
+              ? `${byRule} linha(s) sugerida(s) por regra.`
+              : undefined,
+        },
       );
     } catch (e) {
       console.error(e);
@@ -720,6 +1061,17 @@ export function ReconciliationDashboard() {
               ))}
             </SelectContent>
           </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9"
+            onClick={() => setRulesOpen(true)}
+          >
+            <ListChecks className="h-4 w-4" />
+            <span className="hidden sm:inline ml-2">
+              Regras{rules.length > 0 && ` (${rules.length})`}
+            </span>
+          </Button>
           {canManageReconciliation && transactions.length > 0 && (
             <>
               <UploadStatement
@@ -1002,6 +1354,56 @@ export function ReconciliationDashboard() {
                 {filteredTransactions.length} de {transactions.length} linhas
               </span>
             </div>
+
+            {/* Confirmação em lote: só sugestões visíveis com os filtros atuais. */}
+            {canManageReconciliation && visibleSuggestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm dark:border-amber-900 dark:bg-amber-950/20">
+                <span className="tabular-nums">
+                  {selection.length > 0
+                    ? `${selection.length} de ${visibleSuggestions.length} sugestões selecionadas`
+                    : `${visibleSuggestions.length} sugestão(ões) para confirmar`}
+                </span>
+                <div className="ml-auto flex gap-2">
+                  {selection.length > 0 ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8"
+                      onClick={() => setSelected(new Set())}
+                      disabled={bulkConfirming}
+                    >
+                      Limpar seleção
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8"
+                      onClick={() =>
+                        setSelected(
+                          new Set(visibleSuggestions.map((t) => t.id)),
+                        )
+                      }
+                    >
+                      Selecionar todas
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    disabled={selection.length === 0 || bulkConfirming}
+                    onClick={() => confirmSelected(selection)}
+                  >
+                    {bulkConfirming ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )}
+                    Confirmar{selection.length > 0 && ` ${selection.length}`}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Desktop table */}
@@ -1020,6 +1422,13 @@ export function ReconciliationDashboard() {
               readOnly={!canManageReconciliation}
               isLocked={lockedFor}
               canSettle={canSettleFor}
+              canLaunch={canLaunchFor}
+              ruleFor={ruleFor}
+              isSelectable={selectableFor}
+              selected={selected}
+              onSelectedChange={
+                canManageReconciliation ? setSelected : undefined
+              }
             />
           </div>
 
@@ -1055,6 +1464,8 @@ export function ReconciliationDashboard() {
                     readOnly={!canManageReconciliation}
                     locked={lockedFor(tx)}
                     canSettle={canSettleFor(tx)}
+                    canLaunch={canLaunchFor(tx)}
+                    rule={ruleFor(tx)}
                   />
                 ))}
               </div>
@@ -1155,6 +1566,43 @@ export function ReconciliationDashboard() {
         confirmText="Reabrir"
         variant="destructive"
         onConfirm={handleReopen}
+      />
+
+      {companyId && (
+        <QuickLaunchSheet
+          companyId={companyId}
+          account={account}
+          bankTx={launchingTx}
+          canCreateRule={canManageReconciliationRules}
+          onOpenChange={(o) => !o && setLaunchingTx(null)}
+          onSubmit={handleQuickLaunch}
+          onOpenFullForm={(tx) => {
+            setSelectedBankTx(tx);
+            setCreateModalOpen(true);
+          }}
+        />
+      )}
+
+      {companyId && (
+        <RulesSheet
+          companyId={companyId}
+          open={rulesOpen}
+          onOpenChange={setRulesOpen}
+          rules={rules}
+          canManage={canManageReconciliationRules}
+          onToggle={handleRuleToggle}
+          onDelete={setRuleToDelete}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!ruleToDelete}
+        onOpenChange={(o) => !o && setRuleToDelete(null)}
+        title={`Excluir a regra “${ruleToDelete?.pattern ?? ""}”?`}
+        description="As sugestões dela ainda não confirmadas voltam para pendente. O que já foi conciliado continua conciliado."
+        confirmText="Excluir regra"
+        variant="destructive"
+        onConfirm={handleRuleDelete}
       />
 
       {companyId && (

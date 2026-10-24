@@ -171,6 +171,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   budget: "Orçamento",
   chart_account: "Plano de Contas",
   bank_account: "Conta Bancária",
+  reconciliation_rule: "Regra de Conciliação",
 };
 
 /**
@@ -539,6 +540,8 @@ export function getEntityLink(entity: string, entityId: string): string | null {
       return `/cadastros/plano-de-contas`;
     case "bank_account":
       return `/cadastros/contas-bancarias`;
+    case "reconciliation_rule":
+      return `/financeiro/conciliacao`;
     default:
       return null;
   }

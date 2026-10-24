@@ -23,9 +23,11 @@ import {
   Undo2,
   HandCoins,
   Lock,
+  ListChecks,
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { BankTransaction } from "@/lib/types";
+import { BankTransaction, ReconciliationRule } from "@/lib/types";
 
 export type ReconciliationAction =
   | "confirm"
@@ -44,6 +46,35 @@ interface ReconciliationTableProps {
   readOnly?: boolean;
   isLocked?: (tx: BankTransaction) => boolean;
   canSettle?: (tx: BankTransaction) => boolean;
+  canLaunch?: (tx: BankTransaction) => boolean;
+  ruleFor?: (tx: BankTransaction) => ReconciliationRule | undefined;
+  /** Sugestões que podem entrar na confirmação em lote. */
+  isSelectable?: (tx: BankTransaction) => boolean;
+  selected?: Set<string>;
+  onSelectedChange?: (ids: Set<string>) => void;
+}
+
+/** Como a regra resolve a linha, para a coluna "No sistema" e o card mobile. */
+export function RuleNote({ rule }: { rule?: ReconciliationRule }) {
+  return (
+    <div className="flex items-start gap-1.5 rounded bg-muted/50 p-2 text-sm">
+      <ListChecks className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0">
+        <span className="block truncate font-medium">
+          {!rule
+            ? "Regra excluída"
+            : rule.action === "ignore" || !rule.template
+              ? "Ignorar"
+              : `Lançar “${rule.template.description}”`}
+        </span>
+        {rule && (
+          <span className="block truncate text-xs text-muted-foreground">
+            Regra &ldquo;{rule.pattern}&rdquo;
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function StatusBadge({ status }: { status: BankTransaction["status"] }) {
@@ -112,7 +143,25 @@ export function ReconciliationTable({
   readOnly,
   isLocked,
   canSettle,
+  canLaunch,
+  ruleFor,
+  isSelectable,
+  selected,
+  onSelectedChange,
 }: ReconciliationTableProps) {
+  const selectable = onSelectedChange
+    ? transactions.filter((tx) => isSelectable?.(tx))
+    : [];
+  const allSelected =
+    selectable.length > 0 && selectable.every((tx) => selected?.has(tx.id));
+  const someSelected = selectable.some((tx) => selected?.has(tx.id));
+  const toggle = (id: string, on: boolean) => {
+    const next = new Set(selected);
+    if (on) next.add(id);
+    else next.delete(id);
+    onSelectedChange?.(next);
+  };
+
   const getMatchedEntityName = (
     matchedDetails: BankTransaction["matchedDetails"],
   ) => {
@@ -125,6 +174,23 @@ export function ReconciliationTable({
     <Table>
       <TableHeader>
         <TableRow>
+          {onSelectedChange && (
+            <TableHead className="w-10">
+              <Checkbox
+                checked={
+                  allSelected ? true : someSelected ? "indeterminate" : false
+                }
+                disabled={selectable.length === 0}
+                onCheckedChange={(c) =>
+                  onSelectedChange(
+                    c ? new Set(selectable.map((tx) => tx.id)) : new Set(),
+                  )
+                }
+                aria-label="Selecionar todas as sugestões"
+                title="Selecionar todas as sugestões"
+              />
+            </TableHead>
+          )}
           <TableHead className="w-[100px]">Data</TableHead>
           <TableHead className="w-[34%]">Descrição no banco</TableHead>
           <TableHead className="w-[130px] text-right">Valor</TableHead>
@@ -137,7 +203,7 @@ export function ReconciliationTable({
         {transactions.length === 0 && (
           <TableRow>
             <TableCell
-              colSpan={6}
+              colSpan={onSelectedChange ? 7 : 6}
               className="py-10 text-center text-sm text-muted-foreground"
             >
               Nenhuma linha com os filtros selecionados.
@@ -151,7 +217,19 @@ export function ReconciliationTable({
             <TableRow
               key={tx.id}
               className={cn(tx.status === "ignored" && "text-muted-foreground")}
+              data-state={selected?.has(tx.id) ? "selected" : undefined}
             >
+              {onSelectedChange && (
+                <TableCell>
+                  {editable && isSelectable?.(tx) && (
+                    <Checkbox
+                      checked={selected?.has(tx.id) ?? false}
+                      onCheckedChange={(c) => toggle(tx.id, !!c)}
+                      aria-label="Selecionar sugestão"
+                    />
+                  )}
+                </TableCell>
+              )}
               <TableCell className="tabular-nums">
                 {format(new Date(tx.date), "dd/MM/yyyy")}
               </TableCell>
@@ -237,6 +315,8 @@ export function ReconciliationTable({
                       </div>
                     )}
                   </div>
+                ) : tx.ruleId ? (
+                  <RuleNote rule={ruleFor?.(tx)} />
                 ) : tx.matchedTransactionId ? (
                   <span className="font-mono text-xs text-muted-foreground">
                     ID {tx.matchedTransactionId.slice(0, 8)}
@@ -334,16 +414,18 @@ export function ReconciliationTable({
                               Baixar título
                             </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 text-xs"
-                            onClick={() => onAction(tx.id, "create")}
-                            title="Criar um lançamento já pago para esta linha"
-                          >
-                            <Plus className="h-3.5 w-3.5 mr-1" />
-                            Lançar
-                          </Button>
+                          {(canLaunch?.(tx) ?? true) && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 text-xs"
+                              onClick={() => onAction(tx.id, "create")}
+                              title="Lançar direto, já pago (tarifa, IOF, juros)"
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Lançar
+                            </Button>
+                          )}
                         </>
                       )}
 
