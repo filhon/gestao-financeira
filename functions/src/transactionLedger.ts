@@ -59,6 +59,82 @@ interface TxShape {
   costCenterAllocation?: Allocation[];
   ledgerApplied?: boolean;
   ledgerAppliedAt?: admin.firestore.Timestamp;
+  createdBy?: string;
+}
+
+type Role =
+  | "admin"
+  | "financial_manager"
+  | "approver"
+  | "releaser"
+  | "auditor"
+  | "user";
+
+/** Mesma régua de `canWrite()` nas regras de `transactions`. */
+const TX_WRITERS: Role[] = [
+  "admin",
+  "financial_manager",
+  "approver",
+  "releaser",
+  "user",
+];
+
+/** Transições que só certos papéis fazem (espelha `usePermissions`). */
+const STATUS_ROLES: Record<string, Role[]> = {
+  approved: ["admin", "financial_manager", "approver"],
+  rejected: ["admin", "financial_manager", "approver"],
+  paid: ["admin", "financial_manager", "releaser"],
+  received: ["admin", "financial_manager", "releaser"],
+};
+
+/**
+ * Os callables rodam com o Admin SDK e passam por cima das regras: quem chama
+ * precisa ser conferido aqui, com a mesma régua de `hasCompanyRole` — claim
+ * primeiro, documento do usuário quando a claim está defasada. Devolve o papel
+ * efetivo para a checagem de dono do `user`.
+ */
+async function assertCompanyRole(
+  auth: NonNullable<functions.https.CallableContext["auth"]>,
+  companyId: string,
+  allowed: Role[],
+): Promise<Role> {
+  type RoleSource = { role?: string; companyRoles?: Record<string, string> };
+  const pick = (src?: RoleSource): Role | null => {
+    if (src?.role === "admin") return "admin";
+    const role = src?.companyRoles?.[companyId] as Role | undefined;
+    return role && allowed.includes(role) ? role : null;
+  };
+
+  const fromClaims = pick(auth.token as RoleSource);
+  if (fromClaims) return fromClaims;
+
+  const userSnap = await db().collection("users").doc(auth.uid).get();
+  const fromDb = pick(userSnap.data() as RoleSource | undefined);
+  if (fromDb) return fromDb;
+
+  throw new functions.https.HttpsError(
+    "permission-denied",
+    "Você não tem permissão para esta operação nesta empresa.",
+  );
+}
+
+/** Escrita numa transação existente, com a regra de dono do `user`. */
+async function assertCanWriteTransaction(
+  auth: NonNullable<functions.https.CallableContext["auth"]>,
+  current: TxShape,
+  nextStatus?: unknown,
+) {
+  const changesStatus =
+    typeof nextStatus === "string" && nextStatus !== current.status;
+  const allowed =
+    (changesStatus && STATUS_ROLES[nextStatus as string]) || TX_WRITERS;
+  const role = await assertCompanyRole(auth, current.companyId!, allowed);
+  if (role === "user" && current.createdBy !== auth.uid) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Você só pode alterar lançamentos criados por você.",
+    );
+  }
 }
 
 /**
@@ -393,6 +469,11 @@ export const createPayableTransaction = functions
         "companyId e transaction são obrigatórios.",
       );
     }
+    await assertCompanyRole(context.auth, companyId, [
+      "admin",
+      "financial_manager",
+      "user",
+    ]);
 
     const tx = transaction as TxShape;
     if (tx.type !== "payable") {
@@ -688,6 +769,11 @@ export const createPayableInstallments = functions
         "companyId e transactions são obrigatórios.",
       );
     }
+    await assertCompanyRole(context.auth, companyId, [
+      "admin",
+      "financial_manager",
+      "user",
+    ]);
     // O schema do formulário limita em 120 parcelas; o teto aqui protege o
     // limite de operações de uma transação do Firestore.
     if (transactions.length > 120) {
@@ -1314,6 +1400,8 @@ export const updatePayableTransaction = functions
       );
     }
 
+    await assertCanWriteTransaction(context.auth, current, patch.status);
+
     const outcome = await commitValidatedPatch(
       companyId,
       txRef,
@@ -1467,6 +1555,9 @@ export const applyTransactionPatches = functions
       );
     }
     const companyId = [...companyIds][0];
+    for (const l of loaded) {
+      await assertCanWriteTransaction(context.auth, l.current, l.patch.status);
+    }
 
     // ── Conferência agregada, antes de gravar ────────────────────────────────
     const { byId, rootId } = await loadCcIndex(companyId);
@@ -1796,6 +1887,8 @@ export const setTransactionStatus = functions
         "Transação sem empresa associada.",
       );
     }
+
+    await assertCanWriteTransaction(context.auth, current, status);
 
     const uid = context.auth.uid;
     const now = admin.firestore.FieldValue.serverTimestamp();

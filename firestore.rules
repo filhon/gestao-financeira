@@ -353,6 +353,30 @@ service cloud.firestore {
           allow write: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'releaser']);
        }
     }
+
+    // Contas bancárias: eixo da conciliação. `closings` é o histórico de
+    // períodos fechados; o último é a base do saldo conciliado.
+    match /bank_accounts/{accountId} {
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+       function closingsOf(data) { return data.get('closings', []); }
+       function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor']);
+       allow create, delete: if isAuthenticated() && isManager(getCompanyId());
+
+       // Gestor edita tudo, inclusive reabrir (encurtar `closings`). Quem concilia
+       // registra o saldo do extrato e fecha um período por vez, sem reescrever
+       // fechamentos anteriores e sem reabrir.
+       allow update: if isAuthenticated() &&
+         request.resource.data.companyId == resource.data.companyId && (
+           isManager(getCompanyId()) ||
+           (hasCompanyRole(getCompanyId(), ['releaser']) &&
+            changed().hasOnly(['statementBalance', 'statementBalanceDate', 'closings', 'updatedAt']) &&
+            (!changed().hasAny(['closings']) ||
+             (closingsOf(request.resource.data).size() == closingsOf(resource.data).size() + 1 &&
+              closingsOf(request.resource.data)[0:closingsOf(resource.data).size()] == closingsOf(resource.data))))
+         );
+    }
     
     // ── API Externa ──────────────────────────────────────────────────────────
 

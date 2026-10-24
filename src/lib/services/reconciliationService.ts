@@ -123,6 +123,46 @@ export class ReconciliationService {
     return transactions;
   }
 
+  /**
+   * Conta de origem (BANKACCTFROM) e saldo final (LEDGERBAL) de um OFX. Tudo
+   * opcional: há bancos que omitem o saldo, e cartão vem sem BANKID.
+   */
+  static async parseOFXMeta(content: string): Promise<{
+    bankCode?: string;
+    accountNumber?: string;
+    balance?: number;
+    balanceDate?: Date;
+  }> {
+    try {
+      const parsed = await parseOFXData(content);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const find = (obj: any, key: string): any => {
+        if (!obj || typeof obj !== "object") return undefined;
+        if (key in obj) return obj[key];
+        for (const k in obj) {
+          const hit = find(obj[k], key);
+          if (hit !== undefined) return hit;
+        }
+        return undefined;
+      };
+      const account =
+        find(parsed, "BANKACCTFROM") ?? find(parsed, "CCACCTFROM");
+      const ledger = find(parsed, "LEDGERBAL");
+      return {
+        bankCode: account?.BANKID ? String(account.BANKID) : undefined,
+        accountNumber: account?.ACCTID ? String(account.ACCTID) : undefined,
+        balance:
+          ledger?.BALAMT !== undefined
+            ? this.parseAmount(ledger.BALAMT)
+            : undefined,
+        balanceDate: this.parseDate(ledger?.DTASOF) ?? undefined,
+      };
+    } catch (e) {
+      console.error("Failed to parse OFX header", e);
+      return {};
+    }
+  }
+
   static async parseOFX(content: string): Promise<BankTransaction[]> {
     const transactions: BankTransaction[] = [];
     try {
@@ -157,7 +197,6 @@ export class ReconciliationService {
       for (const node of txNodes) {
         const dateStr = node.DTPOSTED || "";
         const amountStr = node.TRNAMT || "0";
-        const fitId = node.FITID || `gen-${Math.random()}`;
         const name = node.NAME || "";
         const memo = node.MEMO || "";
 
@@ -165,12 +204,15 @@ export class ReconciliationService {
         if (!date) continue;
 
         const amount = this.parseAmount(amountStr);
+        const description = (memo || name || "").trim();
+        const fitId =
+          node.FITID || this.buildDedupId("ofx", date, amount, description);
 
         transactions.push({
           id: fitId,
           date,
           amount,
-          description: (memo || name || "").trim(),
+          description,
           type: amount < 0 ? "debit" : "credit",
           status: "unmatched",
           confidence: 0,

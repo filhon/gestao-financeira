@@ -120,10 +120,17 @@ export const reconciliationSessionService = {
     });
   },
 
-  async clearSession(companyId: string): Promise<void> {
+  /** Remove as linhas de uma conta; sem conta, as linhas legadas sem conta. */
+  async clearSession(
+    companyId: string,
+    bankAccountId: string | null,
+  ): Promise<void> {
     const colRef = this.getItemsCollection(companyId);
     const snap = await getDocs(colRef);
-    await runBatched(snap.docs, (batch, d) => batch.delete(d.ref));
+    const docs = snap.docs.filter(
+      (d) => (d.data().bankAccountId ?? null) === bankAccountId,
+    );
+    await runBatched(docs, (batch, d) => batch.delete(d.ref));
   },
 
   subscribeToSession(

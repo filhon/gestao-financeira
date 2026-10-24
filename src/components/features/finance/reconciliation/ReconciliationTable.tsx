@@ -21,27 +21,98 @@ import {
   MinusCircle,
   Circle,
   Undo2,
+  HandCoins,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BankTransaction } from "@/lib/types";
+
+export type ReconciliationAction =
+  | "confirm"
+  | "create"
+  | "settle"
+  | "ignore"
+  | "unreconcile";
 
 interface ReconciliationTableProps {
   transactions: BankTransaction[];
   onAction: (
     id: string,
-    action: "confirm" | "create" | "ignore" | "unreconcile",
+    action: ReconciliationAction,
     matchedId?: string,
   ) => void;
   readOnly?: boolean;
+  isLocked?: (tx: BankTransaction) => boolean;
+  canSettle?: (tx: BankTransaction) => boolean;
+}
+
+export function StatusBadge({ status }: { status: BankTransaction["status"] }) {
+  switch (status) {
+    case "matched":
+      return (
+        <Badge
+          variant="outline"
+          className="gap-1 border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+        >
+          <CheckCircle2 className="h-3 w-3" />
+          Conciliado
+        </Badge>
+      );
+    case "potential_match":
+      return (
+        <Badge
+          variant="outline"
+          className="gap-1 border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300"
+        >
+          <Zap className="h-3 w-3" />
+          Sugestão
+        </Badge>
+      );
+    case "ignored":
+      return (
+        <Badge variant="outline" className="gap-1 text-muted-foreground">
+          <MinusCircle className="h-3 w-3" />
+          Ignorado
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="secondary" className="gap-1">
+          <Circle className="h-3 w-3" />
+          Pendente
+        </Badge>
+      );
+  }
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="h-1 rounded-full bg-muted w-12 overflow-hidden">
+        <div
+          className={cn(
+            "h-1 rounded-full",
+            value >= 80
+              ? "bg-emerald-500"
+              : value >= 60
+                ? "bg-amber-500"
+                : "bg-red-400",
+          )}
+          style={{ width: `${value}%` }}
+        />
+      </div>
+      <span className="text-xs tabular-nums">{value}%</span>
+    </div>
+  );
 }
 
 export function ReconciliationTable({
   transactions,
   onAction,
   readOnly,
+  isLocked,
+  canSettle,
 }: ReconciliationTableProps) {
-  // const { transactions } = useReconciliationStore(); // Props passed from parent now
-
   const getMatchedEntityName = (
     matchedDetails: BankTransaction["matchedDetails"],
   ) => {
@@ -50,72 +121,44 @@ export function ReconciliationTable({
     return withEntityName.entityName;
   };
 
-  const getStatusBadge = (status: BankTransaction["status"]) => {
-    switch (status) {
-      case "matched":
-        return (
-          <Badge className="bg-green-500 hover:bg-green-600 gap-1">
-            <CheckCircle2 className="h-3 w-3" />
-            Corresp.
-          </Badge>
-        );
-      case "potential_match":
-        return (
-          <Badge
-            variant="secondary"
-            className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200 gap-1"
-          >
-            <Zap className="h-3 w-3" />
-            Sugestão
-          </Badge>
-        );
-      case "ignored":
-        return (
-          <Badge variant="outline" className="gap-1">
-            <MinusCircle className="h-3 w-3" />
-            Ignorado
-          </Badge>
-        );
-      default:
-        return (
-          <Badge variant="secondary" className="gap-1">
-            <Circle className="h-3 w-3" />
-            Novo
-          </Badge>
-        );
-    }
-  };
-
   return (
-    <div className="rounded-md border overflow-hidden">
-      <Table>
-        <TableHeader>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[100px]">Data</TableHead>
+          <TableHead className="w-[34%]">Descrição no banco</TableHead>
+          <TableHead className="w-[130px] text-right">Valor</TableHead>
+          <TableHead className="w-[120px]">Situação</TableHead>
+          <TableHead className="w-[30%]">No sistema</TableHead>
+          <TableHead className="text-right w-[200px]">Ações</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {transactions.length === 0 && (
           <TableRow>
-            <TableHead className="w-[100px]">Data</TableHead>
-            <TableHead className="w-[40%]">Descrição (Banco)</TableHead>
-            <TableHead className="w-[120px]">Valor</TableHead>
-            <TableHead className="w-[100px]">Status</TableHead>
-            <TableHead className="w-[30%]">Sugestão Sistema</TableHead>
-            <TableHead className="text-right w-[120px]">Ações</TableHead>
+            <TableCell
+              colSpan={6}
+              className="py-10 text-center text-sm text-muted-foreground"
+            >
+              Nenhuma linha com os filtros selecionados.
+            </TableCell>
           </TableRow>
-        </TableHeader>
-        <TableBody>
-          {transactions.map((tx) => (
+        )}
+        {transactions.map((tx) => {
+          const locked = isLocked?.(tx) ?? false;
+          const editable = !readOnly && !locked;
+          return (
             <TableRow
               key={tx.id}
-              className={cn(
-                "transition-all duration-500",
-                tx.status === "matched"
-                  ? "bg-green-50/50 dark:bg-green-900/10 opacity-70 border-l-4 border-l-green-500"
-                  : "",
-                tx.status === "ignored" ? "opacity-50 grayscale" : "",
-              )}
+              className={cn(tx.status === "ignored" && "text-muted-foreground")}
             >
-              <TableCell>{format(new Date(tx.date), "dd/MM/yyyy")}</TableCell>
+              <TableCell className="tabular-nums">
+                {format(new Date(tx.date), "dd/MM/yyyy")}
+              </TableCell>
 
               <TableCell>
                 <div
-                  className="truncate font-medium max-w-[400px]"
+                  className="truncate font-medium max-w-[420px]"
                   title={tx.description}
                 >
                   {tx.description}
@@ -124,28 +167,27 @@ export function ReconciliationTable({
 
               <TableCell
                 className={cn(
-                  "font-medium font-financial",
-                  tx.amount < 0 ? "text-red-600" : "text-green-600",
+                  "text-right font-medium font-financial tabular-nums whitespace-nowrap",
+                  tx.amount < 0
+                    ? "text-red-700 dark:text-red-400"
+                    : "text-emerald-700 dark:text-emerald-400",
                 )}
               >
-                <span className="text-xs mr-1 opacity-70">
-                  {tx.amount < 0 ? "▼" : "▲"}
-                </span>
+                {tx.amount < 0 ? "−" : "+"}
                 {formatCurrency(Math.abs(tx.amount))}
               </TableCell>
-              <TableCell>{getStatusBadge(tx.status)}</TableCell>
+              <TableCell>
+                <StatusBadge status={tx.status} />
+              </TableCell>
               <TableCell>
                 {tx.matchedTransactionIds &&
                 tx.matchedTransactionIds.length > 0 ? (
                   <div className="flex flex-col gap-1 text-sm bg-muted/50 p-2 rounded">
-                    <span className="font-medium text-green-700">
-                      Combo ({tx.matchedTransactionIds.length} itens)
-                    </span>
-                    <span className="text-xs text-muted-foreground font-financial">
-                      {formatCurrency(tx.amount)} (Total)
+                    <span className="font-medium">
+                      {tx.matchedTransactionIds.length} lançamentos somados
                     </span>
                     {tx.matchedBundleDetails && (
-                      <div className="flex flex-col gap-1 mt-1 border-t pt-2 scroll-m-0">
+                      <div className="flex flex-col gap-1 mt-1 border-t pt-2">
                         {tx.matchedBundleDetails.map((sub, i) => (
                           <div
                             key={sub.id || i}
@@ -157,7 +199,7 @@ export function ReconciliationTable({
                             >
                               {sub.description}
                             </span>
-                            <span className="whitespace-nowrap font-financial">
+                            <span className="whitespace-nowrap font-financial tabular-nums">
                               {formatCurrency(sub.amount)}
                             </span>
                           </div>
@@ -166,7 +208,7 @@ export function ReconciliationTable({
                     )}
                   </div>
                 ) : tx.matchedDetails ? (
-                  <div className="flex flex-col text-sm bg-muted/50 p-2 rounded group relative">
+                  <div className="flex flex-col text-sm bg-muted/50 p-2 rounded">
                     <span
                       className="font-semibold truncate w-full block"
                       title={tx.matchedDetails.description}
@@ -180,67 +222,29 @@ export function ReconciliationTable({
                           "dd/MM/yyyy",
                         )}
                       </span>
-                      <span className="font-financial">
+                      <span className="font-financial tabular-nums">
                         {formatCurrency(tx.matchedDetails.amount)}
                       </span>
                     </div>
-                    {/* Entity Name if available */}
                     {getMatchedEntityName(tx.matchedDetails) && (
-                      <span className="text-xs text-blue-600 block mt-1">
+                      <span className="text-xs text-muted-foreground block mt-1">
                         {getMatchedEntityName(tx.matchedDetails)}
                       </span>
                     )}
-                    {tx.confidence && tx.confidence < 100 && (
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <div className="h-1 rounded-full bg-muted flex-1 overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-1 rounded-full transition-all",
-                              tx.confidence >= 80
-                                ? "bg-green-500"
-                                : tx.confidence >= 60
-                                  ? "bg-yellow-500"
-                                  : "bg-red-400",
-                            )}
-                            style={{ width: `${tx.confidence}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                          {tx.confidence}%
-                        </span>
+                    {tx.confidence !== undefined && tx.confidence < 100 && (
+                      <div className="mt-1.5 text-muted-foreground">
+                        <ConfidenceBar value={tx.confidence} />
                       </div>
                     )}
                   </div>
                 ) : tx.matchedTransactionId ? (
-                  <div className="flex items-center gap-2 text-sm bg-muted/50 p-2 rounded">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      ID: {tx.matchedTransactionId.slice(0, 8)}...
-                    </span>
-                    {tx.confidence && tx.confidence < 100 && (
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <div className="h-1 rounded-full bg-muted flex-1 overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-1 rounded-full",
-                              tx.confidence >= 80
-                                ? "bg-green-500"
-                                : tx.confidence >= 60
-                                  ? "bg-yellow-500"
-                                  : "bg-red-400",
-                            )}
-                            style={{ width: `${tx.confidence}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                          {tx.confidence}%
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    ID {tx.matchedTransactionId.slice(0, 8)}
+                  </span>
                 ) : tx.matchCandidates && tx.matchCandidates.length > 0 ? (
                   <div className="flex flex-col gap-2 text-xs bg-muted/50 p-2 rounded">
                     <span className="text-muted-foreground">
-                      Sugestões ({tx.matchCandidates.length})
+                      {tx.matchCandidates.length} candidato(s)
                     </span>
                     {tx.matchCandidates.map((c, i) => (
                       <div
@@ -254,127 +258,118 @@ export function ReconciliationTable({
                           >
                             {c.transaction.description}
                           </span>
-                          <span className="whitespace-nowrap font-financial">
+                          <span className="whitespace-nowrap font-financial tabular-nums">
                             {formatCurrency(c.transaction.amount)}
                           </span>
                         </div>
-                        <div className="flex justify-between text-muted-foreground">
+                        <div className="flex justify-between items-center text-muted-foreground">
                           <span>
                             {format(
                               new Date(c.transaction.dueDate),
                               "dd/MM/yyyy",
                             )}
                           </span>
-                          <div className="flex items-center gap-1.5">
-                            <div className="h-1 rounded-full bg-muted w-12 overflow-hidden">
-                              <div
-                                className={cn(
-                                  "h-1 rounded-full",
-                                  c.score >= 80
-                                    ? "bg-green-500"
-                                    : c.score >= 60
-                                      ? "bg-yellow-500"
-                                      : "bg-red-400",
-                                )}
-                                style={{ width: `${c.score}%` }}
-                              />
-                            </div>
-                            <span>{c.score}%</span>
-                          </div>
+                          <ConfidenceBar value={c.score} />
                         </div>
-                        {!readOnly && (
+                        {c.reasons.length > 0 && (
+                          <div className="text-muted-foreground">
+                            {c.reasons.join(" · ")}
+                          </div>
+                        )}
+                        {editable && (
                           <div className="flex justify-end">
                             <Button
                               size="sm"
                               variant="outline"
-                              className="h-7 text-[10px]"
+                              className="h-7 text-xs"
                               onClick={() => onAction(tx.id, "confirm", c.id)}
                             >
-                              Selecionar
+                              Usar este
                             </Button>
-                          </div>
-                        )}
-                        {c.reasons.length > 0 && (
-                          <div className="text-[10px] text-muted-foreground">
-                            {c.reasons.join(" • ")}
                           </div>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <span className="text-muted-foreground text-sm">-</span>
+                  <span className="text-muted-foreground text-sm">—</span>
                 )}
               </TableCell>
               <TableCell className="text-right">
-                <div className="flex justify-end gap-2">
-                  {/* Logic: If potential match, show confirm/ignore. If unmatched, show create. If matched, show success. */}
-                  {readOnly ? (
-                    tx.status === "matched" ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <span className="text-muted-foreground text-xs">-</span>
-                    )
+                <div className="flex justify-end gap-1">
+                  {locked ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                      title="Período fechado"
+                    >
+                      <Lock className="h-3.5 w-3.5" /> Fechado
+                    </span>
+                  ) : !editable ? (
+                    <span className="text-muted-foreground text-xs">—</span>
                   ) : (
                     <>
                       {tx.status === "potential_match" && (
-                        <>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100"
-                            title="Confirmar Match"
-                            onClick={() => onAction(tx.id, "confirm")}
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100"
-                            title="Ignorar"
-                            onClick={() => onAction(tx.id, "ignore")}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-
-                      {tx.status === "unmatched" && (
                         <Button
                           size="sm"
                           variant="outline"
                           className="h-8 text-xs"
-                          onClick={() => onAction(tx.id, "create")}
+                          onClick={() => onAction(tx.id, "confirm")}
                         >
-                          <Plus className="h-3 w-3 mr-1" />
-                          Criar
+                          <Check className="h-3.5 w-3.5 mr-1" />
+                          Confirmar
                         </Button>
                       )}
 
-                      {tx.status === "matched" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 text-xs text-muted-foreground hover:text-destructive"
-                          onClick={() => onAction(tx.id, "unreconcile")}
-                          title="Desfazer conciliação"
-                        >
-                          <Undo2 className="h-3.5 w-3.5 mr-1" />
-                          Desfazer
-                        </Button>
-                      )}
-
-                      {/* Also allow ignore on unmatched if needed, but usually just leave it. */}
                       {tx.status === "unmatched" && (
+                        <>
+                          {canSettle?.(tx) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs"
+                              onClick={() => onAction(tx.id, "settle")}
+                              title="Quitar um título em aberto com este pagamento"
+                            >
+                              <HandCoins className="h-3.5 w-3.5 mr-1" />
+                              Baixar título
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs"
+                            onClick={() => onAction(tx.id, "create")}
+                            title="Criar um lançamento já pago para esta linha"
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1" />
+                            Lançar
+                          </Button>
+                        </>
+                      )}
+
+                      {(tx.status === "potential_match" ||
+                        tx.status === "unmatched") && (
                         <Button
                           size="icon"
                           variant="ghost"
                           className="h-8 w-8 text-muted-foreground"
                           onClick={() => onAction(tx.id, "ignore")}
-                          title="Ignorar"
+                          aria-label="Ignorar"
+                          title="Ignorar (não pede lançamento)"
                         >
                           <X className="h-4 w-4" />
+                        </Button>
+                      )}
+
+                      {(tx.status === "matched" || tx.status === "ignored") && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 text-xs text-muted-foreground hover:text-destructive"
+                          onClick={() => onAction(tx.id, "unreconcile")}
+                        >
+                          <Undo2 className="h-3.5 w-3.5 mr-1" />
+                          Desfazer
                         </Button>
                       )}
                     </>
@@ -382,9 +377,9 @@ export function ReconciliationTable({
                 </div>
               </TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }

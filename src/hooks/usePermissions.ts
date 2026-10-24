@@ -45,6 +45,9 @@ export interface Permissions {
   canViewChartOfAccounts: boolean;
   canManageChartOfAccounts: boolean; // Create/Edit/Import/Archive
 
+  canViewBankAccounts: boolean;
+  canManageBankAccounts: boolean; // Create/Edit, reopen closed periods
+
   canViewReports: boolean;
 
   // Admin & Settings
@@ -208,6 +211,16 @@ export function usePermissions(): Permissions {
         "auditor",
       ]),
       canManageChartOfAccounts: isAdminOrManager,
+
+      // Bank accounts — same audience as the reconciliation that runs on them.
+      canViewBankAccounts: isOneOf([
+        "admin",
+        "financial_manager",
+        "approver",
+        "releaser",
+        "auditor",
+      ]),
+      canManageBankAccounts: isAdminOrManager,
 
       // Reports
       // User: No.

@@ -18,6 +18,7 @@ import {
   MessageSquare,
   ShieldCheck,
   ListTree,
+  Landmark,
   ClipboardList,
   Layers,
   Scale,
@@ -166,6 +167,13 @@ const navigationPages: NavigationPage[] = [
       "classificacao",
     ],
     permission: "canViewChartOfAccounts",
+  },
+  {
+    name: "Contas Bancárias",
+    href: "/cadastros/contas-bancarias",
+    icon: Landmark,
+    keywords: ["banco", "conta corrente", "saldo", "agência"],
+    permission: "canViewBankAccounts",
   },
   {
     name: "Entidades",

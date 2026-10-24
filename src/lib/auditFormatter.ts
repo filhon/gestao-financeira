@@ -153,6 +153,10 @@ export const ACTION_LABELS: Record<string, string> = {
   hold: "bloqueou o pagamento de",
   release_hold: "desbloqueou o pagamento de",
   promise: "registrou promessa de pagamento em",
+  confirm_match: "conciliou",
+  remove_match: "desfez a conciliação de",
+  close_period: "fechou a conciliação de",
+  reopen_period: "reabriu a conciliação de",
 };
 
 // Entity translations
@@ -166,6 +170,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   recurrence: "Recorrência",
   budget: "Orçamento",
   chart_account: "Plano de Contas",
+  bank_account: "Conta Bancária",
 };
 
 /**
@@ -532,6 +537,8 @@ export function getEntityLink(entity: string, entityId: string): string | null {
       return entityId ? `/financeiro` : null;
     case "chart_account":
       return `/cadastros/plano-de-contas`;
+    case "bank_account":
+      return `/cadastros/contas-bancarias`;
     default:
       return null;
   }

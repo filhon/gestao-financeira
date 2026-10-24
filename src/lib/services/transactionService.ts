@@ -1124,7 +1124,7 @@ export const transactionService = {
 
   reconcile: async (
     transactionId: string,
-    data: { externalId: string; reconciledBy: string },
+    data: { externalId: string; reconciledBy: string; bankAccountId?: string },
     actor?: { companyId: string; userEmail: string },
   ) => {
     const docRef = doc(db, COLLECTION_NAME, transactionId);
@@ -1149,6 +1149,7 @@ export const transactionService = {
         reconciledAt: serverTimestamp(),
         externalId: data.externalId,
         reconciledBy: data.reconciledBy,
+        ...(data.bankAccountId ? { bankAccountId: data.bankAccountId } : {}),
         updatedAt: serverTimestamp(),
       });
     });

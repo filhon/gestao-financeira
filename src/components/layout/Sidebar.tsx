@@ -24,6 +24,7 @@ import {
   ReceiptText,
   Megaphone,
   ListTree,
+  Landmark,
 } from "lucide-react";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
@@ -114,6 +115,12 @@ const allMenuItems: MenuItem[] = [
         href: "/cadastros/plano-de-contas",
         icon: ListTree,
         permission: "canViewChartOfAccounts",
+      },
+      {
+        title: "Contas Bancárias",
+        href: "/cadastros/contas-bancarias",
+        icon: Landmark,
+        permission: "canViewBankAccounts",
       },
       {
         title: "Outros Cadastros", // Entities, etc.

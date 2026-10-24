@@ -19,6 +19,7 @@ import {
   Map as MapIcon,
   Megaphone,
   ListTree,
+  Landmark,
   type LucideIcon,
 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -97,6 +98,12 @@ const moreItems: NavTab[] = [
     href: "/cadastros/plano-de-contas",
     icon: ListTree,
     permission: "canViewChartOfAccounts",
+  },
+  {
+    title: "Contas Bancárias",
+    href: "/cadastros/contas-bancarias",
+    icon: Landmark,
+    permission: "canViewBankAccounts",
   },
   {
     title: "Outros Cadastros",

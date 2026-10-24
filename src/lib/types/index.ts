@@ -372,6 +372,8 @@ export interface Transaction {
   reconciledAt?: Date;
   externalId?: string; // ID from bank statement
   reconciledBy?: string;
+  /** Conta bancária por onde o dinheiro passou (gravada na conciliação). */
+  bankAccountId?: string;
 
   // Dunning (Cobrança)
   dunningStatus?: {
@@ -496,7 +498,9 @@ export interface AuditLog {
     | "delete_comprovante"
     | "hold"
     | "release_hold"
-    | "promise";
+    | "promise"
+    | "close_period"
+    | "reopen_period";
   entity:
     | "transaction"
     | "company"
@@ -507,7 +511,8 @@ export interface AuditLog {
     | "recurrence"
     | "budget"
     | "comprovante"
-    | "chart_account";
+    | "chart_account"
+    | "bank_account";
   entityId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details: Record<string, any>;
@@ -674,6 +679,8 @@ export interface BankTransaction {
   description: string;
   documentNumber?: string; // check number, etc.
   type: "credit" | "debit";
+  /** Ausente em linhas importadas antes de existir conta bancária. */
+  bankAccountId?: string;
 
   // Matching State
   status: ReconciliationStatus;
@@ -683,6 +690,38 @@ export interface BankTransaction {
   matchedBundleDetails?: Transaction[]; // Full transaction objects for bundled matches
   matchCandidates?: ReconciliationMatchCandidate[]; // Top candidates for manual review
   confidence?: number; // 0-100 score of match quality
+}
+
+/** Fechamento de conciliação: até `through` o saldo do sistema bateu com `balance`. */
+export interface BankAccountClosing {
+  through: Date;
+  balance: number;
+  closedBy: string;
+  closedAt: Date;
+}
+
+export interface BankAccount {
+  id: string;
+  companyId: string;
+  /** Apelido exibido nas telas ("Itaú movimento"). */
+  name: string;
+  bankName?: string;
+  /** Código do banco (BANKID do OFX), usado para reconhecer o extrato. */
+  bankCode?: string;
+  agency?: string;
+  /** Número da conta (ACCTID do OFX), usado para reconhecer o extrato. */
+  accountNumber?: string;
+  /** Saldo ao fim do dia `openingBalanceDate`, ponto de partida da conciliação. */
+  openingBalance: number;
+  openingBalanceDate: Date;
+  /** Saldo final do último extrato importado (LEDGERBAL ou informado). */
+  statementBalance?: number;
+  statementBalanceDate?: Date;
+  /** Em ordem; o último é o período fechado vigente. */
+  closings?: BankAccountClosing[];
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ReconciliationRule {

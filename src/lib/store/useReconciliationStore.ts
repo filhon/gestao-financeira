@@ -12,7 +12,6 @@ interface ReconciliationState {
     status: BankTransaction["status"],
     updates?: Partial<BankTransaction>,
   ) => void;
-  clearSession: () => void;
   setIsLoading: (loading: boolean) => void;
 }
 
@@ -58,6 +57,5 @@ export const useReconciliationStore = create<ReconciliationState>((set) => ({
       return { transactions: newTransactions };
     }),
 
-  clearSession: () => set({ transactions: [] }),
   setIsLoading: (isLoading) => set({ isLoading }),
 }));
