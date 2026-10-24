@@ -176,6 +176,24 @@ service cloud.firestore {
                 request.resource.data.get('batchId', null) == resource.data.get('batchId', null));
       }
 
+      // Mudança de status direto pelo SDK segue a mesma régua do
+      // `setTransactionStatus` (STATUS_ROLES em functions/src/transactionLedger.ts).
+      // Hoje só o fluxo de lotes escreve status pelo SDK; o `user` muda status
+      // apenas pelo callable, que confere o dono.
+      function statusChangeAllowed() {
+        let before = resource.data.get('status', '');
+        let after = request.resource.data.get('status', '');
+        let cid = getCompanyId();
+        let leavesPaid = before in ['paid', 'received'];
+        return before == after ||
+          isManager(cid) ||
+          (leavesPaid && hasCompanyRole(cid, ['releaser'])) ||
+          (!leavesPaid && (
+            (after in ['approved', 'rejected', 'draft'] && hasCompanyRole(cid, ['approver'])) ||
+            (after in ['paid', 'received', 'authorized'] && hasCompanyRole(cid, ['releaser']))
+          ));
+      }
+
       function canChangeHold() {
         return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentHold']) ||
                isManager(getCompanyId()) ||
@@ -193,15 +211,16 @@ service cloud.firestore {
 
       // CREATE — receitas pelo SDK; despesa só pela Cloud Function, que confere
       // o saldo do centro de custo na mesma operação em que grava.
+      // Receita é do gestor (canCreateReceivables); o `user` só lança despesa.
       allow create: if isAuthenticated() &&
-        (hasCompanyRole(getCompanyId(), ['financial_manager']) ||
-         hasCompanyRole(getCompanyId(), ['user'])) &&
+        isManager(getCompanyId()) &&
         request.resource.data.get('type', '') != 'payable';
 
       // UPDATE — numa despesa, tudo que não mexe em orçamento continua livre:
       // vínculo com lote, conciliação, comprovante, anexo, observação, token de
       // aprovação e as mudanças de status do fluxo.
       allow update: if isAuthenticated() && canWrite() &&
+         statusChangeAllowed() &&
          respectsHold() && canChangeHold() && (
          !isPayableWrite() || (keepsBudgetFields() && keepsRejection())
       );

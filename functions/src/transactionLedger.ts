@@ -83,9 +83,47 @@ const TX_WRITERS: Role[] = [
 const STATUS_ROLES: Record<string, Role[]> = {
   approved: ["admin", "financial_manager", "approver"],
   rejected: ["admin", "financial_manager", "approver"],
+  // Sem estas duas, o `user` levava a própria despesa de rascunho direto a
+  // "autorizada" e ela aparecia para baixa sem ter passado pela aprovação.
+  pending_authorization: ["admin", "financial_manager"],
+  authorized: ["admin", "financial_manager", "releaser"],
   paid: ["admin", "financial_manager", "releaser"],
   received: ["admin", "financial_manager", "releaser"],
 };
+
+const PAY_STATUSES = ["paid", "received"];
+const SETTLEMENT_KEYS = new Set([
+  "status",
+  "paymentDate",
+  "finalAmount",
+  "discount",
+  "interest",
+]);
+
+/**
+ * Status com que uma despesa pode nascer. "paid" é o lançamento direto do
+ * extrato (tarifa, IOF): o dinheiro já saiu, então só quem cria e também paga.
+ */
+async function assertInitialStatus(
+  auth: NonNullable<functions.https.CallableContext["auth"]>,
+  companyId: string,
+  status: unknown,
+) {
+  if (
+    status === undefined ||
+    status === "draft" ||
+    status === "pending_approval"
+  )
+    return;
+  if (status === "paid") {
+    await assertCompanyRole(auth, companyId, ["admin", "financial_manager"]);
+    return;
+  }
+  throw new functions.https.HttpsError(
+    "invalid-argument",
+    `Uma despesa não pode ser criada com status ${String(status)}.`,
+  );
+}
 
 /**
  * Os callables rodam com o Admin SDK e passam por cima das regras: quem chama
@@ -126,8 +164,12 @@ async function assertCanWriteTransaction(
 ) {
   const changesStatus =
     typeof nextStatus === "string" && nextStatus !== current.status;
-  const allowed =
-    (changesStatus && STATUS_ROLES[nextStatus as string]) || TX_WRITERS;
+  // Desfazer uma baixa é de quem paga, seja qual for o destino.
+  const leavesPaid =
+    changesStatus && PAY_STATUSES.includes(current.status as string);
+  const allowed = leavesPaid
+    ? STATUS_ROLES.paid
+    : (changesStatus && STATUS_ROLES[nextStatus as string]) || TX_WRITERS;
   const role = await assertCompanyRole(auth, current.companyId!, allowed);
   if (role === "user" && current.createdBy !== auth.uid) {
     throw new functions.https.HttpsError(
@@ -482,6 +524,7 @@ export const createPayableTransaction = functions
         "Esta função valida apenas despesas.",
       );
     }
+    await assertInitialStatus(context.auth, companyId, tx.status);
 
     const year = effectiveYear(tx);
     if (year === null) {
@@ -781,6 +824,9 @@ export const createPayableInstallments = functions
         "invalid-argument",
         "Um parcelamento não pode ter mais de 120 parcelas.",
       );
+    }
+    for (const t of transactions) {
+      await assertInitialStatus(context.auth, companyId, t.status);
     }
 
     const { byId, parentIdOf, rootId, hasChildren, archived } =
@@ -1497,7 +1543,7 @@ export const applyTransactionPatches = functions
       );
     }
 
-    const { patches, enforce = true } = data as {
+    const { patches, enforce: requestedEnforce } = data as {
       patches?: Array<{
         transactionId?: string;
         patch?: Record<string, unknown>;
@@ -1511,6 +1557,17 @@ export const applyTransactionPatches = functions
         "patches é obrigatório.",
       );
     }
+
+    // `enforce: false` vem do cliente, então só vale para o que é baixa pura:
+    // levar a "paga" mexendo só nos campos da baixa. Junto com qualquer outro
+    // campo (valor, centro de custo) passaria uma despesa nova sem saldo.
+    const isSettlement = (patch?: Record<string, unknown>) =>
+      !!patch &&
+      PAY_STATUSES.includes(patch.status as string) &&
+      Object.keys(patch).every((k) => SETTLEMENT_KEYS.has(k));
+    const enforce =
+      requestedEnforce !== false ||
+      !patches.every((item) => isSettlement(item?.patch));
     // Teto alinhado ao limite de um writeBatch do Firestore; acima disso a tela
     // precisa dividir o lote.
     if (patches.length > 500) {
@@ -1867,6 +1924,13 @@ export const setTransactionStatus = functions
       throw new functions.https.HttpsError(
         "invalid-argument",
         `Status inválido: ${status}.`,
+      );
+    }
+    // A baixa grava sem conferir saldo; fora de "paga" isso seria um atalho.
+    if (settlement && !PAY_STATUSES.includes(status)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Dados de baixa só valem para o status pago.",
       );
     }
 
