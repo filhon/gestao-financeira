@@ -24,6 +24,7 @@ import {
   sum,
 } from "firebase/firestore";
 import currency from "currency.js";
+import { format, startOfDay } from "date-fns";
 import { PaymentBatch, PaymentBatchStatus, Transaction } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
 
@@ -633,6 +634,43 @@ export const paymentBatchService = {
     return token;
   },
 
+  /** Primeiro vencimento, alertas e os 3 maiores itens, para o e-mail ao aprovador. */
+  approvalEmailContext: async (batchId: string) => {
+    const txs = (await batchTransactions(batchId)).docs.map(
+      (d) => d.data() as Transaction,
+    );
+    const due = (t: Transaction) =>
+      (t.dueDate as unknown as Timestamp)?.toDate();
+    const dueDates = txs
+      .map(due)
+      .filter((d): d is Date => !!d)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const brl = (v: number) =>
+      new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(v);
+
+    const today = startOfDay(new Date());
+
+    return {
+      firstDueDate: dueDates[0] ? format(dueDates[0], "dd/MM/yyyy") : undefined,
+      overdueCount: dueDates.filter((d) => d < today).length,
+      budgetExceededCount: txs.filter((t) => t.budgetExceeded).length,
+      topItems: [...txs]
+        .sort((a, b) => effectiveAmount(b) - effectiveAmount(a))
+        .slice(0, 3)
+        .map((t) => {
+          const d = due(t);
+          return {
+            supplier: t.supplierOrClient || t.description,
+            amount: brl(effectiveAmount(t)),
+            dueDate: d ? format(d, "dd/MM") : "",
+          };
+        }),
+    };
+  },
+
   /**
    * Gestor recolhe um envio: o link deixa de valer e o lote volta à etapa
    * anterior (aprovação → Aberto, autorização → Aprovado).
@@ -699,7 +737,11 @@ export const paymentBatchService = {
     batchId: string,
     actor: BatchActor,
     comment?: string,
-    adjustments: Array<{ id: string; adjustedAmount: number }> = [],
+    adjustments: Array<{
+      id: string;
+      adjustedAmount: number;
+      reason: string;
+    }> = [],
     rejections: Array<{ id: string; reason: string }> = [],
   ) => {
     const before = await loadBatch(batchId);
@@ -710,12 +752,13 @@ export const paymentBatchService = {
       );
     }
 
-    const adjusted = new Map(adjustments.map((a) => [a.id, a.adjustedAmount]));
+    const adjusted = new Map(adjustments.map((a) => [a.id, a]));
     const rejected = new Map(rejections.map((r) => [r.id, r.reason]));
 
     const tSnap = await batchTransactions(batchId);
     let total = currency(0);
     const updates: Array<[DocumentReference, DocumentData]> = [];
+    const adjustmentLog: Array<Record<string, unknown>> = [];
     tSnap.docs.forEach((tDoc) => {
       const t = tDoc.data() as Transaction;
       const reason = rejected.get(tDoc.id);
@@ -726,15 +769,40 @@ export const paymentBatchService = {
         ]);
         return;
       }
-      const amount = adjusted.get(tDoc.id) ?? effectiveAmount(t);
+      const adj = adjusted.get(tDoc.id);
+      // Aprovador só reduz, e diz por quê (mesma regra do link mágico)
+      if (
+        adj &&
+        (!(adj.adjustedAmount > 0) ||
+          adj.adjustedAmount > effectiveAmount(t) ||
+          !adj.reason?.trim())
+      ) {
+        throw new Error(
+          `Redução inválida em "${t.description}": o valor só pode diminuir e precisa de motivo.`,
+        );
+      }
+      const amount = adj?.adjustedAmount ?? effectiveAmount(t);
       total = total.add(amount);
+      if (adj) {
+        adjustmentLog.push({
+          transactionId: tDoc.id,
+          from: effectiveAmount(t),
+          to: amount,
+          reason: adj.reason.trim(),
+        });
+      }
       updates.push([
         tDoc.ref,
         {
           status: "approved",
           approvedBy: actor.uid,
           approvedAt: serverTimestamp(),
-          ...(adjusted.has(tDoc.id) ? { batchAdjustedAmount: amount } : {}),
+          ...(adj
+            ? {
+                batchAdjustedAmount: amount,
+                batchAdjustmentReason: adj.reason.trim(),
+              }
+            : {}),
         },
       ]);
     });
@@ -762,8 +830,11 @@ export const paymentBatchService = {
 
     logBatch(before.companyId, actor, "approve", batchId, {
       totalAmount: total.value,
-      adjustmentCount: adjusted.size,
-      rejectedCount: rejected.size,
+      adjustments: adjustmentLog,
+      rejections: [...rejected].map(([transactionId, reason]) => ({
+        transactionId,
+        reason,
+      })),
       ...(comment ? { comment } : {}),
     });
   },

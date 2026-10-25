@@ -9,7 +9,7 @@ import {
   ReimbursementApprovedEmail,
 } from "@/components/emails/EmailTemplates";
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
+import { sendEmail } from "@/lib/email/sendEmail";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
 import { cookies } from "next/headers";
@@ -54,6 +54,14 @@ export async function POST(request: Request) {
 
   let emailComponent;
   let subject = "";
+  let fromName: string | undefined;
+  // Quem atende várias empresas precisa saber de qual é o pedido. Vai no
+  // remetente e com o nome curto: a razão social inteira no assunto escondia
+  // o lote e o valor na caixa de entrada do celular.
+  const shortCompany = (data?.companyName as string | undefined)
+    ?.split(/\s+[-–]\s+/)[0]
+    .trim();
+  const companyFrom = shortCompany ? `FinControl · ${shortCompany}` : undefined;
 
   if (type === "approval_request") {
     emailComponent = <ApprovalRequestEmail {...data} />;
@@ -63,10 +71,12 @@ export async function POST(request: Request) {
     subject = `Atualização de Status: ${data.description}`;
   } else if (type === "batch_approval_request") {
     emailComponent = <BatchApprovalEmail {...data} />;
-    subject = `Lote Aguardando Aprovação: ${data.batchName}`;
+    subject = `Aprovar: ${data.batchName} · ${data.totalAmount}`;
+    fromName = companyFrom;
   } else if (type === "batch_authorization_request") {
     emailComponent = <BatchAuthorizationEmail {...data} />;
-    subject = `Autorização Necessária: ${data.batchName}`;
+    subject = `Autorizar: ${data.batchName}`;
+    fromName = companyFrom;
   } else if (type === "batch_new_transactions") {
     emailComponent = <BatchNewTransactionsEmail {...data} />;
     subject = `Novas transações adicionadas ao lote: ${data.batchName}`;
@@ -84,69 +94,27 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Check if email sending is enabled
-    const isEmailEnabled = process.env.EMAIL_ENABLED !== "false";
-
-    if (!isEmailEnabled) {
-      logger.warn(
-        "Email sending is disabled (EMAIL_ENABLED=false). Email simulation:",
-      );
-      logger.log("To:", to);
-      logger.log("Subject:", subject);
-      logger.log("Type:", type);
-      return NextResponse.json({
-        success: true,
-        message: "Email disabled (EMAIL_ENABLED=false)",
-        simulated: true,
-      });
-    }
-
-    if (!process.env.RESEND_API_KEY) {
-      logger.warn("RESEND_API_KEY is missing. Email simulation:");
-      logger.log("To:", to);
-      logger.log("Subject:", subject);
-      logger.log("Type:", type);
-      return NextResponse.json({
-        success: true,
-        message: "Email simulated (API Key missing)",
-        simulated: true,
-      });
-    }
-
-    const resend = new Resend(process.env.RESEND_API_KEY);
-
-    // In development mode, redirect emails to fallback email for testing
-    // But don't modify subject in production even if fallback is set
-    const isDev = process.env.NODE_ENV === "development";
-    const fallbackEmail = process.env.NEXT_PUBLIC_DEV_FALLBACK_EMAIL;
-    const recipient = isDev && fallbackEmail ? fallbackEmail : to;
-
-    if (isDev && fallbackEmail && to !== fallbackEmail) {
-      logger.log(`[DEV] Redirecting email from ${to} to ${fallbackEmail}`);
-    }
-
-    // Use configured domain or fallback to Resend's default
-    const fromDomain =
-      process.env.EMAIL_FROM_DOMAIN || "updates.fincontrol.ia.br";
-    const fromEmail = `Fin Control <noreply@${fromDomain}>`;
-
-    // Only modify subject in development mode with fallback email
-    const emailSubject =
-      isDev && fallbackEmail ? `[TESTE - Original: ${to}] ${subject}` : subject;
-
-    const { data: result, error } = await resend.emails.send({
-      from: fromEmail,
-      to: recipient,
-      subject: emailSubject,
+    const result = await sendEmail({
+      to,
+      subject,
       react: emailComponent,
+      fromName,
     });
 
-    if (error) {
-      logger.error("Resend API Error:", error);
-      return NextResponse.json({ error }, { status: 500 });
+    if (result.simulated) {
+      return NextResponse.json({
+        success: true,
+        message: result.message,
+        simulated: true,
+      });
     }
 
-    return NextResponse.json(result);
+    if (result.error) {
+      logger.error("Resend API Error:", result.error);
+      return NextResponse.json({ error: result.error }, { status: 500 });
+    }
+
+    return NextResponse.json(result.data);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     logger.error("Email API Internal Error:", error);

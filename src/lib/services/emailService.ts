@@ -1,3 +1,4 @@
+import { format } from "date-fns";
 import { Transaction, ReimbursementReport } from "@/lib/types";
 
 interface EmailResponse {
@@ -93,9 +94,18 @@ export const emailService = {
     totalAmount: number,
     senderName: string,
     approverEmail: string,
+    context?: {
+      companyName?: string;
+      firstDueDate?: string;
+      topItems?: { supplier: string; amount: string; dueDate: string }[];
+      overdueCount?: number;
+      budgetExceededCount?: number;
+    },
   ): Promise<EmailResponse> => {
     try {
       const appDomain = getAppDomain();
+      // Mesmo prazo que sendForApproval grava no lote
+      const expiresAt = new Date(Date.now() + 48 * 3_600_000);
 
       const response = await fetch("/api/email", {
         method: "POST",
@@ -115,6 +125,8 @@ export const emailService = {
             }).format(totalAmount),
             senderName,
             link: `${appDomain}/approve-batch/${token}`,
+            expiresAt: format(expiresAt, "dd/MM 'às' HH:mm"),
+            ...context,
           },
         }),
       });
@@ -133,6 +145,7 @@ export const emailService = {
     totalAmount: number,
     senderName: string,
     authorizerEmail: string,
+    context?: { companyName?: string },
   ): Promise<EmailResponse> => {
     try {
       const appDomain = getAppDomain();
@@ -155,6 +168,7 @@ export const emailService = {
             }).format(totalAmount),
             senderName,
             link: `${appDomain}/authorize-batch/${token}`,
+            ...context,
           },
         }),
       });

@@ -140,6 +140,12 @@ export function useBatchActions({
               recipient,
               actor,
             );
+        // Contexto é enfeite do e-mail: se falhar, o link ainda vai
+        const context = forApproval
+          ? await paymentBatchService
+              .approvalEmailContext(batch.id)
+              .catch(() => ({}))
+          : {};
         await send(
           batch.name,
           batch.id,
@@ -148,6 +154,7 @@ export function useBatchActions({
           batch.totalAmount,
           user.displayName,
           email,
+          { companyName: selectedCompany?.name, ...context },
         );
       }),
     );

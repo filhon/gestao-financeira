@@ -1,9 +1,10 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import currency from "currency.js";
 import { format } from "date-fns";
-import { Check, Edit2, Loader2, X } from "lucide-react";
+import { AlertTriangle, Edit2, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,14 @@ import {
   paymentBatchService,
 } from "@/lib/services/paymentBatchService";
 import { cn, formatCurrency, plural } from "@/lib/utils";
+import {
+  costCenterBalancesQuery,
+  useCostCenters,
+} from "@/hooks/useCostCenters";
+import {
+  EnvelopeLine,
+  envelopeSnapshot,
+} from "@/components/features/finance/EnvelopeLine";
 
 /** "1.234,56" ou "1234.56" → 1234.56; inválido → NaN. */
 const parseAmount = (value: string) => {
@@ -37,8 +46,66 @@ const parseAmount = (value: string) => {
 const TH = "text-xs font-medium text-muted-foreground";
 
 /**
- * Aprovação na página do lote: ajustar valor e rejeitar por transação, depois
- * aprovar ou devolver o lote inteiro. Nada é gravado antes de aprovar.
+ * Envelope dos centros de custo do lote, no exercício de cada vencimento.
+ * As despesas já reservaram saldo desde o rascunho: isto é a situação atual,
+ * não o que a aprovação vai consumir.
+ */
+function BatchEnvelopes({
+  companyId,
+  transactions,
+}: {
+  companyId: string;
+  transactions: Transaction[];
+}) {
+  const { costCenters } = useCostCenters(companyId);
+  const years = [...new Set(transactions.map((t) => t.dueDate.getFullYear()))];
+  const balances = useQueries({
+    queries: years.map((year) => ({
+      ...costCenterBalancesQuery(companyId, costCenters, year),
+      enabled: costCenters.length > 0,
+    })),
+  });
+
+  const ccIds = [
+    ...new Set(
+      transactions
+        .map((t) => t.costCenterId)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const names = new Map(costCenters.map((cc) => [cc.id, cc.name]));
+  const rows = ccIds.flatMap((ccId) =>
+    years.flatMap((year, i) => {
+      const b = balances[i].data?.[ccId];
+      return b ? [{ ccId, snapshot: envelopeSnapshot(b, year) }] : [];
+    }),
+  );
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border px-4 py-3">
+      <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+        Centros de custo deste lote
+      </p>
+      <ul className="space-y-1 text-sm">
+        {rows.map(({ ccId, snapshot }) => (
+          <li
+            key={`${ccId}-${snapshot.year}`}
+            className="flex flex-wrap items-baseline justify-between gap-x-4"
+          >
+            <span className="font-medium">{names.get(ccId) ?? ccId}</span>
+            <EnvelopeLine snapshot={snapshot} className="text-xs" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Aprovação na página do lote: reduzir valor e rejeitar por transação (sempre
+ * com motivo), depois aprovar ou devolver o lote inteiro. Nada é gravado antes
+ * de aprovar.
  */
 export function BatchApprovalPanel({
   batch,
@@ -56,10 +123,13 @@ export function BatchApprovalPanel({
   /** Abre o detalhe da transação (boleto, anexos) antes de decidir. */
   onOpen: (t: Transaction) => void;
 }) {
-  const [adjusted, setAdjusted] = useState<Map<string, number>>(new Map());
+  const [adjusted, setAdjusted] = useState<
+    Map<string, { to: number; reason: string }>
+  >(new Map());
   const [rejected, setRejected] = useState<Map<string, string>>(new Map());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [editReason, setEditReason] = useState("");
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [comment, setComment] = useState("");
@@ -67,24 +137,36 @@ export function BatchApprovalPanel({
   const [returnReason, setReturnReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const amountOf = (t: Transaction) => adjusted.get(t.id) ?? effectiveAmount(t);
+  const amountOf = (t: Transaction) =>
+    adjusted.get(t.id)?.to ?? effectiveAmount(t);
   const kept = transactions.filter((t) => !rejected.has(t.id));
   const total = kept.reduce((acc, t) => acc.add(amountOf(t)), currency(0));
+  const reducedCount = [...adjusted.keys()].filter(
+    (id) => !rejected.has(id),
+  ).length;
 
   const startEdit = (t: Transaction) => {
+    setRejectingId(null);
     setEditingId(t.id);
     setEditValue(amountOf(t).toFixed(2).replace(".", ","));
+    setEditReason(adjusted.get(t.id)?.reason ?? "");
   };
 
   const saveEdit = (t: Transaction) => {
     const value = parseAmount(editValue);
-    if (isNaN(value)) {
-      toast.error("Valor inválido");
-      return;
-    }
+    const original = effectiveAmount(t);
     const next = new Map(adjusted);
-    if (value === effectiveAmount(t)) next.delete(t.id);
-    else next.set(t.id, value);
+    if (value === original) {
+      next.delete(t.id);
+    } else if (isNaN(value) || value <= 0 || value > original) {
+      toast.error(`Informe um valor menor que ${formatCurrency(original)}`);
+      return;
+    } else if (!editReason.trim()) {
+      toast.error("Informe o motivo da redução");
+      return;
+    } else {
+      next.set(t.id, { to: value, reason: editReason.trim() });
+    }
     setAdjusted(next);
     setEditingId(null);
   };
@@ -111,7 +193,7 @@ export function BatchApprovalPanel({
         comment.trim() || undefined,
         [...adjusted]
           .filter(([id]) => !rejected.has(id))
-          .map(([id, adjustedAmount]) => ({ id, adjustedAmount })),
+          .map(([id, a]) => ({ id, adjustedAmount: a.to, reason: a.reason })),
         [...rejected].map(([id, reason]) => ({ id, reason })),
       );
       toast.success(
@@ -147,6 +229,8 @@ export function BatchApprovalPanel({
 
   return (
     <section aria-label="Aprovação do lote" className="space-y-4">
+      <BatchEnvelopes companyId={batch.companyId} transactions={transactions} />
+
       <div className="rounded-lg border">
         <Table>
           <TableHeader>
@@ -173,7 +257,7 @@ export function BatchApprovalPanel({
             ) : (
               transactions.map((t) => {
                 const reason = rejected.get(t.id);
-                const isAdjusted = adjusted.has(t.id) && !reason;
+                const adj = reason ? undefined : adjusted.get(t.id);
                 return (
                   <Fragment key={t.id}>
                     <TableRow className={cn(reason && "text-muted-foreground")}>
@@ -192,9 +276,23 @@ export function BatchApprovalPanel({
                         >
                           {t.description}
                         </button>
+                        {t.budgetExceeded && !reason && (
+                          <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                            <AlertTriangle
+                              className="h-3 w-3 shrink-0"
+                              aria-hidden
+                            />
+                            Criada sem saldo no centro de custo
+                          </span>
+                        )}
                         {reason && (
                           <span className="block truncate text-xs text-red-700 dark:text-red-400">
                             Rejeitada: {reason}
+                          </span>
+                        )}
+                        {adj && (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            Reduzida: {adj.reason}
                           </span>
                         )}
                       </TableCell>
@@ -207,31 +305,14 @@ export function BatchApprovalPanel({
                         </span>
                       </TableCell>
                       <TableCell className="text-right font-financial tabular-nums">
-                        {editingId === t.id ? (
-                          <Input
-                            inputMode="decimal"
-                            aria-label={`Novo valor de ${t.description}`}
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") saveEdit(t);
-                              if (e.key === "Escape") setEditingId(null);
-                            }}
-                            className="ml-auto h-8 w-28 text-right"
-                            autoFocus
-                          />
-                        ) : (
-                          <>
-                            {isAdjusted && (
-                              <span className="mr-1.5 text-xs text-muted-foreground line-through">
-                                {formatCurrency(effectiveAmount(t))}
-                              </span>
-                            )}
-                            <span className={cn(reason && "line-through")}>
-                              {formatCurrency(amountOf(t))}
-                            </span>
-                          </>
+                        {adj && (
+                          <span className="mr-1.5 text-xs text-muted-foreground line-through">
+                            {formatCurrency(effectiveAmount(t))}
+                          </span>
                         )}
+                        <span className={cn(reason && "line-through")}>
+                          {formatCurrency(amountOf(t))}
+                        </span>
                       </TableCell>
                       <TableCell className="text-right">
                         {reason ? (
@@ -243,27 +324,6 @@ export function BatchApprovalPanel({
                           >
                             Desfazer
                           </Button>
-                        ) : editingId === t.id ? (
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8"
-                              onClick={() => saveEdit(t)}
-                              aria-label="Salvar valor"
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8"
-                              onClick={() => setEditingId(null)}
-                              aria-label="Cancelar edição"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
                         ) : (
                           <div className="flex justify-end gap-1">
                             <Button
@@ -271,8 +331,8 @@ export function BatchApprovalPanel({
                               variant="ghost"
                               className="h-8 w-8"
                               onClick={() => startEdit(t)}
-                              aria-label={`Ajustar valor de ${t.description}`}
-                              title="Ajustar valor"
+                              aria-label={`Reduzir valor de ${t.description}`}
+                              title="Reduzir valor"
                             >
                               <Edit2 className="h-4 w-4" />
                             </Button>
@@ -281,6 +341,7 @@ export function BatchApprovalPanel({
                               variant="ghost"
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
                               onClick={() => {
+                                setEditingId(null);
                                 setRejectingId(t.id);
                                 setRejectReason("");
                               }}
@@ -293,6 +354,61 @@ export function BatchApprovalPanel({
                         )}
                       </TableCell>
                     </TableRow>
+                    {editingId === t.id && (
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={5}>
+                          <form
+                            className="flex flex-col gap-2 py-1 sm:flex-row sm:items-end"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              saveEdit(t);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") setEditingId(null);
+                            }}
+                          >
+                            <div className="space-y-1 sm:w-36">
+                              <Label htmlFor={`value-${t.id}`}>
+                                Novo valor
+                              </Label>
+                              <Input
+                                id={`value-${t.id}`}
+                                inputMode="decimal"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                className="h-8 text-right tabular-nums"
+                                autoFocus
+                              />
+                            </div>
+                            <div className="flex-1 space-y-1">
+                              <Label htmlFor={`reduce-${t.id}`}>
+                                Motivo da redução
+                              </Label>
+                              <Input
+                                id={`reduce-${t.id}`}
+                                value={editReason}
+                                onChange={(e) => setEditReason(e.target.value)}
+                                placeholder="Ex.: pagar só a 1ª parcela"
+                                className="h-8"
+                              />
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setEditingId(null)}
+                              >
+                                Cancelar
+                              </Button>
+                              <Button type="submit" size="sm">
+                                Reduzir
+                              </Button>
+                            </div>
+                          </form>
+                        </TableCell>
+                      </TableRow>
+                    )}
                     {rejectingId === t.id && (
                       <TableRow className="bg-muted/40 hover:bg-muted/40">
                         <TableCell colSpan={5}>
@@ -356,8 +472,8 @@ export function BatchApprovalPanel({
             autoFocus
           />
           <p className="text-xs text-muted-foreground">
-            O lote volta para o gestor como Aberto, com este motivo. Ajustes e
-            rejeições desta tela não são gravados.
+            O lote volta para o gestor como Aberto, com este motivo. Reduções e
+            rejeições desta tela não são gravadas.
           </p>
         </div>
       ) : (
@@ -387,12 +503,12 @@ export function BatchApprovalPanel({
           <span className="font-medium font-financial tabular-nums">
             {formatCurrency(total.value)}
           </span>
-          {(rejected.size > 0 || adjusted.size > 0) && (
+          {(rejected.size > 0 || reducedCount > 0) && (
             <span className="text-muted-foreground">
               {rejected.size > 0 &&
                 ` · ${plural(rejected.size, "rejeitada", "rejeitadas")}`}
-              {adjusted.size > 0 &&
-                ` · ${plural(adjusted.size, "ajustada", "ajustadas")}`}
+              {reducedCount > 0 &&
+                ` · ${plural(reducedCount, "reduzida", "reduzidas")}`}
             </span>
           )}
         </p>
@@ -428,7 +544,7 @@ export function BatchApprovalPanel({
               </Button>
               <Button
                 onClick={handleApprove}
-                disabled={isSubmitting || kept.length === 0}
+                disabled={isSubmitting || kept.length === 0 || !!editingId}
               >
                 {isSubmitting && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

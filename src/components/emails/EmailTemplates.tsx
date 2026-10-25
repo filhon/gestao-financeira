@@ -119,122 +119,265 @@ interface BatchApprovalEmailProps {
   totalAmount: string;
   senderName: string;
   link: string;
+  companyName?: string;
+  firstDueDate?: string;
+  expiresAt?: string;
+  topItems?: { supplier: string; amount: string; dueDate: string }[];
+  /** Já vencidas no envio e criadas sem saldo: o que o aprovador olha primeiro. */
+  overdueCount?: number;
+  budgetExceededCount?: number;
 }
+
+const emailLabel = { padding: "6px 0", color: "#64748b" } as const;
+const emailValue = {
+  padding: "6px 0",
+  fontWeight: "bold",
+  textAlign: "right",
+  color: "#0f172a",
+} as const;
 
 export const BatchApprovalEmail: React.FC<
   Readonly<BatchApprovalEmailProps>
-> = ({ batchName, transactionCount, totalAmount, senderName, link }) => (
+> = ({
+  batchName,
+  transactionCount,
+  totalAmount,
+  senderName,
+  link,
+  companyName,
+  firstDueDate,
+  expiresAt,
+  topItems = [],
+  overdueCount = 0,
+  budgetExceededCount = 0,
+}) => {
+  const attention = [
+    overdueCount > 0 &&
+      (overdueCount === transactionCount
+        ? "todas já vencidas"
+        : `${overdueCount} já ${overdueCount === 1 ? "vencida" : "vencidas"}`),
+    budgetExceededCount > 0 &&
+      `${budgetExceededCount} ${budgetExceededCount === 1 ? "criada" : "criadas"} sem saldo no centro de custo`,
+  ].filter(Boolean);
+
+  return (
+    <div
+      style={{
+        fontFamily: "sans-serif",
+        lineHeight: "1.6",
+        maxWidth: "600px",
+        margin: "0 auto",
+        color: "#334155",
+      }}
+    >
+      <div
+        style={{ background: "#f8fafc", padding: "24px", borderRadius: "8px" }}
+      >
+        {companyName && (
+          <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+            {companyName}
+          </p>
+        )}
+        <h2
+          style={{ color: "#0f172a", margin: "4px 0 16px", fontSize: "20px" }}
+        >
+          Lote de pagamentos aguardando sua aprovação
+        </h2>
+
+        <p style={{ margin: "0 0 16px" }}>
+          <strong>{senderName}</strong> enviou o lote abaixo para você aprovar.
+        </p>
+
+        <div style={{ borderTop: "1px solid #e2e8f0" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <tr>
+                <td style={emailLabel}>Lote</td>
+                <td style={emailValue}>{batchName}</td>
+              </tr>
+              <tr>
+                <td style={emailLabel}>Transações</td>
+                <td style={emailValue}>{transactionCount}</td>
+              </tr>
+              {firstDueDate && (
+                <tr>
+                  <td style={emailLabel}>Primeiro vencimento</td>
+                  <td style={emailValue}>{firstDueDate}</td>
+                </tr>
+              )}
+              <tr>
+                <td style={{ ...emailLabel, borderTop: "1px solid #e2e8f0" }}>
+                  Total
+                </td>
+                <td
+                  style={{
+                    ...emailValue,
+                    borderTop: "1px solid #e2e8f0",
+                    fontSize: "18px",
+                  }}
+                >
+                  {totalAmount}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {attention.length > 0 && (
+          <p
+            style={{
+              margin: "12px 0 0",
+              padding: "8px 12px",
+              background: "#fffbeb",
+              borderRadius: "6px",
+              color: "#92400e",
+              fontSize: "14px",
+            }}
+          >
+            Atenção: {attention.join(" · ")}.
+          </p>
+        )}
+
+        {topItems.length > 0 && (
+          <>
+            <p
+              style={{
+                margin: "20px 0 4px",
+                fontSize: "13px",
+                color: "#64748b",
+              }}
+            >
+              Maiores pagamentos
+            </p>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "14px",
+              }}
+            >
+              <tbody>
+                {topItems.map((item, i) => (
+                  <tr key={i}>
+                    <td
+                      style={{
+                        padding: "6px 0",
+                        borderBottom: "1px solid #e2e8f0",
+                      }}
+                    >
+                      {item.supplier}
+                      {item.dueDate && (
+                        <span style={{ color: "#64748b" }}>
+                          {" "}
+                          · venc. {item.dueDate}
+                        </span>
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        padding: "6px 0",
+                        borderBottom: "1px solid #e2e8f0",
+                        textAlign: "right",
+                        whiteSpace: "nowrap",
+                        color: "#0f172a",
+                      }}
+                    >
+                      {item.amount}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        <p style={{ fontSize: "14px", margin: "20px 0 0" }}>
+          Na página você vê documento, anexos e para onde vai cada pagamento.
+          Pode reduzir valores ou rejeitar itens com motivo, ou devolver o lote
+          ao gestor.
+        </p>
+
+        <div style={{ textAlign: "center", margin: "24px 0" }}>
+          <a
+            href={link}
+            style={{
+              // emerald-700: texto branco passa do AA (o 600 dava 3,8:1)
+              background: "#047857",
+              color: "#fcfcfd",
+              padding: "12px 32px",
+              textDecoration: "none",
+              borderRadius: "6px",
+              fontWeight: "bold",
+              display: "inline-block",
+            }}
+          >
+            Revisar e aprovar
+          </a>
+        </div>
+
+        <p style={{ color: "#64748b", fontSize: "12px", margin: 0 }}>
+          {expiresAt
+            ? `O link vale até ${expiresAt} e é só seu: não encaminhe.`
+            : "O link vale por 48 horas e é só seu: não encaminhe."}{" "}
+          Não reconhece este pedido? Não clique e avise o gestor financeiro.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+interface ApprovalCodeEmailProps {
+  code: string;
+  batchName: string;
+  companyName?: string | null;
+  minutes: number;
+}
+
+export const ApprovalCodeEmail: React.FC<Readonly<ApprovalCodeEmailProps>> = ({
+  code,
+  batchName,
+  companyName,
+  minutes,
+}) => (
   <div
     style={{
       fontFamily: "sans-serif",
       lineHeight: "1.6",
       maxWidth: "600px",
       margin: "0 auto",
+      color: "#334155",
     }}
   >
     <div
-      style={{ background: "#f8fafc", padding: "20px", borderRadius: "8px" }}
+      style={{ background: "#f8fafc", padding: "24px", borderRadius: "8px" }}
     >
-      <h2 style={{ color: "#1e293b", marginTop: 0 }}>
-        📋 Lote de Pagamentos Aguardando Aprovação
+      {companyName && (
+        <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+          {companyName}
+        </p>
+      )}
+      <h2 style={{ color: "#0f172a", margin: "4px 0 16px", fontSize: "20px" }}>
+        Código para confirmar a decisão sobre o lote
       </h2>
-
-      <p style={{ color: "#475569" }}>Olá,</p>
-      <p style={{ color: "#475569" }}>
-        <strong>{senderName}</strong> enviou um lote de pagamentos para sua
-        aprovação.
+      <p style={{ margin: "0 0 16px" }}>
+        Lote <strong>{batchName}</strong>. Digite o código na página de
+        aprovação:
       </p>
-
-      <div
+      <p
         style={{
-          background: "#fff",
-          padding: "16px",
-          borderRadius: "6px",
-          border: "1px solid #e2e8f0",
-          margin: "20px 0",
+          fontSize: "32px",
+          fontWeight: "bold",
+          letterSpacing: "8px",
+          color: "#0f172a",
+          fontFamily: "monospace",
+          margin: "0 0 16px",
         }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <tbody>
-            <tr>
-              <td style={{ padding: "8px 0", color: "#64748b" }}>Lote:</td>
-              <td
-                style={{
-                  padding: "8px 0",
-                  fontWeight: "bold",
-                  textAlign: "right",
-                }}
-              >
-                {batchName}
-              </td>
-            </tr>
-            <tr>
-              <td style={{ padding: "8px 0", color: "#64748b" }}>
-                Transações:
-              </td>
-              <td
-                style={{
-                  padding: "8px 0",
-                  fontWeight: "bold",
-                  textAlign: "right",
-                }}
-              >
-                {transactionCount}
-              </td>
-            </tr>
-            <tr>
-              <td
-                style={{
-                  padding: "8px 0",
-                  color: "#64748b",
-                  borderTop: "1px solid #e2e8f0",
-                }}
-              >
-                Valor Total:
-              </td>
-              <td
-                style={{
-                  padding: "8px 0",
-                  fontWeight: "bold",
-                  textAlign: "right",
-                  borderTop: "1px solid #e2e8f0",
-                  color: "#059669",
-                  fontSize: "18px",
-                }}
-              >
-                {totalAmount}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <p style={{ color: "#475569", fontSize: "14px" }}>
-        Clique no botão abaixo para revisar as transações e aprovar o lote. Você
-        poderá editar valores, rejeitar transações individuais ou devolver o
-        lote para ajustes.
+        {code}
       </p>
-
-      <div style={{ textAlign: "center", margin: "24px 0" }}>
-        <a
-          href={link}
-          style={{
-            background: "#059669",
-            color: "#fff",
-            padding: "12px 32px",
-            textDecoration: "none",
-            borderRadius: "6px",
-            fontWeight: "bold",
-            display: "inline-block",
-          }}
-        >
-          Revisar e Aprovar Lote
-        </a>
-      </div>
-
-      <p style={{ color: "#94a3b8", fontSize: "12px", marginBottom: 0 }}>
-        Este link expira em 48 horas. Se você não reconhece esta solicitação,
-        por favor ignore este email.
+      <p style={{ color: "#64748b", fontSize: "12px", margin: 0 }}>
+        Vale por {minutes} minutos. Não compartilhe este código. Se você não
+        pediu, alguém abriu o seu link de aprovação: avise o gestor financeiro.
       </p>
     </div>
   </div>

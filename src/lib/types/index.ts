@@ -366,6 +366,7 @@ export interface Transaction {
   // Batch approval tracking
   batchRejectionReason?: string; // Why rejected from batch
   batchAdjustedAmount?: number; // Approver-adjusted amount
+  batchAdjustmentReason?: string; // Why the approver reduced it
 
   // Reconciliation
   reconciled?: boolean;
