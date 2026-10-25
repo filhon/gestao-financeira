@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
+import currency from "currency.js";
 
 const BATCHES = "payment_batches";
 const TRANSACTIONS = "transactions";
@@ -213,12 +214,15 @@ export async function POST(request: Request) {
 
       const fsWriteBatch = adminDb.batch();
 
-      let newTotalAmount = 0;
-      allTxSnap.docs.forEach((tDoc) => {
-        const originalAmount = (tDoc.data().amount as number) ?? 0;
-        const adjustedAmount = adjustmentMap.get(tDoc.id);
-        newTotalAmount += adjustedAmount ?? originalAmount;
-      });
+      const newTotalAmount = allTxSnap.docs.reduce((acc, tDoc) => {
+        const td = tDoc.data();
+        return acc.add(
+          adjustmentMap.get(tDoc.id) ??
+            td.batchAdjustedAmount ??
+            (td.amount as number) ??
+            0,
+        );
+      }, currency(0)).value;
 
       const batchUpdate: Record<string, unknown> = {
         status: "approved",
@@ -303,9 +307,12 @@ export async function POST(request: Request) {
       fsWriteBatch.update(batchDoc.ref, {
         transactionIds: newTransactionIds,
         rejectedTransactionIds: rejectedIds,
+        // Subtrai o que o lote de fato soma: o valor ajustado, se houver
         totalAmount: Math.max(
           0,
-          (batchData.totalAmount as number) - (tData.amount as number),
+          currency(batchData.totalAmount as number).subtract(
+            (tData.batchAdjustedAmount ?? tData.amount) as number,
+          ).value,
         ),
         updatedAt: FieldValue.serverTimestamp(),
       });

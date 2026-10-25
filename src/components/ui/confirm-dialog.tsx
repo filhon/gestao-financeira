@@ -22,6 +22,9 @@ interface ConfirmDialogProps {
   cancelText?: string;
   variant?: "default" | "destructive";
   onConfirm: () => Promise<void> | void;
+  /** Conteúdo extra entre a descrição e os botões (ex.: campo de motivo). */
+  children?: React.ReactNode;
+  confirmDisabled?: boolean;
 }
 
 export function ConfirmDialog({
@@ -33,6 +36,8 @@ export function ConfirmDialog({
   cancelText = "Cancelar",
   variant = "default",
   onConfirm,
+  children,
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -41,6 +46,8 @@ export function ConfirmDialog({
       setIsLoading(true);
       await onConfirm();
       onOpenChange(false);
+    } catch {
+      // Quem chama já avisou o erro; o diálogo fica aberto para tentar de novo
     } finally {
       setIsLoading(false);
     }
@@ -53,6 +60,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isLoading}>
             {cancelText}
@@ -62,7 +70,7 @@ export function ConfirmDialog({
               e.preventDefault();
               handleConfirm();
             }}
-            disabled={isLoading}
+            disabled={isLoading || confirmDisabled}
             className={
               variant === "destructive"
                 ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"

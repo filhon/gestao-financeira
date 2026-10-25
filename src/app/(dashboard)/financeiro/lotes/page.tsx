@@ -1,26 +1,28 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import currency from "currency.js";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { paymentBatchService } from "@/lib/services/paymentBatchService";
+import {
+  BatchActor,
+  canActOnBatch,
+  paymentBatchService,
+} from "@/lib/services/paymentBatchService";
 import { notificationService } from "@/lib/services/notificationService";
 import { emailService } from "@/lib/services/emailService";
-import { PaymentBatch } from "@/lib/types";
+import { PaymentBatch, PaymentBatchStatus } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Plus,
   MoreHorizontal,
   Loader2,
-  Edit,
   CalendarIcon,
   Trash2,
   Package,
-  Layers,
-  Clock,
-  CheckCircle2,
-  DollarSign,
-  SlidersHorizontal,
-  X,
+  Pencil,
+  Undo2,
+  Eye,
 } from "lucide-react";
 import {
   Table,
@@ -30,10 +32,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatCurrencyAbbr, cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { formatCurrency, formatCurrencyAbbr, cn, plural } from "@/lib/utils";
+import { differenceInDays, format, formatDistanceToNowStrict } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Badge } from "@/components/ui/badge";
 import {
   ResponsiveModal,
   ResponsiveModalContent,
@@ -44,19 +45,20 @@ import {
 } from "@/components/ui/responsive-modal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/AuthProvider";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BatchDetailsDialog } from "@/components/features/finance/BatchDetailsDialog";
 import { BatchSendDialog } from "@/components/features/finance/BatchSendDialog";
 import { BatchApprovalDialog } from "@/components/features/finance/BatchApprovalDialog";
+import { BatchStatusBadge } from "@/components/features/finance/batchStatus";
 import {
   Popover,
   PopoverContent,
@@ -64,314 +66,211 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
-// ── Constants (top-level so MobileBatchCard can use them) ──────────────────
+// ── Abas: agrupam os status por quem precisa agir ──────────────────────────
 
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; color: string; dot: string; bg: string }
-> = {
-  open: {
-    label: "Aberto",
-    color: "bg-slate-100 text-slate-700 border-slate-200",
-    dot: "bg-slate-400",
-    bg: "",
+type TabId = "to_send" | "in_review" | "to_pay" | "paid" | "rejected" | "all";
+
+const TABS: { id: TabId; label: string; statuses: PaymentBatchStatus[] }[] = [
+  { id: "to_send", label: "A enviar", statuses: ["open"] },
+  {
+    id: "in_review",
+    label: "Em aprovação",
+    statuses: ["pending_approval", "pending_authorization"],
   },
-  pending_approval: {
-    label: "Ag. Aprovação",
-    color: "bg-amber-50 text-amber-700 border-amber-200",
-    dot: "bg-amber-400 animate-pulse",
-    bg: "bg-amber-50/60 dark:bg-amber-950/20",
-  },
-  approved: {
-    label: "Aprovado",
-    color: "bg-green-50 text-green-700 border-green-200",
-    dot: "bg-green-500",
-    bg: "bg-green-50/40 dark:bg-green-950/15",
-  },
-  pending_authorization: {
-    label: "Ag. Autorização",
-    color: "bg-amber-50 text-amber-700 border-amber-200",
-    dot: "bg-amber-400 animate-pulse",
-    bg: "bg-amber-50/60 dark:bg-amber-950/20",
-  },
-  authorized: {
-    label: "Autorizado",
-    color: "bg-teal-50 text-teal-700 border-teal-200",
-    dot: "bg-teal-500",
-    bg: "bg-teal-50/40 dark:bg-teal-950/15",
-  },
-  paid: {
-    label: "Pago",
-    color: "bg-blue-50 text-blue-700 border-blue-200",
-    dot: "bg-blue-500",
-    bg: "bg-blue-50/40 dark:bg-blue-950/15",
-  },
-  rejected: {
-    label: "Rejeitado",
-    color: "bg-red-50 text-red-700 border-red-200",
-    dot: "bg-red-500",
-    bg: "bg-red-50/40 dark:bg-red-950/15",
-  },
+  { id: "to_pay", label: "A pagar", statuses: ["approved", "authorized"] },
+  { id: "paid", label: "Pagos", statuses: ["paid"] },
+  { id: "rejected", label: "Rejeitados", statuses: ["rejected"] },
+  { id: "all", label: "Todos", statuses: [] },
+];
+
+const EMPTY: Record<TabId, string> = {
+  to_send: "Nenhum lote aberto. Crie um lote para agrupar as contas da semana.",
+  in_review: "Nenhum lote aguardando aprovação ou autorização.",
+  to_pay: "Nenhum lote aprovado aguardando pagamento.",
+  paid: "Nenhum lote pago ainda.",
+  rejected: "Nenhum lote rejeitado.",
+  all: "Nenhum lote criado. Crie um lote para agrupar e aprovar pagamentos.",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  all: "Todos",
-  open: "Aberto",
-  pending_approval: "Ag. Aprovação",
-  approved: "Aprovado",
-  pending_authorization: "Ag. Autorização",
-  authorized: "Autorizado",
-  paid: "Pago",
-  rejected: "Rejeitado",
-};
+/** Lote parado há mais que isso sem andar de etapa ganha destaque. */
+const STALE_DAYS = 7;
 
-function getStatusBadge(status: string) {
-  const cfg = STATUS_CONFIG[status];
-  if (!cfg) return <Badge>{status}</Badge>;
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border",
-        cfg.color,
-      )}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", cfg.dot)} />
-      {cfg.label}
-    </span>
-  );
+// ── Próximo passo de cada lote ─────────────────────────────────────────────
+
+type ActionKind =
+  | "send_approval"
+  | "approve"
+  | "send_authorization"
+  | "authorize"
+  | "confirm_payment";
+
+interface NextStep {
+  /** Quem precisa agir agora. */
+  who: string;
+  /** O que precisa ser feito, em minúsculas para compor a frase. */
+  what: string;
+  mine: boolean;
+  since?: Date;
+  expired?: boolean;
+  action?: { kind: ActionKind; label: string };
 }
 
-// ── Mobile skeleton ────────────────────────────────────────────────────────
-
-function MobileCardSkeleton() {
-  return (
-    <div className="divide-y">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="flex items-start gap-3 px-4 py-3.5">
-          <div className="flex-1 space-y-2 min-w-0">
-            <div className="flex items-start justify-between gap-2">
-              <Skeleton className="h-4 flex-1 max-w-[180px]" />
-              <Skeleton className="h-4 w-20 shrink-0" />
-            </div>
-            <Skeleton className="h-3 w-28" />
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-3 w-20" />
-              <Skeleton className="h-5 w-20 rounded-full" />
-            </div>
-          </div>
-          <Skeleton className="h-11 w-11 rounded shrink-0" />
-        </div>
-      ))}
-    </div>
-  );
+interface StepContext {
+  actor: BatchActor | null;
+  canManage: boolean;
+  canApprove: boolean;
+  canPay: boolean;
 }
 
-// ── Mobile batch card ──────────────────────────────────────────────────────
+function nextStep(b: PaymentBatch, ctx: StepContext): NextStep | null {
+  const manager = "Gestor financeiro";
+  const expired =
+    !!b.approvalTokenExpiresAt && b.approvalTokenExpiresAt < new Date();
+  const designated = !!ctx.actor && canActOnBatch(b, ctx.actor);
 
-interface MobileBatchCardProps {
-  batch: PaymentBatch;
-  canManageBatches: boolean;
-  canApproveBatches: boolean;
-  canPayBatches: boolean;
-  onViewDetails: () => void;
-  onApprove: () => void;
-  onSendForApproval: () => void;
-  onSendForAuthorization: () => void;
-  onConfirmAuthorization: () => void;
-  onConfirmPayments: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRevert: () => void;
+  switch (b.status) {
+    case "open":
+      return {
+        who: manager,
+        what: "enviar para aprovação",
+        mine: ctx.canManage,
+        since: b.revertedAt ?? b.createdAt,
+        action:
+          ctx.canManage && b.transactionIds.length > 0
+            ? { kind: "send_approval", label: "Enviar para aprovação" }
+            : undefined,
+      };
+    case "pending_approval": {
+      const mine = ctx.canApprove && designated;
+      return {
+        who: b.approverName || b.approverEmail || "Aprovador",
+        what: "aprovar",
+        mine,
+        since: b.sentForApprovalAt,
+        expired,
+        action: mine
+          ? { kind: "approve", label: "Aprovar" }
+          : expired && ctx.canManage
+            ? { kind: "send_approval", label: "Reenviar link" }
+            : undefined,
+      };
+    }
+    case "approved":
+      return {
+        who: manager,
+        what: "enviar para autorização",
+        mine: ctx.canManage,
+        since: b.approvedAt,
+        action: ctx.canManage
+          ? { kind: "send_authorization", label: "Enviar para autorização" }
+          : undefined,
+      };
+    case "pending_authorization": {
+      const mine = ctx.canPay && designated;
+      return {
+        who: b.authorizerName || b.authorizerEmail || "Autorizador",
+        what: "autorizar no banco",
+        mine,
+        since: b.sentForAuthorizationAt,
+        expired,
+        action: mine
+          ? { kind: "authorize", label: "Autorizar" }
+          : expired && ctx.canManage
+            ? { kind: "send_authorization", label: "Reenviar link" }
+            : undefined,
+      };
+    }
+    case "authorized":
+      return {
+        who: manager,
+        what: "confirmar pagamento",
+        mine: ctx.canManage,
+        since: b.authorizedAt,
+        action: ctx.canManage
+          ? { kind: "confirm_payment", label: "Confirmar pagamento" }
+          : undefined,
+      };
+    default:
+      return null;
+  }
 }
 
-function MobileBatchCard({
+function periodLabel(b: PaymentBatch) {
+  if (!b.startDate || !b.endDate) return null;
+  const sameYear = b.startDate.getFullYear() === b.endDate.getFullYear();
+  return `${format(b.startDate, sameYear ? "dd/MM" : "dd/MM/yyyy")} a ${format(b.endDate, "dd/MM/yyyy")}`;
+}
+
+/** Erro do serviço já vem em português; o do Firestore, não. */
+function errorMessage(error: unknown, fallback: string) {
+  if ((error as { code?: string })?.code === "permission-denied")
+    return "Você não tem permissão para esta ação.";
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function StepCell({
+  step,
   batch,
-  canManageBatches,
-  canApproveBatches,
-  canPayBatches,
-  onViewDetails,
-  onApprove,
-  onSendForApproval,
-  onSendForAuthorization,
-  onConfirmAuthorization,
-  onConfirmPayments,
-  onEdit,
-  onDelete,
-  onRevert,
-}: MobileBatchCardProps) {
-  const cfg = STATUS_CONFIG[batch.status];
-  const bgClass = cfg?.bg ?? "";
-
-  const quickAction = (() => {
-    if (batch.status === "pending_approval" && canApproveBatches)
-      return {
-        label: "Aprovar",
-        onClick: onApprove,
-        className: "border-green-200 text-green-700 hover:bg-green-50",
-      };
-    if (batch.status === "pending_authorization" && canPayBatches)
-      return {
-        label: "Autorizar",
-        onClick: onConfirmAuthorization,
-        className: "border-teal-200 text-teal-700 hover:bg-teal-50",
-      };
-    if (batch.status === "authorized" && canManageBatches)
-      return {
-        label: "Confirmar Pgto",
-        onClick: onConfirmPayments,
-        className: "border-blue-200 text-blue-700 hover:bg-blue-50",
-      };
-    return null;
-  })();
-
-  const responsibleText = (() => {
-    if (batch.status === "pending_approval" && batch.approverEmail)
-      return `Aprovador: ${batch.approverEmail}`;
-    if (batch.status === "pending_authorization" && batch.authorizerEmail)
-      return `Autorizador: ${batch.authorizerEmail}`;
-    return null;
-  })();
-
+}: {
+  step: NextStep | null;
+  batch: PaymentBatch;
+}) {
+  if (!step) {
+    return (
+      <span className="text-sm text-muted-foreground">
+        {batch.status === "paid" && batch.paidAt
+          ? `Pago em ${format(batch.paidAt, "dd/MM/yyyy")}`
+          : "Sem pendência"}
+      </span>
+    );
+  }
+  const stale =
+    !!step.since && differenceInDays(new Date(), step.since) > STALE_DAYS;
   return (
-    <div
-      className={cn(
-        "relative flex items-start gap-2 px-4 py-3.5 transition-colors",
-        bgClass,
-      )}
-    >
-      {/* Main content */}
-      <button
-        type="button"
-        className="flex-1 text-left min-w-0 py-0.5"
-        onClick={onViewDetails}
+    <div className="flex min-w-0 flex-col">
+      <span
+        className={cn(
+          "truncate text-sm",
+          step.mine ? "font-medium text-foreground" : "text-muted-foreground",
+        )}
+        title={step.who}
       >
-        <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-medium leading-snug flex-1 truncate">
-            {batch.name}
-          </p>
+        {step.mine ? "Você" : step.who}
+        <span className="font-normal text-muted-foreground">: {step.what}</span>
+      </span>
+      {step.expired ? (
+        <span className="text-xs text-red-600 dark:text-red-400">
+          Link expirado
+        </span>
+      ) : (
+        step.since && (
           <span
-            className="text-sm font-bold font-financial shrink-0"
-            title={formatCurrency(batch.totalAmount)}
+            className={cn(
+              "text-xs tabular-nums",
+              stale
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-muted-foreground",
+            )}
+            title={format(step.since, "dd/MM/yyyy HH:mm")}
           >
-            {formatCurrencyAbbr(batch.totalAmount)}
+            {stale ? "parado " : ""}
+            {formatDistanceToNowStrict(step.since, {
+              locale: ptBR,
+              addSuffix: true,
+            })}
           </span>
-        </div>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {format(batch.createdAt, "dd MMM yyyy", { locale: ptBR })}
-        </p>
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <span className="text-xs text-muted-foreground">
-            {batch.transactionIds.length}{" "}
-            {batch.transactionIds.length !== 1 ? "transações" : "transação"}
-          </span>
-          {getStatusBadge(batch.status)}
-        </div>
-        {responsibleText && (
-          <p className="text-[10px] text-muted-foreground/70 mt-1 truncate">
-            {responsibleText}
-          </p>
-        )}
-      </button>
-
-      {/* Actions */}
-      <div className="flex items-center gap-1 shrink-0">
-        {quickAction && (
-          <Button
-            size="sm"
-            variant="outline"
-            className={cn("h-10 text-xs px-3", quickAction.className)}
-            onClick={quickAction.onClick}
-          >
-            {quickAction.label}
-          </Button>
-        )}
-        {(canManageBatches || quickAction) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="h-11 w-11 p-0"
-                aria-label="Ações do lote"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Ações</DropdownMenuLabel>
-              {canManageBatches && (
-                <>
-                  <DropdownMenuItem onClick={onEdit}>
-                    <Edit className="mr-2 h-4 w-4" /> Editar
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              )}
-              {batch.status === "open" && canManageBatches && (
-                <DropdownMenuItem onClick={onSendForApproval}>
-                  Enviar para Aprovador
-                </DropdownMenuItem>
-              )}
-              {batch.status === "pending_approval" && canApproveBatches && (
-                <DropdownMenuItem onClick={onApprove}>
-                  Aprovar Lote
-                </DropdownMenuItem>
-              )}
-              {batch.status === "approved" && canManageBatches && (
-                <DropdownMenuItem onClick={onSendForAuthorization}>
-                  Enviar para Autorização
-                </DropdownMenuItem>
-              )}
-              {batch.status === "pending_authorization" && canPayBatches && (
-                <DropdownMenuItem onClick={onConfirmAuthorization}>
-                  Confirmar Autorização
-                </DropdownMenuItem>
-              )}
-              {batch.status === "authorized" && canManageBatches && (
-                <DropdownMenuItem onClick={onConfirmPayments}>
-                  Confirmar Pagamentos
-                </DropdownMenuItem>
-              )}
-              {batch.status === "paid" && canManageBatches && (
-                <DropdownMenuItem
-                  className="text-amber-600 focus:text-amber-700"
-                  onClick={onRevert}
-                >
-                  Reverter para Aberto
-                </DropdownMenuItem>
-              )}
-              {batch.status === "open" && canManageBatches && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    onClick={onDelete}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" /> Excluir Lote
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+        )
+      )}
     </div>
   );
 }
 
-// ── Page ───────────────────────────────────────────────────────────────────
+// ── Página ─────────────────────────────────────────────────────────────────
 
 export default function PaymentBatchesPage() {
   const { selectedCompany } = useCompany();
@@ -380,91 +279,116 @@ export default function PaymentBatchesPage() {
   const { canViewBatches, canManageBatches, canApproveBatches, canPayBatches } =
     usePermissions();
 
-  const [isLoading] = useState(false);
+  const [tab, setTab] = useState<TabId>(
+    canManageBatches ? "to_send" : "in_review",
+  );
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newBatchName, setNewBatchName] = useState("");
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
 
-  // Pagination & Filtering
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const pageSize = 20;
-
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingBatch, setEditingBatch] = useState<PaymentBatch | null>(null);
   const [editingBatchName, setEditingBatchName] = useState("");
-  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
 
   const [selectedBatch, setSelectedBatch] = useState<PaymentBatch | null>(null);
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [deleteBatchId, setDeleteBatchId] = useState<string | null>(null);
-  const [revertBatchId, setRevertBatchId] = useState<string | null>(null);
+  const [deleteBatch, setDeleteBatch] = useState<PaymentBatch | null>(null);
+  const [revertBatch, setRevertBatch] = useState<PaymentBatch | null>(null);
+  const [revertReason, setRevertReason] = useState("");
+  const [confirmStep, setConfirmStep] = useState<{
+    kind: "authorize" | "confirm_payment";
+    batch: PaymentBatch;
+  } | null>(null);
 
-  // New workflow dialogs
-  const [isSendForApprovalOpen, setIsSendForApprovalOpen] = useState(false);
-  const [isSendForAuthorizationOpen, setIsSendForAuthorizationOpen] =
-    useState(false);
-  const [isApprovalOpen, setIsApprovalOpen] = useState(false);
+  const [sendKind, setSendKind] = useState<
+    "send_approval" | "send_authorization" | null
+  >(null);
+  const [approvalBatch, setApprovalBatch] = useState<PaymentBatch | null>(null);
   const [actionBatch, setActionBatch] = useState<PaymentBatch | null>(null);
 
-  const activeFilterCount = filterStatus !== "all" ? 1 : 0;
+  const actor: BatchActor | null = user
+    ? { uid: user.uid, email: user.email ?? "" }
+    : null;
+  const ctx: StepContext = {
+    actor,
+    canManage: canManageBatches,
+    canApprove: canApproveBatches,
+    canPay: canPayBatches,
+  };
 
-  // Guard: redirect if no permission
   useEffect(() => {
-    if (!canViewBatches) {
-      router.push("/dashboard");
-    }
+    if (!canViewBatches) router.push("/dashboard");
   }, [canViewBatches, router]);
+
+  const statuses = TABS.find((t) => t.id === tab)!.statuses;
 
   const {
     items: batches,
     hasMore,
     loadMore,
-    isLoading: isPaginatedLoading,
+    isLoading,
     isFetchingNextPage,
-    refresh: fetchBatches,
+    refresh: refreshList,
   } = usePaginatedQuery<PaymentBatch>({
-    queryKey: ["payment-batches", selectedCompany?.id, filterStatus],
+    queryKey: ["payment-batches", selectedCompany?.id, tab],
     queryFn: async (pgSize, lastDoc) => {
       const { batches: items, lastDoc: newLastDoc } =
         await paymentBatchService.getAll(
           selectedCompany!.id,
           pgSize,
           lastDoc,
-          filterStatus,
+          statuses,
         );
       return { items, lastDoc: newLastDoc };
     },
-    pageSize,
+    pageSize: 20,
     enabled: !!selectedCompany && canViewBatches,
   });
 
-  const kpiData = useMemo(() => {
-    const open = batches.filter((b) => b.status === "open");
-    const pending = batches.filter(
-      (b) =>
-        b.status === "pending_approval" || b.status === "pending_authorization",
-    );
-    const authorized = batches.filter((b) => b.status === "authorized");
-    const paid = batches.filter((b) => b.status === "paid");
+  // Contagem e total de TODOS os lotes da empresa, não só da página carregada
+  const summaryQuery = useQuery({
+    queryKey: ["payment-batches-summary", selectedCompany?.id],
+    queryFn: () => paymentBatchService.getStatusSummary(selectedCompany!.id),
+    enabled: !!selectedCompany && canViewBatches,
+  });
+  const tabTotals = (id: TabId) => {
+    const summary = summaryQuery.data;
+    if (!summary) return null;
+    const t = TABS.find((x) => x.id === id)!;
+    const list = t.statuses.length
+      ? t.statuses
+      : (Object.keys(summary) as PaymentBatchStatus[]);
     return {
-      openCount: open.length,
-      openTotal: open.reduce((s, b) => s + b.totalAmount, 0),
-      pendingCount: pending.length,
-      authorizedCount: authorized.length,
-      authorizedTotal: authorized.reduce((s, b) => s + b.totalAmount, 0),
-      paidTotal: paid.reduce((s, b) => s + b.totalAmount, 0),
+      count: list.reduce((n, s) => n + summary[s].count, 0),
+      total: list.reduce((acc, s) => acc.add(summary[s].total), currency(0))
+        .value,
     };
-  }, [batches]);
+  };
+  const visibleTabs = TABS.filter(
+    (t) => t.id !== "rejected" || (tabTotals("rejected")?.count ?? 0) > 0,
+  );
+
+  const refresh = () => {
+    refreshList();
+    summaryQuery.refetch();
+  };
 
   if (!canViewBatches) return null;
 
+  // ── Criar / renomear / excluir ───────────────────────────────────────────
+
+  const suggestedName =
+    startDate && endDate
+      ? `Pagamentos ${format(startDate, "dd/MM")} a ${format(endDate, "dd/MM/yyyy")}`
+      : "";
+  const invalidRange = !!startDate && !!endDate && startDate > endDate;
+
   const handleCreateBatch = async () => {
-    if (!selectedCompany || !user || !newBatchName.trim()) return;
+    const name = newBatchName.trim() || suggestedName;
+    if (!selectedCompany || !user || !name || invalidRange) return;
     try {
       let start: Date | undefined;
       let end: Date | undefined;
-
       if (startDate) {
         start = new Date(startDate);
         start.setHours(0, 0, 0, 0);
@@ -473,1026 +397,755 @@ export default function PaymentBatchesPage() {
         end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
       }
-
       await paymentBatchService.create(
-        newBatchName,
+        name,
         selectedCompany.id,
         user.uid,
         start,
         end,
       );
-      toast.success("Lote criado com sucesso");
+      toast.success(`Lote "${name}" criado`);
       setIsCreateOpen(false);
       setNewBatchName("");
       setStartDate(undefined);
       setEndDate(undefined);
-      fetchBatches();
+      setTab("to_send");
+      refresh();
     } catch (error) {
       console.error("Error creating batch:", error);
-      toast.error("Erro ao criar lote");
+      toast.error(errorMessage(error, "Erro ao criar lote"));
     }
-  };
-
-  const handleEditBatch = (batch: PaymentBatch) => {
-    setEditingBatchId(batch.id);
-    setEditingBatchName(batch.name);
-    setIsEditOpen(true);
   };
 
   const handleUpdateBatch = async () => {
-    if (!editingBatchId || !editingBatchName.trim()) return;
+    if (!editingBatch || !editingBatchName.trim()) return;
     try {
-      await paymentBatchService.update(editingBatchId, {
-        name: editingBatchName,
+      await paymentBatchService.update(editingBatch.id, {
+        name: editingBatchName.trim(),
       });
-      toast.success("Lote atualizado com sucesso");
-      setIsEditOpen(false);
-      setEditingBatchId(null);
-      setEditingBatchName("");
-      fetchBatches();
+      toast.success("Lote renomeado");
+      setEditingBatch(null);
+      refresh();
     } catch (error) {
       console.error("Error updating batch:", error);
-      toast.error("Erro ao atualizar lote");
+      toast.error(errorMessage(error, "Erro ao renomear lote"));
     }
   };
 
-  const handleViewDetails = (batch: PaymentBatch) => {
-    setSelectedBatch(batch);
-    setIsDetailsOpen(true);
-  };
-
-  const handleOpenSendForApproval = (batch: PaymentBatch) => {
-    setActionBatch(batch);
-    setIsSendForApprovalOpen(true);
-  };
-
-  const handleSendForApproval = async (
-    _userId: string,
-    approverEmail: string,
-    approverName: string,
-  ) => {
-    if (!actionBatch || !user || !selectedCompany) return;
+  const handleDeleteBatch = async () => {
+    if (!deleteBatch || !actor) return;
     try {
-      const token = await paymentBatchService.sendForApproval(
-        actionBatch.id,
-        approverEmail,
-        approverEmail,
-      );
-      await emailService.sendBatchApprovalRequest(
+      await paymentBatchService.delete(deleteBatch.id, actor);
+      toast.success(`Lote "${deleteBatch.name}" excluído`);
+      setDeleteBatch(null);
+      refresh();
+    } catch (error) {
+      console.error("Error deleting batch:", error);
+      toast.error(errorMessage(error, "Erro ao excluir lote"));
+      throw error;
+    }
+  };
+
+  // ── Fluxo ────────────────────────────────────────────────────────────────
+
+  const runAction = (batch: PaymentBatch, kind: ActionKind) => {
+    if (kind === "approve") setApprovalBatch(batch);
+    else if (kind === "send_approval" || kind === "send_authorization") {
+      setActionBatch(batch);
+      setSendKind(kind);
+    } else setConfirmStep({ kind, batch });
+  };
+
+  const handleSend = async (_userId: string, email: string, name: string) => {
+    if (!actionBatch || !actor || !user || !sendKind) return;
+    const forApproval = sendKind === "send_approval";
+    try {
+      const recipient = { email, name: name !== email ? name : undefined };
+      const token = forApproval
+        ? await paymentBatchService.sendForApproval(
+            actionBatch.id,
+            recipient,
+            actor,
+          )
+        : await paymentBatchService.sendForAuthorization(
+            actionBatch.id,
+            recipient,
+            actor,
+          );
+      const send = forApproval
+        ? emailService.sendBatchApprovalRequest
+        : emailService.sendBatchAuthorizationRequest;
+      await send(
         actionBatch.name,
         actionBatch.id,
         token,
         actionBatch.transactionIds.length,
         actionBatch.totalAmount,
         user.displayName,
-        approverEmail,
+        email,
       );
-      toast.success(
-        `Lote enviado para ${approverName || approverEmail} (e-mail enviado)`,
-      );
-      fetchBatches();
+      toast.success(`Link enviado para ${name || email}. Vale por 48 horas.`);
+      refresh();
     } catch (error) {
-      console.error("Error sending for approval:", error);
-      toast.error("Erro ao enviar para aprovação");
+      console.error("Error sending batch:", error);
+      toast.error(
+        errorMessage(
+          error,
+          forApproval
+            ? "Erro ao enviar para aprovação"
+            : "Erro ao enviar para autorização",
+        ),
+      );
       throw error;
     }
   };
 
-  const handleOpenApproval = (batch: PaymentBatch) => {
-    setActionBatch(batch);
-    setIsApprovalOpen(true);
-  };
-
   const handleApprovalComplete = async () => {
-    if (!actionBatch || !selectedCompany || !user) return;
+    if (!approvalBatch || !selectedCompany || !user) return;
+    refresh();
     try {
       await notificationService.notifyBatchApproved(
-        actionBatch.createdBy,
-        actionBatch.name,
-        actionBatch.id,
+        approvalBatch.createdBy,
+        approvalBatch.name,
+        approvalBatch.id,
         user.displayName,
         selectedCompany.id,
       );
-      fetchBatches();
     } catch (error) {
       console.error("Error notifying after approval:", error);
     }
   };
 
-  const handleOpenSendForAuthorization = (batch: PaymentBatch) => {
-    setActionBatch(batch);
-    setIsSendForAuthorizationOpen(true);
-  };
-
-  const handleSendForAuthorization = async (
-    _userId: string,
-    authorizerEmail: string,
-    authorizerName: string,
-  ) => {
-    if (!actionBatch || !user || !selectedCompany) return;
+  const handleConfirmStep = async () => {
+    if (!confirmStep || !actor || !user || !selectedCompany) return;
+    const { kind, batch } = confirmStep;
     try {
-      const token = await paymentBatchService.sendForAuthorization(
-        actionBatch.id,
-        authorizerEmail,
-        authorizerEmail,
-      );
-      await emailService.sendBatchAuthorizationRequest(
-        actionBatch.name,
-        actionBatch.id,
-        token,
-        actionBatch.transactionIds.length,
-        actionBatch.totalAmount,
-        user.displayName,
-        authorizerEmail,
-      );
-      toast.success(
-        `Lote enviado para ${authorizerName || authorizerEmail} (e-mail enviado)`,
-      );
-      fetchBatches();
+      if (kind === "authorize") {
+        await paymentBatchService.confirmAuthorization(batch.id, actor);
+        toast.success(
+          `Lote autorizado: ${plural(batch.transactionIds.length, "transação", "transações")} · ${formatCurrency(batch.totalAmount)}`,
+        );
+        notificationService
+          .notifyBatchAuthorized(
+            batch.createdBy,
+            batch.name,
+            batch.id,
+            user.displayName,
+            selectedCompany.id,
+          )
+          .catch((e) => console.error("Error notifying authorization:", e));
+      } else {
+        const result = await paymentBatchService.confirmPayments(
+          batch.id,
+          actor,
+        );
+        toast.success(
+          `${plural(result.count, "transação marcada", "transações marcadas")} como paga${result.count === 1 ? "" : "s"} · ${formatCurrency(result.total)}`,
+        );
+      }
+      setConfirmStep(null);
+      refresh();
     } catch (error) {
-      console.error("Error sending for authorization:", error);
-      toast.error("Erro ao enviar para autorização");
+      console.error("Error confirming step:", error);
+      toast.error(
+        errorMessage(
+          error,
+          kind === "authorize"
+            ? "Erro ao autorizar lote"
+            : "Erro ao confirmar pagamentos",
+        ),
+      );
       throw error;
     }
   };
 
-  const handleConfirmAuthorization = async (batch: PaymentBatch) => {
-    if (!user || !selectedCompany) return;
-    try {
-      await paymentBatchService.confirmAuthorization(batch.id, user.uid);
-      await notificationService.notifyBatchAuthorized(
-        batch.createdBy,
-        batch.name,
-        batch.id,
-        user.displayName,
-        selectedCompany.id,
-      );
-      toast.success("Autorização confirmada");
-      fetchBatches();
-    } catch (error) {
-      console.error("Error confirming authorization:", error);
-      toast.error("Erro ao confirmar autorização");
-    }
-  };
-
-  const handleConfirmPayments = async (batch: PaymentBatch) => {
-    if (!user) return;
-    try {
-      await paymentBatchService.confirmPayments(batch.id, user.uid);
-      toast.success("Pagamentos confirmados");
-      fetchBatches();
-    } catch (error) {
-      console.error("Error confirming payments:", error);
-      toast.error("Erro ao confirmar pagamentos");
-    }
-  };
-
   const handleRevertToOpen = async () => {
-    if (!revertBatchId || !user) return;
+    if (!revertBatch || !actor) return;
     try {
-      await paymentBatchService.revertToOpen(revertBatchId, user.uid);
-      toast.success("Lote revertido para Aberto com sucesso");
-      setRevertBatchId(null);
-      fetchBatches();
+      await paymentBatchService.revertToOpen(
+        revertBatch.id,
+        actor,
+        revertReason,
+      );
+      toast.success(`Lote "${revertBatch.name}" voltou para Aberto`);
+      setRevertBatch(null);
+      setRevertReason("");
+      refresh();
     } catch (error) {
       console.error("Error reverting batch:", error);
-      toast.error(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (error as any)?.message || "Erro ao reverter lote",
-      );
+      toast.error(errorMessage(error, "Erro ao reverter lote"));
+      throw error;
     }
   };
 
-  const handleDeleteBatch = async () => {
-    if (!deleteBatchId) return;
-    try {
-      await paymentBatchService.delete(deleteBatchId);
-      toast.success("Lote excluído com sucesso");
-      setDeleteBatchId(null);
-      fetchBatches();
-    } catch (error) {
-      console.error("Error deleting batch:", error);
-      toast.error(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (error as any)?.message || "Erro ao excluir lote",
-      );
-    }
-  };
+  // ── Peças da tabela ──────────────────────────────────────────────────────
 
-  const getResponsiblePerson = (batch: PaymentBatch) => {
-    switch (batch.status) {
-      case "pending_approval":
-        return batch.approverEmail ? `Aprovador: ${batch.approverEmail}` : "-";
-      case "pending_authorization":
-        return batch.authorizerEmail
-          ? `Autorizador: ${batch.authorizerEmail}`
-          : "-";
-      default:
-        return "-";
-    }
-  };
+  const renderMenu = (batch: PaymentBatch) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          aria-label={`Ações do lote ${batch.name}`}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setSelectedBatch(batch)}>
+          <Eye className="mr-2 h-4 w-4" /> Ver transações
+        </DropdownMenuItem>
+        {canManageBatches && (
+          <DropdownMenuItem
+            onClick={() => {
+              setEditingBatch(batch);
+              setEditingBatchName(batch.name);
+            }}
+          >
+            <Pencil className="mr-2 h-4 w-4" /> Renomear
+          </DropdownMenuItem>
+        )}
+        {batch.status === "paid" && canManageBatches && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => setRevertBatch(batch)}
+            >
+              <Undo2 className="mr-2 h-4 w-4" /> Reverter para Aberto
+            </DropdownMenuItem>
+          </>
+        )}
+        {batch.status === "open" && canManageBatches && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => setDeleteBatch(batch)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Excluir lote
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
-  const isTableLoading =
-    isLoading || (isPaginatedLoading && batches.length === 0);
+  const renderAction = (batch: PaymentBatch, step: NextStep | null) =>
+    step?.action && (
+      <Button
+        size="sm"
+        variant={
+          step.action.kind === "confirm_payment" ||
+          step.action.kind === "authorize"
+            ? "default"
+            : "outline"
+        }
+        className="h-8 whitespace-nowrap text-xs"
+        onClick={() => runAction(batch, step.action!.kind)}
+      >
+        {step.action.label}
+      </Button>
+    );
+
+  const activeTotals = tabTotals(tab);
+  const remaining = activeTotals ? activeTotals.count - batches.length : null;
+  const isTableLoading = isLoading && batches.length === 0;
+
+  const emptyState = (
+    <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
+      <Package className="mb-3 h-8 w-8 text-muted-foreground/60" />
+      <p className="max-w-sm text-sm text-muted-foreground">{EMPTY[tab]}</p>
+      {canManageBatches && (tab === "to_send" || tab === "all") && (
+        <Button
+          size="sm"
+          className="mt-4"
+          onClick={() => setIsCreateOpen(true)}
+        >
+          <Plus className="mr-2 h-4 w-4" /> Novo lote
+        </Button>
+      )}
+    </div>
+  );
+
+  const loadMoreButton = hasMore && (
+    <div className="flex justify-center border-t p-3">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={loadMore}
+        disabled={isFetchingNextPage}
+      >
+        {isFetchingNextPage && (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        )}
+        Carregar mais
+        {remaining !== null && remaining > 0 && (
+          <span className="ml-1 text-muted-foreground">
+            ({remaining} restantes)
+          </span>
+        )}
+      </Button>
+    </div>
+  );
+
+  const COLUMNS = (
+    <TableRow>
+      <TableHead>Lote</TableHead>
+      <TableHead>Status</TableHead>
+      <TableHead>Próximo passo</TableHead>
+      <TableHead className="text-right">Transações</TableHead>
+      <TableHead className="text-right">Valor total</TableHead>
+      <TableHead className="w-px text-right">
+        <span className="sr-only">Ações</span>
+      </TableHead>
+    </TableRow>
+  );
 
   return (
     <div className="space-y-4 md:space-y-6">
-      {/* ── Page header ──────────────────────────────────────────────── */}
-      <div className="flex flex-wrap justify-between items-start md:items-center gap-2">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
-            Lotes de Pagamento
-          </h1>
-          {/* Result count — mobile only */}
-          {!isPaginatedLoading && (
-            <span className="md:hidden text-xs text-muted-foreground tabular-nums shrink-0">
-              {batches.length}
-              {hasMore ? "+" : ""} lote{batches.length !== 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
+      {/* ── Cabeçalho ──────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-xl font-bold tracking-tight md:text-3xl">
+          Lotes de Pagamento
+        </h1>
 
-        <div className="flex items-center gap-2">
-          {/* Mobile: filter button */}
-          <button
-            type="button"
-            onClick={() => setMobileFiltersOpen(true)}
-            aria-label="Abrir filtros"
-            className={cn(
-              "relative md:hidden flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors",
-              activeFilterCount > 0
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            )}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            {activeFilterCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground leading-none">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {canManageBatches && (
-            <ResponsiveModal open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-              <ResponsiveModalTrigger asChild>
-                <Button size="sm" className="h-9">
-                  <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline ml-2">Novo Lote</span>
-                </Button>
-              </ResponsiveModalTrigger>
-              <ResponsiveModalContent>
-                <ResponsiveModalHeader>
-                  <ResponsiveModalTitle>Criar Novo Lote</ResponsiveModalTitle>
-                </ResponsiveModalHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nome do Lote</Label>
-                    <Input
-                      id="name"
-                      placeholder="Ex: Pagamentos Semana 42"
-                      value={newBatchName}
-                      onChange={(e) => setNewBatchName(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2 flex flex-col">
-                      <Label htmlFor="startDate">Data Inicial</Label>
+        {canManageBatches && (
+          <ResponsiveModal open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <ResponsiveModalTrigger asChild>
+              <Button size="sm" className="h-9">
+                <Plus className="h-4 w-4" />
+                <span className="ml-2 hidden sm:inline">Novo lote</span>
+                <span className="sr-only sm:hidden">Novo lote</span>
+              </Button>
+            </ResponsiveModalTrigger>
+            <ResponsiveModalContent>
+              <ResponsiveModalHeader>
+                <ResponsiveModalTitle>Novo lote</ResponsiveModalTitle>
+              </ResponsiveModalHeader>
+              <div className="space-y-4 py-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {(
+                    [
+                      ["startDate", "Vencimento de", startDate, setStartDate],
+                      ["endDate", "Vencimento até", endDate, setEndDate],
+                    ] as const
+                  ).map(([id, label, value, setValue]) => (
+                    <div key={id} className="flex flex-col space-y-2">
+                      <Label htmlFor={id}>{label}</Label>
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
-                            variant={"outline"}
+                            id={id}
+                            variant="outline"
                             className={cn(
                               "w-full justify-start text-left font-normal",
-                              !startDate && "text-muted-foreground",
+                              !value && "text-muted-foreground",
                             )}
                           >
                             <CalendarIcon className="mr-2 h-4 w-4" />
-                            {startDate ? (
-                              format(startDate, "dd/MM/yyyy", { locale: ptBR })
-                            ) : (
-                              <span>Selecione uma data</span>
-                            )}
+                            {value ? format(value, "dd/MM/yyyy") : "Selecione"}
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0">
                           <Calendar
                             mode="single"
-                            selected={startDate}
-                            onSelect={setStartDate}
+                            selected={value}
+                            onSelect={setValue}
                             initialFocus
                           />
                         </PopoverContent>
                       </Popover>
                     </div>
-                    <div className="space-y-2 flex flex-col">
-                      <Label htmlFor="endDate">Data Final</Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant={"outline"}
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !endDate && "text-muted-foreground",
-                            )}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {endDate ? (
-                              format(endDate, "dd/MM/yyyy", { locale: ptBR })
-                            ) : (
-                              <span>Selecione uma data</span>
-                            )}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Calendar
-                            mode="single"
-                            selected={endDate}
-                            onSelect={setEndDate}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Ao definir as datas, as contas em rascunho (draft) dentro
-                    deste período serão adicionadas automaticamente.
-                  </p>
+                  ))}
                 </div>
-                <ResponsiveModalFooter>
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsCreateOpen(false)}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleCreateBatch}>Criar</Button>
-                </ResponsiveModalFooter>
-              </ResponsiveModalContent>
-            </ResponsiveModal>
-          )}
-        </div>
-      </div>
-
-      {/* ── Mobile: active filter chip ───────────────────────────────── */}
-      {activeFilterCount > 0 && (
-        <div className="flex md:hidden items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {filterStatus !== "all" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-              {STATUS_LABELS[filterStatus] ?? filterStatus}
-              <button
-                onClick={() => setFilterStatus("all")}
-                className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                aria-label="Remover filtro de status"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          )}
-          <button
-            onClick={() => setFilterStatus("all")}
-            className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline hover:text-foreground transition-colors ml-1"
-          >
-            Limpar tudo
-          </button>
-        </div>
-      )}
-
-      {/* ── KPI stat strip ─────────────────────────────────────────────── */}
-      {!isPaginatedLoading && batches.length > 0 && (
-        <div className="rounded-lg border bg-card overflow-hidden">
-          <div className="grid grid-cols-2 md:grid-cols-4">
-            <div className="px-5 py-4 border-r border-b md:border-b-0">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Layers className="h-3.5 w-3.5" />
-                Em Aberto
-              </p>
-              <div className="mt-1.5 flex items-baseline gap-2">
-                <span className="text-2xl font-bold tabular-nums">
-                  {kpiData.openCount}
-                </span>
-                <span
-                  className="text-xs text-muted-foreground font-financial truncate"
-                  title={formatCurrency(kpiData.openTotal)}
-                >
-                  {formatCurrencyAbbr(kpiData.openTotal)}
-                </span>
-              </div>
-            </div>
-            <div className="px-5 py-4 border-b md:border-b-0 md:border-r">
-              <p
-                className={cn(
-                  "text-xs flex items-center gap-1.5",
-                  kpiData.pendingCount > 0
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground",
+                {invalidRange ? (
+                  <p className="text-sm text-destructive">
+                    A data inicial precisa ser anterior à final.
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    As contas em rascunho com vencimento no período entram no
+                    lote automaticamente.
+                  </p>
                 )}
-              >
-                <Clock className="h-3.5 w-3.5" />
-                Aguardando
-              </p>
-              <div className="mt-1.5 flex items-baseline gap-2">
-                <span
-                  className={cn(
-                    "text-2xl font-bold tabular-nums",
-                    kpiData.pendingCount > 0
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "",
-                  )}
-                >
-                  {kpiData.pendingCount}
-                </span>
-                <span className="text-xs text-muted-foreground">lotes</span>
+                <div className="space-y-2">
+                  <Label htmlFor="batch-name">Nome</Label>
+                  <Input
+                    id="batch-name"
+                    placeholder={suggestedName || "Ex.: Pagamentos semana 44"}
+                    value={newBatchName}
+                    onChange={(e) => setNewBatchName(e.target.value)}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="px-5 py-4 border-r">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Autorizados
-              </p>
-              <div className="mt-1.5 flex items-baseline gap-2">
-                <span className="text-2xl font-bold tabular-nums text-teal-600 dark:text-teal-400">
-                  {kpiData.authorizedCount}
-                </span>
-                <span
-                  className="text-xs text-muted-foreground font-financial truncate"
-                  title={formatCurrency(kpiData.authorizedTotal)}
-                >
-                  {formatCurrencyAbbr(kpiData.authorizedTotal)}
-                </span>
-              </div>
-            </div>
-            <div className="px-5 py-4">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <DollarSign className="h-3.5 w-3.5" />
-                Total Pago
-              </p>
-              <div className="mt-1.5">
-                <span
-                  className="text-2xl font-bold font-financial text-blue-600 dark:text-blue-400"
-                  title={formatCurrency(kpiData.paidTotal)}
-                >
-                  <span className="md:hidden">
-                    {formatCurrencyAbbr(kpiData.paidTotal)}
-                  </span>
-                  <span className="hidden md:inline">
-                    {formatCurrency(kpiData.paidTotal)}
-                  </span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Desktop: status filter bar ───────────────────────────────── */}
-      <div className="hidden md:flex items-center gap-3">
-        <Label className="text-sm text-muted-foreground shrink-0">Status</Label>
-        <Select
-          value={filterStatus}
-          onValueChange={(value) => setFilterStatus(value)}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="open">Aberto</SelectItem>
-            <SelectItem value="pending_approval">
-              Aguardando Aprovação
-            </SelectItem>
-            <SelectItem value="approved">Aprovado</SelectItem>
-            <SelectItem value="pending_authorization">
-              Aguardando Autorização
-            </SelectItem>
-            <SelectItem value="authorized">Autorizado</SelectItem>
-            <SelectItem value="paid">Pago</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* ── Mobile: card list ────────────────────────────────────────── */}
-      <div className="md:hidden border rounded-lg overflow-hidden">
-        {isTableLoading ? (
-          <MobileCardSkeleton />
-        ) : batches.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-14 px-4 text-center text-muted-foreground">
-            <div className="rounded-full bg-muted p-4 mb-4">
-              <Package className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <p className="font-medium">Nenhum lote encontrado</p>
-            <p className="text-sm mt-1 max-w-xs">
-              {filterStatus === "all"
-                ? "Crie um novo lote para agrupar e gerenciar pagamentos."
-                : `Não há lotes com status "${STATUS_LABELS[filterStatus] ?? filterStatus}".`}
-            </p>
-            {filterStatus !== "all" ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-4"
-                onClick={() => setFilterStatus("all")}
-              >
-                Ver todos os lotes
-              </Button>
-            ) : canManageBatches ? (
-              <Button
-                size="sm"
-                className="mt-4"
-                onClick={() => setIsCreateOpen(true)}
-              >
-                <Plus className="mr-2 h-4 w-4" /> Criar Primeiro Lote
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <>
-            <div className="divide-y">
-              {batches.map((batch) => (
-                <MobileBatchCard
-                  key={batch.id}
-                  batch={batch}
-                  canManageBatches={canManageBatches}
-                  canApproveBatches={canApproveBatches}
-                  canPayBatches={canPayBatches}
-                  onViewDetails={() => handleViewDetails(batch)}
-                  onApprove={() => handleOpenApproval(batch)}
-                  onSendForApproval={() => handleOpenSendForApproval(batch)}
-                  onSendForAuthorization={() =>
-                    handleOpenSendForAuthorization(batch)
-                  }
-                  onConfirmAuthorization={() =>
-                    handleConfirmAuthorization(batch)
-                  }
-                  onConfirmPayments={() => handleConfirmPayments(batch)}
-                  onEdit={() => handleEditBatch(batch)}
-                  onDelete={() => setDeleteBatchId(batch.id)}
-                  onRevert={() => setRevertBatchId(batch.id)}
-                />
-              ))}
-            </div>
-            {hasMore && (
-              <div className="flex justify-center p-4 border-t">
+              <ResponsiveModalFooter>
                 <Button
                   variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetchingNextPage}
+                  onClick={() => setIsCreateOpen(false)}
                 >
-                  {isFetchingNextPage && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  Carregar Mais
+                  Cancelar
                 </Button>
-              </div>
-            )}
-          </>
+                <Button
+                  onClick={handleCreateBatch}
+                  disabled={
+                    invalidRange || !(newBatchName.trim() || suggestedName)
+                  }
+                >
+                  Criar lote
+                </Button>
+              </ResponsiveModalFooter>
+            </ResponsiveModalContent>
+          </ResponsiveModal>
         )}
       </div>
 
-      {/* ── Desktop: table ───────────────────────────────────────────── */}
-      <div className="hidden md:block border rounded-lg">
-        {isTableLoading ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Responsável</TableHead>
-                <TableHead>Transações</TableHead>
-                <TableHead>Valor Total</TableHead>
-                <TableHead>Criado em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+      <div className="rounded-xl border bg-card">
+        {/* ── Abas por etapa, com contagem e total do servidor ─────────── */}
+        <div
+          role="tablist"
+          aria-label="Etapa dos lotes"
+          className="flex overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {visibleTabs.map((t) => {
+            const selected = t.id === tab;
+            const totals = tabTotals(t.id);
+            return (
+              <button
+                key={t.id}
+                role="tab"
+                type="button"
+                aria-selected={selected}
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  "relative flex shrink-0 flex-col items-start gap-0.5 px-3 py-2.5 text-left transition-colors",
+                  "after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset rounded-md",
+                  selected
+                    ? "after:bg-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  {t.label}
+                  {totals === null ? (
+                    summaryQuery.isError ? null : (
+                      <Skeleton className="h-4 w-5 rounded-full" />
+                    )
+                  ) : (
+                    <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground">
+                      {totals.count}
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs font-financial tabular-nums text-muted-foreground">
+                  {totals ? (
+                    <>
+                      <span className="sm:hidden">
+                        {formatCurrencyAbbr(totals.total)}
+                      </span>
+                      <span className="hidden sm:inline">
+                        {formatCurrency(totals.total)}
+                      </span>
+                    </>
+                  ) : (
+                    " "
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Mobile: lista ─────────────────────────────────────────────── */}
+        <div className="md:hidden">
+          {isTableLoading ? (
+            <div className="divide-y">
               {Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell>
-                    <Skeleton className="h-4 w-36" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-6 w-24 rounded-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-28" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-8" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-24" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-20" />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Skeleton className="h-8 w-8 ml-auto" />
-                  </TableCell>
-                </TableRow>
+                <div key={i} className="space-y-2 px-4 py-3.5">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
               ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Responsável</TableHead>
-                  <TableHead>Transações</TableHead>
-                  <TableHead>Valor Total</TableHead>
-                  <TableHead>Criado em</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {batches.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7}>
-                      <div className="flex flex-col items-center justify-center py-16 text-center">
-                        <div className="rounded-full bg-muted p-4 mb-4">
-                          <Package className="h-8 w-8 text-muted-foreground" />
-                        </div>
-                        <p className="font-medium text-lg">
-                          Nenhum lote encontrado
+            </div>
+          ) : batches.length === 0 ? (
+            emptyState
+          ) : (
+            <ul className="divide-y">
+              {batches.map((batch) => {
+                const step = nextStep(batch, ctx);
+                const period = periodLabel(batch);
+                return (
+                  <li
+                    key={batch.id}
+                    className="flex items-start gap-2 px-4 py-3.5"
+                  >
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => setSelectedBatch(batch)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-sm font-medium">
+                          {batch.name}
                         </p>
-                        <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                          {filterStatus === "all"
-                            ? "Crie um novo lote para agrupar e gerenciar pagamentos."
-                            : `Não há lotes com status "${STATUS_LABELS[filterStatus] ?? filterStatus}".`}
-                        </p>
-                        {filterStatus !== "all" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="mt-4"
-                            onClick={() => setFilterStatus("all")}
-                          >
-                            Ver todos os lotes
-                          </Button>
-                        )}
-                        {canManageBatches && filterStatus === "all" && (
-                          <Button
-                            size="sm"
-                            className="mt-4"
-                            onClick={() => setIsCreateOpen(true)}
-                          >
-                            <Plus className="mr-2 h-4 w-4" /> Criar Primeiro
-                            Lote
-                          </Button>
-                        )}
+                        <span
+                          className="shrink-0 text-sm font-semibold font-financial tabular-nums"
+                          title={formatCurrency(batch.totalAmount)}
+                        >
+                          {formatCurrencyAbbr(batch.totalAmount)}
+                        </span>
                       </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <BatchStatusBadge status={batch.status} />
+                        <span>
+                          {plural(
+                            batch.transactionIds.length,
+                            "transação",
+                            "transações",
+                          )}
+                        </span>
+                        {period && <span>{period}</span>}
+                      </div>
+                      <div className="mt-1.5">
+                        <StepCell step={step} batch={batch} />
+                      </div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {renderAction(batch, step)}
+                      {renderMenu(batch)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {loadMoreButton}
+        </div>
+
+        {/* ── Desktop: tabela ───────────────────────────────────────────── */}
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>{COLUMNS}</TableHeader>
+            <TableBody>
+              {isTableLoading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Skeleton className="h-4 w-56" />
+                      <Skeleton className="mt-1.5 h-3 w-28" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-40" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="ml-auto h-4 w-8" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="ml-auto h-4 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="ml-auto h-8 w-8" />
                     </TableCell>
                   </TableRow>
-                ) : (
-                  batches.map((batch) => (
+                ))
+              ) : batches.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={6}>{emptyState}</TableCell>
+                </TableRow>
+              ) : (
+                batches.map((batch) => {
+                  const step = nextStep(batch, ctx);
+                  const period = periodLabel(batch);
+                  return (
                     <TableRow
                       key={batch.id}
-                      onClick={() => handleViewDetails(batch)}
+                      className="cursor-pointer"
+                      onClick={() => setSelectedBatch(batch)}
                     >
-                      <TableCell className="font-medium">
-                        {batch.name}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(batch.status)}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {getResponsiblePerson(batch)}
-                      </TableCell>
-                      <TableCell>{batch.transactionIds.length}</TableCell>
-                      <TableCell className="font-financial">
-                        {formatCurrency(batch.totalAmount)}
+                      <TableCell className="max-w-0 w-[34%]">
+                        <button
+                          type="button"
+                          className="block max-w-full truncate rounded-sm text-left font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          title={batch.name}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedBatch(batch);
+                          }}
+                        >
+                          {batch.name}
+                        </button>
+                        <span className="block text-xs text-muted-foreground tabular-nums">
+                          {period
+                            ? `Vencimentos de ${period}`
+                            : `Criado em ${format(batch.createdAt, "dd/MM/yyyy")}`}
+                        </span>
                       </TableCell>
                       <TableCell>
-                        {format(batch.createdAt, "dd/MM/yyyy", {
-                          locale: ptBR,
-                        })}
+                        <BatchStatusBadge status={batch.status} />
+                      </TableCell>
+                      <TableCell className="max-w-0 w-[24%]">
+                        <StepCell step={step} batch={batch} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {batch.transactionIds.length}
+                      </TableCell>
+                      <TableCell className="text-right font-financial tabular-nums">
+                        {formatCurrency(batch.totalAmount)}
                       </TableCell>
                       <TableCell
                         className="text-right"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex items-center justify-end gap-2">
-                          {batch.status === "pending_approval" &&
-                            canApproveBatches && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs border-green-200 text-green-700 hover:bg-green-50"
-                                onClick={() => handleOpenApproval(batch)}
-                              >
-                                Aprovar
-                              </Button>
-                            )}
-                          {batch.status === "pending_authorization" &&
-                            canPayBatches && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs border-teal-200 text-teal-700 hover:bg-teal-50"
-                                onClick={() =>
-                                  handleConfirmAuthorization(batch)
-                                }
-                              >
-                                Autorizar
-                              </Button>
-                            )}
-                          {batch.status === "authorized" &&
-                            canManageBatches && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
-                                onClick={() => handleConfirmPayments(batch)}
-                              >
-                                Confirmar Pgto
-                              </Button>
-                            )}
-                          {(canManageBatches ||
-                            (batch.status === "pending_approval" &&
-                              canApproveBatches) ||
-                            (batch.status === "pending_authorization" &&
-                              canPayBatches)) && (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <span className="sr-only">Abrir menu</span>
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Ações</DropdownMenuLabel>
-                                {canManageBatches && (
-                                  <>
-                                    <DropdownMenuItem
-                                      onClick={() => handleEditBatch(batch)}
-                                    >
-                                      <Edit className="mr-2 h-4 w-4" /> Editar
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                  </>
-                                )}
-                                {batch.status === "open" &&
-                                  canManageBatches && (
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        handleOpenSendForApproval(batch)
-                                      }
-                                    >
-                                      Enviar para Aprovador
-                                    </DropdownMenuItem>
-                                  )}
-                                {batch.status === "pending_approval" &&
-                                  canApproveBatches && (
-                                    <DropdownMenuItem
-                                      onClick={() => handleOpenApproval(batch)}
-                                    >
-                                      Aprovar Lote
-                                    </DropdownMenuItem>
-                                  )}
-                                {batch.status === "approved" &&
-                                  canManageBatches && (
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        handleOpenSendForAuthorization(batch)
-                                      }
-                                    >
-                                      Enviar para Autorização
-                                    </DropdownMenuItem>
-                                  )}
-                                {batch.status === "pending_authorization" &&
-                                  canPayBatches && (
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        handleConfirmAuthorization(batch)
-                                      }
-                                    >
-                                      Confirmar Autorização
-                                    </DropdownMenuItem>
-                                  )}
-                                {batch.status === "authorized" &&
-                                  canManageBatches && (
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        handleConfirmPayments(batch)
-                                      }
-                                    >
-                                      Confirmar Pagamentos
-                                    </DropdownMenuItem>
-                                  )}
-                                {batch.status === "paid" &&
-                                  canManageBatches && (
-                                    <DropdownMenuItem
-                                      className="text-amber-600 focus:text-amber-700"
-                                      onClick={() => setRevertBatchId(batch.id)}
-                                    >
-                                      Reverter para Aberto
-                                    </DropdownMenuItem>
-                                  )}
-                                {batch.status === "open" &&
-                                  canManageBatches && (
-                                    <>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
-                                        className="text-destructive focus:text-destructive"
-                                        onClick={() =>
-                                          setDeleteBatchId(batch.id)
-                                        }
-                                      >
-                                        <Trash2 className="mr-2 h-4 w-4" />{" "}
-                                        Excluir Lote
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {renderAction(batch, step)}
+                          {renderMenu(batch)}
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            {hasMore && (
-              <div className="flex justify-center p-4 border-t">
-                <Button
-                  variant="outline"
-                  onClick={loadMore}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : null}
-                  Carregar Mais
-                </Button>
-              </div>
-            )}
-          </>
-        )}
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+          {loadMoreButton}
+        </div>
       </div>
 
-      {/* ── Mobile filter sheet ──────────────────────────────────────── */}
-      <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-        <SheetContent
-          side="bottom"
-          className="rounded-t-2xl max-h-[92dvh] overflow-y-auto px-4 pb-6 pt-3"
-        >
-          <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/25 shrink-0" />
-          <SheetTitle className="mb-4 text-base font-semibold">
-            Filtros
-          </SheetTitle>
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Status
-              </p>
-              <Select
-                value={filterStatus}
-                onValueChange={(val) => setFilterStatus(val)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="open">Aberto</SelectItem>
-                  <SelectItem value="pending_approval">
-                    Aguardando Aprovação
-                  </SelectItem>
-                  <SelectItem value="approved">Aprovado</SelectItem>
-                  <SelectItem value="pending_authorization">
-                    Aguardando Autorização
-                  </SelectItem>
-                  <SelectItem value="authorized">Autorizado</SelectItem>
-                  <SelectItem value="paid">Pago</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => {
-                  setFilterStatus("all");
-                  setMobileFiltersOpen(false);
-                }}
-              >
-                Limpar
-              </Button>
-              <Button
-                className="flex-1"
-                onClick={() => {
-                  setMobileFiltersOpen(false);
-                  toast.success("Filtros aplicados");
-                }}
-              >
-                Aplicar
-              </Button>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* ── Details Dialog ───────────────────────────────────────────── */}
+      {/* ── Diálogos ─────────────────────────────────────────────────────── */}
       <BatchDetailsDialog
         batch={selectedBatch}
-        isOpen={isDetailsOpen}
-        onClose={() => setIsDetailsOpen(false)}
-        onUpdate={fetchBatches}
+        isOpen={!!selectedBatch}
+        onClose={() => setSelectedBatch(null)}
+        onUpdate={refresh}
       />
 
-      {/* ── Edit Dialog ──────────────────────────────────────────────── */}
-      <ResponsiveModal open={isEditOpen} onOpenChange={setIsEditOpen}>
+      <ResponsiveModal
+        open={!!editingBatch}
+        onOpenChange={(open) => !open && setEditingBatch(null)}
+      >
         <ResponsiveModalContent>
           <ResponsiveModalHeader>
-            <ResponsiveModalTitle>Editar Lote</ResponsiveModalTitle>
+            <ResponsiveModalTitle>Renomear lote</ResponsiveModalTitle>
           </ResponsiveModalHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name">Nome do Lote</Label>
-              <Input
-                id="edit-name"
-                placeholder="Ex: Pagamentos Semana 42"
-                value={editingBatchName}
-                onChange={(e) => setEditingBatchName(e.target.value)}
-              />
-            </div>
+          <div className="space-y-2 py-4">
+            <Label htmlFor="edit-name">Nome</Label>
+            <Input
+              id="edit-name"
+              value={editingBatchName}
+              onChange={(e) => setEditingBatchName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleUpdateBatch()}
+            />
           </div>
           <ResponsiveModalFooter>
-            <Button variant="outline" onClick={() => setIsEditOpen(false)}>
+            <Button variant="outline" onClick={() => setEditingBatch(null)}>
               Cancelar
             </Button>
-            <Button onClick={handleUpdateBatch}>Salvar</Button>
+            <Button
+              onClick={handleUpdateBatch}
+              disabled={!editingBatchName.trim()}
+            >
+              Salvar
+            </Button>
           </ResponsiveModalFooter>
         </ResponsiveModalContent>
       </ResponsiveModal>
 
-      {/* ── Send for Approval Dialog ─────────────────────────────────── */}
       {selectedCompany && (
         <BatchSendDialog
-          isOpen={isSendForApprovalOpen}
+          isOpen={!!sendKind}
           onClose={() => {
-            setIsSendForApprovalOpen(false);
+            setSendKind(null);
             setActionBatch(null);
           }}
-          onSend={handleSendForApproval}
+          onSend={handleSend}
           companyId={selectedCompany.id}
-          title="Enviar para Aprovador"
-          description="Digite o e-mail do aprovador. Um link de aprovação será enviado — o destinatário não precisa ser usuário do sistema."
-          buttonText="Enviar para Aprovação"
+          title={
+            sendKind === "send_authorization"
+              ? "Enviar para autorização"
+              : "Enviar para aprovação"
+          }
+          description={
+            sendKind === "send_authorization"
+              ? `${actionBatch?.name ?? ""}: o autorizador recebe um link que vale por 48 horas e não precisa ter conta no sistema. Você não pode autorizar um lote que enviou.`
+              : `${actionBatch?.name ?? ""}: o aprovador recebe um link que vale por 48 horas e não precisa ter conta no sistema. Você não pode aprovar um lote que enviou.`
+          }
+          buttonText="Enviar link"
         />
       )}
 
-      {/* ── Approval Dialog ──────────────────────────────────────────── */}
-      {user && (
+      {actor && (
         <BatchApprovalDialog
-          batch={actionBatch}
-          isOpen={isApprovalOpen}
-          onClose={() => {
-            setIsApprovalOpen(false);
-            setActionBatch(null);
-          }}
+          batch={approvalBatch}
+          isOpen={!!approvalBatch}
+          onClose={() => setApprovalBatch(null)}
           onApprove={handleApprovalComplete}
-          userId={user.uid}
-        />
-      )}
-
-      {/* ── Send for Authorization Dialog ────────────────────────────── */}
-      {selectedCompany && (
-        <BatchSendDialog
-          isOpen={isSendForAuthorizationOpen}
-          onClose={() => {
-            setIsSendForAuthorizationOpen(false);
-            setActionBatch(null);
-          }}
-          onSend={handleSendForAuthorization}
-          companyId={selectedCompany.id}
-          title="Enviar para Autorização"
-          description="Digite o e-mail do autorizador. Um link de autorização será enviado — o destinatário não precisa ser usuário do sistema."
-          buttonText="Enviar para Autorização"
+          actor={actor}
         />
       )}
 
       <ConfirmDialog
-        open={!!deleteBatchId}
-        onOpenChange={(open) => !open && setDeleteBatchId(null)}
-        title="Excluir Lote"
-        description="Tem certeza que deseja excluir este lote? As transações vinculadas voltarão para o status 'sem lote', mas não serão excluídas."
-        confirmText="Excluir"
+        open={!!confirmStep}
+        onOpenChange={(open) => !open && setConfirmStep(null)}
+        title={
+          confirmStep?.kind === "authorize"
+            ? `Autorizar "${confirmStep.batch.name}"?`
+            : `Confirmar pagamento de "${confirmStep?.batch.name ?? ""}"?`
+        }
+        description={
+          confirmStep
+            ? confirmStep.kind === "authorize"
+              ? `${plural(confirmStep.batch.transactionIds.length, "transação", "transações")}, total de ${formatCurrency(confirmStep.batch.totalAmount)}. Autorize só depois de liberar o lote no internet banking.`
+              : `${plural(confirmStep.batch.transactionIds.length, "transação será marcada", "transações serão marcadas")} como paga${confirmStep.batch.transactionIds.length === 1 ? "" : "s"}, total de ${formatCurrency(confirmStep.batch.totalAmount)}. Confirme só depois de conferir o débito no extrato.`
+            : ""
+        }
+        confirmText={
+          confirmStep?.kind === "authorize"
+            ? "Autorizar"
+            : "Confirmar pagamento"
+        }
+        onConfirm={handleConfirmStep}
+      />
+
+      <ConfirmDialog
+        open={!!deleteBatch}
+        onOpenChange={(open) => !open && setDeleteBatch(null)}
+        title={`Excluir "${deleteBatch?.name ?? ""}"?`}
+        description="As transações do lote voltam a ficar sem lote. Nenhuma conta é excluída."
+        confirmText="Excluir lote"
         variant="destructive"
         onConfirm={handleDeleteBatch}
       />
 
       <ConfirmDialog
-        open={!!revertBatchId}
-        onOpenChange={(open) => !open && setRevertBatchId(null)}
-        title="Reverter Lote para Aberto"
-        description="Esta ação irá reverter o status do lote de 'Pago' para 'Aberto' e todas as transações voltarão para o status 'Rascunho'. Use esta opção apenas se o pagamento foi confirmado incorretamente. Deseja continuar?"
-        confirmText="Reverter Lote"
+        open={!!revertBatch}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRevertBatch(null);
+            setRevertReason("");
+          }
+        }}
+        title={`Reverter "${revertBatch?.name ?? ""}" para Aberto?`}
+        description="O lote volta para Aberto e as transações voltam para Rascunho. Use só se o pagamento foi confirmado por engano. O motivo fica registrado na auditoria."
+        confirmText="Reverter lote"
         variant="destructive"
+        confirmDisabled={!revertReason.trim()}
         onConfirm={handleRevertToOpen}
-      />
+      >
+        <div className="space-y-2">
+          <Label htmlFor="revert-reason">Motivo</Label>
+          <Textarea
+            id="revert-reason"
+            value={revertReason}
+            onChange={(e) => setRevertReason(e.target.value)}
+            placeholder="Ex.: pagamento confirmado no lote errado"
+            className="min-h-[72px]"
+          />
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -7,7 +7,12 @@ import {
 import { PaymentBatch, Transaction } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
 import { transactionService } from "@/lib/services/transactionService";
-import { paymentBatchService } from "@/lib/services/paymentBatchService";
+import {
+  effectiveAmount,
+  paymentBatchService,
+} from "@/lib/services/paymentBatchService";
+import { BatchStatusBadge } from "@/components/features/finance/batchStatus";
+import currency from "currency.js";
 import { emailService } from "@/lib/services/emailService";
 import {
   Table,
@@ -30,7 +35,6 @@ import {
   PackageOpen,
   ChevronDown,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Style } from "exceljs";
@@ -273,10 +277,7 @@ export function BatchDetailsDialog({
       // 2. Prepare Data
       const data = transactions.map((t) => ({
         ...t,
-        // Use the batch-adjusted amount when an approver modified it; fall back to original
-        effectiveAmount:
-          (t as Transaction & { batchAdjustedAmount?: number })
-            .batchAdjustedAmount ?? t.amount,
+        effectiveAmount: effectiveAmount(t),
         costCenterName: getCostCenterName(t),
         installmentText: t.recurrence?.isRecurring
           ? "Contínua"
@@ -339,7 +340,7 @@ export function BatchDetailsDialog({
 
       worksheet.mergeCells("A2:F2");
       worksheet.getCell("A2").value =
-        `Solicitante: ${user.displayName} (${user.email})`;
+        `Exportado por: ${user.displayName} (${user.email})`;
 
       worksheet.mergeCells("A3:F3");
       worksheet.getCell("A3").value =
@@ -426,8 +427,11 @@ export function BatchDetailsDialog({
 
       const currentBalance = metrics?.cashBalance || 0;
       // Compute total from live transaction data to reflect any edits made after batch creation
-      const liveTotal = data.reduce((sum, t) => sum + t.effectiveAmount, 0);
-      const balanceAfter = currentBalance - liveTotal;
+      const liveTotal = data.reduce(
+        (acc, t) => acc.add(t.effectiveAmount),
+        currency(0),
+      ).value;
+      const balanceAfter = currency(currentBalance).subtract(liveTotal).value;
 
       addFooterRow("Valor total do lote:", liveTotal);
       addFooterRow("Saldo atual:", currentBalance);
@@ -571,6 +575,7 @@ export function BatchDetailsDialog({
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Error exporting batch", error);
+      toast.error("Não foi possível exportar o lote. Tente novamente.");
     } finally {
       setIsExporting(false);
     }
@@ -579,14 +584,34 @@ export function BatchDetailsDialog({
   if (!batch) return null;
 
   const liveTotal = transactions.reduce(
-    (sum, t) =>
-      sum +
-      ((t as Transaction & { batchAdjustedAmount?: number })
-        .batchAdjustedAmount ?? t.amount),
-    0,
-  );
+    (acc, t) => acc.add(effectiveAmount(t)),
+    currency(0),
+  ).value;
 
-  const batchStatusLabel = batch.status === "open" ? "Aberto" : "Fechado";
+  const when = (d?: Date | null) =>
+    d ? format(new Date(d), "dd/MM/yyyy 'às' HH:mm") : null;
+  // Linha do tempo do lote; o log de auditoria guarda o detalhe completo.
+  const history = [
+    { label: "Criado", at: batch.createdAt },
+    {
+      label: `Enviado para aprovação${batch.approverEmail ? ` a ${batch.approverName || batch.approverEmail}` : ""}`,
+      at: batch.sentForApprovalAt,
+    },
+    { label: "Aprovado", at: batch.approvedAt, note: batch.approverComment },
+    {
+      label: `Enviado para autorização${batch.authorizerEmail ? ` a ${batch.authorizerName || batch.authorizerEmail}` : ""}`,
+      at: batch.sentForAuthorizationAt,
+    },
+    { label: "Autorizado", at: batch.authorizedAt },
+    { label: "Pagamento confirmado", at: batch.paidAt },
+    {
+      label: "Revertido para Aberto",
+      at: batch.revertedAt,
+      note: batch.revertReason,
+    },
+  ]
+    .filter((e) => e.at)
+    .sort((a, b) => new Date(a.at!).getTime() - new Date(b.at!).getTime());
 
   return (
     <ResponsiveModal open={isOpen} onOpenChange={onClose}>
@@ -595,9 +620,7 @@ export function BatchDetailsDialog({
           <div className="flex items-start justify-between gap-4 pr-8">
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <Badge variant="outline" className="shrink-0">
-                  {batchStatusLabel}
-                </Badge>
+                <BatchStatusBadge status={batch.status} />
                 {batch.startDate && batch.endDate && (
                   <span className="text-xs text-muted-foreground truncate">
                     {format(new Date(batch.startDate), "dd/MM/yyyy")} →{" "}
@@ -654,6 +677,17 @@ export function BatchDetailsDialog({
         </ResponsiveModalHeader>
 
         <div className="space-y-4">
+          {history.length > 1 && (
+            <ol className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+              {history.map((e) => (
+                <li key={e.label} title={e.note || undefined}>
+                  <span className="text-foreground">{e.label}</span>{" "}
+                  {when(e.at)}
+                  {e.note && <span className="italic"> · “{e.note}”</span>}
+                </li>
+              ))}
+            </ol>
+          )}
           {missingTransactions.length > 0 &&
             batch.status === "open" &&
             canManageBatches && (
@@ -839,7 +873,7 @@ export function BatchDetailsDialog({
                         </div>
                       </TableHead>
                       <TableHead
-                        className="cursor-pointer hover:bg-muted/50 transition-colors w-[100px]"
+                        className="cursor-pointer hover:bg-muted/50 transition-colors w-[170px]"
                         onClick={() => requestSort("status")}
                       >
                         <div className="flex items-center gap-2">
@@ -910,56 +944,16 @@ export function BatchDetailsDialog({
                           </TableCell>
                           <TableCell>{t.supplierOrClient}</TableCell>
                           <TableCell className="text-right font-financial">
-                            {formatCurrency(t.amount)}
+                            {t.batchAdjustedAmount !== undefined &&
+                              t.batchAdjustedAmount !== t.amount && (
+                                <span className="mr-1.5 text-xs text-muted-foreground line-through">
+                                  {formatCurrency(t.amount)}
+                                </span>
+                              )}
+                            {formatCurrency(effectiveAmount(t))}
                           </TableCell>
                           <TableCell>
-                            {(() => {
-                              switch (t.status) {
-                                case "paid":
-                                  return (
-                                    <Badge className="bg-emerald-500 hover:bg-emerald-600">
-                                      Pago
-                                    </Badge>
-                                  );
-                                case "authorized":
-                                  return (
-                                    <Badge className="bg-blue-500 hover:bg-blue-600">
-                                      Autorizado
-                                    </Badge>
-                                  );
-                                case "approved":
-                                  return (
-                                    <Badge className="bg-blue-400 hover:bg-blue-500">
-                                      Aprovado
-                                    </Badge>
-                                  );
-                                case "pending_authorization":
-                                  return (
-                                    <Badge className="bg-amber-500 hover:bg-amber-600">
-                                      Aguardando Autorização
-                                    </Badge>
-                                  );
-                                case "pending_approval":
-                                  return (
-                                    <Badge className="bg-amber-400 hover:bg-amber-500">
-                                      Aguardando Aprovação
-                                    </Badge>
-                                  );
-                                case "rejected":
-                                  return (
-                                    <Badge variant="destructive">
-                                      Rejeitado
-                                    </Badge>
-                                  );
-                                case "draft":
-                                  return (
-                                    <Badge variant="secondary">Rascunho</Badge>
-                                  );
-                                case "paid":
-                                case "received":
-                                  return <Badge variant="outline">Pago</Badge>;
-                              }
-                            })()}
+                            <BatchStatusBadge status={t.status} />
                           </TableCell>
                           {batch.status === "open" && canManageBatches && (
                             <TableCell>
@@ -968,6 +962,7 @@ export function BatchDetailsDialog({
                                 size="icon"
                                 className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                 onClick={() => setDeleteId(t.id)}
+                                aria-label={`Remover ${t.description} do lote`}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

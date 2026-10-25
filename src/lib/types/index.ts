@@ -436,6 +436,7 @@ export interface PaymentBatch {
   // Approval workflow
   approverId?: string;
   approverEmail?: string;
+  approverName?: string | null;
   approvedBy?: string;
   approvedAt?: Date;
   approverComment?: string;
@@ -444,6 +445,7 @@ export interface PaymentBatch {
   // Authorization workflow (releaser = authorizer)
   authorizerId?: string;
   authorizerEmail?: string;
+  authorizerName?: string | null;
   authorizedBy?: string;
   authorizedAt?: Date;
   sentForAuthorizationAt?: Date;
@@ -455,6 +457,7 @@ export interface PaymentBatch {
   // Revert (paid → open)
   revertedBy?: string;
   revertedAt?: Date;
+  revertReason?: string;
 
   // Rejected transaction IDs (for audit)
   rejectedTransactionIds?: string[];

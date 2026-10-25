@@ -23,8 +23,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { PaymentBatch, Transaction } from "@/lib/types";
 import { transactionService } from "@/lib/services/transactionService";
-import { paymentBatchService } from "@/lib/services/paymentBatchService";
+import {
+  BatchActor,
+  effectiveAmount,
+  paymentBatchService,
+} from "@/lib/services/paymentBatchService";
 import { formatCurrency } from "@/lib/utils";
+import currency from "currency.js";
 import { format } from "date-fns";
 import { Loader2, X, Check, Edit2 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,8 +39,17 @@ interface BatchApprovalDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onApprove: () => void;
-  userId: string;
+  actor: BatchActor;
 }
+
+/** "1.234,56" ou "1234.56" → 1234.56; inválido → NaN. */
+const parseAmount = (value: string) => {
+  const v = value.trim();
+  const normalized = v.includes(",")
+    ? v.replace(/\./g, "").replace(",", ".")
+    : v;
+  return /^\d+(\.\d{1,2})?$/.test(normalized) ? Number(normalized) : NaN;
+};
 
 interface TransactionEdit {
   id: string;
@@ -50,7 +64,7 @@ export function BatchApprovalDialog({
   isOpen,
   onClose,
   onApprove,
-  userId,
+  actor,
 }: BatchApprovalDialogProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [edits, setEdits] = useState<Map<string, TransactionEdit>>(new Map());
@@ -74,7 +88,7 @@ export function BatchApprovalDialog({
           data.forEach((t) => {
             initialEdits.set(t.id, {
               id: t.id,
-              originalAmount: t.amount,
+              originalAmount: effectiveAmount(t),
               isRejected: false,
             });
           });
@@ -95,13 +109,17 @@ export function BatchApprovalDialog({
     if (transaction) {
       setEditingAmountId(transactionId);
       const edit = edits.get(transactionId);
-      setEditAmountValue(String(edit?.adjustedAmount ?? transaction.amount));
+      setEditAmountValue(
+        (edit?.adjustedAmount ?? effectiveAmount(transaction))
+          .toFixed(2)
+          .replace(".", ","),
+      );
     }
   };
 
   const handleSaveAmount = () => {
     if (!editingAmountId) return;
-    const newAmount = parseFloat(editAmountValue);
+    const newAmount = parseAmount(editAmountValue);
     if (isNaN(newAmount) || newAmount < 0) {
       toast.error("Valor inválido");
       return;
@@ -127,30 +145,36 @@ export function BatchApprovalDialog({
     setRejectReason("");
   };
 
-  const handleConfirmReject = async () => {
-    if (!rejectingId || !batch || !rejectReason.trim()) {
-      toast.error("Por favor, informe o motivo da rejeição");
+  // Só marca: a rejeição é gravada junto com a aprovação, então Cancelar desfaz.
+  const handleConfirmReject = () => {
+    if (!rejectingId || !rejectReason.trim()) {
+      toast.error("Informe o motivo da rejeição");
       return;
     }
-
-    try {
-      await paymentBatchService.rejectTransaction(
-        batch.id,
-        rejectingId,
-        rejectReason,
+    const current = edits.get(rejectingId);
+    if (current) {
+      setEdits(
+        new Map(edits).set(rejectingId, {
+          ...current,
+          isRejected: true,
+          rejectionReason: rejectReason.trim(),
+        }),
       );
-      // Remove from local state
-      setTransactions(transactions.filter((t) => t.id !== rejectingId));
-      edits.delete(rejectingId);
-      setEdits(new Map(edits));
-      toast.success("Transação rejeitada");
-    } catch (error) {
-      console.error("Error rejecting transaction:", error);
-      toast.error("Erro ao rejeitar transação");
-    } finally {
-      setRejectingId(null);
-      setRejectReason("");
     }
+    setRejectingId(null);
+    setRejectReason("");
+  };
+
+  const undoReject = (transactionId: string) => {
+    const current = edits.get(transactionId);
+    if (!current) return;
+    setEdits(
+      new Map(edits).set(transactionId, {
+        ...current,
+        isRejected: false,
+        rejectionReason: undefined,
+      }),
+    );
   };
 
   const handleApprove = async () => {
@@ -159,9 +183,12 @@ export function BatchApprovalDialog({
     setIsSubmitting(true);
     try {
       // Collect adjustments
-      const adjustments: Array<{ id: string; adjustedAmount?: number }> = [];
+      const adjustments: Array<{ id: string; adjustedAmount: number }> = [];
+      const rejections: Array<{ id: string; reason: string }> = [];
       edits.forEach((edit) => {
-        if (edit.adjustedAmount !== undefined) {
+        if (edit.isRejected) {
+          rejections.push({ id: edit.id, reason: edit.rejectionReason ?? "" });
+        } else if (edit.adjustedAmount !== undefined) {
           adjustments.push({
             id: edit.id,
             adjustedAmount: edit.adjustedAmount,
@@ -171,17 +198,22 @@ export function BatchApprovalDialog({
 
       await paymentBatchService.approveWithDetails(
         batch.id,
-        userId,
+        actor,
         comment || undefined,
-        adjustments.length > 0 ? adjustments : undefined,
+        adjustments,
+        rejections,
       );
 
-      toast.success("Lote aprovado com sucesso");
+      toast.success(
+        `Lote aprovado: ${approvedCount} ${approvedCount === 1 ? "transação" : "transações"} · ${formatCurrency(totalAmount)}`,
+      );
       onApprove();
       onClose();
     } catch (error) {
       console.error("Error approving batch:", error);
-      toast.error("Erro ao aprovar lote");
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao aprovar lote",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -199,18 +231,24 @@ export function BatchApprovalDialog({
 
   const getDisplayAmount = (transaction: Transaction) => {
     const edit = edits.get(transaction.id);
-    return edit?.adjustedAmount ?? transaction.amount;
+    return edit?.adjustedAmount ?? effectiveAmount(transaction);
   };
+
+  const isRejected = (transaction: Transaction) =>
+    !!edits.get(transaction.id)?.isRejected;
 
   const isAmountEdited = (transaction: Transaction) => {
     const edit = edits.get(transaction.id);
     return edit?.adjustedAmount !== undefined;
   };
 
-  const totalAmount = transactions.reduce(
-    (sum, t) => sum + getDisplayAmount(t),
-    0,
-  );
+  const kept = transactions.filter((t) => !isRejected(t));
+  const approvedCount = kept.length;
+  const totalAmount = kept.reduce(
+    (acc, t) => acc.add(getDisplayAmount(t)),
+    currency(0),
+  ).value;
+  const rejectedCount = transactions.length - approvedCount;
 
   if (!batch) return null;
 
@@ -226,7 +264,11 @@ export function BatchApprovalDialog({
         <div className="space-y-4">
           {/* Summary */}
           <div className="flex justify-between text-sm font-medium bg-muted/50 p-3 rounded-lg">
-            <span>Transações: {transactions.length}</span>
+            <span>
+              Transações: {approvedCount}
+              {rejectedCount > 0 &&
+                ` (${rejectedCount} ${rejectedCount === 1 ? "rejeitada" : "rejeitadas"})`}
+            </span>
             <span className="font-financial">
               Total: {formatCurrency(totalAmount)}
             </span>
@@ -263,7 +305,15 @@ export function BatchApprovalDialog({
                     </TableRow>
                   ) : (
                     transactions.map((t) => (
-                      <TableRow key={t.id}>
+                      <TableRow
+                        key={t.id}
+                        className={
+                          isRejected(t)
+                            ? "text-muted-foreground line-through decoration-muted-foreground/50"
+                            : undefined
+                        }
+                        title={edits.get(t.id)?.rejectionReason}
+                      >
                         <TableCell>{format(t.dueDate, "dd/MM/yyyy")}</TableCell>
                         <TableCell>{t.description}</TableCell>
                         <TableCell>{t.supplierOrClient}</TableCell>
@@ -271,8 +321,14 @@ export function BatchApprovalDialog({
                           {editingAmountId === t.id ? (
                             <div className="flex items-center gap-1 justify-end">
                               <Input
-                                type="number"
+                                inputMode="decimal"
+                                aria-label="Novo valor"
                                 value={editAmountValue}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveAmount();
+                                  if (e.key === "Escape")
+                                    setEditingAmountId(null);
+                                }}
                                 onChange={(e) =>
                                   setEditAmountValue(e.target.value)
                                 }
@@ -308,27 +364,40 @@ export function BatchApprovalDialog({
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          {editingAmountId !== t.id && (
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8"
-                                onClick={() => handleEditAmount(t.id)}
-                                title="Editar valor"
-                              >
-                                <Edit2 className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-red-500 hover:text-red-700"
-                                onClick={() => handleStartReject(t.id)}
-                                title="Rejeitar"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
+                          {isRejected(t) ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 text-xs no-underline"
+                              onClick={() => undoReject(t.id)}
+                            >
+                              Desfazer
+                            </Button>
+                          ) : (
+                            editingAmountId !== t.id && (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8"
+                                  onClick={() => handleEditAmount(t.id)}
+                                  title="Editar valor"
+                                  aria-label={`Editar valor de ${t.description}`}
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-red-500 hover:text-red-700"
+                                  onClick={() => handleStartReject(t.id)}
+                                  title="Rejeitar"
+                                  aria-label={`Rejeitar ${t.description}`}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )
                           )}
                         </TableCell>
                       </TableRow>
@@ -349,7 +418,7 @@ export function BatchApprovalDialog({
                 placeholder="Descreva o motivo da rejeição..."
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
-                className="min-h-[80px]"
+                className="min-h-20"
               />
               <div className="flex gap-2 justify-end">
                 <Button
@@ -377,7 +446,7 @@ export function BatchApprovalDialog({
               placeholder="Adicione um comentário sobre a aprovação..."
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              className="min-h-[80px]"
+              className="min-h-20"
             />
           </div>
         </div>
@@ -388,7 +457,7 @@ export function BatchApprovalDialog({
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={isSubmitting || transactions.length === 0}
+            disabled={isSubmitting || approvedCount === 0}
             className="bg-green-600 hover:bg-green-700"
           >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

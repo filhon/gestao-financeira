@@ -945,8 +945,13 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     setBulkDialog("batch");
     if (!companyId) return;
     try {
-      const { batches } = await paymentBatchService.getAll(companyId);
-      setOpenBatches(batches.filter((b) => b.status === "open"));
+      const { batches } = await paymentBatchService.getAll(
+        companyId,
+        50,
+        null,
+        ["open"],
+      );
+      setOpenBatches(batches);
     } catch {
       toast.error("Erro ao carregar lotes.");
     }

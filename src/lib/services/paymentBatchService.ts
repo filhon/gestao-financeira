@@ -13,15 +13,145 @@ import {
   addDoc,
   Timestamp,
   DocumentData,
+  DocumentReference,
   QueryDocumentSnapshot,
   deleteField,
   startAfter,
   limit,
+  runTransaction,
+  getAggregateFromServer,
+  count,
+  sum,
 } from "firebase/firestore";
+import currency from "currency.js";
 import { PaymentBatch, PaymentBatchStatus, Transaction } from "@/lib/types";
+import { auditService } from "@/lib/services/auditService";
 
 const COLLECTION_NAME = "payment_batches";
 const TRANSACTIONS_COLLECTION = "transactions";
+
+/** Quem executa a ação: vai para o log de auditoria e para a segregação de funções. */
+export interface BatchActor {
+  uid: string;
+  email: string;
+}
+
+export const BATCH_STATUSES: PaymentBatchStatus[] = [
+  "open",
+  "pending_approval",
+  "approved",
+  "pending_authorization",
+  "authorized",
+  "paid",
+  "rejected",
+];
+
+const STATUS_NAMES: Record<PaymentBatchStatus, string> = {
+  open: "Aberto",
+  pending_approval: "Aguardando aprovação",
+  approved: "Aprovado",
+  pending_authorization: "Aguardando autorização",
+  authorized: "Autorizado",
+  paid: "Pago",
+  rejected: "Rejeitado",
+};
+
+/** Valor que o lote de fato paga: o ajustado pelo aprovador, se houver. */
+export const effectiveAmount = (
+  t: Pick<Transaction, "amount" | "batchAdjustedAmount">,
+) => t.batchAdjustedAmount ?? t.amount;
+
+const sameEmail = (a?: string | null, b?: string | null) =>
+  !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Segregação de funções: só a pessoa designada aprova/autoriza, e nunca quem
+ * criou o lote. As regras do Firestore repetem a mesma checagem.
+ */
+export function canActOnBatch(
+  batch: Pick<
+    PaymentBatch,
+    "status" | "createdBy" | "approverEmail" | "authorizerEmail"
+  >,
+  actor: BatchActor,
+): boolean {
+  if (actor.uid === batch.createdBy) return false;
+  if (batch.status === "pending_approval")
+    return sameEmail(batch.approverEmail, actor.email);
+  if (batch.status === "pending_authorization")
+    return sameEmail(batch.authorizerEmail, actor.email);
+  return false;
+}
+
+function assertStatus(data: DocumentData, allowed: PaymentBatchStatus[]): void {
+  if (!allowed.includes(data.status)) {
+    throw new Error(
+      `O lote está "${STATUS_NAMES[data.status as PaymentBatchStatus] ?? data.status}" e não aceita esta ação. Atualize a página.`,
+    );
+  }
+}
+
+/** writeBatch aceita até 500 operações; lotes grandes vão em partes. */
+async function commitInChunks(
+  updates: Array<[DocumentReference, DocumentData]>,
+): Promise<void> {
+  for (let i = 0; i < updates.length; i += 500) {
+    const wb = writeBatch(db);
+    updates.slice(i, i + 500).forEach(([ref, data]) => wb.update(ref, data));
+    await wb.commit();
+  }
+}
+
+/**
+ * Troca o status do lote só se ele ainda estiver num dos `from`. Roda em
+ * transação: dois cliques (ou duas abas) não executam a mesma etapa duas vezes.
+ */
+async function transitionBatch(
+  batchId: string,
+  from: PaymentBatchStatus[],
+  update: (data: DocumentData) => DocumentData,
+): Promise<DocumentData> {
+  const ref = doc(db, COLLECTION_NAME, batchId);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Lote não encontrado.");
+    const data = snap.data();
+    assertStatus(data, from);
+    tx.update(ref, { ...update(data), updatedAt: serverTimestamp() });
+    return data;
+  });
+}
+
+async function loadBatch(batchId: string): Promise<DocumentData> {
+  const snap = await getDoc(doc(db, COLLECTION_NAME, batchId));
+  if (!snap.exists()) throw new Error("Lote não encontrado.");
+  return snap.data();
+}
+
+const batchTransactions = (batchId: string) =>
+  getDocs(
+    query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where("batchId", "==", batchId),
+    ),
+  );
+
+const logBatch = (
+  companyId: string,
+  actor: BatchActor,
+  action: Parameters<typeof auditService.log>[0]["action"],
+  batchId: string,
+  details: Record<string, unknown>,
+) =>
+  auditService.log({
+    companyId,
+    userId: actor.uid,
+    userEmail: actor.email,
+    action,
+    entity: "batch",
+    entityId: batchId,
+    details,
+  });
 
 const convertDates = (data: DocumentData): PaymentBatch => {
   return {
@@ -91,7 +221,7 @@ export const paymentBatchService = {
     companyId: string,
     pageSize: number = 20,
     lastDoc: QueryDocumentSnapshot<DocumentData> | null = null,
-    filterStatus?: string,
+    statuses: PaymentBatchStatus[] = [],
   ): Promise<{
     batches: PaymentBatch[];
     lastDoc: QueryDocumentSnapshot<DocumentData> | null;
@@ -102,8 +232,10 @@ export const paymentBatchService = {
       orderBy("createdAt", "desc"),
     );
 
-    if (filterStatus && filterStatus !== "all") {
-      q = query(q, where("status", "==", filterStatus));
+    if (statuses.length === 1) {
+      q = query(q, where("status", "==", statuses[0]));
+    } else if (statuses.length > 1) {
+      q = query(q, where("status", "in", statuses));
     }
 
     if (lastDoc) {
@@ -121,6 +253,58 @@ export const paymentBatchService = {
       batches,
       lastDoc: snapshot.docs[snapshot.docs.length - 1] || null,
     };
+  },
+
+  /**
+   * Quantidade e total por status, de todos os lotes da empresa (não só da
+   * página carregada). Agregação no servidor; sem o índice publicado, soma em
+   * memória.
+   */
+  getStatusSummary: async (
+    companyId: string,
+  ): Promise<Record<PaymentBatchStatus, { count: number; total: number }>> => {
+    const entries = await Promise.all(
+      BATCH_STATUSES.map(async (status) => {
+        const q = query(
+          collection(db, COLLECTION_NAME),
+          where("companyId", "==", companyId),
+          where("status", "==", status),
+        );
+        try {
+          const snap = await getAggregateFromServer(q, {
+            count: count(),
+            total: sum("totalAmount"),
+          });
+          return [
+            status,
+            {
+              count: snap.data().count,
+              total: currency(snap.data().total || 0).value,
+            },
+          ] as const;
+        } catch (error) {
+          console.warn(
+            "Agregação de lotes indisponível; somando em memória.",
+            error,
+          );
+          const snap = await getDocs(query(q, limit(2000)));
+          return [
+            status,
+            {
+              count: snap.size,
+              total: snap.docs.reduce(
+                (acc, d) => acc.add(d.data().totalAmount || 0),
+                currency(0),
+              ).value,
+            },
+          ] as const;
+        }
+      }),
+    );
+    return Object.fromEntries(entries) as Record<
+      PaymentBatchStatus,
+      { count: number; total: number }
+    >;
   },
 
   getById: async (id: string): Promise<PaymentBatch | null> => {
@@ -228,9 +412,9 @@ export const paymentBatchService = {
 
     const newIds = uniqueTransactions.map((t) => t.id);
     const additionalAmount = uniqueTransactions.reduce(
-      (sum, t) => sum + t.amount,
-      0,
-    );
+      (acc, t) => acc.add(t.amount),
+      currency(0),
+    ).value;
 
     const shouldRevert =
       batchData.status === "approved" && !!batchData.approverEmail;
@@ -239,7 +423,7 @@ export const paymentBatchService = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const batchUpdate: any = {
       transactionIds: [...batchData.transactionIds, ...newIds],
-      totalAmount: batchData.totalAmount + additionalAmount,
+      totalAmount: currency(batchData.totalAmount).add(additionalAmount).value,
       updatedAt: serverTimestamp(),
     };
 
@@ -300,14 +484,14 @@ export const paymentBatchService = {
 
     const newIds = uniqueTransactions.map((t) => t.id);
     const additionalAmount = uniqueTransactions.reduce(
-      (sum, t) => sum + t.amount,
-      0,
-    );
+      (acc, t) => acc.add(t.amount),
+      currency(0),
+    ).value;
 
     // Update Batch
     batch.update(batchRef, {
       transactionIds: [...batchData.transactionIds, ...newIds],
-      totalAmount: batchData.totalAmount + additionalAmount,
+      totalAmount: currency(batchData.totalAmount).add(additionalAmount).value,
       updatedAt: serverTimestamp(),
     });
 
@@ -320,36 +504,29 @@ export const paymentBatchService = {
     await batch.commit();
   },
 
-  delete: async (batchId: string) => {
+  delete: async (batchId: string, actor: BatchActor) => {
     const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
+    const batchData = await loadBatch(batchId);
+    assertStatus(batchData, ["open"]);
 
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
-
-    if (batchData.status !== "open") {
-      throw new Error("Apenas lotes com status 'Aberto' podem ser excluídos");
-    }
-
-    const batchWrite = writeBatch(db);
-
-    // 1. Find all transactions in this batch
-    // We trust the transaction collection query more than the array for mass updates
-    const q = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("batchId", "==", batchId),
+    // A consulta por batchId é mais confiável que o array para desvincular
+    const transactionsSnap = await batchTransactions(batchId);
+    await commitInChunks(
+      transactionsSnap.docs.map((tDoc) => [
+        tDoc.ref,
+        { batchId: deleteField() },
+      ]),
     );
-    const transactionsSnap = await getDocs(q);
 
-    // 2. Remove batchId from them
-    transactionsSnap.docs.forEach((tDoc) => {
-      batchWrite.update(tDoc.ref, { batchId: deleteField() });
+    const wb = writeBatch(db);
+    wb.delete(batchRef);
+    await wb.commit();
+
+    logBatch(batchData.companyId, actor, "delete", batchId, {
+      name: batchData.name,
+      transactionCount: transactionsSnap.size,
+      totalAmount: batchData.totalAmount,
     });
-
-    // 3. Delete the batch document
-    batchWrite.delete(batchRef);
-
-    await batchWrite.commit();
   },
 
   removeTransactions: async (batchId: string, transactions: Transaction[]) => {
@@ -364,19 +541,17 @@ export const paymentBatchService = {
     const newIds = batchData.transactionIds.filter(
       (id) => !idsToRemove.has(id),
     );
-    // Use batchAdjustedAmount when present so the subtracted value matches what
-    // was actually added to totalAmount (which was bumped by updateTransactionAmount).
     const amountToRemove = transactions.reduce(
-      (sum, t) =>
-        sum +
-        ((t as Transaction & { batchAdjustedAmount?: number })
-          .batchAdjustedAmount ?? t.amount),
-      0,
+      (acc, t) => acc.add(effectiveAmount(t)),
+      currency(0),
     );
 
     batch.update(batchRef, {
       transactionIds: newIds,
-      totalAmount: Math.max(0, batchData.totalAmount - amountToRemove),
+      totalAmount: Math.max(
+        0,
+        currency(batchData.totalAmount).subtract(amountToRemove).value,
+      ),
       updatedAt: serverTimestamp(),
     });
 
@@ -388,395 +563,271 @@ export const paymentBatchService = {
     await batch.commit();
   },
 
-  updateStatus: async (
-    batchId: string,
-    status: PaymentBatchStatus,
-    userId: string,
-  ) => {
-    const batch = writeBatch(db);
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: any = { status, updatedAt: serverTimestamp() };
-    if (status === "approved") {
-      updateData.approvedBy = userId;
-      updateData.approvedAt = serverTimestamp();
-    }
-
-    batch.update(batchRef, updateData);
-
-    // Propagate status to transactions if needed
-    // If batch is approved, transactions become approved?
-    // If batch is paid, transactions become paid?
-    let transactionStatus: string | null = null;
-    if (status === "approved") transactionStatus = "approved";
-    if (status === "paid") transactionStatus = "paid";
-    if (status === "rejected") transactionStatus = "rejected";
-
-    if (transactionStatus) {
-      // Fetch all batch transactions first to ensure they exist
-      const q = query(
-        collection(db, TRANSACTIONS_COLLECTION),
-        where("batchId", "==", batchId),
-      );
-      const snapshot = await getDocs(q);
-
-      snapshot.docs.forEach((docSnap) => {
-        const tRef = doc(db, TRANSACTIONS_COLLECTION, docSnap.id);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tUpdate: any = { status: transactionStatus };
-        if (status === "approved") {
-          tUpdate.approvedBy = userId;
-          tUpdate.approvedAt = serverTimestamp();
-        }
-        if (status === "paid") {
-          tUpdate.releasedBy = userId;
-          tUpdate.releasedAt = serverTimestamp();
-        }
-        batch.update(tRef, tUpdate);
-      });
-    }
-
-    await batch.commit();
-  },
-
   /**
-   * Send batch for approval - assigns approver, generates token, changes status
+   * Envia (ou reenvia, com link novo) o lote ao aprovador.
    */
   sendForApproval: async (
     batchId: string,
-    approverId: string,
-    approverEmail: string,
+    approver: { email: string; name?: string },
+    actor: BatchActor,
   ): Promise<string> => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
+    if (sameEmail(approver.email, actor.email)) {
+      throw new Error("Você não pode ser o aprovador de um lote que enviou.");
+    }
 
-    // Generate token with 48h expiration
     const token = crypto.randomUUID();
     const tokenHash = await hashToken(token);
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 48);
 
-    const batch = writeBatch(db);
-    batch.update(batchRef, {
-      status: "pending_approval",
-      approverId,
-      approverEmail,
-      approvalTokenHash: tokenHash,
-      approvalToken: null, // Clear plain token if it existed
-      approvalTokenExpiresAt: expiresAt,
-      sentForApprovalAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    const data = await transitionBatch(
+      batchId,
+      ["open", "pending_approval"],
+      () => ({
+        status: "pending_approval",
+        approverId: approver.email,
+        approverEmail: approver.email,
+        approverName: approver.name || null,
+        approvalTokenHash: tokenHash,
+        approvalToken: null,
+        approvalTokenExpiresAt: expiresAt,
+        sentForApprovalAt: serverTimestamp(),
+      }),
+    );
 
-    await batch.commit();
+    logBatch(data.companyId, actor, "update", batchId, {
+      sentForApproval: true,
+      approverEmail: approver.email,
+      resent: data.status === "pending_approval",
+    });
     return token;
   },
 
   /**
-   * Approve batch with optional comment and transaction adjustments
+   * Aprova o lote. Ajustes de valor e rejeições de itens só são gravados aqui,
+   * junto com a aprovação: fechar o diálogo sem aprovar não deixa rastro.
    */
   approveWithDetails: async (
     batchId: string,
-    userId: string,
+    actor: BatchActor,
     comment?: string,
-    transactionUpdates?: Array<{ id: string; adjustedAmount?: number }>,
+    adjustments: Array<{ id: string; adjustedAmount: number }> = [],
+    rejections: Array<{ id: string; reason: string }> = [],
   ) => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-
-    const batch = writeBatch(db);
-
-    // Update batch status
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const batchUpdate: any = {
-      status: "approved",
-      approvedBy: userId,
-      approvedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    if (comment) {
-      batchUpdate.approverComment = comment;
-    }
-    batch.update(batchRef, batchUpdate);
-
-    // Apply transaction adjustments
-    if (transactionUpdates) {
-      for (const update of transactionUpdates) {
-        const tRef = doc(db, TRANSACTIONS_COLLECTION, update.id);
-        if (update.adjustedAmount !== undefined) {
-          batch.update(tRef, {
-            batchAdjustedAmount: update.adjustedAmount,
-            status: "approved",
-            approvedBy: userId,
-            approvedAt: serverTimestamp(),
-          });
-        } else {
-          batch.update(tRef, {
-            status: "approved",
-            approvedBy: userId,
-            approvedAt: serverTimestamp(),
-          });
-        }
-      }
-    } else {
-      // Approve all transactions — query by batchId so orphan IDs in the array are ignored
-      const tQuery = query(
-        collection(db, TRANSACTIONS_COLLECTION),
-        where("batchId", "==", batchId),
+    const before = await loadBatch(batchId);
+    assertStatus(before, ["pending_approval"]);
+    if (!canActOnBatch(before as PaymentBatch, actor)) {
+      throw new Error(
+        "Só o aprovador designado pode aprovar este lote, e nunca quem o criou.",
       );
-      const tSnap = await getDocs(tQuery);
-      tSnap.docs.forEach((tDoc) => {
-        batch.update(tDoc.ref, {
-          status: "approved",
-          approvedBy: userId,
-          approvedAt: serverTimestamp(),
-        });
-      });
     }
 
-    await batch.commit();
+    const adjusted = new Map(adjustments.map((a) => [a.id, a.adjustedAmount]));
+    const rejected = new Map(rejections.map((r) => [r.id, r.reason]));
+
+    const tSnap = await batchTransactions(batchId);
+    let total = currency(0);
+    const updates: Array<[DocumentReference, DocumentData]> = [];
+    tSnap.docs.forEach((tDoc) => {
+      const t = tDoc.data() as Transaction;
+      const reason = rejected.get(tDoc.id);
+      if (reason) {
+        updates.push([
+          tDoc.ref,
+          { batchId: null, batchRejectionReason: reason, status: "draft" },
+        ]);
+        return;
+      }
+      const amount = adjusted.get(tDoc.id) ?? effectiveAmount(t);
+      total = total.add(amount);
+      updates.push([
+        tDoc.ref,
+        {
+          status: "approved",
+          approvedBy: actor.uid,
+          approvedAt: serverTimestamp(),
+          ...(adjusted.has(tDoc.id) ? { batchAdjustedAmount: amount } : {}),
+        },
+      ]);
+    });
+
+    await commitInChunks(updates);
+
+    await transitionBatch(batchId, ["pending_approval"], (data) => ({
+      status: "approved",
+      approvedBy: actor.uid,
+      approvedAt: serverTimestamp(),
+      approvalTokenHash: null,
+      approvalToken: null,
+      approvalTokenExpiresAt: null,
+      totalAmount: total.value,
+      transactionIds: (data.transactionIds as string[]).filter(
+        (id) => !rejected.has(id),
+      ),
+      rejectedTransactionIds: [
+        ...(data.rejectedTransactionIds ?? []),
+        ...rejected.keys(),
+      ],
+      ...(comment ? { approverComment: comment } : {}),
+    }));
+
+    logBatch(before.companyId, actor, "approve", batchId, {
+      totalAmount: total.value,
+      adjustmentCount: adjusted.size,
+      rejectedCount: rejected.size,
+      ...(comment ? { comment } : {}),
+    });
   },
 
   /**
-   * Reject a single transaction from batch - marks it rejected and returns to open status
-   */
-  rejectTransaction: async (
-    batchId: string,
-    transactionId: string,
-    reason: string,
-  ) => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
-
-    // Get transaction to know the amount to subtract
-    const tRef = doc(db, TRANSACTIONS_COLLECTION, transactionId);
-    const tSnap = await getDoc(tRef);
-    if (!tSnap.exists()) throw new Error("Transaction not found");
-    const tData = tSnap.data() as Transaction;
-
-    const batch = writeBatch(db);
-
-    // Remove from transactionIds, add to rejectedTransactionIds
-    const newTransactionIds = batchData.transactionIds.filter(
-      (id) => id !== transactionId,
-    );
-    const rejectedIds = [
-      ...(batchData.rejectedTransactionIds || []),
-      transactionId,
-    ];
-
-    batch.update(batchRef, {
-      transactionIds: newTransactionIds,
-      rejectedTransactionIds: rejectedIds,
-      totalAmount: Math.max(0, batchData.totalAmount - tData.amount),
-      updatedAt: serverTimestamp(),
-    });
-
-    // Mark transaction with rejection reason and return to draft status
-    batch.update(tRef, {
-      batchId: null,
-      batchRejectionReason: reason,
-      status: "draft",
-    });
-
-    await batch.commit();
-  },
-
-  /**
-   * Send batch for authorization - assigns releaser, generates token, changes status
+   * Envia (ou reenvia, com link novo) o lote para autorização.
    */
   sendForAuthorization: async (
     batchId: string,
-    authorizerId: string,
-    authorizerEmail: string,
+    authorizer: { email: string; name?: string },
+    actor: BatchActor,
   ): Promise<string> => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
+    if (sameEmail(authorizer.email, actor.email)) {
+      throw new Error("Você não pode ser o autorizador de um lote que enviou.");
+    }
 
-    // Generate token with 48h expiration
     const token = crypto.randomUUID();
     const tokenHash = await hashToken(token);
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 48);
 
-    const batch = writeBatch(db);
-    batch.update(batchRef, {
-      status: "pending_authorization",
-      authorizerId,
-      authorizerEmail,
-      approvalTokenHash: tokenHash,
-      approvalToken: null,
-      approvalTokenExpiresAt: expiresAt,
-      sentForAuthorizationAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    const data = await transitionBatch(
+      batchId,
+      ["approved", "pending_authorization"],
+      () => ({
+        status: "pending_authorization",
+        authorizerId: authorizer.email,
+        authorizerEmail: authorizer.email,
+        authorizerName: authorizer.name || null,
+        approvalTokenHash: tokenHash,
+        approvalToken: null,
+        approvalTokenExpiresAt: expiresAt,
+        sentForAuthorizationAt: serverTimestamp(),
+      }),
+    );
 
-    await batch.commit();
+    logBatch(data.companyId, actor, "update", batchId, {
+      sentForAuthorization: true,
+      authorizerEmail: authorizer.email,
+      resent: data.status === "pending_authorization",
+    });
     return token;
   },
 
   /**
-   * Confirm authorization - releaser confirms bank processing
+   * Autorizador confirma que o lote foi liberado no banco.
    */
-  confirmAuthorization: async (batchId: string, userId: string) => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-
-    const batch = writeBatch(db);
-    batch.update(batchRef, {
-      status: "authorized",
-      authorizedBy: userId,
-      authorizedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    await batch.commit();
-  },
-
-  /**
-   * Confirm payments - manager confirms all payments complete
-   */
-  confirmPayments: async (batchId: string, userId: string) => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-
-    const batch = writeBatch(db);
-    batch.update(batchRef, {
-      status: "paid",
-      paidBy: userId,
-      paidAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    // Mark all existing transactions as paid — query by batchId so orphan IDs are ignored
-    const tQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("batchId", "==", batchId),
+  confirmAuthorization: async (batchId: string, actor: BatchActor) => {
+    const data = await transitionBatch(
+      batchId,
+      ["pending_authorization"],
+      (current) => {
+        if (!canActOnBatch(current as PaymentBatch, actor)) {
+          throw new Error(
+            "Só o autorizador designado pode autorizar este lote, e nunca quem o criou.",
+          );
+        }
+        return {
+          status: "authorized",
+          authorizedBy: actor.uid,
+          authorizedAt: serverTimestamp(),
+          approvalTokenHash: null,
+          approvalToken: null,
+          approvalTokenExpiresAt: null,
+        };
+      },
     );
-    const tSnap = await getDocs(tQuery);
-    tSnap.docs.forEach((tDoc) => {
-      batch.update(tDoc.ref, {
-        status: "paid",
-        releasedBy: userId,
-        releasedAt: serverTimestamp(),
-      });
-    });
 
-    await batch.commit();
+    logBatch(data.companyId, actor, "authorize", batchId, {
+      totalAmount: data.totalAmount,
+    });
   },
 
   /**
-   * Update transaction amount within batch
+   * Gestor confirma que todos os pagamentos do lote saíram. As transações vão
+   * primeiro (idempotente, em partes); a troca de status do lote vem por
+   * último e só acontece uma vez.
    */
-  updateTransactionAmount: async (
+  confirmPayments: async (
     batchId: string,
-    transactionId: string,
-    newAmount: number,
-  ) => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
+    actor: BatchActor,
+  ): Promise<{ count: number; total: number }> => {
+    assertStatus(await loadBatch(batchId), ["authorized"]);
 
-    const tRef = doc(db, TRANSACTIONS_COLLECTION, transactionId);
-    const tSnap = await getDoc(tRef);
-    if (!tSnap.exists()) throw new Error("Transaction not found");
-    const tData = tSnap.data() as Transaction;
+    const tSnap = await batchTransactions(batchId);
+    await commitInChunks(
+      tSnap.docs.map((tDoc) => [
+        tDoc.ref,
+        {
+          status: "paid",
+          releasedBy: actor.uid,
+          releasedAt: serverTimestamp(),
+        },
+      ]),
+    );
 
-    const amountDiff = newAmount - tData.amount;
+    const data = await transitionBatch(batchId, ["authorized"], () => ({
+      status: "paid",
+      paidBy: actor.uid,
+      paidAt: serverTimestamp(),
+    }));
 
-    const batch = writeBatch(db);
-
-    // Update batch total
-    batch.update(batchRef, {
-      totalAmount: batchData.totalAmount + amountDiff,
-      updatedAt: serverTimestamp(),
+    logBatch(data.companyId, actor, "pay", batchId, {
+      transactionCount: tSnap.size,
+      totalAmount: data.totalAmount,
     });
-
-    // Update transaction with adjusted amount
-    batch.update(tRef, {
-      batchAdjustedAmount: newAmount,
-    });
-
-    await batch.commit();
+    return { count: tSnap.size, total: data.totalAmount };
   },
 
   /**
-   * Revert paid batch back to open status
-   * Reverts batch status from 'paid' to 'open' and all transactions from 'paid' to 'draft'
+   * Desfaz uma confirmação de pagamento errada: lote volta a Aberto e as
+   * transações a Rascunho. O motivo e o histórico ficam no log de auditoria.
    */
-  revertToOpen: async (batchId: string, userId: string): Promise<void> => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-    const batchData = batchSnap.data() as PaymentBatch;
+  revertToOpen: async (
+    batchId: string,
+    actor: BatchActor,
+    reason: string,
+  ): Promise<void> => {
+    if (!reason.trim()) throw new Error("Informe o motivo da reversão.");
+    const before = await loadBatch(batchId);
+    assertStatus(before, ["paid"]);
 
-    if (batchData.status !== "paid") {
-      throw new Error(
-        "Apenas lotes com status 'Pago' podem ser revertidos para Aberto.",
-      );
-    }
+    const tSnap = await batchTransactions(batchId);
+    await commitInChunks(
+      tSnap.docs.map((tDoc) => [
+        tDoc.ref,
+        {
+          status: "draft",
+          releasedBy: deleteField(),
+          releasedAt: deleteField(),
+        },
+      ]),
+    );
 
-    const batch = writeBatch(db);
-
-    batch.update(batchRef, {
+    await transitionBatch(batchId, ["paid"], () => ({
       status: "open",
       paidBy: deleteField(),
       paidAt: deleteField(),
-      revertedBy: userId,
+      revertedBy: actor.uid,
       revertedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      revertReason: reason.trim(),
+    }));
+
+    logBatch(before.companyId, actor, "update", batchId, {
+      revertedFromPaid: true,
+      reason: reason.trim(),
+      paidBy: before.paidBy,
+      paidAt: (before.paidAt as Timestamp)?.toDate().toISOString(),
+      approvedBy: before.approvedBy,
+      authorizedBy: before.authorizedBy,
+      transactionCount: tSnap.size,
+      totalAmount: before.totalAmount,
     });
-
-    // Revert all transactions back to draft
-    const tQuery = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("batchId", "==", batchId),
-    );
-    const tSnap = await getDocs(tQuery);
-    tSnap.docs.forEach((tDoc) => {
-      batch.update(tDoc.ref, {
-        status: "draft",
-        releasedBy: deleteField(),
-        releasedAt: deleteField(),
-      });
-    });
-
-    await batch.commit();
-  },
-
-  /**
-   * Return batch to manager for adjustments
-   */
-  returnToManager: async (batchId: string, reason: string): Promise<void> => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) throw new Error("Batch not found");
-
-    const batch = writeBatch(db);
-    batch.update(batchRef, {
-      status: "open",
-      approvalTokenHash: null,
-      approvalToken: null,
-      approvalTokenExpiresAt: null,
-      approverId: null,
-      approverEmail: null,
-      approverComment: `Devolvido: ${reason}`,
-      updatedAt: serverTimestamp(),
-    });
-
-    await batch.commit();
   },
 
   /**

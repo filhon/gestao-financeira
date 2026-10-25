@@ -234,12 +234,34 @@ service cloud.firestore {
        function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
        
        allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser']);
-       
-       // Write: Managers, Approvers, Releasers (Approve/Pay actions)
-       allow write: if isAuthenticated() && (
-         isManager(getCompanyId()) || 
-         hasCompanyRole(getCompanyId(), ['approver', 'releaser'])
-       );
+
+       function canWriteBatch() {
+         return isManager(getCompanyId()) ||
+                hasCompanyRole(getCompanyId(), ['approver', 'releaser']);
+       }
+
+       // Segregação de funções: aprovar e autorizar só pela pessoa designada
+       // (e-mail do token), nunca por quem criou o lote. As demais trocas de
+       // status são do gestor. O magic link usa o Admin SDK e confere o token.
+       function isDesignated(field) {
+         return request.auth.uid != resource.data.createdBy &&
+                request.auth.token.get('email', '').lower() ==
+                  resource.data.get(field, '').lower();
+       }
+
+       function batchStatusChangeAllowed() {
+         let before = resource.data.get('status', '');
+         let after = request.resource.data.get('status', '');
+         return before == after ||
+           (before == 'pending_approval' && after == 'approved' && isDesignated('approverEmail')) ||
+           (before == 'pending_authorization' && after == 'authorized' && isDesignated('authorizerEmail')) ||
+           (!(after in ['approved', 'authorized']) && isManager(getCompanyId()));
+       }
+
+       allow create, delete: if isAuthenticated() && canWriteBatch();
+       allow update: if isAuthenticated() && canWriteBatch() &&
+         request.resource.data.companyId == resource.data.companyId &&
+         batchStatusChangeAllowed();
     }
 
     // 5. Recurring Templates
