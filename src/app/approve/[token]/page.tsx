@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { transactionService } from "@/lib/services/transactionService";
-import { costCenterService } from "@/lib/services/costCenterService";
-import { Transaction, CostCenter } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,13 +44,30 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+interface ApprovalTransaction {
+  id: string;
+  description: string;
+  details: string | null;
+  amount: number;
+  dueDate: Date;
+  createdAt: Date;
+  requesterName: string | null;
+}
+
+interface ApprovalCostCenter {
+  name: string;
+  description: string | null;
+}
+
 export default function ApprovalPage() {
   const params = useParams();
   const router = useRouter();
   const token = params.token as string;
 
-  const [transaction, setTransaction] = useState<Transaction | null>(null);
-  const [costCenter, setCostCenter] = useState<CostCenter | null>(null);
+  const [transaction, setTransaction] = useState<ApprovalTransaction | null>(
+    null,
+  );
+  const [costCenter, setCostCenter] = useState<ApprovalCostCenter | null>(null);
   const [status, setStatus] = useState<
     "loading" | "ready" | "success" | "rejected" | "error"
   >("loading");
@@ -70,46 +85,24 @@ export default function ApprovalPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const txData = await transactionService.getByApprovalToken(token);
-        if (!txData) {
+        const res = await fetch(
+          `/api/internal/transaction-approval?token=${encodeURIComponent(token)}`,
+        );
+        const data = await res.json();
+        if (!res.ok) {
           setStatus("error");
-          setErrorMessage("Link inválido ou expirado.");
+          setErrorMessage(data.error || "Link inválido ou expirado.");
           return;
         }
 
-        if (txData.status !== "pending_approval") {
-          setStatus("error");
-          setErrorMessage(
-            `Esta transação não está aguardando aprovação (status: ${txData.status}).`,
-          );
-          return;
-        }
-
-        if (
-          txData.approvalTokenExpiresAt &&
-          new Date(txData.approvalTokenExpiresAt) < new Date()
-        ) {
-          setStatus("error");
-          setErrorMessage("Este link de aprovação expirou.");
-          return;
-        }
-
-        setTransaction(txData);
-        setEditValue(String(txData.amount));
-
-        if (
-          txData.costCenterAllocation &&
-          txData.costCenterAllocation.length > 0
-        ) {
-          try {
-            const ccId = txData.costCenterAllocation[0].costCenterId;
-            const ccData = await costCenterService.getById(ccId);
-            setCostCenter(ccData);
-          } catch (error) {
-            console.error("Error loading cost center:", error);
-          }
-        }
-
+        const tx = data.transaction;
+        setTransaction({
+          ...tx,
+          dueDate: new Date(tx.dueDate),
+          createdAt: new Date(tx.createdAt),
+        });
+        setEditValue(String(tx.amount));
+        setCostCenter(data.costCenter);
         setStatus("ready");
       } catch (error) {
         console.error("Error loading transaction:", error);
@@ -443,13 +436,13 @@ export default function ApprovalPage() {
               </div>
             )}
 
-            {transaction.requestOrigin && (
+            {transaction.requesterName && (
               <div>
                 <Label className="text-muted-foreground text-sm flex items-center gap-2 mb-2">
                   <User className="h-4 w-4" />
                   Solicitante
                 </Label>
-                <p className="font-medium">{transaction.requestOrigin.name}</p>
+                <p className="font-medium">{transaction.requesterName}</p>
               </div>
             )}
 

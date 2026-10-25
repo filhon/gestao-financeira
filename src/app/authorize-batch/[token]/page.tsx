@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { paymentBatchService } from "@/lib/services/paymentBatchService";
-import { PaymentBatch } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,12 +21,19 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+interface AuthorizationBatch {
+  id: string;
+  name: string;
+  transactionCount: number;
+  totalAmount: number;
+}
+
 export default function BatchAuthorizationPage() {
   const params = useParams();
   const router = useRouter();
   const token = params.token as string;
 
-  const [batch, setBatch] = useState<PaymentBatch | null>(null);
+  const [batch, setBatch] = useState<AuthorizationBatch | null>(null);
   const [status, setStatus] = useState<
     "loading" | "ready" | "success" | "error"
   >("loading");
@@ -38,28 +43,22 @@ export default function BatchAuthorizationPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const batchData = await paymentBatchService.getByApprovalToken(token);
-        if (!batchData) {
+        const res = await fetch(
+          `/api/internal/batch-authorization?token=${encodeURIComponent(token)}`,
+        );
+        const data = await res.json();
+        if (!res.ok) {
           setStatus("error");
-          setErrorMessage("Link inválido ou expirado.");
+          setErrorMessage(data.error || "Link inválido ou expirado.");
           return;
         }
 
-        if (batchData.status !== "pending_authorization") {
-          setStatus("error");
-          setErrorMessage(
-            `Este lote não está aguardando autorização (status: ${batchData.status}).`,
-          );
-          return;
-        }
-
-        setBatch(batchData);
+        setBatch(data);
         setStatus("ready");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } catch (error: any) {
+      } catch (error) {
         console.error("Error loading batch:", error);
         setStatus("error");
-        setErrorMessage(error.message || "Erro ao carregar o lote.");
+        setErrorMessage("Erro ao carregar o lote.");
       }
     };
 
@@ -71,7 +70,16 @@ export default function BatchAuthorizationPage() {
 
     setIsSubmitting(true);
     try {
-      await paymentBatchService.authorizeByToken(token);
+      const res = await fetch("/api/internal/batch-authorization", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Erro ao autorizar lote");
+        return;
+      }
       setStatus("success");
     } catch (error) {
       console.error("Error authorizing:", error);
@@ -160,9 +168,7 @@ export default function BatchAuthorizationPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Transações:</span>
-              <span className="font-semibold">
-                {batch?.transactionIds.length}
-              </span>
+              <span className="font-semibold">{batch?.transactionCount}</span>
             </div>
             <div className="flex justify-between border-t pt-2">
               <span className="text-muted-foreground">Valor Total:</span>

@@ -1473,24 +1473,6 @@ export const transactionService = {
     return data;
   },
 
-  getByApprovalToken: async (token: string): Promise<Transaction | null> => {
-    const q = query(
-      collection(db, COLLECTION_NAME),
-      where("approvalToken", "==", token),
-    );
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      return null;
-    }
-
-    const docSnapshot = snapshot.docs[0];
-    return convertDates({
-      id: docSnapshot.id,
-      ...docSnapshot.data(),
-    });
-  },
-
   /** Rejeita pelo magic link. Mesma razão do `approveByToken`. */
   rejectByToken: async (token: string, _userId: string, reason: string) => {
     const call = httpsCallable<

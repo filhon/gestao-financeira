@@ -51,8 +51,40 @@ const fromDoc = (id: string, data: Record<string, unknown>): BankAccount =>
     updatedAt: toDate(data.updatedAt),
   }) as BankAccount;
 
-/** Só dígitos: o OFX traz "0001234-5", o cadastro pode ter "1234-5". */
-const digits = (v?: string) => (v ?? "").replace(/\D/g, "").replace(/^0+/, "");
+const rawDigits = (v?: string) => (v ?? "").replace(/\D/g, "");
+/** Só dígitos, sem zeros à esquerda: "0001234-5" e "1234-5" viram "12345". */
+const digits = (v?: string) => rawDigits(v).replace(/^0+/, "");
+
+/**
+ * Quão especificamente o extrato aponta para a conta (0 = não é ela).
+ *
+ * Cada banco monta o ACCTID de um jeito: Itaú manda agência+conta+DV
+ * ("0364362426"), BB e Bradesco põem a agência no BRANCHID, Caixa inclui a
+ * operação, alguns omitem o DV. Então a conta cadastrada é procurada como
+ * sufixo dos dígitos do extrato (BRANCHID + ACCTID), com e sem o DV dos dois
+ * lados. A pontuação é o tamanho do trecho que bateu.
+ */
+function statementScore(a: BankAccount, statementDigits: string): number {
+  const account = rawDigits(a.accountNumber);
+  if (!account) return 0;
+  const keys = [
+    a.agency ? rawDigits(a.agency) + account : "",
+    account,
+    // "12345-6" cadastrado, extrato sem o DV.
+    /\D\s*\w$/.test(a.accountNumber ?? "") ? account.slice(0, -1) : "",
+  ]
+    .map((k) => k.replace(/^0+/, ""))
+    .filter((k) => k.length >= 4);
+
+  let best = 0;
+  for (const key of keys) {
+    if (statementDigits.endsWith(key)) best = Math.max(best, key.length);
+    // Cadastro sem o DV, extrato com ele.
+    else if (statementDigits.slice(0, -1).endsWith(key))
+      best = Math.max(best, key.length - 0.5);
+  }
+  return best;
+}
 
 export const bankAccountService = {
   async getAll(companyId: string): Promise<BankAccount[]> {
@@ -67,21 +99,41 @@ export const bankAccountService = {
       .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   },
 
-  /** Conta cadastrada que corresponde ao BANKID/ACCTID de um OFX. */
+  /**
+   * Conta cadastrada que corresponde ao BANKID/BRANCHID/ACCTID de um OFX.
+   * Empate entre duas contas = ambíguo: melhor não escolher do que importar
+   * na conta errada.
+   */
   findByStatement(
     accounts: BankAccount[],
-    statement: { bankCode?: string; accountNumber?: string },
+    statement: { bankCode?: string; branchId?: string; accountNumber?: string },
   ): BankAccount | undefined {
-    const acct = digits(statement.accountNumber);
-    if (!acct) return undefined;
-    return accounts.find(
-      (a) =>
-        a.active &&
-        digits(a.accountNumber) === acct &&
-        (!a.bankCode ||
-          !statement.bankCode ||
-          digits(a.bankCode) === digits(statement.bankCode)),
-    );
+    if (!digits(statement.accountNumber)) return undefined;
+    const statementDigits = (
+      rawDigits(statement.branchId) + rawDigits(statement.accountNumber)
+    ).replace(/^0+/, "");
+    // Código COMPE tem até 3 dígitos; há bancos que mandam o ISPB (8) no
+    // BANKID, e esse não dá para comparar com o cadastro.
+    const bank = digits(statement.bankCode);
+    const comparableBank = bank.length > 0 && bank.length <= 3 ? bank : "";
+
+    let best: BankAccount | undefined;
+    let bestScore = 0;
+    let tie = false;
+    for (const a of accounts) {
+      if (!a.active) continue;
+      if (comparableBank && a.bankCode && digits(a.bankCode) !== comparableBank)
+        continue;
+      const score = statementScore(a, statementDigits);
+      if (score > bestScore) {
+        best = a;
+        bestScore = score;
+        tie = false;
+      } else if (score > 0 && score === bestScore) {
+        tie = true;
+      }
+    }
+    return tie ? undefined : best;
   },
 
   async create(draft: BankAccountDraft, companyId: string, actor: Actor) {

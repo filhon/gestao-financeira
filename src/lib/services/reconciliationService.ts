@@ -10,6 +10,17 @@ import Papa from "papaparse";
 import currency from "currency.js";
 
 export class ReconciliationService {
+  /**
+   * OFX 1.x é SGML e aceita `&` cru (ex.: "N&M COMERCIO"), mas o ofx-js
+   * converte para XML e usa um parser estrito. Escapa todo `&` que não
+   * inicia uma entidade.
+   */
+  private static parseOFXContent(content: string) {
+    return parseOFXData(
+      content.replace(/&(?!(?:[a-zA-Z]+|#\d+|#x[0-9a-fA-F]+);)/g, "&amp;"),
+    );
+  }
+
   static async parseStatement(
     fileContent: string,
     type: "csv" | "json" | "ofx",
@@ -129,12 +140,13 @@ export class ReconciliationService {
    */
   static async parseOFXMeta(content: string): Promise<{
     bankCode?: string;
+    branchId?: string;
     accountNumber?: string;
     balance?: number;
     balanceDate?: Date;
   }> {
     try {
-      const parsed = await parseOFXData(content);
+      const parsed = await this.parseOFXContent(content);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const find = (obj: any, key: string): any => {
         if (!obj || typeof obj !== "object") return undefined;
@@ -150,6 +162,7 @@ export class ReconciliationService {
       const ledger = find(parsed, "LEDGERBAL");
       return {
         bankCode: account?.BANKID ? String(account.BANKID) : undefined,
+        branchId: account?.BRANCHID ? String(account.BRANCHID) : undefined,
         accountNumber: account?.ACCTID ? String(account.ACCTID) : undefined,
         balance:
           ledger?.BALAMT !== undefined
@@ -166,7 +179,7 @@ export class ReconciliationService {
   static async parseOFX(content: string): Promise<BankTransaction[]> {
     const transactions: BankTransaction[] = [];
     try {
-      const parsedOfx = await parseOFXData(content);
+      const parsedOfx = await this.parseOFXContent(content);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const findTransactions = (obj: any): any[] => {
