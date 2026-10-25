@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn, formatCurrency, plural } from "@/lib/utils";
 import { format } from "date-fns";
+import currency from "currency.js";
 import {
   Check,
   Plus,
@@ -32,10 +33,12 @@ import {
   Lock,
   ListChecks,
   MoreHorizontal,
+  ChevronRight,
+  AlertTriangle,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
-import type { DayBalance } from "@/lib/bankReconciliation";
+import { dayKey, type DayGroup } from "@/lib/bankReconciliation";
 
 export type ReconciliationAction =
   | "confirm"
@@ -123,7 +126,7 @@ export function StatusBadge({ status }: { status: BankTransaction["status"] }) {
       );
     default:
       return (
-        <Badge variant="secondary" className="gap-1">
+        <Badge variant="outline" className="gap-1">
           <Circle className="h-3 w-3" />
           Pendente
         </Badge>
@@ -131,27 +134,34 @@ export function StatusBadge({ status }: { status: BankTransaction["status"] }) {
   }
 }
 
-/** Lançamento do sistema numa linha só: a altura da tabela fica constante. */
+/**
+ * Lançamento do sistema numa linha só: a altura da tabela fica constante.
+ * Data e valor em colunas fixas, para alinharem de uma linha para a outra.
+ */
 function SystemLine({
   t,
   note,
 }: {
-  t: Pick<Transaction, "description" | "dueDate" | "amount">;
+  t: Pick<Transaction, "description" | "dueDate" | "paymentDate" | "amount">;
   note?: React.ReactNode;
 }) {
   return (
-    <div className="min-w-0">
-      <div className="flex items-baseline gap-2 text-sm">
-        <span className="truncate font-medium" title={t.description}>
-          {t.description || "Sem descrição"}
-        </span>
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-          {dmy(t.dueDate)} ·{" "}
-          <span className="font-financial">{formatCurrency(t.amount)}</span>
-        </span>
-      </div>
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-3 md:grid-cols-[minmax(0,1fr)_7.5rem_6.5rem]">
+      <span className="truncate text-sm font-medium" title={t.description}>
+        {t.description || "Sem descrição"}
+      </span>
+      <span className="text-xs text-muted-foreground tabular-nums">
+        {t.paymentDate
+          ? `pago ${dmy(t.paymentDate)}`
+          : `venc. ${dmy(t.dueDate)}`}
+      </span>
+      <span className="text-right text-xs text-muted-foreground font-financial tabular-nums">
+        {formatCurrency(t.amount)}
+      </span>
       {note && (
-        <div className="truncate text-xs text-muted-foreground">{note}</div>
+        <div className="col-span-3 truncate text-xs text-muted-foreground">
+          {note}
+        </div>
       )}
     </div>
   );
@@ -398,8 +408,70 @@ export function RowActions({
   );
 }
 
-/** Fim do dia: saldos que o banco informou contra o calculado pelo arquivo. */
-function DayBalanceRow({ day, cols }: { day: DayBalance; cols: number }) {
+/** O que falta no dia, ou por que ele está resolvido. */
+function DayVerdict({ group }: { group: DayGroup }) {
+  const { balance } = group;
+  if (group.pending > 0) {
+    return (
+      <span className="font-medium text-foreground">
+        {plural(group.pending, "pendente", "pendentes")}
+      </span>
+    );
+  }
+  if (balance && balance.computed !== null && !balance.matches) {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
+        <AlertTriangle className="h-3.5 w-3.5" />
+        Nenhum saldo do banco bate com o calculado:{" "}
+        <span className="font-financial tabular-nums">
+          {formatCurrency(balance.computed)}
+        </span>
+      </span>
+    );
+  }
+  if (group.locked) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Lock className="h-3.5 w-3.5" />
+        Período fechado
+      </span>
+    );
+  }
+  if (balance?.computed === null) return <span>Dentro do saldo inicial</span>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1",
+        balance?.matches && "text-emerald-700 dark:text-emerald-400",
+      )}
+    >
+      <CheckCircle2 className="h-3.5 w-3.5" />
+      {balance?.matches ? "Confere com o sistema" : "Tudo tratado"}
+    </span>
+  );
+}
+
+/**
+ * Cabeçalho do dia: abre e recolhe, mostra os saldos que o banco informou e o
+ * veredito. O banco manda vários saldos (com aplicação, disponível, da conta);
+ * o que bate com o sistema leva o ✓, para ficar claro qual deles é o da conta.
+ */
+function DayHeaderRow({
+  group,
+  cols,
+  collapsed,
+  onToggle,
+}: {
+  group: DayGroup;
+  cols: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const { balance } = group;
+  const hit = (amount: number) =>
+    !!balance &&
+    balance.computed !== null &&
+    currency(amount).value === balance.computed;
   return (
     <TableRow className="bg-muted/30 hover:bg-muted/30">
       <TableCell
@@ -407,39 +479,62 @@ function DayBalanceRow({ day, cols }: { day: DayBalance; cols: number }) {
         className="py-1.5 text-xs text-muted-foreground"
       >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="font-medium text-foreground/80">
-            Saldos do banco em {dmy(day.date)}
-          </span>
-          {day.lines.map((l) => (
-            <span key={l.id}>
-              {l.description}{" "}
-              <span className="font-financial tabular-nums">
-                {formatCurrency(l.amount)}
+          {group.total > 0 ? (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={!collapsed}
+              className="-mx-1 inline-flex items-center gap-1 rounded-sm px-1 font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <ChevronRight
+                className={cn(
+                  "h-3.5 w-3.5 text-muted-foreground transition-transform duration-150",
+                  !collapsed && "rotate-90",
+                )}
+              />
+              <span className="tabular-nums">{dmy(group.date)}</span>
+              <span className="font-normal text-muted-foreground">
+                · {plural(group.total, "linha", "linhas")}
+              </span>
+            </button>
+          ) : (
+            <span className="pl-[18px] font-medium text-foreground">
+              <span className="tabular-nums">{dmy(group.date)}</span>
+              <span className="font-normal text-muted-foreground">
+                {" "}
+                · sem movimento
               </span>
             </span>
-          ))}
-          {day.computed !== null && (
-            <span
-              className={cn(
-                "ml-auto inline-flex items-center gap-1",
-                day.matches && "text-emerald-700 dark:text-emerald-400",
-              )}
-            >
-              {day.matches ? (
-                <>
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Confere com o sistema
-                </>
-              ) : (
-                <>
-                  Calculado pelo arquivo{" "}
+          )}
+          {balance && balance.lines.length > 0 && (
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Banco:</span>
+              {balance.lines.map((l) => (
+                <span
+                  key={l.id}
+                  className={cn(
+                    "inline-flex items-center gap-1",
+                    hit(l.amount) &&
+                      "font-medium text-emerald-700 dark:text-emerald-400",
+                  )}
+                >
+                  {hit(l.amount) && (
+                    <CheckCircle2
+                      className="h-3.5 w-3.5"
+                      aria-label="confere com o sistema"
+                    />
+                  )}
+                  {l.description}{" "}
                   <span className="font-financial tabular-nums">
-                    {formatCurrency(day.computed)}
+                    {formatCurrency(l.amount)}
                   </span>
-                </>
-              )}
+                </span>
+              ))}
             </span>
           )}
+          <span className="ml-auto">
+            <DayVerdict group={group} />
+          </span>
         </div>
       </TableCell>
     </TableRow>
@@ -448,8 +543,13 @@ function DayBalanceRow({ day, cols }: { day: DayBalance; cols: number }) {
 
 interface ReconciliationTableProps {
   transactions: BankTransaction[];
-  /** Só com a lista completa à vista: filtrada, a conferência não faz sentido. */
-  dayBalances?: DayBalance[];
+  /** Dias do extrato, com a conferência de saldo; as linhas entram dentro deles. */
+  days: DayGroup[];
+  /** Dias recolhidos: só o cabeçalho aparece. */
+  collapsedDays: Set<string>;
+  onToggleDay: (group: DayGroup) => void;
+  /** Sem filtro, dia sem linha à vista (só saldo) também aparece. */
+  showEmptyDays: boolean;
   onAction: ActionHandler;
   rowState: (tx: BankTransaction) => RowState;
   canSettle: (tx: BankTransaction) => boolean;
@@ -470,7 +570,10 @@ interface ReconciliationTableProps {
 
 export function ReconciliationTable({
   transactions,
-  dayBalances = [],
+  days,
+  collapsedDays,
+  onToggleDay,
+  showEmptyDays,
   onAction,
   rowState,
   canSettle,
@@ -488,6 +591,8 @@ export function ReconciliationTable({
   emptyState,
 }: ReconciliationTableProps) {
   const selectable = onSelectedChange ? transactions.filter(isSelectable) : [];
+  // Sem linha a tratar, a coluna de seleção só empurraria a data.
+  const showSelect = !!onSelectedChange && selectable.length > 0;
   const allSelected =
     selectable.length > 0 && selectable.every((tx) => selected.has(tx.id));
   const someSelected = selectable.some((tx) => selected.has(tx.id));
@@ -497,48 +602,49 @@ export function ReconciliationTable({
     else next.delete(id);
     onSelectedChange?.(next);
   };
-  const cols = onSelectedChange ? 7 : 6;
+  const cols = showSelect ? 7 : 6;
 
-  // Saldo do dia entra depois dos movimentos do dia. O sort é estável e as
-  // linhas já vêm em ordem de data.
-  const dayKey = (d: Date) => format(new Date(d), "yyyy-MM-dd");
-  const rows = [
-    ...transactions.map((tx) => ({
-      key: `${dayKey(tx.date)}0`,
-      tx,
-      day: undefined,
-    })),
-    ...dayBalances.map((day) => ({ key: `${day.day}1`, tx: undefined, day })),
-  ].sort((a, b) => a.key.localeCompare(b.key));
-  const firstId = transactions[0]?.id;
+  // As linhas já vêm em ordem de data; cada dia leva as suas.
+  const byDay = new Map<string, BankTransaction[]>();
+  for (const tx of transactions) {
+    const key = dayKey(tx.date);
+    byDay.set(key, [...(byDay.get(key) ?? []), tx]);
+  }
+  const shownDays =
+    transactions.length === 0
+      ? []
+      : days.filter((g) => byDay.has(g.day) || showEmptyDays);
+  const firstId = shownDays
+    .filter((g) => !collapsedDays.has(g.day))
+    .flatMap((g) => byDay.get(g.day) ?? [])[0]?.id;
 
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          {onSelectedChange && (
+          {showSelect && (
             <TableHead className="w-10">
-              {selectable.length > 0 && (
-                <Checkbox
-                  checked={
-                    allSelected ? true : someSelected ? "indeterminate" : false
-                  }
-                  onCheckedChange={(c) =>
-                    onSelectedChange(
-                      c ? new Set(selectable.map((tx) => tx.id)) : new Set(),
-                    )
-                  }
-                  aria-label="Selecionar todas as linhas a tratar"
-                />
-              )}
+              <Checkbox
+                checked={
+                  allSelected ? true : someSelected ? "indeterminate" : false
+                }
+                onCheckedChange={(c) =>
+                  onSelectedChange?.(
+                    c ? new Set(selectable.map((tx) => tx.id)) : new Set(),
+                  )
+                }
+                aria-label="Selecionar todas as linhas a tratar"
+              />
             </TableHead>
           )}
           <TableHead className="w-[100px]">Data</TableHead>
           <TableHead className="w-[34%]">Descrição no banco</TableHead>
           <TableHead className="w-[130px] text-right">Valor</TableHead>
           <TableHead className="w-[120px]">Situação</TableHead>
-          <TableHead className="w-[30%]">No sistema</TableHead>
-          <TableHead className="text-right w-[200px]">Ações</TableHead>
+          <TableHead>No sistema</TableHead>
+          <TableHead className="w-px whitespace-nowrap text-right">
+            Ações
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -564,84 +670,101 @@ export function ReconciliationTable({
             </TableCell>
           </TableRow>
         )}
-        {rows.map(({ tx, day }) => {
-          if (day) return <DayBalanceRow key={day.day} day={day} cols={cols} />;
-          if (!tx) return null;
-          const state = rowState(tx);
-          const editable = state === "editable";
-          const active = activeId === tx.id;
-          return (
-            <TableRow
-              key={tx.id}
-              data-row-id={tx.id}
-              // Tab entra pela linha ativa (ou a primeira); j/k e setas andam dentro.
-              tabIndex={tx.id === (activeId ?? firstId) ? 0 : -1}
-              onFocus={() => onActiveChange(tx.id)}
-              className={cn(
-                "outline-none",
-                tx.status === "ignored" && "text-muted-foreground",
-                active && "bg-muted/60 ring-1 ring-inset ring-primary/40",
-              )}
-              data-state={selected.has(tx.id) ? "selected" : undefined}
-            >
-              {onSelectedChange && (
-                <TableCell>
-                  {isSelectable(tx) && (
-                    <Checkbox
-                      checked={selected.has(tx.id)}
-                      onCheckedChange={(c) => toggle(tx.id, !!c)}
-                      aria-label={`Selecionar ${tx.description}, ${signed(tx.amount)}`}
-                    />
-                  )}
-                </TableCell>
-              )}
-              <TableCell className="tabular-nums">{dmy(tx.date)}</TableCell>
-
-              <TableCell className="max-w-0">
-                <div className="truncate font-medium" title={tx.description}>
-                  {tx.description}
-                </div>
-              </TableCell>
-
-              <TableCell
-                className={cn(
-                  "text-right font-medium font-financial tabular-nums whitespace-nowrap",
-                  tx.amount < 0
-                    ? "text-red-700 dark:text-red-400"
-                    : "text-emerald-700 dark:text-emerald-400",
-                )}
-              >
-                {signed(tx.amount)}
-              </TableCell>
-              <TableCell>
-                <StatusBadge status={tx.status} />
-              </TableCell>
-              <TableCell className="max-w-0">
-                <SystemCell
-                  tx={tx}
-                  rule={ruleFor(tx)}
-                  editable={editable}
-                  onAction={onAction}
-                />
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex justify-end">
-                  <RowActions
-                    tx={tx}
-                    state={state}
-                    canSettle={canSettle(tx)}
-                    canLaunch={canLaunch(tx)}
-                    canRule={canRule}
-                    onAction={onAction}
-                    menuOpen={menuOpenId === tx.id}
-                    onMenuOpenChange={(o) => onMenuOpenChange(o ? tx.id : null)}
-                  />
-                </div>
-              </TableCell>
-            </TableRow>
-          );
+        {shownDays.flatMap((group) => {
+          const collapsed = collapsedDays.has(group.day);
+          return [
+            <DayHeaderRow
+              key={group.day}
+              group={group}
+              cols={cols}
+              collapsed={collapsed}
+              onToggle={() => onToggleDay(group)}
+            />,
+            ...(collapsed ? [] : (byDay.get(group.day) ?? [])).map(renderRow),
+          ];
         })}
       </TableBody>
     </Table>
   );
+
+  function renderRow(tx: BankTransaction) {
+    const state = rowState(tx);
+    const editable = state === "editable";
+    const active = activeId === tx.id;
+    return (
+      <TableRow
+        key={tx.id}
+        data-row-id={tx.id}
+        // Tab entra pela linha ativa (ou a primeira); j/k e setas andam dentro.
+        tabIndex={tx.id === (activeId ?? firstId) ? 0 : -1}
+        onFocus={() => onActiveChange(tx.id)}
+        className={cn(
+          "outline-none",
+          tx.status === "ignored" && "text-muted-foreground",
+          active && "bg-muted/60 ring-2 ring-inset ring-primary",
+        )}
+        data-state={selected.has(tx.id) ? "selected" : undefined}
+      >
+        {showSelect && (
+          <TableCell>
+            {isSelectable(tx) && (
+              <Checkbox
+                checked={selected.has(tx.id)}
+                onCheckedChange={(c) => toggle(tx.id, !!c)}
+                aria-label={`Selecionar ${tx.description}, ${signed(tx.amount)}`}
+              />
+            )}
+          </TableCell>
+        )}
+        <TableCell className="tabular-nums">{dmy(tx.date)}</TableCell>
+
+        <TableCell className="max-w-0">
+          <div className="truncate font-medium" title={tx.description}>
+            {tx.description}
+          </div>
+        </TableCell>
+
+        <TableCell
+          className={cn(
+            "text-right font-medium font-financial tabular-nums whitespace-nowrap",
+            tx.status === "ignored"
+              ? "text-muted-foreground"
+              : tx.amount < 0
+                ? "text-red-700 dark:text-red-400"
+                : "text-emerald-700 dark:text-emerald-400",
+          )}
+        >
+          {signed(tx.amount)}
+        </TableCell>
+        <TableCell>
+          <StatusBadge status={tx.status} />
+        </TableCell>
+        <TableCell className="max-w-0">
+          <SystemCell
+            tx={tx}
+            rule={ruleFor(tx)}
+            editable={editable}
+            onAction={onAction}
+          />
+        </TableCell>
+        <TableCell className="text-right">
+          {/* Fechada: o cabeçalho do dia já diz; um cadeado por linha era ruído. */}
+          <div
+            className={cn("flex justify-end", state === "locked" && "sr-only")}
+          >
+            <RowActions
+              tx={tx}
+              state={state}
+              canSettle={canSettle(tx)}
+              canLaunch={canLaunch(tx)}
+              canRule={canRule}
+              onAction={onAction}
+              menuOpen={menuOpenId === tx.id}
+              onMenuOpenChange={(o) => onMenuOpenChange(o ? tx.id : null)}
+            />
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
 }

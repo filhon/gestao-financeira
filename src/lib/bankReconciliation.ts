@@ -172,6 +172,61 @@ export function dailyBalances(
     });
 }
 
+export const dayKey = day;
+
+/** Um dia do extrato: quantas linhas, quantas faltam e o saldo do banco. */
+export interface DayGroup {
+  day: string;
+  date: Date;
+  total: number;
+  pending: number;
+  locked: boolean;
+  balance?: DayBalance;
+  /** Nada a fazer: sem pendente e, se o banco mandou saldo, ele bate. */
+  done: boolean;
+}
+
+/** Agrupa as linhas de movimento por dia, com a conferência de saldo de cada um. */
+export function groupByDay(
+  account: BankAccount,
+  lines: BankTransaction[],
+  balances: DayBalance[],
+): DayGroup[] {
+  const closing = lastClosing(account);
+  const groups = new Map<string, DayGroup>();
+  const at = (date: Date) => {
+    const key = day(date);
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        day: key,
+        date: new Date(date),
+        total: 0,
+        pending: 0,
+        locked: !!closing && key <= day(closing.through),
+        done: false,
+      };
+      groups.set(key, g);
+    }
+    return g;
+  };
+  for (const tx of lines) {
+    const g = at(tx.date);
+    g.total++;
+    if (tx.status === "unmatched" || tx.status === "potential_match")
+      g.pending++;
+  }
+  for (const b of balances) at(b.date).balance = b;
+  return [...groups.values()]
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .map((g) => ({
+      ...g,
+      done:
+        g.pending === 0 &&
+        (!g.balance || g.balance.computed === null || g.balance.matches),
+    }));
+}
+
 /**
  * Saldo do extrato a gravar depois de importar. O Itaú manda no saldo final
  * do OFX o total com a aplicação automática, mas os movimentos são da conta

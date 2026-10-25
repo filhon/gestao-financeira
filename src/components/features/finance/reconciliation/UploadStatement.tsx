@@ -2,7 +2,7 @@
 
 import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, plural } from "@/lib/utils";
 import { useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReconciliationService } from "@/lib/services/reconciliationService";
@@ -28,6 +28,8 @@ interface UploadStatementProps {
   /** O OFX era de outra conta cadastrada: a tela passa a mostrá-la. */
   onAccountDetected: (accountId: string) => void;
   variant?: "dropzone" | "button";
+  /** Período fechado e sem extrato novo: importar vira a ação principal. */
+  primary?: boolean;
 }
 
 export function UploadStatement({
@@ -35,6 +37,7 @@ export function UploadStatement({
   accounts,
   onAccountDetected,
   variant = "dropzone",
+  primary,
 }: UploadStatementProps) {
   const { selectedCompany } = useCompany();
   const queryClient = useQueryClient();
@@ -155,10 +158,12 @@ export function UploadStatement({
         );
       } else if (skipped > 0) {
         toast.success(
-          `${added} lançamento(s) novo(s) importado(s). ${skipped} já existiam.`,
+          `${plural(added, "lançamento novo importado", "lançamentos novos importados")}. ${skipped === 1 ? "1 já existia" : `${skipped} já existiam`}.`,
         );
       } else {
-        toast.success(`${added} lançamento(s) importado(s).`);
+        toast.success(
+          `${plural(added, "lançamento importado", "lançamentos importados")}.`,
+        );
       }
     } catch (error) {
       console.error(error);
@@ -189,18 +194,19 @@ export function UploadStatement({
       <>
         {input}
         <Button
-          variant="outline"
+          variant={primary ? "default" : "outline"}
           size="sm"
           className="h-9"
           disabled={isProcessing}
           onClick={() => inputRef.current?.click()}
+          aria-label="Importar extrato"
         >
           {isProcessing ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Upload className="h-4 w-4" />
           )}
-          <span className="hidden sm:inline ml-2">Importar extrato</span>
+          <span className="hidden sm:inline">Importar extrato</span>
         </Button>
       </>
     );

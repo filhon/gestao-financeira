@@ -28,6 +28,7 @@ import {
   useChartOfAccounts,
 } from "@/hooks/useChartOfAccounts";
 import { BalanceStrip } from "@/components/features/finance/reconciliation/BalanceStrip";
+import { AccountStrip } from "@/components/features/finance/reconciliation/AccountStrip";
 import {
   SettleFromStatementSheet,
   Settlement,
@@ -52,7 +53,7 @@ import {
   MoreHorizontal,
   MinusCircle,
   History,
-  EyeOff,
+  Undo2,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
@@ -64,13 +65,6 @@ import { useBankAccounts } from "@/hooks/useBankAccounts";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,9 +87,13 @@ import { reconciliationSessionService } from "@/lib/services/reconciliationSessi
 import {
   applyRules,
   dailyBalances,
+  dayKey,
+  groupByDay,
+  type DayGroup,
   isBalanceLine,
   isBeforeBase,
   isLocked,
+  lastClosing,
   lineTransaction,
   rulePattern,
   summarizeAccount,
@@ -104,14 +102,16 @@ import {
 const ACCOUNT_KEY = (companyId: string) =>
   `reconciliation-account-${companyId}`;
 
-type Tab = "all" | "unmatched" | "potential_match" | "matched" | "ignored";
+// Sugestão é pendente com palpite: fica em Pendentes, marcada pelo badge.
+type Tab = "all" | "pending" | "matched" | "ignored";
 const TABS: { id: Tab; label: string }[] = [
   { id: "all", label: "Todas" },
-  { id: "unmatched", label: "Pendentes" },
-  { id: "potential_match", label: "Sugestões" },
+  { id: "pending", label: "Pendentes" },
   { id: "matched", label: "Conciliadas" },
   { id: "ignored", label: "Ignoradas" },
 ];
+const tabOf = (status: BankTransaction["status"]): Tab =>
+  status === "unmatched" || status === "potential_match" ? "pending" : status;
 
 function MobileBankTxCard({
   tx,
@@ -266,8 +266,25 @@ export function ReconciliationDashboard() {
       // Sem storage: cai na primeira conta ativa.
     }
   }, [companyId]);
+  // Uma prova por conta: alimenta a faixa de contas e a conta da tela.
+  const summaries = useMemo(
+    () =>
+      new Map(activeAccounts.map((a) => [a.id, summarizeAccount(a, allItems)])),
+    [activeAccounts, allItems],
+  );
+  // Mais atrasada primeiro: a que nunca fechou, depois a de fechamento mais antigo.
+  const orderedAccounts = useMemo(
+    () =>
+      [...activeAccounts].sort(
+        (a, b) =>
+          (lastClosing(a)?.through.getTime() ?? -Infinity) -
+            (lastClosing(b)?.through.getTime() ?? -Infinity) ||
+          a.name.localeCompare(b.name),
+      ),
+    [activeAccounts],
+  );
   const account =
-    activeAccounts.find((a) => a.id === pickedAccountId) ?? activeAccounts[0];
+    activeAccounts.find((a) => a.id === pickedAccountId) ?? orderedAccounts[0];
   const selectAccount = (id: string) => {
     setPickedAccountId(id);
     try {
@@ -306,10 +323,17 @@ export function ReconciliationDashboard() {
         : movementLines.filter((t) => !isBeforeBase(t, account)),
     [movementLines, account, showPast],
   );
-  const summary = useMemo(
-    () => (account ? summarizeAccount(account, allItems) : null),
-    [account, allItems],
-  );
+  const summary = (account && summaries.get(account.id)) || null;
+  const closing = account ? lastClosing(account) : undefined;
+  // Fechada e sem extrato novo: o próximo passo é importar.
+  const periodDone = !!closing && !!summary && !summary.hasMovement;
+  // Para onde o saldo inicial volta ao reabrir: o fechamento anterior ou a abertura.
+  const reopenTarget = account
+    ? (account.closings?.at(-2) ?? {
+        through: account.openingBalanceDate,
+        balance: account.openingBalance,
+      })
+    : null;
   const dayBalances = useMemo(
     () =>
       account
@@ -375,6 +399,7 @@ export function ReconciliationDashboard() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkConfirming, setBulkConfirming] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const activeIndex = useRef(-1);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -405,12 +430,11 @@ export function ReconciliationDashboard() {
   const tabCounts = useMemo(() => {
     const counts: Record<Tab, number> = {
       all: lines.length,
-      unmatched: 0,
-      potential_match: 0,
+      pending: 0,
       matched: 0,
       ignored: 0,
     };
-    for (const tx of lines) counts[tx.status]++;
+    for (const tx of lines) counts[tabOf(tx.status)]++;
     return counts;
   }, [lines]);
 
@@ -431,12 +455,53 @@ export function ReconciliationDashboard() {
     return lines
       .filter(
         (tx) =>
-          (tab === "all" || tx.status === tab) &&
+          (tab === "all" || tabOf(tx.status) === tab) &&
           (!term || haystack(tx).includes(term)),
       )
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [lines, searchTerm, tab]);
-  const showDayBalances = tab === "all" && !searchTerm.trim();
+
+  // ── Dias ───────────────────────────────────────────────────────────────────
+  // Sem filtro, dia resolvido fica recolhido e o trabalho aparece sozinho. A
+  // escolha do operador vale para o estado em que o dia estava: quando ele
+  // muda (a última pendente foi tratada), o dia volta ao padrão e recolhe.
+  const dayGroups = useMemo(
+    () => (account ? groupByDay(account, lines, dayBalances) : []),
+    [account, lines, dayBalances],
+  );
+  const unfiltered = tab === "all" && !searchTerm.trim();
+  const [flippedDays, setFlippedDays] = useState<Set<string>>(new Set());
+  const flipKey = (g: DayGroup) => `${g.day}|${g.done ? 1 : 0}`;
+  const collapsedDays = useMemo(
+    () =>
+      new Set(
+        unfiltered
+          ? dayGroups
+              .filter(
+                (g) => g.total > 0 && g.done !== flippedDays.has(flipKey(g)),
+              )
+              .map((g) => g.day)
+          : [],
+      ),
+    [dayGroups, flippedDays, unfiltered],
+  );
+  const toggleDay = (g: DayGroup) => {
+    // Recolher pela mão não arrasta o cursor (nem o foco) para outra linha.
+    activeIndex.current = -1;
+    setFlippedDays((prev) => {
+      const next = new Set(prev);
+      const key = flipKey(g);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  // O que o teclado percorre: só linhas de dia aberto.
+  const navigable = useMemo(
+    () =>
+      filteredTransactions.filter((t) => !collapsedDays.has(dayKey(t.date))),
+    [filteredTransactions, collapsedDays],
+  );
   // Tudo o que foi importado já está no saldo inicial: não é filtro, é o fim do trabalho.
   const periodDoneMessage =
     lines.length === 0 && pastCount > 0 && summary
@@ -580,11 +645,35 @@ export function ReconciliationDashboard() {
     }
   };
 
+  /** Volta as linhas ao estado de antes de ignorar: status, motivo e regra. */
+  const undoIgnore = (before: BankTransaction[]) => ({
+    label: "Desfazer",
+    onClick: async () => {
+      if (!companyId) return;
+      try {
+        await reconciliationSessionService.bulkUpdateItems(
+          companyId,
+          before.map((t) => ({
+            id: t.id,
+            data: {
+              status: t.status,
+              ignoreReason: t.ignoreReason,
+              ruleId: t.ruleId,
+            },
+          })),
+        );
+      } catch (error) {
+        toast.error(friendlyError(error, "Erro ao desfazer"));
+      }
+    },
+  });
+
   const ignoreSelected = async (
     ids: string[],
     reason: NonNullable<BankTransaction["ignoreReason"]>,
   ) => {
     if (!companyId) return;
+    const before = transactions.filter((t) => ids.includes(t.id));
     try {
       await reconciliationSessionService.bulkUpdateItems(
         companyId,
@@ -594,7 +683,9 @@ export function ReconciliationDashboard() {
         })),
       );
       setSelected(new Set());
-      toast.success(plural(ids.length, "linha ignorada", "linhas ignoradas"));
+      toast.success(plural(ids.length, "linha ignorada", "linhas ignoradas"), {
+        action: undoIgnore(before),
+      });
     } catch (error) {
       console.error(error);
       toast.error(friendlyError(error, "Erro ao ignorar as linhas"));
@@ -853,7 +944,7 @@ export function ReconciliationDashboard() {
           ignoreReason: (arg ?? "other") as BankTransaction["ignoreReason"],
           ruleId: undefined,
         });
-        toast.success("Linha ignorada");
+        toast.success("Linha ignorada", { action: undoIgnore([tx]) });
       } catch (error) {
         console.error(error);
         toast.error(friendlyError(error, "Erro ao ignorar lançamento"));
@@ -954,7 +1045,10 @@ export function ReconciliationDashboard() {
   const triggerAutoMatch = async () => {
     if (!canManageReconciliation || !companyId || !user) return;
     const open = lines.filter((t) => rowStateFor(t) === "editable");
-    if (open.length === 0) return;
+    if (open.length === 0) {
+      toast.info("Nenhuma linha aberta para buscar correspondência.");
+      return;
+    }
     setIsMatching(true);
     try {
       const dates = open.map((t) => new Date(t.date).getTime());
@@ -1071,7 +1165,7 @@ export function ReconciliationDashboard() {
         })),
       );
       toast.success(
-        `${legacyItems.length} linha(s) atribuída(s) a ${account.name}`,
+        `${plural(legacyItems.length, "linha atribuída", "linhas atribuídas")} a ${account.name}`,
       );
     } catch (error) {
       console.error(error);
@@ -1138,7 +1232,7 @@ export function ReconciliationDashboard() {
             : null;
 
   const moveActive = (delta: number) => {
-    const list = filteredTransactions;
+    const list = navigable;
     if (list.length === 0) return;
     const index = list.findIndex((t) => t.id === activeId);
     const next =
@@ -1163,7 +1257,7 @@ export function ReconciliationDashboard() {
       ) {
         return;
       }
-      const active = filteredTransactions.find((t) => t.id === activeId);
+      const active = navigable.find((t) => t.id === activeId);
       const onRow = target.hasAttribute("data-row-id");
       // Setas só com o foco numa linha, para não roubar a rolagem da página.
       const arrow =
@@ -1176,8 +1270,15 @@ export function ReconciliationDashboard() {
       } else if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
-      } else if (/^[1-5]$/.test(e.key)) {
+      } else if (/^[1-4]$/.test(e.key)) {
         setTab(TABS[Number(e.key) - 1].id);
+      } else if ((e.key === "[" || e.key === "]") && account) {
+        const n = orderedAccounts.length;
+        const i = orderedAccounts.findIndex((a) => a.id === account.id);
+        if (n > 1)
+          selectAccount(
+            orderedAccounts[(i + (e.key === "]" ? 1 : -1) + n) % n].id,
+          );
       } else if ((e.key === "x" || e.key === "X") && active) {
         if (!selectableFor(active)) return;
         const next = new Set(selected);
@@ -1203,6 +1304,22 @@ export function ReconciliationDashboard() {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, []);
+  // Linha tratada sai da aba filtrada, ou o dia dela recolhe: o cursor fica na
+  // mesma posição (a próxima linha aberta) em vez de voltar ao topo. Trocar de
+  // aba, de conta ou buscar zera a posição.
+  useEffect(() => {
+    activeIndex.current = -1;
+  }, [tab, searchTerm, account?.id]);
+  useEffect(() => {
+    const i = navigable.findIndex((t) => t.id === activeId);
+    if (i >= 0) {
+      activeIndex.current = i;
+    } else if (activeId && activeIndex.current >= 0) {
+      const next =
+        navigable[Math.min(activeIndex.current, navigable.length - 1)];
+      setActiveId(next?.id ?? null);
+    }
+  }, [navigable, activeId]);
   useEffect(() => {
     if (!activeId) return;
     const el = document.querySelector<HTMLElement>(
@@ -1219,22 +1336,15 @@ export function ReconciliationDashboard() {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-xl font-bold tracking-tight md:text-2xl">
         Conciliação Bancária
+        {/* Com várias contas, a faixa de contas diz qual está aberta. */}
+        {account && activeAccounts.length === 1 && (
+          <span className="ml-2 text-base font-normal text-muted-foreground">
+            · {account.name}
+          </span>
+        )}
       </h1>
       {account && (
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={account.id} onValueChange={selectAccount}>
-            <SelectTrigger className="h-9 w-[220px]" aria-label="Conta">
-              <Landmark className="h-4 w-4 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {activeAccounts.map((a) => (
-                <SelectItem key={a.id} value={a.id}>
-                  {a.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           {canManageReconciliation && transactions.length > 0 && (
             <>
               <UploadStatement
@@ -1242,6 +1352,7 @@ export function ReconciliationDashboard() {
                 accounts={accounts}
                 onAccountDetected={selectAccount}
                 variant="button"
+                primary={periodDone}
               />
               {/* Secundário: o primário da tela é fechar o período. */}
               <Button
@@ -1250,6 +1361,7 @@ export function ReconciliationDashboard() {
                 className="h-9"
                 onClick={triggerAutoMatch}
                 disabled={isMatching}
+                aria-label="Buscar correspondências"
               >
                 {isMatching ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1279,6 +1391,12 @@ export function ReconciliationDashboard() {
                 Regras de conciliação
                 {rules.length > 0 && ` (${rules.length})`}
               </DropdownMenuItem>
+              {closing && canManageBankAccounts && (
+                <DropdownMenuItem onSelect={() => setReopenConfirmOpen(true)}>
+                  <Undo2 className="h-4 w-4" />
+                  Reabrir período até {format(closing.through, "dd/MM/yyyy")}
+                </DropdownMenuItem>
+              )}
               {canManageReconciliation && transactions.length > 0 && (
                 <>
                   <DropdownMenuSeparator />
@@ -1360,8 +1478,9 @@ export function ReconciliationDashboard() {
   const legacyBanner = canManageReconciliation && legacyItems.length > 0 && (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900 dark:bg-amber-950/30">
       <p className="flex-1 min-w-[16rem] text-amber-900 dark:text-amber-200">
-        {legacyItems.length} linha(s) foram importadas antes das contas
-        bancárias e não pertencem a nenhuma conta.
+        {legacyItems.length === 1
+          ? "1 linha foi importada antes das contas bancárias e não pertence a nenhuma conta."
+          : `${legacyItems.length} linhas foram importadas antes das contas bancárias e não pertencem a nenhuma conta.`}
       </p>
       <Button size="sm" variant="outline" onClick={assignLegacy}>
         Atribuir a {account.name}
@@ -1372,6 +1491,14 @@ export function ReconciliationDashboard() {
   return (
     <div className="flex flex-col gap-4">
       {header}
+      {activeAccounts.length > 1 && (
+        <AccountStrip
+          accounts={orderedAccounts}
+          summaries={summaries}
+          activeId={account.id}
+          onSelect={selectAccount}
+        />
+      )}
       {legacyBanner}
 
       {summary && (
@@ -1379,11 +1506,9 @@ export function ReconciliationDashboard() {
           account={account}
           summary={summary}
           canManage={canManageReconciliation}
-          canReopen={canManageBankAccounts}
           onSetStatementBalance={handleStatementBalance}
           onClose={() => setCloseConfirmOpen(true)}
-          onReopen={() => setReopenConfirmOpen(true)}
-          onShowPending={() => setTab("unmatched")}
+          onShowPending={() => setTab("pending")}
         />
       )}
 
@@ -1406,6 +1531,21 @@ export function ReconciliationDashboard() {
             role="tablist"
             aria-label="Situação das linhas"
             className="flex overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            // Setas trocam de aba e levam o foco junto (padrão WAI-ARIA de abas).
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+              e.preventDefault();
+              const i = TABS.findIndex((t) => t.id === tab);
+              const next =
+                TABS[
+                  (i + (e.key === "ArrowRight" ? 1 : -1) + TABS.length) %
+                    TABS.length
+                ];
+              setTab(next.id);
+              e.currentTarget
+                .querySelector<HTMLElement>(`[data-tab="${next.id}"]`)
+                ?.focus();
+            }}
           >
             {TABS.map((t, i) => {
               const selectedTab = t.id === tab;
@@ -1414,7 +1554,10 @@ export function ReconciliationDashboard() {
                   key={t.id}
                   role="tab"
                   type="button"
+                  data-tab={t.id}
                   aria-selected={selectedTab}
+                  aria-controls="reconciliation-panel"
+                  tabIndex={selectedTab ? 0 : -1}
                   title={`${t.label} (${i + 1})`}
                   onClick={() => setTab(t.id)}
                   className={cn(
@@ -1434,224 +1577,243 @@ export function ReconciliationDashboard() {
             })}
           </div>
 
-          <div className="flex flex-col gap-3 border-b p-4">
-            <div className="flex items-center gap-2">
-              <div className="relative min-w-0 flex-1 md:max-w-[320px]">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  ref={searchRef}
-                  placeholder="Buscar descrição ou valor (/)"
-                  aria-label="Buscar no extrato"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      setSearchTerm("");
-                      e.currentTarget.blur();
-                    }
-                  }}
-                  className="h-10 pl-9 pr-8 md:h-9"
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm("")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-                    aria-label="Limpar busca"
+          <div
+            id="reconciliation-panel"
+            role="tabpanel"
+            aria-label={TABS.find((t) => t.id === tab)?.label}
+          >
+            <div className="flex flex-col gap-3 border-b p-4">
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1 md:max-w-[320px]">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    ref={searchRef}
+                    placeholder="Buscar descrição ou valor (/)"
+                    aria-label="Buscar no extrato"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setSearchTerm("");
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    className="h-10 pl-9 pr-8 md:h-9"
+                  />
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label="Limpar busca"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
+                  {filteredTransactions.length} de{" "}
+                  {plural(lines.length, "linha", "linhas")}
+                </span>
+                {pastCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={showPast}
+                    onClick={() => setShowPast((v) => !v)}
+                    className={cn(
+                      "h-9 shrink-0 text-xs text-muted-foreground",
+                      showPast && "bg-muted text-foreground",
+                    )}
                   >
-                    <X className="h-4 w-4" />
-                  </button>
+                    {/* Rótulo fixo: o estado vai no aria-pressed e no fundo. */}
+                    <History className="h-3.5 w-3.5" />
+                    Períodos anteriores ({pastCount})
+                  </Button>
                 )}
               </div>
-              <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
-                {filteredTransactions.length} de{" "}
-                {plural(lines.length, "linha", "linhas")}
-              </span>
-              {pastCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 shrink-0 text-xs text-muted-foreground"
-                  aria-pressed={showPast}
-                  onClick={() => setShowPast((v) => !v)}
-                >
-                  {showPast ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <History className="h-3.5 w-3.5" />
-                  )}
-                  {showPast
-                    ? "Ocultar períodos anteriores"
-                    : `Mostrar períodos anteriores (${pastCount})`}
-                </Button>
-              )}
+
+              {/* Lote: confirmar as sugestões selecionadas, ignorar qualquer linha. */}
+              {canManageReconciliation &&
+                (selection.length > 0 || visibleSuggestions.length > 0) && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                    <span className="tabular-nums">
+                      {selection.length > 0
+                        ? plural(
+                            selection.length,
+                            "linha selecionada",
+                            "linhas selecionadas",
+                          )
+                        : `${plural(visibleSuggestions.length, "sugestão", "sugestões")} para confirmar`}
+                    </span>
+                    <div className="ml-auto flex flex-wrap gap-2">
+                      {selection.length > 0 ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          onClick={() => setSelected(new Set())}
+                          disabled={bulkConfirming}
+                        >
+                          Limpar seleção
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          onClick={() =>
+                            setSelected(
+                              new Set(visibleSuggestions.map((t) => t.id)),
+                            )
+                          }
+                        >
+                          Selecionar sugestões
+                        </Button>
+                      )}
+                      {selection.length > 0 && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              disabled={bulkConfirming}
+                            >
+                              <MinusCircle className="h-3.5 w-3.5" />
+                              Ignorar {selection.length}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-60">
+                            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                              Motivo
+                            </DropdownMenuLabel>
+                            {IGNORE_REASONS.map((r) => (
+                              <DropdownMenuItem
+                                key={r.value}
+                                onSelect={() =>
+                                  ignoreSelected(selection, r.value)
+                                }
+                              >
+                                {r.label}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                      <Button
+                        size="sm"
+                        className="h-8"
+                        disabled={
+                          confirmSelection.length === 0 || bulkConfirming
+                        }
+                        onClick={() => confirmSelected(confirmSelection)}
+                      >
+                        {bulkConfirming ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
+                        Confirmar
+                        {confirmSelection.length > 0 &&
+                          ` ${confirmSelection.length}`}
+                      </Button>
+                    </div>
+                  </div>
+                )}
             </div>
 
-            {/* Lote: confirmar as sugestões selecionadas, ignorar qualquer linha. */}
-            {canManageReconciliation &&
-              (selection.length > 0 || visibleSuggestions.length > 0) && (
-                <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                  <span className="tabular-nums">
-                    {selection.length > 0
-                      ? plural(
-                          selection.length,
-                          "linha selecionada",
-                          "linhas selecionadas",
-                        )
-                      : `${plural(visibleSuggestions.length, "sugestão", "sugestões")} para confirmar`}
-                  </span>
-                  <div className="ml-auto flex flex-wrap gap-2">
-                    {selection.length > 0 ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8"
-                        onClick={() => setSelected(new Set())}
-                        disabled={bulkConfirming}
-                      >
-                        Limpar seleção
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8"
-                        onClick={() =>
-                          setSelected(
-                            new Set(visibleSuggestions.map((t) => t.id)),
-                          )
-                        }
-                      >
-                        Selecionar sugestões
-                      </Button>
-                    )}
-                    {selection.length > 0 && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            disabled={bulkConfirming}
-                          >
-                            <MinusCircle className="h-3.5 w-3.5" />
-                            Ignorar {selection.length}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-60">
-                          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                            Motivo
-                          </DropdownMenuLabel>
-                          {IGNORE_REASONS.map((r) => (
-                            <DropdownMenuItem
-                              key={r.value}
-                              onSelect={() =>
-                                ignoreSelected(selection, r.value)
-                              }
-                            >
-                              {r.label}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                    <Button
-                      size="sm"
-                      className="h-8"
-                      disabled={confirmSelection.length === 0 || bulkConfirming}
-                      onClick={() => confirmSelected(confirmSelection)}
-                    >
-                      {bulkConfirming ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Check className="h-3.5 w-3.5" />
-                      )}
-                      Confirmar
-                      {confirmSelection.length > 0 &&
-                        ` ${confirmSelection.length}`}
-                    </Button>
+            {/* Desktop table */}
+            <div className="relative hidden md:block" aria-busy={isMatching}>
+              {isMatching && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70">
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium shadow-sm"
+                  >
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    Buscando correspondências…
                   </div>
                 </div>
               )}
-          </div>
-
-          {/* Desktop table */}
-          <div className="relative hidden md:block" aria-busy={isMatching}>
-            {isMatching && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70">
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium shadow-sm"
-                >
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  Buscando correspondências…
-                </div>
-              </div>
-            )}
-            <ReconciliationTable
-              transactions={filteredTransactions}
-              dayBalances={showDayBalances ? dayBalances : undefined}
-              onAction={handleAction}
-              rowState={rowStateFor}
-              canSettle={canSettleFor}
-              canLaunch={canLaunchFor}
-              canRule={canManageReconciliationRules}
-              ruleFor={ruleFor}
-              isSelectable={selectableFor}
-              selected={selected}
-              onSelectedChange={
-                canManageReconciliation ? setSelected : undefined
-              }
-              activeId={activeId}
-              onActiveChange={setActiveId}
-              menuOpenId={menuOpenId}
-              onMenuOpenChange={setMenuOpenId}
-              onClearFilters={clearFilters}
-              emptyState={periodDoneMessage}
-            />
-            <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-              Teclado: <Kbd>j</Kbd> <Kbd>k</Kbd> navega · <Kbd>Enter</Kbd> ação
-              principal · <Kbd>i</Kbd> outras ações · <Kbd>x</Kbd> seleciona ·{" "}
-              <Kbd>/</Kbd> busca · <Kbd>1</Kbd> a <Kbd>5</Kbd> abas
-            </p>
-          </div>
-
-          {/* Mobile card list */}
-          <div className="md:hidden">
-            {filteredTransactions.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 px-4 py-10 text-muted-foreground">
-                <FileText className="h-8 w-8 opacity-40" />
-                <p className="text-center text-sm font-medium">
-                  {searchTerm
-                    ? `Nenhum resultado para "${searchTerm}"`
-                    : (periodDoneMessage ?? "Nenhuma linha nesta aba")}
+              <ReconciliationTable
+                transactions={filteredTransactions}
+                days={dayGroups}
+                collapsedDays={collapsedDays}
+                onToggleDay={toggleDay}
+                showEmptyDays={unfiltered}
+                onAction={handleAction}
+                rowState={rowStateFor}
+                canSettle={canSettleFor}
+                canLaunch={canLaunchFor}
+                canRule={canManageReconciliationRules}
+                ruleFor={ruleFor}
+                isSelectable={selectableFor}
+                selected={selected}
+                onSelectedChange={
+                  canManageReconciliation ? setSelected : undefined
+                }
+                activeId={activeId}
+                onActiveChange={setActiveId}
+                menuOpenId={menuOpenId}
+                onMenuOpenChange={setMenuOpenId}
+                onClearFilters={clearFilters}
+                emptyState={periodDoneMessage}
+              />
+              {/* Só quando há o que tratar: com tudo travado, as teclas não fazem nada. */}
+              {lines.some((t) => rowStateFor(t) === "editable") && (
+                <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+                  Teclado: <Kbd>j</Kbd> <Kbd>k</Kbd> navega · <Kbd>Enter</Kbd>{" "}
+                  ação principal · <Kbd>i</Kbd> outras ações · <Kbd>x</Kbd>{" "}
+                  seleciona · <Kbd>/</Kbd> busca · <Kbd>1</Kbd> a <Kbd>4</Kbd>{" "}
+                  filtro
+                  {orderedAccounts.length > 1 && (
+                    <>
+                      {" "}
+                      · <Kbd>[</Kbd> <Kbd>]</Kbd> conta
+                    </>
+                  )}
                 </p>
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0 text-xs"
-                  onClick={clearFilters}
-                >
-                  Limpar filtros
-                </Button>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {filteredTransactions.map((tx) => (
-                  <MobileBankTxCard
-                    key={tx.id}
-                    tx={tx}
-                    state={rowStateFor(tx)}
-                    canSettle={canSettleFor(tx)}
-                    canLaunch={canLaunchFor(tx)}
-                    canRule={canManageReconciliationRules}
-                    rule={ruleFor(tx)}
-                    onAction={handleAction}
-                  />
-                ))}
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Mobile card list */}
+            <div className="md:hidden">
+              {filteredTransactions.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-4 py-10 text-muted-foreground">
+                  <FileText className="h-8 w-8 opacity-40" />
+                  <p className="text-center text-sm font-medium">
+                    {searchTerm
+                      ? `Nenhum resultado para "${searchTerm}"`
+                      : (periodDoneMessage ?? "Nenhuma linha nesta aba")}
+                  </p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={clearFilters}
+                  >
+                    Limpar filtros
+                  </Button>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {filteredTransactions.map((tx) => (
+                    <MobileBankTxCard
+                      key={tx.id}
+                      tx={tx}
+                      state={rowStateFor(tx)}
+                      canSettle={canSettleFor(tx)}
+                      canLaunch={canLaunchFor(tx)}
+                      canRule={canManageReconciliationRules}
+                      rule={ruleFor(tx)}
+                      onAction={handleAction}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -1678,8 +1840,8 @@ export function ReconciliationDashboard() {
       <ConfirmDialog
         open={reopenConfirmOpen}
         onOpenChange={setReopenConfirmOpen}
-        title="Reabrir o último período fechado?"
-        description="As linhas desse período voltam a ser editáveis e o saldo inicial volta para o fechamento anterior. A reabertura fica registrada na auditoria."
+        title={`Reabrir o período fechado até ${closing ? format(closing.through, "dd/MM/yyyy") : ""}?`}
+        description={`As linhas desse período voltam a ser editáveis e o saldo inicial volta para ${reopenTarget ? `${formatCurrency(reopenTarget.balance)} em ${format(new Date(reopenTarget.through), "dd/MM/yyyy")}` : "o fechamento anterior"}. A reabertura fica registrada na auditoria.`}
         confirmText="Reabrir"
         variant="destructive"
         onConfirm={handleReopen}

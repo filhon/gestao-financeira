@@ -8,6 +8,7 @@ import {
   applyRules,
   dailyBalances,
   findRule,
+  groupByDay,
   isBalanceLine,
   isBeforeBase,
   pickStatementBalance,
@@ -172,5 +173,38 @@ assert.equal(pickStatementBalance(checking, itau, null)?.balance, 1);
 
 assert.ok(isBeforeBase(statement[0], account));
 assert.ok(!isBeforeBase(statement[1], account));
+
+// Dias: pendente ou saldo que não bate deixa o dia aberto; dia só com saldo
+// também aparece; fechamento trava os dias até ele.
+const movement = statement.filter((t) => !isBalanceLine(t));
+assert.deepEqual(
+  groupByDay(account, movement, days).map((g) => [
+    g.day,
+    g.total,
+    g.pending,
+    g.done,
+  ]),
+  [
+    ["2026-10-20", 0, 0, true],
+    ["2026-10-21", 3, 1, false],
+    ["2026-10-22", 0, 0, false],
+    ["2026-10-23", 1, 0, true],
+  ],
+);
+const closed = {
+  ...account,
+  closings: [
+    {
+      through: new Date(2026, 9, 21),
+      balance: 1,
+      closedBy: "u1",
+      closedAt: new Date(),
+    },
+  ],
+};
+assert.deepEqual(
+  groupByDay(closed, movement, []).map((g) => g.locked),
+  [true, false],
+);
 
 console.log("check:reconciliation-rules ok");

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { CheckCircle2, Lock, Pencil, Undo2 } from "lucide-react";
+import currency from "currency.js";
+import { CheckCircle2, Lock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,27 +28,31 @@ interface BalanceStripProps {
   account: BankAccount;
   summary: Summary;
   canManage: boolean;
-  canReopen: boolean;
   onSetStatementBalance: (balance: number, date: Date) => Promise<void>;
   onClose: () => void;
-  onReopen: () => void;
   onShowPending: () => void;
 }
 
 const d = (date: Date) => format(date, "dd/MM/yyyy");
 
+const signed = (amount: number) =>
+  `${amount < 0 ? "−" : "+"}${formatCurrency(Math.abs(amount))}`;
+
 export function BalanceStrip({
   account,
   summary,
   canManage,
-  canReopen,
   onSetStatementBalance,
   onClose,
-  onReopen,
   onShowPending,
 }: BalanceStripProps) {
   const closing = lastClosing(account);
+  // Fechada e sem extrato novo: o trabalho acabou, não há o que fechar.
+  const done = !!closing && !summary.hasMovement;
   const projected = summary.projectedDifference;
+  const movement = currency(summary.bookBalance).subtract(
+    summary.base.balance,
+  ).value;
   const closeBlocker = summary.canClose
     ? null
     : summary.pending > 0
@@ -58,6 +63,8 @@ export function BalanceStrip({
           ? `Extrato sem movimento depois de ${d(summary.base.date)}`
           : null;
 
+  // Ordem da prova: o lado do sistema (inicial → conciliado), depois o banco
+  // (extrato) e a diferença entre os dois.
   return (
     <section
       aria-label="Saldo da conciliação"
@@ -71,6 +78,26 @@ export function BalanceStrip({
           <Hint>
             {closing ? "fechamento de " : "abertura em "}
             {d(summary.base.date)}
+          </Hint>
+        </Figure>
+
+        <Figure label="Saldo conciliado">
+          <span className="font-financial tabular-nums">
+            {formatCurrency(summary.bookBalance)}
+          </span>
+          <Hint>
+            {summary.total === 0 ? (
+              "sem movimento depois do saldo inicial"
+            ) : (
+              <>
+                inicial{" "}
+                <span className="font-financial tabular-nums">
+                  {signed(movement)}
+                </span>{" "}
+                · {summary.handled} de{" "}
+                {plural(summary.total, "linha tratada", "linhas tratadas")}
+              </>
+            )}
           </Hint>
         </Figure>
 
@@ -108,16 +135,6 @@ export function BalanceStrip({
           </Hint>
         </Figure>
 
-        <Figure label="Saldo conciliado">
-          <span className="font-financial tabular-nums">
-            {formatCurrency(summary.bookBalance)}
-          </span>
-          <Hint>
-            {summary.handled} de {plural(summary.total, "linha", "linhas")} do
-            período
-          </Hint>
-        </Figure>
-
         {/* Projetada: tratar soma a linha como ela está, então o número final já
             é conhecido. Uma diferença parcial fazia caçar centavos que não existem. */}
         <Figure label="Diferença">
@@ -130,6 +147,7 @@ export function BalanceStrip({
                 projected !== 0
                   ? "text-amber-700 dark:text-amber-400"
                   : summary.pending === 0 &&
+                      summary.hasMovement &&
                       "text-emerald-700 dark:text-emerald-400",
               )}
             >
@@ -167,24 +185,26 @@ export function BalanceStrip({
         </Figure>
 
         <div className="col-span-2 lg:col-span-1 flex flex-wrap items-center gap-2 px-4 py-3">
-          {closing && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Lock className="h-3.5 w-3.5" />
-              Fechada até {d(closing.through)}
-              {canReopen && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={onReopen}
-                >
-                  <Undo2 className="h-3.5 w-3.5" />
-                  Reabrir
-                </Button>
-              )}
-            </span>
+          {done && closing ? (
+            // ponytail: mostra quando fechou, não quem (closedBy é uid); buscar o nome se pedirem.
+            <div className="flex flex-col gap-0.5 lg:items-end">
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+                <CheckCircle2 className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+                Conciliada até {d(closing.through)}
+              </span>
+              <Hint>
+                fechada em {d(closing.closedAt)} · importe o próximo extrato
+              </Hint>
+            </div>
+          ) : (
+            closing && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Lock className="h-3.5 w-3.5" />
+                Fechada até {d(closing.through)}
+              </span>
+            )
           )}
-          {canManage && summary.statementDate && (
+          {!done && canManage && summary.statementDate && (
             // O motivo fica à vista: botão desabilitado não abre `title`.
             <div className="flex flex-col items-start gap-1 lg:items-end">
               <Button
