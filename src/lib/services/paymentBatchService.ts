@@ -46,6 +46,16 @@ export const BATCH_STATUSES: PaymentBatchStatus[] = [
   "rejected",
 ];
 
+/** Lotes que ainda têm etapa pela frente. */
+export const ACTIVE_STATUSES: PaymentBatchStatus[] = [
+  "open",
+  "pending_approval",
+  "approved",
+  "pending_authorization",
+  "authorized",
+];
+export const ACTIVE_BATCH_LIMIT = 500;
+
 const STATUS_NAMES: Record<PaymentBatchStatus, string> = {
   open: "Aberto",
   pending_approval: "Aguardando aprovação",
@@ -167,6 +177,7 @@ const convertDates = (data: DocumentData): PaymentBatch => {
     authorizedAt: (data.authorizedAt as Timestamp)?.toDate(),
     paidAt: (data.paidAt as Timestamp)?.toDate(),
     revertedAt: (data.revertedAt as Timestamp)?.toDate(),
+    returnedAt: (data.returnedAt as Timestamp)?.toDate(),
     approvalTokenExpiresAt: (
       data.approvalTokenExpiresAt as Timestamp
     )?.toDate(),
@@ -253,6 +264,24 @@ export const paymentBatchService = {
       batches,
       lastDoc: snapshot.docs[snapshot.docs.length - 1] || null,
     };
+  },
+
+  /**
+   * Todos os lotes ainda em andamento (abertos até autorizados). A tela divide
+   * entre "com você" e "aguardando" e ordena por vencimento no cliente, então
+   * precisa do conjunto inteiro, não de uma página.
+   */
+  getActive: async (companyId: string): Promise<PaymentBatch[]> => {
+    // ponytail: teto de ACTIVE_BATCH_LIMIT lotes ativos; acima disso, paginar com orderBy("startDate")
+    const snapshot = await getDocs(
+      query(
+        collection(db, COLLECTION_NAME),
+        where("companyId", "==", companyId),
+        where("status", "in", ACTIVE_STATUSES),
+        limit(ACTIVE_BATCH_LIMIT),
+      ),
+    );
+    return snapshot.docs.map((d) => convertDates({ id: d.id, ...d.data() }));
   },
 
   /**
@@ -592,6 +621,7 @@ export const paymentBatchService = {
         approvalToken: null,
         approvalTokenExpiresAt: expiresAt,
         sentForApprovalAt: serverTimestamp(),
+        returnReason: null,
       }),
     );
 
@@ -601,6 +631,64 @@ export const paymentBatchService = {
       resent: data.status === "pending_approval",
     });
     return token;
+  },
+
+  /**
+   * Gestor recolhe um envio: o link deixa de valer e o lote volta à etapa
+   * anterior (aprovação → Aberto, autorização → Aprovado).
+   */
+  recall: async (batchId: string, actor: BatchActor) => {
+    const data = await transitionBatch(
+      batchId,
+      ["pending_approval", "pending_authorization"],
+      (current) => ({
+        status: current.status === "pending_approval" ? "open" : "approved",
+        approvalTokenHash: null,
+        approvalToken: null,
+        approvalTokenExpiresAt: null,
+      }),
+    );
+    logBatch(data.companyId, actor, "update", batchId, {
+      recalledFrom: data.status,
+    });
+  },
+
+  /**
+   * Aprovador devolve o lote inteiro ao gestor, com motivo. Mesmo efeito da
+   * devolução pelo magic link.
+   */
+  returnToManager: async (
+    batchId: string,
+    actor: BatchActor,
+    reason: string,
+  ) => {
+    if (!reason.trim()) throw new Error("Informe o motivo da devolução.");
+    const data = await transitionBatch(
+      batchId,
+      ["pending_approval"],
+      (current) => {
+        if (!canActOnBatch(current as PaymentBatch, actor)) {
+          throw new Error(
+            "Só o aprovador designado pode devolver este lote, e nunca quem o criou.",
+          );
+        }
+        return {
+          status: "open",
+          approvalTokenHash: null,
+          approvalToken: null,
+          approvalTokenExpiresAt: null,
+          approverId: null,
+          approverEmail: null,
+          approverComment: `Devolvido: ${reason.trim()}`,
+          returnReason: reason.trim(),
+          returnedAt: serverTimestamp(),
+        };
+      },
+    );
+    logBatch(data.companyId, actor, "update", batchId, {
+      returnedToManager: true,
+      reason: reason.trim(),
+    });
   },
 
   /**
@@ -668,7 +756,8 @@ export const paymentBatchService = {
         ...(data.rejectedTransactionIds ?? []),
         ...rejected.keys(),
       ],
-      ...(comment ? { approverComment: comment } : {}),
+      // Sem comentário, apaga o de uma devolução anterior
+      approverComment: comment ?? null,
     }));
 
     logBatch(before.companyId, actor, "approve", batchId, {

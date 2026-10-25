@@ -459,6 +459,10 @@ export interface PaymentBatch {
   revertedAt?: Date;
   revertReason?: string;
 
+  // Devolução pelo aprovador (pending_approval → open)
+  returnedAt?: Date;
+  returnReason?: string | null;
+
   // Rejected transaction IDs (for audit)
   rejectedTransactionIds?: string[];
 

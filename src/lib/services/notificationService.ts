@@ -140,7 +140,7 @@ export const notificationService = {
       title: "Novo lote de pagamento criado",
       message: `O lote "${batchName}" foi criado automaticamente e está pronto para revisão.`,
       type: "info",
-      link: `/financeiro/lotes`,
+      link: `/financeiro/lotes/${batchId}`,
     });
   },
 
@@ -157,7 +157,7 @@ export const notificationService = {
       title: "Lote aguardando sua aprovação",
       message: `${senderName} enviou o lote "${batchName}" para sua aprovação.`,
       type: "warning",
-      link: `/financeiro/lotes`,
+      link: `/financeiro/lotes/${batchId}`,
     });
   },
 
@@ -174,7 +174,7 @@ export const notificationService = {
       title: "Lote aprovado",
       message: `${approverName} aprovou o lote "${batchName}". Pronto para exportação bancária.`,
       type: "success",
-      link: `/financeiro/lotes`,
+      link: `/financeiro/lotes/${batchId}`,
     });
   },
 
@@ -191,7 +191,7 @@ export const notificationService = {
       title: "Lote aguardando autorização bancária",
       message: `${senderName} enviou o lote "${batchName}" para autorização no banco.`,
       type: "warning",
-      link: `/financeiro/lotes`,
+      link: `/financeiro/lotes/${batchId}`,
     });
   },
 
@@ -208,7 +208,7 @@ export const notificationService = {
       title: "Lote autorizado",
       message: `${authorizerName} autorizou o lote "${batchName}" no banco. Confirme os pagamentos quando concluídos.`,
       type: "success",
-      link: `/financeiro/lotes`,
+      link: `/financeiro/lotes/${batchId}`,
     });
   },
 };

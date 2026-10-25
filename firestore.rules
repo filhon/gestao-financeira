@@ -254,6 +254,8 @@ service cloud.firestore {
          let after = request.resource.data.get('status', '');
          return before == after ||
            (before == 'pending_approval' && after == 'approved' && isDesignated('approverEmail')) ||
+           (before == 'pending_approval' && after == 'open' && isDesignated('approverEmail')) ||
+           (before == 'pending_authorization' && after == 'approved' && isManager(getCompanyId())) ||
            (before == 'pending_authorization' && after == 'authorized' && isDesignated('authorizerEmail')) ||
            (!(after in ['approved', 'authorized']) && isManager(getCompanyId()));
        }

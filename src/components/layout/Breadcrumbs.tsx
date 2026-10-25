@@ -9,6 +9,7 @@ import { userService } from "@/lib/services/userService";
 import { useQueryClient } from "@tanstack/react-query";
 import { costCentersQuery } from "@/hooks/useCostCenters";
 import { entityService } from "@/lib/services/entityService";
+import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { useCompany } from "@/components/providers/CompanyProvider";
 
 // Map of paths to display names
@@ -94,6 +95,15 @@ export function Breadcrumbs() {
               } catch {
                 labels[segment] = "Detalhes";
               }
+            }
+          }
+          // Payment batch page
+          else if (prevSegment === "lotes") {
+            try {
+              const batch = await paymentBatchService.getById(segment);
+              labels[segment] = batch?.name || "Lote";
+            } catch {
+              labels[segment] = "Lote";
             }
           }
           // Entity page

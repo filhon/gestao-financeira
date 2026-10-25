@@ -234,7 +234,8 @@ export async function POST(request: Request) {
         totalAmount: newTotalAmount,
         updatedAt: FieldValue.serverTimestamp(),
       };
-      if (comment) batchUpdate.approverComment = comment;
+      // Sem comentário, apaga o de uma devolução anterior
+      batchUpdate.approverComment = comment || null;
       fsWriteBatch.update(batchDoc.ref, batchUpdate);
 
       allTxSnap.docs.forEach((tDoc) => {
@@ -359,6 +360,8 @@ export async function POST(request: Request) {
         approverId: null,
         approverEmail: null,
         approverComment: `Devolvido: ${reason.trim()}`,
+        returnReason: reason.trim(),
+        returnedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
 

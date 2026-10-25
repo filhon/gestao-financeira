@@ -7,11 +7,11 @@ import { cn } from "@/lib/utils";
 const STATUS: Record<string, { label: string; className: string }> = {
   open: {
     label: "Aberto",
-    className: "bg-muted text-muted-foreground",
+    className: "bg-muted text-foreground/80",
   },
   draft: {
     label: "Rascunho",
-    className: "bg-muted text-muted-foreground",
+    className: "bg-muted text-foreground/80",
   },
   pending_approval: {
     label: "Aguardando aprovação",
@@ -55,7 +55,7 @@ export function BatchStatusBadge({ status }: { status: string }) {
     <span
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium",
-        STATUS[status]?.className ?? "bg-muted text-muted-foreground",
+        STATUS[status]?.className ?? "bg-muted text-foreground/80",
       )}
     >
       {batchStatusLabel(status)}
