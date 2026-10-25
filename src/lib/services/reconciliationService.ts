@@ -285,17 +285,9 @@ export class ReconciliationService {
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
 
+    // Nada concilia sem alguém confirmar: quem responde pela conciliação é o
+    // contador. Score alto só vira sugestão forte, que a tela pré-seleciona.
     const top = candidates[0];
-    if (top && top.score >= 90) {
-      return {
-        matchedId: top.id,
-        matchedDetails: top.transaction,
-        matchCandidates: candidates,
-        confidence: top.score,
-        status: "matched",
-      };
-    }
-
     if (top && top.score >= 70) {
       return {
         matchedId: top.id,

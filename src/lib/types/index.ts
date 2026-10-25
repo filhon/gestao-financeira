@@ -693,6 +693,15 @@ export interface BankTransaction {
   confidence?: number; // 0-100 score of match quality
   /** Sugestão (ou conciliação) que veio de uma regra, não de um título. */
   ruleId?: string;
+  /** Por que a linha não pede lançamento; vai para a auditoria do fechamento. */
+  ignoreReason?: "transfer" | "investment" | "other";
+  /**
+   * Como a linha foi conciliada, para o desfazer saber o que reverter:
+   * "launched" criou o lançamento, "settled" deu baixa num título aberto.
+   */
+  resolution?: "launched" | "settled";
+  /** Status do título antes da baixa pelo extrato; o desfazer volta para ele. */
+  previousStatus?: TransactionStatus;
 }
 
 /** Fechamento de conciliação: até `through` o saldo do sistema bateu com `balance`. */

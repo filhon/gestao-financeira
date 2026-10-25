@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UploadStatement } from "@/components/features/finance/reconciliation/UploadStatement";
@@ -8,7 +8,11 @@ import {
   ReconciliationTable,
   StatusBadge,
   ReconciliationAction,
-  RuleNote,
+  RowActions,
+  RowState,
+  SystemCell,
+  ActionHandler,
+  IGNORE_REASONS,
 } from "@/components/features/finance/reconciliation/ReconciliationTable";
 import {
   QuickLaunchSheet,
@@ -39,16 +43,14 @@ import {
   Loader2,
   Trash2,
   FileText,
-  SlidersHorizontal,
   X,
   Check,
   Plus,
-  Undo2,
   Search,
   Landmark,
-  HandCoins,
-  Lock,
   ListChecks,
+  MoreHorizontal,
+  MinusCircle,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
@@ -57,12 +59,6 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
-import {
-  ResponsiveModal,
-  ResponsiveModalContent,
-  ResponsiveModalHeader,
-  ResponsiveModalTitle,
-} from "@/components/ui/responsive-modal";
 import { TransactionForm } from "@/components/features/finance/TransactionForm";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { Input } from "@/components/ui/input";
@@ -73,15 +69,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency, plural } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import {
   applyRules,
+  dailyBalances,
+  isBalanceLine,
+  isBeforeBase,
   isLocked,
   lineTransaction,
   rulePattern,
@@ -91,22 +102,31 @@ import {
 const ACCOUNT_KEY = (companyId: string) =>
   `reconciliation-account-${companyId}`;
 
+type Tab = "all" | "unmatched" | "potential_match" | "matched" | "ignored";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "all", label: "Todas" },
+  { id: "unmatched", label: "Pendentes" },
+  { id: "potential_match", label: "Sugestões" },
+  { id: "matched", label: "Conciliadas" },
+  { id: "ignored", label: "Ignoradas" },
+];
+
 function MobileBankTxCard({
   tx,
-  onAction,
-  readOnly,
-  locked,
+  state,
   canSettle,
   canLaunch,
+  canRule,
   rule,
+  onAction,
 }: {
   tx: BankTransaction;
-  onAction: (id: string, action: ReconciliationAction) => void;
-  readOnly?: boolean;
-  locked?: boolean;
-  canSettle?: boolean;
-  canLaunch?: boolean;
+  state: RowState;
+  canSettle: boolean;
+  canLaunch: boolean;
+  canRule: boolean;
   rule?: ReconciliationRule;
+  onAction: ActionHandler;
 }) {
   return (
     <div className="px-4 py-3.5">
@@ -133,105 +153,25 @@ function MobileBankTxCard({
         {formatCurrency(Math.abs(tx.amount))}
       </div>
 
-      {tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0 ? (
-        <div className="mt-2 text-xs bg-muted/50 rounded p-2">
-          <span className="font-medium">
-            {tx.matchedTransactionIds.length} lançamentos somados
-          </span>
-        </div>
-      ) : tx.matchedDetails ? (
-        <div className="mt-2 text-xs bg-muted/50 rounded p-2">
-          <p className="font-medium truncate">
-            {tx.matchedDetails.description || "Sem descrição"}
-          </p>
-          <div className="flex justify-between text-muted-foreground mt-0.5">
-            <span>
-              {format(new Date(tx.matchedDetails.dueDate), "dd/MM/yyyy")}
-            </span>
-            <span className="font-financial">
-              {formatCurrency(tx.matchedDetails.amount)}
-            </span>
-          </div>
-        </div>
-      ) : tx.ruleId ? (
-        <div className="mt-2">
-          <RuleNote rule={rule} />
-        </div>
-      ) : tx.matchCandidates && tx.matchCandidates.length > 0 ? (
-        <div className="mt-2 text-xs text-muted-foreground bg-muted/50 rounded p-2">
-          {tx.matchCandidates.length} sugestão(ões) disponível(eis)
-        </div>
-      ) : null}
+      <div className="mt-2">
+        <SystemCell
+          tx={tx}
+          rule={rule}
+          editable={state === "editable"}
+          onAction={onAction}
+        />
+      </div>
 
-      {locked ? (
-        <p className="mt-2.5 flex items-center justify-end gap-1 text-xs text-muted-foreground">
-          <Lock className="h-3 w-3" /> Período fechado
-        </p>
-      ) : (
-        !readOnly && (
-          <div className="flex flex-wrap gap-2 mt-2.5 justify-end items-center">
-            {tx.status === "potential_match" && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs"
-                onClick={() => onAction(tx.id, "confirm")}
-              >
-                <Check className="h-3.5 w-3.5 mr-1" />
-                Confirmar
-              </Button>
-            )}
-            {tx.status === "unmatched" && (
-              <>
-                {canSettle && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => onAction(tx.id, "settle")}
-                  >
-                    <HandCoins className="h-3.5 w-3.5 mr-1" />
-                    Baixar título
-                  </Button>
-                )}
-                {canLaunch && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => onAction(tx.id, "create")}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Lançar
-                  </Button>
-                )}
-              </>
-            )}
-            {(tx.status === "potential_match" || tx.status === "unmatched") && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8 text-muted-foreground"
-                onClick={() => onAction(tx.id, "ignore")}
-                aria-label="Ignorar"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
-            {(tx.status === "matched" || tx.status === "ignored") && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-xs text-muted-foreground"
-                onClick={() => onAction(tx.id, "unreconcile")}
-              >
-                <Undo2 className="h-3.5 w-3.5 mr-1" />
-                Desfazer
-              </Button>
-            )}
-          </div>
-        )
-      )}
+      <div className="mt-2.5 flex justify-end">
+        <RowActions
+          tx={tx}
+          state={state}
+          canSettle={canSettle}
+          canLaunch={canLaunch}
+          canRule={canRule}
+          onAction={onAction}
+        />
+      </div>
     </div>
   );
 }
@@ -345,11 +285,29 @@ export function ReconciliationDashboard() {
       account ? allItems.filter((t) => t.bankAccountId === account.id) : [],
     [allItems, account],
   );
+  // Linhas de saldo do banco não são movimento: saem da lista e viram a
+  // conferência do dia.
+  const lines = useMemo(
+    () => transactions.filter((t) => !isBalanceLine(t)),
+    [transactions],
+  );
   const summary = useMemo(
     () => (account ? summarizeAccount(account, allItems) : null),
     [account, allItems],
   );
+  const dayBalances = useMemo(
+    () => (account ? dailyBalances(account, allItems) : []),
+    [account, allItems],
+  );
   const lockedFor = (tx: BankTransaction) => isLocked(tx, account);
+  const rowStateFor = (tx: BankTransaction): RowState =>
+    lockedFor(tx)
+      ? "locked"
+      : account && isBeforeBase(tx, account)
+        ? "before"
+        : canManageReconciliation
+          ? "editable"
+          : "readonly";
   const canSettleFor = (tx: BankTransaction) =>
     canManageReconciliation &&
     (tx.amount < 0 ? canPayPayables : canEditReceivables);
@@ -383,14 +341,22 @@ export function ReconciliationDashboard() {
   };
 
   /** Sugestão que a confirmação em lote consegue resolver sozinha. */
-  const selectableFor = (tx: BankTransaction) => {
-    if (tx.status !== "potential_match" || lockedFor(tx)) return false;
+  const confirmableFor = (tx: BankTransaction) => {
+    if (tx.status !== "potential_match" || rowStateFor(tx) !== "editable")
+      return false;
     if (!tx.ruleId) return true;
     const rule = ruleFor(tx);
     return !!rule && (rule.action === "ignore" || canLaunchFor(tx));
   };
+  /** Qualquer linha a tratar entra no lote: confirmar as sugestões, ignorar o resto. */
+  const selectableFor = (tx: BankTransaction) =>
+    rowStateFor(tx) === "editable" &&
+    (tx.status === "unmatched" || tx.status === "potential_match");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkConfirming, setBulkConfirming] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // ── Modais e filtros ───────────────────────────────────────────────────────
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -405,48 +371,60 @@ export function ReconciliationDashboard() {
   );
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [hideReconciled, setHideReconciled] = useState(false);
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [tab, setTab] = useState<Tab>("all");
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = useState(false);
-
-  const statusLabels: Record<string, string> = {
-    all: "Todos",
-    matched: "Conciliados",
-    potential_match: "Sugestões",
-    unmatched: "Pendentes",
-    ignored: "Ignorados",
-  };
-
-  const activeFilterCount =
-    (statusFilter !== "all" ? 1 : 0) + (hideReconciled ? 1 : 0);
+  const [undoTx, setUndoTx] = useState<BankTransaction | null>(null);
 
   const clearFilters = () => {
-    setStatusFilter("all");
-    setHideReconciled(false);
+    setTab("all");
+    setSearchTerm("");
   };
 
+  const tabCounts = useMemo(() => {
+    const counts: Record<Tab, number> = {
+      all: lines.length,
+      unmatched: 0,
+      potential_match: 0,
+      matched: 0,
+      ignored: 0,
+    };
+    for (const tx of lines) counts[tx.status]++;
+    return counts;
+  }, [lines]);
+
   const filteredTransactions = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    return transactions
-      .filter((tx) => {
-        const matchesSearch =
-          tx.description.toLowerCase().includes(term) ||
-          tx.amount.toString().includes(searchTerm);
-        const matchesStatus =
-          statusFilter === "all" || tx.status === statusFilter;
-        const matchesHidden = hideReconciled ? tx.status !== "matched" : true;
-        return matchesSearch && matchesStatus && matchesHidden;
-      })
+    const term = searchTerm.trim().toLowerCase();
+    // Valor no jeito que o operador digita: "2.125,26", "2125,26" ou "2125.26".
+    const haystack = (tx: BankTransaction) => {
+      const abs = Math.abs(tx.amount);
+      return [
+        tx.description,
+        formatCurrency(abs),
+        abs.toFixed(2),
+        abs.toFixed(2).replace(".", ","),
+      ]
+        .join(" ")
+        .toLowerCase();
+    };
+    return lines
+      .filter(
+        (tx) =>
+          (tab === "all" || tx.status === tab) &&
+          (!term || haystack(tx).includes(term)),
+      )
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [transactions, searchTerm, statusFilter, hideReconciled]);
+  }, [lines, searchTerm, tab]);
+  const showDayBalances = tab === "all" && !searchTerm.trim();
 
   // Seleção vale só para o que está à vista: filtrar e confirmar nunca pega
   // linha escondida.
-  const visibleSuggestions = filteredTransactions.filter(selectableFor);
-  const selection = visibleSuggestions
+  const visibleSuggestions = filteredTransactions.filter(confirmableFor);
+  const selection = filteredTransactions
+    .filter((t) => selected.has(t.id) && selectableFor(t))
+    .map((t) => t.id);
+  const confirmSelection = visibleSuggestions
     .filter((t) => selected.has(t.id))
     .map((t) => t.id);
 
@@ -509,6 +487,7 @@ export function ReconciliationDashboard() {
       } as Transaction,
       confidence: 100,
       ruleId,
+      resolution: "launched",
     });
   };
 
@@ -565,12 +544,35 @@ export function ReconciliationDashboard() {
     setSelected(new Set());
     setBulkConfirming(false);
     if (failures.length === 0) {
-      toast.success(`${done} sugestão(ões) confirmada(s)`);
+      toast.success(
+        `${plural(done, "sugestão confirmada", "sugestões confirmadas")}`,
+      );
     } else {
       toast.warning(
-        `${done} confirmada(s), ${failures.length} não foi(ram) possível`,
-        { description: failures[0] },
+        `${done} de ${done + failures.length} confirmadas; ${plural(failures.length, "falhou", "falharam")}`,
+        { description: failureList(failures) },
       );
+    }
+  };
+
+  const ignoreSelected = async (
+    ids: string[],
+    reason: NonNullable<BankTransaction["ignoreReason"]>,
+  ) => {
+    if (!companyId) return;
+    try {
+      await reconciliationSessionService.bulkUpdateItems(
+        companyId,
+        ids.map((id) => ({
+          id,
+          data: { status: "ignored", ignoreReason: reason, ruleId: undefined },
+        })),
+      );
+      setSelected(new Set());
+      toast.success(plural(ids.length, "linha ignorada", "linhas ignoradas"));
+    } catch (error) {
+      console.error(error);
+      toast.error(friendlyError(error, "Erro ao ignorar as linhas"));
     }
   };
 
@@ -596,10 +598,11 @@ export function ReconciliationDashboard() {
       createdBy: actor!.uid,
       createdAt: new Date(),
     };
-    // Estado atual, não o do render: o "Sempre ignorar" do toast roda depois.
+    // Estado atual, não o do render: a linha de origem acabou de mudar.
     const pending = useReconciliationStore.getState().transactions.filter(
       (t) =>
         t.id !== exceptId &&
+        !isBalanceLine(t) &&
         !isLocked(
           t,
           accounts.find((a) => a.id === t.bankAccountId),
@@ -615,9 +618,15 @@ export function ReconciliationDashboard() {
         })),
       );
     }
-    return hits.length;
+    return { ruleId: id, hits: hits.length };
   };
 
+  const hitsNote = (hits: number) =>
+    hits > 0
+      ? `${plural(hits, "outra linha virou", "outras linhas viraram")} sugestão para confirmar.`
+      : undefined;
+
+  /** Ignora a linha e cria a regra que ignora as próximas iguais. */
   const ignoreAlways = async (tx: BankTransaction) => {
     const pattern = rulePattern(tx.description);
     if (pattern.length < 3) {
@@ -625,7 +634,7 @@ export function ReconciliationDashboard() {
       return;
     }
     try {
-      const hits = await createRuleAndApply(
+      const { ruleId, hits } = await createRuleAndApply(
         {
           pattern,
           direction: tx.amount < 0 ? "debit" : "credit",
@@ -633,11 +642,9 @@ export function ReconciliationDashboard() {
         },
         tx.id,
       );
+      await updateStatusAndSync(tx.id, "ignored", { ruleId });
       toast.success(`Regra criada: ignorar “${pattern}”`, {
-        description:
-          hits > 0
-            ? `${hits} outra(s) linha(s) viraram sugestão para confirmar.`
-            : undefined,
+        description: hitsNote(hits),
       });
     } catch (error) {
       console.error(error);
@@ -664,7 +671,7 @@ export function ReconciliationDashboard() {
     }
     // O lançamento já foi gravado: falha na regra não desfaz nada.
     try {
-      const hits = await createRuleAndApply(
+      const { hits } = await createRuleAndApply(
         {
           pattern,
           direction: tx.amount < 0 ? "debit" : "credit",
@@ -674,10 +681,7 @@ export function ReconciliationDashboard() {
         tx.id,
       );
       toast.success("Lançado, conciliado e regra criada", {
-        description:
-          hits > 0
-            ? `${hits} outra(s) linha(s) viraram sugestão para confirmar.`
-            : undefined,
+        description: hitsNote(hits),
       });
     } catch (error) {
       console.error(error);
@@ -729,51 +733,42 @@ export function ReconciliationDashboard() {
     }
   };
 
-  const handleAction = async (
-    id: string,
-    action: ReconciliationAction,
-    matchedId?: string,
-  ) => {
-    if (!canManageReconciliation || !user || !companyId) return;
-    const tx = transactions.find((t) => t.id === id);
-    if (!tx || lockedFor(tx)) return;
+  /**
+   * Desfaz de verdade: o lançamento criado pela linha é excluído e a baixa
+   * feita por ela é estornada. Só tirar a marca de conciliado deixava o título
+   * pago, e o operador descobria depois em Contas a pagar.
+   */
+  const undoLine = async (tx: BankTransaction) => {
+    if (!user || !companyId || !actor) return;
+    const matchedIds =
+      tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0
+        ? tx.matchedTransactionIds
+        : tx.matchedTransactionId
+          ? [tx.matchedTransactionId]
+          : [];
+    const resolution = tx.status === "matched" ? tx.resolution : undefined;
 
-    if (action === "confirm") {
-      try {
-        await confirmLine(tx, matchedId);
-        toast.success("Conciliação confirmada");
-      } catch (error) {
-        console.error(error);
-        toast.error(friendlyError(error, "Erro ao confirmar conciliação"));
-      }
-    } else if (action === "ignore") {
-      try {
-        await updateStatusAndSync(id, "ignored");
-        if (canManageReconciliationRules && !tx.ruleId) {
-          toast("Linha ignorada", {
-            action: {
-              label: "Sempre ignorar",
-              onClick: () => ignoreAlways(tx),
-            },
-          });
+    try {
+      if (resolution === "launched" && tx.matchedTransactionId) {
+        await transactionService.delete(
+          tx.matchedTransactionId,
+          actor,
+          companyId,
+        );
+      } else {
+        // Estorna antes de soltar: se o estorno falhar, nada mudou.
+        if (
+          resolution === "settled" &&
+          tx.previousStatus &&
+          tx.matchedTransactionId
+        ) {
+          await transactionService.updateStatus(
+            tx.matchedTransactionId,
+            tx.previousStatus,
+            actor,
+            companyId,
+          );
         }
-      } catch (error) {
-        console.error(error);
-        toast.error(friendlyError(error, "Erro ao ignorar lançamento"));
-      }
-    } else if (action === "create") {
-      setLaunchingTx(tx);
-    } else if (action === "settle") {
-      setSettlingTx(tx);
-    } else if (action === "unreconcile") {
-      const matchedIds =
-        tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0
-          ? tx.matchedTransactionIds
-          : tx.matchedTransactionId
-            ? [tx.matchedTransactionId]
-            : [];
-
-      try {
         const unreconcileActor = {
           companyId,
           userId: user.uid,
@@ -784,27 +779,75 @@ export function ReconciliationDashboard() {
             transactionService.unreconcile(matchedId, unreconcileActor),
           ),
         );
+      }
 
-        await updateStatusAndSync(id, "unmatched", {
-          matchedTransactionId: undefined,
-          matchedTransactionIds: undefined,
-          matchedDetails: undefined,
-          matchedBundleDetails: undefined,
-          confidence: undefined,
-          ruleId: undefined,
+      await updateStatusAndSync(tx.id, "unmatched", {
+        matchedTransactionId: undefined,
+        matchedTransactionIds: undefined,
+        matchedDetails: undefined,
+        matchedBundleDetails: undefined,
+        confidence: undefined,
+        ruleId: undefined,
+        ignoreReason: undefined,
+        resolution: undefined,
+        previousStatus: undefined,
+      });
+      if (tx.status === "ignored") toast.success("Linha voltou para pendente");
+      else if (resolution === "launched")
+        toast.success("Conciliação desfeita e lançamento excluído");
+      else if (resolution === "settled")
+        toast.success("Conciliação desfeita e baixa estornada");
+      else
+        toast.success("Conciliação desfeita", {
+          description: tx.matchedDetails
+            ? `“${tx.matchedDetails.description}” continua pago no sistema.`
+            : undefined,
         });
-        toast.success(
-          tx.status === "ignored"
-            ? "Linha voltou para pendente"
-            : "Conciliação desfeita",
-        );
+    } catch (error) {
+      console.error(error);
+      toast.error(friendlyError(error, "Erro ao desfazer conciliação"));
+    }
+  };
+
+  const handleAction: ActionHandler = async (id, action, arg) => {
+    if (!canManageReconciliation || !user || !companyId) return;
+    const tx = transactions.find((t) => t.id === id);
+    if (!tx || rowStateFor(tx) !== "editable") return;
+
+    if (action === "confirm") {
+      try {
+        await confirmLine(tx, arg);
+        toast.success("Conciliação confirmada");
       } catch (error) {
         console.error(error);
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Erro ao desfazer conciliação",
-        );
+        toast.error(friendlyError(error, "Erro ao confirmar conciliação"));
+      }
+    } else if (action === "ignore") {
+      try {
+        await updateStatusAndSync(id, "ignored", {
+          ignoreReason: (arg ?? "other") as BankTransaction["ignoreReason"],
+          ruleId: undefined,
+        });
+        toast.success("Linha ignorada");
+      } catch (error) {
+        console.error(error);
+        toast.error(friendlyError(error, "Erro ao ignorar lançamento"));
+      }
+    } else if (action === "ignoreAlways") {
+      await ignoreAlways(tx);
+    } else if (action === "create") {
+      setLaunchingTx(tx);
+    } else if (action === "settle") {
+      setSettlingTx(tx);
+    } else if (action === "unreconcile") {
+      // Excluir lançamento ou estornar baixa pede confirmação; o resto é barato.
+      if (
+        tx.status === "matched" &&
+        (tx.resolution === "launched" || tx.resolution === "settled")
+      ) {
+        setUndoTx(tx);
+      } else {
+        await undoLine(tx);
       }
     }
   };
@@ -825,7 +868,18 @@ export function ReconciliationDashboard() {
 
       await updateStatusAndSync(selectedBankTx.id, "matched", {
         matchedTransactionId: matchedId,
+        matchedDetails: {
+          id: matchedId,
+          type: data.type,
+          status: "paid",
+          description: data.description,
+          supplierOrClient: data.supplierOrClient,
+          amount: data.amount,
+          dueDate: data.dueDate,
+          paymentDate: data.paymentDate,
+        } as Transaction,
         confidence: 100,
+        resolution: "launched",
       });
 
       toast.success("Lançamento criado e conciliado");
@@ -857,6 +911,8 @@ export function ReconciliationDashboard() {
           finalAmount: settlement.finalAmount,
         },
         confidence: 100,
+        resolution: "settled",
+        previousStatus: title.status,
       });
       toast.success("Título baixado e conciliado", {
         description: result.budgetExceeded
@@ -872,7 +928,7 @@ export function ReconciliationDashboard() {
 
   const triggerAutoMatch = async () => {
     if (!canManageReconciliation || !companyId || !user) return;
-    const open = transactions.filter((t) => !lockedFor(t));
+    const open = lines.filter((t) => rowStateFor(t) === "editable");
     if (open.length === 0) return;
     setIsMatching(true);
     try {
@@ -895,26 +951,6 @@ export function ReconciliationDashboard() {
         open,
         systemTransactions,
         entities,
-      );
-
-      // High-confidence lines come back as "matched": flag the system
-      // transaction as reconciled too, otherwise it stays free to be matched
-      // again by a later import. If the claim fails (e.g. another statement
-      // line already took it), fall back to a suggestion for manual review.
-      await Promise.all(
-        processed.map(async (tx, i) => {
-          if (
-            tx === open[i] ||
-            tx.status !== "matched" ||
-            !tx.matchedTransactionId
-          )
-            return;
-          try {
-            await reconcileAll([tx.matchedTransactionId], tx);
-          } catch {
-            processed[i] = { ...tx, status: "potential_match" };
-          }
-        }),
       );
 
       // Título vence regra: a linha que achou título larga a sugestão da regra.
@@ -943,20 +979,41 @@ export function ReconciliationDashboard() {
         );
       }
 
-      const auto = changed.filter((t) => t.status === "matched").length;
+      // Sugestão forte já vem marcada: confirmar é um clique, mas é de alguém.
+      const strong = changed.filter(
+        (t) =>
+          t.status === "potential_match" &&
+          !t.ruleId &&
+          (t.confidence ?? 0) >= 90,
+      );
+      if (strong.length > 0) {
+        setSelected((prev) => new Set([...prev, ...strong.map((t) => t.id)]));
+      }
       const byRule = changed.filter(
         (t) => t.status === "potential_match" && t.ruleId,
       ).length;
-      const suggested = changed.length - auto - byRule;
+      const toReview =
+        changed.filter((t) => t.status === "potential_match").length -
+        strong.length -
+        byRule;
       toast.success(
         changed.length === 0
           ? "Nenhuma correspondência nova encontrada."
-          : `${auto} conciliada(s) automaticamente, ${suggested} sugestão(ões) para revisar.`,
+          : strong.length > 0
+            ? `${plural(strong.length, "sugestão forte já selecionada", "sugestões fortes já selecionadas")} para confirmar`
+            : `${plural(toReview, "sugestão", "sugestões")} para revisar`,
         {
           description:
-            byRule > 0
-              ? `${byRule} linha(s) sugerida(s) por regra.`
-              : undefined,
+            [
+              strong.length > 0 && toReview > 0
+                ? `${plural(toReview, "outra sugestão", "outras sugestões")} para revisar.`
+                : null,
+              byRule > 0
+                ? `${plural(byRule, "linha sugerida", "linhas sugeridas")} por regra.`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined,
         },
       );
     } catch (e) {
@@ -1041,9 +1098,101 @@ export function ReconciliationDashboard() {
     }
   };
 
+  // ── Teclado ────────────────────────────────────────────────────────────────
+  // Mesmo mapa das listas de contas: j/k andam, x seleciona, Enter faz a ação
+  // principal, i abre as outras, 1-5 trocam de aba, / busca.
+  const primaryAction = (tx: BankTransaction): ReconciliationAction | null =>
+    tx.status === "potential_match"
+      ? "confirm"
+      : tx.status !== "unmatched"
+        ? null
+        : canSettleFor(tx)
+          ? "settle"
+          : canLaunchFor(tx)
+            ? "create"
+            : null;
+
+  const moveActive = (delta: number) => {
+    const list = filteredTransactions;
+    if (list.length === 0) return;
+    const index = list.findIndex((t) => t.id === activeId);
+    const next =
+      list[
+        index < 0
+          ? delta > 0
+            ? 0
+            : list.length - 1
+          : Math.min(list.length - 1, Math.max(0, index + delta))
+      ];
+    setActiveId(next.id);
+  };
+
+  const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    keyHandler.current = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      if (
+        target.closest("input, textarea, select, [contenteditable='true']") ||
+        target.closest("[role='dialog'], [role='menu']")
+      ) {
+        return;
+      }
+      const active = filteredTransactions.find((t) => t.id === activeId);
+      const onRow = target.hasAttribute("data-row-id");
+      // Setas só com o foco numa linha, para não roubar a rolagem da página.
+      const arrow =
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        !!target.closest("[data-row-id]");
+
+      if (e.key === "j" || e.key === "k" || arrow) {
+        e.preventDefault();
+        moveActive(e.key === "j" || e.key === "ArrowDown" ? 1 : -1);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (/^[1-5]$/.test(e.key)) {
+        setTab(TABS[Number(e.key) - 1].id);
+      } else if ((e.key === "x" || e.key === "X") && active) {
+        if (!selectableFor(active)) return;
+        const next = new Set(selected);
+        if (next.has(active.id)) next.delete(active.id);
+        else next.add(active.id);
+        setSelected(next);
+      } else if (e.key === "Enter" && active && onRow) {
+        // Enter num botão da linha é do botão; só a linha inteira dispara a principal.
+        const action = primaryAction(active);
+        if (action && rowStateFor(active) === "editable") {
+          e.preventDefault();
+          handleAction(active.id, action);
+        }
+      } else if (e.key === "i" && active && selectableFor(active)) {
+        setMenuOpenId(active.id);
+      } else if (e.key === "Escape") {
+        setSelected(new Set());
+      }
+    };
+  });
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => keyHandler.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+  useEffect(() => {
+    if (!activeId) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-row-id="${CSS.escape(activeId)}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+    // Não tira o foco de um checkbox ou botão da própria linha.
+    if (el && !el.contains(document.activeElement)) {
+      el.focus({ preventScroll: true });
+    }
+  }, [activeId]);
+
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+      <h1 className="text-xl font-bold tracking-tight md:text-2xl">
         Conciliação Bancária
       </h1>
       {account && (
@@ -1061,17 +1210,6 @@ export function ReconciliationDashboard() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9"
-            onClick={() => setRulesOpen(true)}
-          >
-            <ListChecks className="h-4 w-4" />
-            <span className="hidden sm:inline ml-2">
-              Regras{rules.length > 0 && ` (${rules.length})`}
-            </span>
-          </Button>
           {canManageReconciliation && transactions.length > 0 && (
             <>
               <UploadStatement
@@ -1080,7 +1218,9 @@ export function ReconciliationDashboard() {
                 onAccountDetected={selectAccount}
                 variant="button"
               />
+              {/* Secundário: o primário da tela é fechar o período. */}
               <Button
+                variant="outline"
                 size="sm"
                 className="h-9"
                 onClick={triggerAutoMatch}
@@ -1091,22 +1231,43 @@ export function ReconciliationDashboard() {
                 ) : (
                   <Search className="h-4 w-4" />
                 )}
-                <span className="hidden sm:inline ml-2">
+                <span className="hidden sm:inline">
                   Buscar correspondências
                 </span>
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                onClick={() => setClearConfirmOpen(true)}
-                aria-label="Limpar linhas do extrato"
-                title="Limpar linhas do extrato"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
             </>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Mais opções da conciliação"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuItem onSelect={() => setRulesOpen(true)}>
+                <ListChecks className="h-4 w-4" />
+                Regras de conciliação
+                {rules.length > 0 && ` (${rules.length})`}
+              </DropdownMenuItem>
+              {canManageReconciliation && transactions.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setClearConfirmOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Limpar extrato desta conta
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
     </div>
@@ -1197,10 +1358,7 @@ export function ReconciliationDashboard() {
           onSetStatementBalance={handleStatementBalance}
           onClose={() => setCloseConfirmOpen(true)}
           onReopen={() => setReopenConfirmOpen(true)}
-          onShowPending={() => {
-            setStatusFilter("unmatched");
-            setHideReconciled(false);
-          }}
+          onShowPending={() => setTab("unmatched")}
         />
       )}
 
@@ -1218,238 +1376,218 @@ export function ReconciliationDashboard() {
         )
       ) : (
         <section className="rounded-lg border bg-card">
-          <div className="flex flex-col gap-3 p-4 border-b">
-            {/* Mobile: search + filter button */}
-            <div className="flex items-center gap-2 md:hidden">
-              <div className="relative flex-1 min-w-0">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar no extrato"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 pr-8 h-10"
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm("")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Limpar busca"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setMobileFiltersOpen(true)}
-                aria-label="Abrir filtros"
-                className={cn(
-                  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors",
-                  activeFilterCount > 0
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                )}
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground leading-none">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* Mobile: active filter chips */}
-            {activeFilterCount > 0 && (
-              <div className="flex md:hidden items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {statusFilter !== "all" && (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-                    {statusLabels[statusFilter] ?? statusFilter}
-                    <button
-                      onClick={() => setStatusFilter("all")}
-                      className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                      aria-label="Remover filtro de status"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </span>
-                )}
-                {hideReconciled && (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-                    Ocultar conciliados
-                    <button
-                      onClick={() => setHideReconciled(false)}
-                      className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                      aria-label="Remover filtro"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </span>
-                )}
+          {/* ── Abas por situação, como nas listas de contas ─────────────── */}
+          <div
+            role="tablist"
+            aria-label="Situação das linhas"
+            className="flex overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {TABS.map((t, i) => {
+              const selectedTab = t.id === tab;
+              return (
                 <button
-                  onClick={clearFilters}
-                  className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline hover:text-foreground transition-colors ml-1"
+                  key={t.id}
+                  role="tab"
+                  type="button"
+                  aria-selected={selectedTab}
+                  title={`${t.label} (${i + 1})`}
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    "relative flex shrink-0 items-center gap-1.5 rounded-sm px-3 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    "after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full",
+                    selectedTab
+                      ? "after:bg-primary"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
                 >
-                  Limpar tudo
+                  {t.label}
+                  <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground">
+                    {tabCounts[t.id]}
+                  </span>
                 </button>
-              </div>
-            )}
+              );
+            })}
+          </div>
 
-            {/* Desktop: search + filters inline */}
-            <div className="hidden md:flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 md:max-w-[300px]">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="flex flex-col gap-3 border-b p-4">
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1 md:max-w-[320px]">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar no extrato"
+                  ref={searchRef}
+                  placeholder="Buscar descrição ou valor (/)"
+                  aria-label="Buscar no extrato"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 pr-8"
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setSearchTerm("");
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  className="h-10 pl-9 pr-8 md:h-9"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm("")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
                     aria-label="Limpar busca"
                   >
                     <X className="h-4 w-4" />
                   </button>
                 )}
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[180px]" aria-label="Situação">
-                  <SelectValue placeholder="Situação" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(statusLabels).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="hide-reconciled"
-                  checked={hideReconciled}
-                  onCheckedChange={(c) => setHideReconciled(!!c)}
-                />
-                <Label htmlFor="hide-reconciled" className="cursor-pointer">
-                  Ocultar conciliados
-                </Label>
-              </div>
-              {activeFilterCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={clearFilters}
-                >
-                  <X className="mr-1 h-3.5 w-3.5" />
-                  Limpar filtros
-                </Button>
-              )}
-              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                {filteredTransactions.length} de {transactions.length} linhas
+              <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
+                {filteredTransactions.length} de{" "}
+                {plural(lines.length, "linha", "linhas")}
               </span>
             </div>
 
-            {/* Confirmação em lote: só sugestões visíveis com os filtros atuais. */}
-            {canManageReconciliation && visibleSuggestions.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm dark:border-amber-900 dark:bg-amber-950/20">
-                <span className="tabular-nums">
-                  {selection.length > 0
-                    ? `${selection.length} de ${visibleSuggestions.length} sugestões selecionadas`
-                    : `${visibleSuggestions.length} sugestão(ões) para confirmar`}
-                </span>
-                <div className="ml-auto flex gap-2">
-                  {selection.length > 0 ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8"
-                      onClick={() => setSelected(new Set())}
-                      disabled={bulkConfirming}
-                    >
-                      Limpar seleção
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8"
-                      onClick={() =>
-                        setSelected(
-                          new Set(visibleSuggestions.map((t) => t.id)),
+            {/* Lote: confirmar as sugestões selecionadas, ignorar qualquer linha. */}
+            {canManageReconciliation &&
+              (selection.length > 0 || visibleSuggestions.length > 0) && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <span className="tabular-nums">
+                    {selection.length > 0
+                      ? plural(
+                          selection.length,
+                          "linha selecionada",
+                          "linhas selecionadas",
                         )
-                      }
-                    >
-                      Selecionar todas
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    className="h-8"
-                    disabled={selection.length === 0 || bulkConfirming}
-                    onClick={() => confirmSelected(selection)}
-                  >
-                    {bulkConfirming ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : `${plural(visibleSuggestions.length, "sugestão", "sugestões")} para confirmar`}
+                  </span>
+                  <div className="ml-auto flex flex-wrap gap-2">
+                    {selection.length > 0 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8"
+                        onClick={() => setSelected(new Set())}
+                        disabled={bulkConfirming}
+                      >
+                        Limpar seleção
+                      </Button>
                     ) : (
-                      <Check className="h-3.5 w-3.5" />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8"
+                        onClick={() =>
+                          setSelected(
+                            new Set(visibleSuggestions.map((t) => t.id)),
+                          )
+                        }
+                      >
+                        Selecionar sugestões
+                      </Button>
                     )}
-                    Confirmar{selection.length > 0 && ` ${selection.length}`}
-                  </Button>
+                    {selection.length > 0 && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            disabled={bulkConfirming}
+                          >
+                            <MinusCircle className="h-3.5 w-3.5" />
+                            Ignorar {selection.length}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-60">
+                          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                            Motivo
+                          </DropdownMenuLabel>
+                          {IGNORE_REASONS.map((r) => (
+                            <DropdownMenuItem
+                              key={r.value}
+                              onSelect={() =>
+                                ignoreSelected(selection, r.value)
+                              }
+                            >
+                              {r.label}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                    <Button
+                      size="sm"
+                      className="h-8"
+                      disabled={confirmSelection.length === 0 || bulkConfirming}
+                      onClick={() => confirmSelected(confirmSelection)}
+                    >
+                      {bulkConfirming ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      Confirmar
+                      {confirmSelection.length > 0 &&
+                        ` ${confirmSelection.length}`}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
           </div>
 
           {/* Desktop table */}
-          <div className="hidden md:block relative">
+          <div className="relative hidden md:block" aria-busy={isMatching}>
             {isMatching && (
-              <div className="absolute inset-0 z-10 bg-background/70 flex items-center justify-center">
-                <div className="flex items-center gap-2 text-sm font-medium bg-background border rounded-lg px-4 py-2 shadow-sm">
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70">
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium shadow-sm"
+                >
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  Buscando correspondências...
+                  Buscando correspondências…
                 </div>
               </div>
             )}
             <ReconciliationTable
               transactions={filteredTransactions}
+              dayBalances={showDayBalances ? dayBalances : undefined}
               onAction={handleAction}
-              readOnly={!canManageReconciliation}
-              isLocked={lockedFor}
+              rowState={rowStateFor}
               canSettle={canSettleFor}
               canLaunch={canLaunchFor}
+              canRule={canManageReconciliationRules}
               ruleFor={ruleFor}
               isSelectable={selectableFor}
               selected={selected}
               onSelectedChange={
                 canManageReconciliation ? setSelected : undefined
               }
+              activeId={activeId}
+              onActiveChange={setActiveId}
+              menuOpenId={menuOpenId}
+              onMenuOpenChange={setMenuOpenId}
+              onClearFilters={clearFilters}
             />
+            <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+              Teclado: <Kbd>j</Kbd> <Kbd>k</Kbd> navega · <Kbd>Enter</Kbd> ação
+              principal · <Kbd>i</Kbd> outras ações · <Kbd>x</Kbd> seleciona ·{" "}
+              <Kbd>/</Kbd> busca · <Kbd>1</Kbd> a <Kbd>5</Kbd> abas
+            </p>
           </div>
 
           {/* Mobile card list */}
           <div className="md:hidden">
             {filteredTransactions.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-10 px-4 text-muted-foreground">
+              <div className="flex flex-col items-center gap-2 px-4 py-10 text-muted-foreground">
                 <FileText className="h-8 w-8 opacity-40" />
-                <p className="text-sm font-medium text-center">
+                <p className="text-center text-sm font-medium">
                   {searchTerm
                     ? `Nenhum resultado para "${searchTerm}"`
-                    : "Nenhuma linha com os filtros selecionados"}
+                    : "Nenhuma linha nesta aba"}
                 </p>
                 <Button
                   variant="link"
                   size="sm"
                   className="h-auto p-0 text-xs"
-                  onClick={() => {
-                    setSearchTerm("");
-                    clearFilters();
-                  }}
+                  onClick={clearFilters}
                 >
                   Limpar filtros
                 </Button>
@@ -1460,12 +1598,12 @@ export function ReconciliationDashboard() {
                   <MobileBankTxCard
                     key={tx.id}
                     tx={tx}
-                    onAction={handleAction}
-                    readOnly={!canManageReconciliation}
-                    locked={lockedFor(tx)}
+                    state={rowStateFor(tx)}
                     canSettle={canSettleFor(tx)}
                     canLaunch={canLaunchFor(tx)}
+                    canRule={canManageReconciliationRules}
                     rule={ruleFor(tx)}
+                    onAction={handleAction}
                   />
                 ))}
               </div>
@@ -1474,76 +1612,11 @@ export function ReconciliationDashboard() {
         </section>
       )}
 
-      {/* Mobile filter sheet */}
-      <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-        <SheetContent
-          side="bottom"
-          className="rounded-t-2xl max-h-[92dvh] overflow-y-auto px-4 pb-6 pt-3"
-        >
-          <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/25 shrink-0" />
-          <SheetTitle className="mb-4 text-base font-semibold">
-            Filtros
-          </SheetTitle>
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Situação
-              </p>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(statusLabels).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="hide-reconciled-mobile"
-                checked={hideReconciled}
-                onCheckedChange={(c) => setHideReconciled(!!c)}
-              />
-              <Label
-                htmlFor="hide-reconciled-mobile"
-                className="cursor-pointer"
-              >
-                Ocultar conciliados
-              </Label>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => {
-                  clearFilters();
-                  setMobileFiltersOpen(false);
-                }}
-              >
-                Limpar
-              </Button>
-              <Button
-                className="flex-1"
-                onClick={() => setMobileFiltersOpen(false)}
-              >
-                Aplicar
-              </Button>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
-
       <ConfirmDialog
         open={clearConfirmOpen}
         onOpenChange={setClearConfirmOpen}
         title={`Limpar o extrato de ${account.name}?`}
-        description={`As ${transactions.length} linhas importadas desta conta saem da tela, incluindo ${summary?.pending ?? 0} ainda pendentes. Lançamentos já conciliados continuam conciliados no sistema, e os períodos fechados não mudam.`}
+        description={`${plural(transactions.length, "linha importada", "linhas importadas")} desta conta saem da tela, incluindo ${summary?.pending ?? 0} ainda pendentes. Lançamentos já conciliados continuam conciliados no sistema, e os períodos fechados não mudam.`}
         confirmText="Limpar extrato"
         variant="destructive"
         onConfirm={handleClearSession}
@@ -1614,32 +1687,89 @@ export function ReconciliationDashboard() {
         />
       )}
 
-      <ResponsiveModal open={createModalOpen} onOpenChange={setCreateModalOpen}>
-        <ResponsiveModalContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-          <ResponsiveModalHeader>
-            <ResponsiveModalTitle>Lançar e conciliar</ResponsiveModalTitle>
-          </ResponsiveModalHeader>
-          {selectedBankTx && (
-            <TransactionForm
-              variant="reconcile"
-              type={selectedBankTx.type === "debit" ? "payable" : "receivable"}
-              defaultValues={{
-                amount: Math.abs(selectedBankTx.amount),
-                description: selectedBankTx.description,
-                dueDate: new Date(selectedBankTx.date),
-                paymentDate: new Date(selectedBankTx.date),
-                status: "paid",
-                paymentMethod: "transfer",
-                bankAccountId: selectedBankTx.bankAccountId,
-                supplierOrClient: selectedBankTx.description,
-              }}
-              onSubmit={handleCreateSubmit}
-              isLoading={false}
-              onCancel={() => setCreateModalOpen(false)}
-            />
-          )}
-        </ResponsiveModalContent>
-      </ResponsiveModal>
+      <ConfirmDialog
+        open={!!undoTx}
+        onOpenChange={(o) => !o && setUndoTx(null)}
+        title={
+          undoTx?.resolution === "launched"
+            ? "Desfazer e excluir o lançamento?"
+            : "Desfazer e estornar a baixa?"
+        }
+        description={
+          undoTx?.resolution === "launched"
+            ? `“${undoTx.matchedDetails?.description ?? "O lançamento"}” foi criado a partir desta linha e será excluído. A linha volta para pendente.`
+            : `A baixa de “${undoTx?.matchedDetails?.description ?? "o título"}” é estornada e ele volta a ficar em aberto. A linha volta para pendente.`
+        }
+        confirmText={
+          undoTx?.resolution === "launched"
+            ? "Excluir lançamento"
+            : "Estornar baixa"
+        }
+        variant="destructive"
+        onConfirm={async () => {
+          if (undoTx) await undoLine(undoTx);
+        }}
+      />
+
+      {/* Painel lateral, como o formulário de lançamento nas listas. */}
+      <Sheet open={createModalOpen} onOpenChange={setCreateModalOpen}>
+        <SheetContent
+          onInteractOutside={(e) => e.preventDefault()}
+          className="w-full gap-0 overflow-hidden p-0 sm:max-w-4xl"
+        >
+          <SheetHeader className="shrink-0 gap-0.5 border-b px-6 py-4">
+            <SheetTitle className="text-lg">Lançar e conciliar</SheetTitle>
+            {selectedBankTx && (
+              <SheetDescription>
+                {selectedBankTx.description} ·{" "}
+                {format(new Date(selectedBankTx.date), "dd/MM/yyyy")} ·{" "}
+                {formatCurrency(Math.abs(selectedBankTx.amount))}
+              </SheetDescription>
+            )}
+          </SheetHeader>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto px-6 pt-5"
+            style={{ "--form-inset": "1.5rem" } as React.CSSProperties}
+          >
+            {selectedBankTx && (
+              <TransactionForm
+                variant="reconcile"
+                type={
+                  selectedBankTx.type === "debit" ? "payable" : "receivable"
+                }
+                defaultValues={{
+                  amount: Math.abs(selectedBankTx.amount),
+                  description: selectedBankTx.description,
+                  dueDate: new Date(selectedBankTx.date),
+                  paymentDate: new Date(selectedBankTx.date),
+                  status: "paid",
+                  paymentMethod: "transfer",
+                  bankAccountId: selectedBankTx.bankAccountId,
+                  supplierOrClient: selectedBankTx.description,
+                }}
+                onSubmit={handleCreateSubmit}
+                isLoading={false}
+                onCancel={() => setCreateModalOpen(false)}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border bg-muted px-1 font-mono text-[10px] text-foreground/80">
+      {children}
+    </kbd>
+  );
+}
+
+/** Todas as falhas do lote, não só a primeira; a partir da quarta, a contagem. */
+const failureList = (failures: string[]) =>
+  [
+    ...failures.slice(0, 3),
+    ...(failures.length > 3 ? [`e mais ${failures.length - 3}`] : []),
+  ].join("\n");

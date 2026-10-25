@@ -8,6 +8,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ReconciliationService } from "@/lib/services/reconciliationService";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import { bankAccountService } from "@/lib/services/bankAccountService";
+import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
+import { pickStatementBalance } from "@/lib/bankReconciliation";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { BankAccount } from "@/lib/types";
 import { toast } from "sonner";
@@ -107,24 +109,39 @@ export function UploadStatement({
         transactions,
       );
 
-      if (meta?.balance !== undefined) {
-        const balanceDate =
-          meta.balanceDate ??
-          new Date(
-            Math.max(...transactions.map((t) => new Date(t.date).getTime())),
-          );
-        // Reimportar um extrato mais antigo não pode recuar o saldo final.
-        if (
-          !target.statementBalanceDate ||
-          balanceDate >= new Date(target.statementBalanceDate)
-        ) {
-          await bankAccountService.setStatementBalance(
-            target.id,
-            meta.balance,
-            balanceDate,
-          );
-          await queryClient.invalidateQueries({ queryKey: ["bank-accounts"] });
-        }
+      // Linhas da conta depois da importação: as que já estavam e as novas.
+      const known = useReconciliationStore
+        .getState()
+        .transactions.filter((t) => t.bankAccountId === target.id);
+      const knownIds = new Set(known.map((t) => t.id));
+      const picked = pickStatementBalance(
+        target,
+        [...known, ...transactions.filter((t) => !knownIds.has(t.id))],
+        meta?.balance !== undefined
+          ? {
+              balance: meta.balance,
+              date:
+                meta.balanceDate ??
+                new Date(
+                  Math.max(
+                    ...transactions.map((t) => new Date(t.date).getTime()),
+                  ),
+                ),
+            }
+          : null,
+      );
+      // Reimportar um extrato mais antigo não pode recuar o saldo final.
+      if (
+        picked &&
+        (!target.statementBalanceDate ||
+          picked.date >= new Date(target.statementBalanceDate))
+      ) {
+        await bankAccountService.setStatementBalance(
+          target.id,
+          picked.balance,
+          picked.date,
+        );
+        await queryClient.invalidateQueries({ queryKey: ["bank-accounts"] });
       }
 
       if (target.id !== account.id) {

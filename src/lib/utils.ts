@@ -51,6 +51,10 @@ export function titleCasePtBr(text: string): string {
 }
 
 /** Minúsculas e sem acento: "IPT" casa "IPTU", "agua" casa "Água". */
+/** "1 linha", "3 linhas". */
+export const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`;
+
 export function normalizeText(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }

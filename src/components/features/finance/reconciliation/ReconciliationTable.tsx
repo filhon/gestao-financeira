@@ -10,12 +10,19 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatCurrency } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn, formatCurrency, plural } from "@/lib/utils";
 import { format } from "date-fns";
 import {
   Check,
   Plus,
-  X,
   CheckCircle2,
   Zap,
   MinusCircle,
@@ -24,40 +31,48 @@ import {
   HandCoins,
   Lock,
   ListChecks,
+  MoreHorizontal,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils";
-import { BankTransaction, ReconciliationRule } from "@/lib/types";
+import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
+import type { DayBalance } from "@/lib/bankReconciliation";
 
 export type ReconciliationAction =
   | "confirm"
   | "create"
   | "settle"
   | "ignore"
+  | "ignoreAlways"
   | "unreconcile";
 
-interface ReconciliationTableProps {
-  transactions: BankTransaction[];
-  onAction: (
-    id: string,
-    action: ReconciliationAction,
-    matchedId?: string,
-  ) => void;
-  readOnly?: boolean;
-  isLocked?: (tx: BankTransaction) => boolean;
-  canSettle?: (tx: BankTransaction) => boolean;
-  canLaunch?: (tx: BankTransaction) => boolean;
-  ruleFor?: (tx: BankTransaction) => ReconciliationRule | undefined;
-  /** Sugestões que podem entrar na confirmação em lote. */
-  isSelectable?: (tx: BankTransaction) => boolean;
-  selected?: Set<string>;
-  onSelectedChange?: (ids: Set<string>) => void;
-}
+/** `arg`: o candidato escolhido em "confirm", o motivo em "ignore". */
+export type ActionHandler = (
+  id: string,
+  action: ReconciliationAction,
+  arg?: string,
+) => void;
+
+/** O que a linha deixa fazer: período fechado e linha da abertura não mudam. */
+export type RowState = "editable" | "readonly" | "locked" | "before";
+
+export const IGNORE_REASONS: {
+  value: NonNullable<BankTransaction["ignoreReason"]>;
+  label: string;
+}[] = [
+  { value: "transfer", label: "Transferência entre contas" },
+  { value: "investment", label: "Aplicação ou resgate" },
+  { value: "other", label: "Outro motivo" },
+];
+
+const signed = (amount: number) =>
+  `${amount < 0 ? "−" : "+"}${formatCurrency(Math.abs(amount))}`;
+
+const dmy = (d: Date) => format(new Date(d), "dd/MM/yyyy");
 
 /** Como a regra resolve a linha, para a coluna "No sistema" e o card mobile. */
 export function RuleNote({ rule }: { rule?: ReconciliationRule }) {
   return (
-    <div className="flex items-start gap-1.5 rounded bg-muted/50 p-2 text-sm">
+    <div className="flex min-w-0 items-start gap-1.5 text-sm">
       <ListChecks className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
         <span className="block truncate font-medium">
@@ -116,59 +131,383 @@ export function StatusBadge({ status }: { status: BankTransaction["status"] }) {
   }
 }
 
-function ConfidenceBar({ value }: { value: number }) {
+/** Lançamento do sistema numa linha só: a altura da tabela fica constante. */
+function SystemLine({
+  t,
+  note,
+}: {
+  t: Pick<Transaction, "description" | "dueDate" | "amount">;
+  note?: React.ReactNode;
+}) {
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="h-1 rounded-full bg-muted w-12 overflow-hidden">
-        <div
-          className={cn(
-            "h-1 rounded-full",
-            value >= 80
-              ? "bg-emerald-500"
-              : value >= 60
-                ? "bg-amber-500"
-                : "bg-red-400",
-          )}
-          style={{ width: `${value}%` }}
-        />
+    <div className="min-w-0">
+      <div className="flex items-baseline gap-2 text-sm">
+        <span className="truncate font-medium" title={t.description}>
+          {t.description || "Sem descrição"}
+        </span>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+          {dmy(t.dueDate)} ·{" "}
+          <span className="font-financial">{formatCurrency(t.amount)}</span>
+        </span>
       </div>
-      <span className="text-xs tabular-nums">{value}%</span>
+      {note && (
+        <div className="truncate text-xs text-muted-foreground">{note}</div>
+      )}
     </div>
   );
 }
 
-export function ReconciliationTable({
-  transactions,
+const RESOLUTION_NOTE: Record<
+  NonNullable<BankTransaction["resolution"]>,
+  string
+> = {
+  launched: "Lançado a partir desta linha",
+  settled: "Título baixado por esta linha",
+};
+
+/** Coluna "No sistema": o que a linha casou, sugeriu ou por que foi ignorada. */
+export function SystemCell({
+  tx,
+  rule,
+  editable,
   onAction,
-  readOnly,
-  isLocked,
+}: {
+  tx: BankTransaction;
+  rule?: ReconciliationRule;
+  editable: boolean;
+  onAction: ActionHandler;
+}) {
+  if (tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0) {
+    return (
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-sm font-medium">
+          {tx.matchedTransactionIds.length} lançamentos somados
+        </span>
+        {tx.matchedBundleDetails?.map((sub, i) => (
+          <div
+            key={sub.id || i}
+            className="flex justify-between gap-2 text-xs text-muted-foreground"
+          >
+            <span className="truncate" title={sub.description}>
+              {sub.description}
+            </span>
+            <span className="whitespace-nowrap font-financial tabular-nums">
+              {formatCurrency(sub.amount)}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (tx.matchedDetails) {
+    const note =
+      tx.status === "potential_match" && tx.confidence
+        ? `${tx.confidence}% de semelhança${tx.confidence >= 90 ? " · sugestão forte" : ""}`
+        : tx.resolution && RESOLUTION_NOTE[tx.resolution];
+    return <SystemLine t={tx.matchedDetails} note={note} />;
+  }
+  if (tx.ruleId) return <RuleNote rule={rule} />;
+  if (tx.status === "ignored") {
+    return (
+      <span className="text-sm text-muted-foreground">
+        {IGNORE_REASONS.find((r) => r.value === tx.ignoreReason)?.label ??
+          "Sem lançamento"}
+      </span>
+    );
+  }
+  if (tx.matchedTransactionId) {
+    return (
+      <span className="font-mono text-xs text-muted-foreground">
+        ID {tx.matchedTransactionId.slice(0, 8)}
+      </span>
+    );
+  }
+  if (tx.matchCandidates && tx.matchCandidates.length > 0) {
+    return (
+      <div className="flex min-w-0 flex-col gap-2">
+        <span className="text-xs text-muted-foreground">
+          {plural(
+            tx.matchCandidates.length,
+            "candidato fraco",
+            "candidatos fracos",
+          )}
+        </span>
+        {tx.matchCandidates.map((c, i) => (
+          <div key={`${c.id}-${i}`} className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <SystemLine
+                t={c.transaction}
+                note={[`${c.score}%`, ...c.reasons].join(" · ")}
+              />
+            </div>
+            {editable && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 text-xs"
+                onClick={() => onAction(tx.id, "confirm", c.id)}
+              >
+                Usar este
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <span className="text-sm text-muted-foreground">—</span>;
+}
+
+/**
+ * Ações de uma linha: a principal à vista, o resto no menu. Dezesseis linhas
+ * com três botões cada eram uma parede que competia com os valores.
+ */
+export function RowActions({
+  tx,
+  state,
   canSettle,
   canLaunch,
+  canRule,
+  onAction,
+  menuOpen,
+  onMenuOpenChange,
+}: {
+  tx: BankTransaction;
+  state: RowState;
+  canSettle: boolean;
+  canLaunch: boolean;
+  canRule: boolean;
+  onAction: ActionHandler;
+  menuOpen?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
+}) {
+  if (state === "locked") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+        title="Período fechado"
+      >
+        <Lock className="h-3.5 w-3.5" /> Fechado
+      </span>
+    );
+  }
+  if (state === "before") {
+    return (
+      <span
+        className="text-xs text-muted-foreground"
+        title="Já está dentro do saldo inicial"
+      >
+        Antes da abertura
+      </span>
+    );
+  }
+  if (state === "readonly") {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+
+  // Leitor de tela ouve de qual linha é o botão, não dezesseis "Ignorar".
+  const who = `${tx.description}, ${signed(tx.amount)}`;
+
+  if (tx.status === "matched" || tx.status === "ignored") {
+    const label = tx.status === "ignored" ? "Voltar para pendente" : "Desfazer";
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-8 text-xs text-muted-foreground"
+        onClick={() => onAction(tx.id, "unreconcile")}
+        aria-label={`${label}: ${who}`}
+      >
+        <Undo2 className="h-3.5 w-3.5" />
+        {label}
+      </Button>
+    );
+  }
+
+  const primary =
+    tx.status === "potential_match"
+      ? { label: "Confirmar", Icon: Check, action: "confirm" as const }
+      : canSettle
+        ? { label: "Baixar título", Icon: HandCoins, action: "settle" as const }
+        : canLaunch
+          ? { label: "Lançar", Icon: Plus, action: "create" as const }
+          : null;
+  const launchInMenu =
+    tx.status === "unmatched" && canLaunch && primary?.action !== "create";
+
+  return (
+    <div className="flex justify-end gap-1">
+      {primary && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={() => onAction(tx.id, primary.action)}
+          aria-label={`${primary.label}: ${who}`}
+        >
+          <primary.Icon className="h-3.5 w-3.5" />
+          {primary.label}
+        </Button>
+      )}
+      <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 text-muted-foreground"
+            aria-label={`Mais ações: ${who}`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          {launchInMenu && (
+            <>
+              <DropdownMenuItem onSelect={() => onAction(tx.id, "create")}>
+                <Plus className="h-4 w-4" />
+                Lançar direto, já pago
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            Ignorar: não pede lançamento
+          </DropdownMenuLabel>
+          {IGNORE_REASONS.map((r) => (
+            <DropdownMenuItem
+              key={r.value}
+              onSelect={() => onAction(tx.id, "ignore", r.value)}
+            >
+              {r.label}
+            </DropdownMenuItem>
+          ))}
+          {canRule && !tx.ruleId && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => onAction(tx.id, "ignoreAlways")}
+              >
+                <ListChecks className="h-4 w-4" />
+                Sempre ignorar linhas como esta
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/** Fim do dia: saldos que o banco informou contra o calculado pelo arquivo. */
+function DayBalanceRow({ day, cols }: { day: DayBalance; cols: number }) {
+  return (
+    <TableRow className="bg-muted/30 hover:bg-muted/30">
+      <TableCell
+        colSpan={cols}
+        className="py-1.5 text-xs text-muted-foreground"
+      >
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="font-medium text-foreground/80">
+            Saldos do banco em {dmy(day.date)}
+          </span>
+          {day.lines.map((l) => (
+            <span key={l.id}>
+              {l.description}{" "}
+              <span className="font-financial tabular-nums">
+                {formatCurrency(l.amount)}
+              </span>
+            </span>
+          ))}
+          {day.computed !== null && (
+            <span
+              className={cn(
+                "ml-auto inline-flex items-center gap-1",
+                day.matches && "text-emerald-700 dark:text-emerald-400",
+              )}
+            >
+              {day.matches ? (
+                <>
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Confere com o sistema
+                </>
+              ) : (
+                <>
+                  Calculado pelo arquivo{" "}
+                  <span className="font-financial tabular-nums">
+                    {formatCurrency(day.computed)}
+                  </span>
+                </>
+              )}
+            </span>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+interface ReconciliationTableProps {
+  transactions: BankTransaction[];
+  /** Só com a lista completa à vista: filtrada, a conferência não faz sentido. */
+  dayBalances?: DayBalance[];
+  onAction: ActionHandler;
+  rowState: (tx: BankTransaction) => RowState;
+  canSettle: (tx: BankTransaction) => boolean;
+  canLaunch: (tx: BankTransaction) => boolean;
+  canRule: boolean;
+  ruleFor: (tx: BankTransaction) => ReconciliationRule | undefined;
+  isSelectable: (tx: BankTransaction) => boolean;
+  selected: Set<string>;
+  onSelectedChange?: (ids: Set<string>) => void;
+  activeId: string | null;
+  onActiveChange: (id: string) => void;
+  menuOpenId: string | null;
+  onMenuOpenChange: (id: string | null) => void;
+  onClearFilters: () => void;
+}
+
+export function ReconciliationTable({
+  transactions,
+  dayBalances = [],
+  onAction,
+  rowState,
+  canSettle,
+  canLaunch,
+  canRule,
   ruleFor,
   isSelectable,
   selected,
   onSelectedChange,
+  activeId,
+  onActiveChange,
+  menuOpenId,
+  onMenuOpenChange,
+  onClearFilters,
 }: ReconciliationTableProps) {
-  const selectable = onSelectedChange
-    ? transactions.filter((tx) => isSelectable?.(tx))
-    : [];
+  const selectable = onSelectedChange ? transactions.filter(isSelectable) : [];
   const allSelected =
-    selectable.length > 0 && selectable.every((tx) => selected?.has(tx.id));
-  const someSelected = selectable.some((tx) => selected?.has(tx.id));
+    selectable.length > 0 && selectable.every((tx) => selected.has(tx.id));
+  const someSelected = selectable.some((tx) => selected.has(tx.id));
   const toggle = (id: string, on: boolean) => {
     const next = new Set(selected);
     if (on) next.add(id);
     else next.delete(id);
     onSelectedChange?.(next);
   };
+  const cols = onSelectedChange ? 7 : 6;
 
-  const getMatchedEntityName = (
-    matchedDetails: BankTransaction["matchedDetails"],
-  ) => {
-    if (!matchedDetails) return undefined;
-    const withEntityName = matchedDetails as unknown as { entityName?: string };
-    return withEntityName.entityName;
-  };
+  // Saldo do dia entra depois dos movimentos do dia. O sort é estável e as
+  // linhas já vêm em ordem de data.
+  const dayKey = (d: Date) => format(new Date(d), "yyyy-MM-dd");
+  const rows = [
+    ...transactions.map((tx) => ({
+      key: `${dayKey(tx.date)}0`,
+      tx,
+      day: undefined,
+    })),
+    ...dayBalances.map((day) => ({ key: `${day.day}1`, tx: undefined, day })),
+  ].sort((a, b) => a.key.localeCompare(b.key));
+  const firstId = transactions[0]?.id;
 
   return (
     <Table>
@@ -176,19 +515,19 @@ export function ReconciliationTable({
         <TableRow>
           {onSelectedChange && (
             <TableHead className="w-10">
-              <Checkbox
-                checked={
-                  allSelected ? true : someSelected ? "indeterminate" : false
-                }
-                disabled={selectable.length === 0}
-                onCheckedChange={(c) =>
-                  onSelectedChange(
-                    c ? new Set(selectable.map((tx) => tx.id)) : new Set(),
-                  )
-                }
-                aria-label="Selecionar todas as sugestões"
-                title="Selecionar todas as sugestões"
-              />
+              {selectable.length > 0 && (
+                <Checkbox
+                  checked={
+                    allSelected ? true : someSelected ? "indeterminate" : false
+                  }
+                  onCheckedChange={(c) =>
+                    onSelectedChange(
+                      c ? new Set(selectable.map((tx) => tx.id)) : new Set(),
+                    )
+                  }
+                  aria-label="Selecionar todas as linhas a tratar"
+                />
+              )}
             </TableHead>
           )}
           <TableHead className="w-[100px]">Data</TableHead>
@@ -203,42 +542,56 @@ export function ReconciliationTable({
         {transactions.length === 0 && (
           <TableRow>
             <TableCell
-              colSpan={onSelectedChange ? 7 : 6}
+              colSpan={cols}
               className="py-10 text-center text-sm text-muted-foreground"
             >
-              Nenhuma linha com os filtros selecionados.
+              Nenhuma linha com os filtros selecionados.{" "}
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0"
+                onClick={onClearFilters}
+              >
+                Limpar filtros
+              </Button>
             </TableCell>
           </TableRow>
         )}
-        {transactions.map((tx) => {
-          const locked = isLocked?.(tx) ?? false;
-          const editable = !readOnly && !locked;
+        {rows.map(({ tx, day }) => {
+          if (day) return <DayBalanceRow key={day.day} day={day} cols={cols} />;
+          if (!tx) return null;
+          const state = rowState(tx);
+          const editable = state === "editable";
+          const active = activeId === tx.id;
           return (
             <TableRow
               key={tx.id}
-              className={cn(tx.status === "ignored" && "text-muted-foreground")}
-              data-state={selected?.has(tx.id) ? "selected" : undefined}
+              data-row-id={tx.id}
+              // Tab entra pela linha ativa (ou a primeira); j/k e setas andam dentro.
+              tabIndex={tx.id === (activeId ?? firstId) ? 0 : -1}
+              onFocus={() => onActiveChange(tx.id)}
+              className={cn(
+                "outline-none",
+                tx.status === "ignored" && "text-muted-foreground",
+                active && "bg-muted/60 ring-1 ring-inset ring-primary/40",
+              )}
+              data-state={selected.has(tx.id) ? "selected" : undefined}
             >
               {onSelectedChange && (
                 <TableCell>
-                  {editable && isSelectable?.(tx) && (
+                  {isSelectable(tx) && (
                     <Checkbox
-                      checked={selected?.has(tx.id) ?? false}
+                      checked={selected.has(tx.id)}
                       onCheckedChange={(c) => toggle(tx.id, !!c)}
-                      aria-label="Selecionar sugestão"
+                      aria-label={`Selecionar ${tx.description}, ${signed(tx.amount)}`}
                     />
                   )}
                 </TableCell>
               )}
-              <TableCell className="tabular-nums">
-                {format(new Date(tx.date), "dd/MM/yyyy")}
-              </TableCell>
+              <TableCell className="tabular-nums">{dmy(tx.date)}</TableCell>
 
-              <TableCell>
-                <div
-                  className="truncate font-medium max-w-[420px]"
-                  title={tx.description}
-                >
+              <TableCell className="max-w-0">
+                <div className="truncate font-medium" title={tx.description}>
                   {tx.description}
                 </div>
               </TableCell>
@@ -251,211 +604,31 @@ export function ReconciliationTable({
                     : "text-emerald-700 dark:text-emerald-400",
                 )}
               >
-                {tx.amount < 0 ? "−" : "+"}
-                {formatCurrency(Math.abs(tx.amount))}
+                {signed(tx.amount)}
               </TableCell>
               <TableCell>
                 <StatusBadge status={tx.status} />
               </TableCell>
-              <TableCell>
-                {tx.matchedTransactionIds &&
-                tx.matchedTransactionIds.length > 0 ? (
-                  <div className="flex flex-col gap-1 text-sm bg-muted/50 p-2 rounded">
-                    <span className="font-medium">
-                      {tx.matchedTransactionIds.length} lançamentos somados
-                    </span>
-                    {tx.matchedBundleDetails && (
-                      <div className="flex flex-col gap-1 mt-1 border-t pt-2">
-                        {tx.matchedBundleDetails.map((sub, i) => (
-                          <div
-                            key={sub.id || i}
-                            className="text-xs flex justify-between gap-2"
-                          >
-                            <span
-                              className="truncate max-w-[180px]"
-                              title={sub.description}
-                            >
-                              {sub.description}
-                            </span>
-                            <span className="whitespace-nowrap font-financial tabular-nums">
-                              {formatCurrency(sub.amount)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : tx.matchedDetails ? (
-                  <div className="flex flex-col text-sm bg-muted/50 p-2 rounded">
-                    <span
-                      className="font-semibold truncate w-full block"
-                      title={tx.matchedDetails.description}
-                    >
-                      {tx.matchedDetails.description || "Sem descrição"}
-                    </span>
-                    <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
-                      <span>
-                        {format(
-                          new Date(tx.matchedDetails.dueDate),
-                          "dd/MM/yyyy",
-                        )}
-                      </span>
-                      <span className="font-financial tabular-nums">
-                        {formatCurrency(tx.matchedDetails.amount)}
-                      </span>
-                    </div>
-                    {getMatchedEntityName(tx.matchedDetails) && (
-                      <span className="text-xs text-muted-foreground block mt-1">
-                        {getMatchedEntityName(tx.matchedDetails)}
-                      </span>
-                    )}
-                    {tx.confidence !== undefined && tx.confidence < 100 && (
-                      <div className="mt-1.5 text-muted-foreground">
-                        <ConfidenceBar value={tx.confidence} />
-                      </div>
-                    )}
-                  </div>
-                ) : tx.ruleId ? (
-                  <RuleNote rule={ruleFor?.(tx)} />
-                ) : tx.matchedTransactionId ? (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    ID {tx.matchedTransactionId.slice(0, 8)}
-                  </span>
-                ) : tx.matchCandidates && tx.matchCandidates.length > 0 ? (
-                  <div className="flex flex-col gap-2 text-xs bg-muted/50 p-2 rounded">
-                    <span className="text-muted-foreground">
-                      {tx.matchCandidates.length} candidato(s)
-                    </span>
-                    {tx.matchCandidates.map((c, i) => (
-                      <div
-                        key={`${c.id}-${i}`}
-                        className="flex flex-col gap-1 border-t pt-2 first:border-t-0 first:pt-0"
-                      >
-                        <div className="flex justify-between gap-2">
-                          <span
-                            className="truncate max-w-[200px] font-medium"
-                            title={c.transaction.description}
-                          >
-                            {c.transaction.description}
-                          </span>
-                          <span className="whitespace-nowrap font-financial tabular-nums">
-                            {formatCurrency(c.transaction.amount)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>
-                            {format(
-                              new Date(c.transaction.dueDate),
-                              "dd/MM/yyyy",
-                            )}
-                          </span>
-                          <ConfidenceBar value={c.score} />
-                        </div>
-                        {c.reasons.length > 0 && (
-                          <div className="text-muted-foreground">
-                            {c.reasons.join(" · ")}
-                          </div>
-                        )}
-                        {editable && (
-                          <div className="flex justify-end">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => onAction(tx.id, "confirm", c.id)}
-                            >
-                              Usar este
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground text-sm">—</span>
-                )}
+              <TableCell className="max-w-0">
+                <SystemCell
+                  tx={tx}
+                  rule={ruleFor(tx)}
+                  editable={editable}
+                  onAction={onAction}
+                />
               </TableCell>
               <TableCell className="text-right">
-                <div className="flex justify-end gap-1">
-                  {locked ? (
-                    <span
-                      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-                      title="Período fechado"
-                    >
-                      <Lock className="h-3.5 w-3.5" /> Fechado
-                    </span>
-                  ) : !editable ? (
-                    <span className="text-muted-foreground text-xs">—</span>
-                  ) : (
-                    <>
-                      {tx.status === "potential_match" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs"
-                          onClick={() => onAction(tx.id, "confirm")}
-                        >
-                          <Check className="h-3.5 w-3.5 mr-1" />
-                          Confirmar
-                        </Button>
-                      )}
-
-                      {tx.status === "unmatched" && (
-                        <>
-                          {canSettle?.(tx) && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-8 text-xs"
-                              onClick={() => onAction(tx.id, "settle")}
-                              title="Quitar um título em aberto com este pagamento"
-                            >
-                              <HandCoins className="h-3.5 w-3.5 mr-1" />
-                              Baixar título
-                            </Button>
-                          )}
-                          {(canLaunch?.(tx) ?? true) && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 text-xs"
-                              onClick={() => onAction(tx.id, "create")}
-                              title="Lançar direto, já pago (tarifa, IOF, juros)"
-                            >
-                              <Plus className="h-3.5 w-3.5 mr-1" />
-                              Lançar
-                            </Button>
-                          )}
-                        </>
-                      )}
-
-                      {(tx.status === "potential_match" ||
-                        tx.status === "unmatched") && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-muted-foreground"
-                          onClick={() => onAction(tx.id, "ignore")}
-                          aria-label="Ignorar"
-                          title="Ignorar (não pede lançamento)"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      )}
-
-                      {(tx.status === "matched" || tx.status === "ignored") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 text-xs text-muted-foreground hover:text-destructive"
-                          onClick={() => onAction(tx.id, "unreconcile")}
-                        >
-                          <Undo2 className="h-3.5 w-3.5 mr-1" />
-                          Desfazer
-                        </Button>
-                      )}
-                    </>
-                  )}
+                <div className="flex justify-end">
+                  <RowActions
+                    tx={tx}
+                    state={state}
+                    canSettle={canSettle(tx)}
+                    canLaunch={canLaunch(tx)}
+                    canRule={canRule}
+                    onAction={onAction}
+                    menuOpen={menuOpenId === tx.id}
+                    onMenuOpenChange={(o) => onMenuOpenChange(o ? tx.id : null)}
+                  />
                 </div>
               </TableCell>
             </TableRow>

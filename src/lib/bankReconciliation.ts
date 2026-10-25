@@ -36,6 +36,22 @@ export const isLocked = (tx: BankTransaction, account?: BankAccount) => {
 };
 
 /**
+ * Linha até a data da base: já está dentro do saldo inicial e não entra na
+ * prova. Com fechamento, essas linhas já são `isLocked`.
+ */
+export const isBeforeBase = (tx: BankTransaction, account: BankAccount) =>
+  day(tx.date) <= day(balanceBase(account).date);
+
+/**
+ * Saldo que o banco manda como se fosse lançamento ("SALDO ANTERIOR", "SALDO
+ * TOTAL DISPONÍVEL DIA", "SDO APLIC AUT MAIS"). Não é movimento: fica fora da
+ * prova e vira a conferência do dia.
+ */
+// ponytail: pelo histórico; se algum banco mandar movimento que comece com "SALDO", marcar na importação.
+export const isBalanceLine = (tx: Pick<BankTransaction, "description">) =>
+  /^(saldo|sdo)\b/.test(normalizeText(tx.description.trim()));
+
+/**
  * Prova da conciliação de uma conta.
  *
  * Saldo conciliado = base + linhas tratadas (conciliadas ou ignoradas) depois
@@ -43,6 +59,9 @@ export const isLocked = (tx: BankTransaction, account?: BankAccount) => {
  * certo e nenhuma linha faltar no arquivo, a diferença zera quando não sobra
  * linha pendente. Ignorar conta como tratar: é a decisão consciente de que o
  * movimento não pede lançamento (transferência entre contas, aplicação).
+ *
+ * Como tratar soma a linha do mesmo jeito que conciliar, a diferença final já
+ * é conhecida antes: `projectedDifference` conta as pendentes como estão.
  */
 export function summarizeAccount(
   account: BankAccount,
@@ -56,6 +75,7 @@ export function summarizeAccount(
   const inWindow = items.filter(
     (tx) =>
       tx.bankAccountId === account.id &&
+      !isBalanceLine(tx) &&
       day(tx.date) > day(base.date) &&
       (!until || day(tx.date) <= until),
   );
@@ -68,10 +88,17 @@ export function summarizeAccount(
     (sum, tx) => sum.add(tx.amount),
     currency(base.balance),
   ).value;
-  const difference =
+  const pendingAmount = inWindow
+    .filter((tx) => !handled.includes(tx))
+    .reduce((sum, tx) => sum.add(tx.amount), currency(0)).value;
+  const statement =
     account.statementBalance === undefined
       ? null
-      : currency(account.statementBalance).subtract(bookBalance).value;
+      : currency(account.statementBalance);
+  const difference = statement ? statement.subtract(bookBalance).value : null;
+  const projectedDifference = statement
+    ? statement.subtract(bookBalance).subtract(pendingAmount).value
+    : null;
 
   return {
     base,
@@ -81,12 +108,86 @@ export function summarizeAccount(
       ? new Date(account.statementBalanceDate)
       : null,
     difference,
+    projectedDifference,
+    pendingAmount,
     total: inWindow.length,
     handled: handled.length,
     pending,
+    hasMovement: !!until && until > day(base.date),
     canClose:
       difference === 0 && pending === 0 && !!until && until > day(base.date),
   };
+}
+
+export interface DayBalance {
+  day: string;
+  date: Date;
+  /** Linhas de saldo que o banco mandou neste dia. */
+  lines: BankTransaction[];
+  /** Base + todo movimento do arquivo até o fim do dia; null antes da base. */
+  computed: number | null;
+  /** Algum saldo do banco bate com o calculado. */
+  matches: boolean;
+}
+
+/**
+ * Conferência diária com as linhas de saldo do banco. O calculado soma todo
+ * movimento do arquivo, tratado ou não: o banco diz que ele aconteceu. Quando
+ * um dia não bate, a falta está nele, não no período inteiro.
+ */
+export function dailyBalances(
+  account: BankAccount,
+  items: BankTransaction[],
+): DayBalance[] {
+  const base = balanceBase(account);
+  const baseDay = day(base.date);
+  const own = items.filter((tx) => tx.bankAccountId === account.id);
+  const movements = own.filter((tx) => !isBalanceLine(tx));
+
+  const byDay = new Map<string, BankTransaction[]>();
+  for (const tx of own.filter(isBalanceLine)) {
+    const key = day(tx.date);
+    byDay.set(key, [...(byDay.get(key) ?? []), tx]);
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, lines]) => {
+      const computed =
+        key < baseDay
+          ? null
+          : movements
+              .filter((tx) => day(tx.date) > baseDay && day(tx.date) <= key)
+              .reduce((sum, tx) => sum.add(tx.amount), currency(base.balance))
+              .value;
+      return {
+        day: key,
+        date: new Date(lines[0].date),
+        lines,
+        computed,
+        matches:
+          computed !== null &&
+          lines.some((tx) => currency(tx.amount).value === computed),
+      };
+    });
+}
+
+/**
+ * Saldo do extrato a gravar depois de importar. O Itaú manda no saldo final
+ * do OFX o total com a aplicação automática, mas os movimentos são da conta
+ * corrente: a linha de saldo do último dia que bate com o calculado mostra a
+ * base da conta e vence o arquivo. Nenhuma bate: vale o saldo do arquivo.
+ */
+export function pickStatementBalance(
+  account: BankAccount,
+  items: BankTransaction[],
+  fromFile: { balance: number; date: Date } | null,
+): { balance: number; date: Date } | null {
+  const last = dailyBalances(account, items).at(-1);
+  if (last?.matches && last.computed !== null) {
+    return { balance: last.computed, date: last.date };
+  }
+  return fromFile;
 }
 
 // ─── Regras ───────────────────────────────────────────────────────────────────

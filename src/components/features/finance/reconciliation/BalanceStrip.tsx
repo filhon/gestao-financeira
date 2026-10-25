@@ -15,9 +15,13 @@ import {
 } from "@/components/ui/popover";
 import { BankAccount } from "@/lib/types";
 import { lastClosing, summarizeAccount } from "@/lib/bankReconciliation";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency, plural } from "@/lib/utils";
 
 type Summary = ReturnType<typeof summarizeAccount>;
+
+// Mesmo anel dos botões do sistema, para os gatilhos em texto.
+const focusRing =
+  "rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 interface BalanceStripProps {
   account: BankAccount;
@@ -43,7 +47,16 @@ export function BalanceStrip({
   onShowPending,
 }: BalanceStripProps) {
   const closing = lastClosing(account);
-  const { difference } = summary;
+  const projected = summary.projectedDifference;
+  const closeBlocker = summary.canClose
+    ? null
+    : summary.pending > 0
+      ? `Faltam ${plural(summary.pending, "linha", "linhas")}`
+      : summary.difference !== null && summary.difference !== 0
+        ? `Diferença de ${formatCurrency(summary.difference)}`
+        : !summary.hasMovement
+          ? `Extrato sem movimento depois de ${d(summary.base.date)}`
+          : null;
 
   return (
     <section
@@ -100,38 +113,56 @@ export function BalanceStrip({
             {formatCurrency(summary.bookBalance)}
           </span>
           <Hint>
-            {summary.handled} de {summary.total} linhas tratadas
+            {summary.handled} de {plural(summary.total, "linha", "linhas")} do
+            período
           </Hint>
         </Figure>
 
+        {/* Projetada: tratar soma a linha como ela está, então o número final já
+            é conhecido. Uma diferença parcial fazia caçar centavos que não existem. */}
         <Figure label="Diferença">
-          {difference === null ? (
-            <span className="text-muted-foreground">—</span>
+          {projected === null ? (
+            <span className="text-muted-foreground">Sem saldo do extrato</span>
           ) : (
             <span
               className={cn(
                 "font-financial tabular-nums text-lg font-semibold",
-                difference === 0
-                  ? "text-emerald-700 dark:text-emerald-400"
-                  : "text-amber-700 dark:text-amber-400",
+                projected !== 0
+                  ? "text-amber-700 dark:text-amber-400"
+                  : summary.pending === 0 &&
+                      "text-emerald-700 dark:text-emerald-400",
               )}
             >
-              {formatCurrency(difference)}
+              {formatCurrency(projected)}
             </span>
           )}
-          {summary.pending > 0 ? (
+          {summary.pending > 0 && (
             <button
               type="button"
               onClick={onShowPending}
-              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              className={cn(
+                "self-start text-left text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground",
+                focusRing,
+              )}
             >
-              {summary.pending} linha{summary.pending === 1 ? "" : "s"} pendente
-              {summary.pending === 1 ? "" : "s"}
+              com{" "}
+              {plural(summary.pending, "linha pendente", "linhas pendentes")}{" "}
+              <span className="font-financial tabular-nums">
+                ({summary.pendingAmount < 0 ? "−" : "+"}
+                {formatCurrency(Math.abs(summary.pendingAmount))})
+              </span>
             </button>
-          ) : difference !== null && difference !== 0 ? (
-            <Hint>confira o saldo inicial e se faltam linhas no arquivo</Hint>
-          ) : (
-            <Hint>{difference === 0 ? "extrato e sistema batem" : " "}</Hint>
+          )}
+          {projected !== null && (
+            <Hint>
+              {projected !== 0
+                ? summary.pending > 0
+                  ? "não zera tratando tudo: confira o saldo inicial e se faltam linhas"
+                  : "confira o saldo inicial e se faltam linhas no arquivo"
+                : summary.pending > 0
+                  ? "zera quando as pendentes forem tratadas"
+                  : "extrato e sistema batem"}
+            </Hint>
           )}
         </Figure>
 
@@ -154,20 +185,27 @@ export function BalanceStrip({
             </span>
           )}
           {canManage && summary.statementDate && (
-            <Button
-              size="sm"
-              className="h-9"
-              disabled={!summary.canClose}
-              onClick={onClose}
-              title={
-                summary.canClose
-                  ? undefined
-                  : "Zere a diferença e trate todas as linhas para fechar"
-              }
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Fechar até {format(summary.statementDate, "dd/MM")}
-            </Button>
+            // O motivo fica à vista: botão desabilitado não abre `title`.
+            <div className="flex flex-col items-start gap-1 lg:items-end">
+              <Button
+                size="sm"
+                className="h-9"
+                disabled={!summary.canClose}
+                onClick={onClose}
+                aria-describedby={closeBlocker ? "close-blocker" : undefined}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Fechar até {d(summary.statementDate)}
+              </Button>
+              {closeBlocker && (
+                <span
+                  id="close-blocker"
+                  className="text-xs text-muted-foreground"
+                >
+                  {closeBlocker}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </dl>
@@ -236,14 +274,20 @@ function StatementBalanceEditor({
         {asText ? (
           <button
             type="button"
-            className="self-start text-sm font-medium text-primary underline underline-offset-2 hover:no-underline"
+            className={cn(
+              "self-start text-sm font-medium text-primary underline underline-offset-2 hover:no-underline",
+              focusRing,
+            )}
           >
             Informar saldo
           </button>
         ) : (
           <button
             type="button"
-            className="-my-1 flex h-6 w-6 items-center justify-center rounded hover:bg-muted hover:text-foreground"
+            className={cn(
+              "-my-1 flex h-6 w-6 items-center justify-center hover:bg-muted hover:text-foreground",
+              focusRing,
+            )}
             aria-label="Corrigir saldo do extrato"
           >
             <Pencil className="h-3 w-3" />
