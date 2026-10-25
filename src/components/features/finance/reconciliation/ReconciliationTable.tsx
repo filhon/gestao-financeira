@@ -464,6 +464,8 @@ interface ReconciliationTableProps {
   menuOpenId: string | null;
   onMenuOpenChange: (id: string | null) => void;
   onClearFilters: () => void;
+  /** Texto da tabela vazia quando não é culpa dos filtros (tudo já fechado). */
+  emptyState?: React.ReactNode;
 }
 
 export function ReconciliationTable({
@@ -483,6 +485,7 @@ export function ReconciliationTable({
   menuOpenId,
   onMenuOpenChange,
   onClearFilters,
+  emptyState,
 }: ReconciliationTableProps) {
   const selectable = onSelectedChange ? transactions.filter(isSelectable) : [];
   const allSelected =
@@ -545,15 +548,19 @@ export function ReconciliationTable({
               colSpan={cols}
               className="py-10 text-center text-sm text-muted-foreground"
             >
-              Nenhuma linha com os filtros selecionados.{" "}
-              <Button
-                variant="link"
-                size="sm"
-                className="h-auto p-0"
-                onClick={onClearFilters}
-              >
-                Limpar filtros
-              </Button>
+              {emptyState ?? (
+                <>
+                  Nenhuma linha com os filtros selecionados.{" "}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    onClick={onClearFilters}
+                  >
+                    Limpar filtros
+                  </Button>
+                </>
+              )}
             </TableCell>
           </TableRow>
         )}

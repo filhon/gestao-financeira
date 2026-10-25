@@ -51,6 +51,8 @@ import {
   ListChecks,
   MoreHorizontal,
   MinusCircle,
+  History,
+  EyeOff,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
@@ -287,17 +289,35 @@ export function ReconciliationDashboard() {
   );
   // Linhas de saldo do banco não são movimento: saem da lista e viram a
   // conferência do dia.
-  const lines = useMemo(
+  const movementLines = useMemo(
     () => transactions.filter((t) => !isBalanceLine(t)),
     [transactions],
+  );
+  // Extratos entram um em cima do outro; o que já está no saldo inicial
+  // (períodos fechados, dias até a abertura) fica fora da tela por padrão.
+  const [showPast, setShowPast] = useState(false);
+  const pastCount = account
+    ? movementLines.filter((t) => isBeforeBase(t, account)).length
+    : 0;
+  const lines = useMemo(
+    () =>
+      showPast || !account
+        ? movementLines
+        : movementLines.filter((t) => !isBeforeBase(t, account)),
+    [movementLines, account, showPast],
   );
   const summary = useMemo(
     () => (account ? summarizeAccount(account, allItems) : null),
     [account, allItems],
   );
   const dayBalances = useMemo(
-    () => (account ? dailyBalances(account, allItems) : []),
-    [account, allItems],
+    () =>
+      account
+        ? dailyBalances(account, allItems).filter(
+            (d) => showPast || !isBeforeBase(d.lines[0], account),
+          )
+        : [],
+    [account, allItems, showPast],
   );
   const lockedFor = (tx: BankTransaction) => isLocked(tx, account);
   const rowStateFor = (tx: BankTransaction): RowState =>
@@ -417,6 +437,11 @@ export function ReconciliationDashboard() {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [lines, searchTerm, tab]);
   const showDayBalances = tab === "all" && !searchTerm.trim();
+  // Tudo o que foi importado já está no saldo inicial: não é filtro, é o fim do trabalho.
+  const periodDoneMessage =
+    lines.length === 0 && pastCount > 0 && summary
+      ? `Tudo até ${format(summary.base.date, "dd/MM/yyyy")} já está no saldo inicial. Importe o próximo extrato para continuar.`
+      : undefined;
 
   // Seleção vale só para o que está à vista: filtrar e confirmar nunca pega
   // linha escondida.
@@ -1442,6 +1467,24 @@ export function ReconciliationDashboard() {
                 {filteredTransactions.length} de{" "}
                 {plural(lines.length, "linha", "linhas")}
               </span>
+              {pastCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 shrink-0 text-xs text-muted-foreground"
+                  aria-pressed={showPast}
+                  onClick={() => setShowPast((v) => !v)}
+                >
+                  {showPast ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <History className="h-3.5 w-3.5" />
+                  )}
+                  {showPast
+                    ? "Ocultar períodos anteriores"
+                    : `Mostrar períodos anteriores (${pastCount})`}
+                </Button>
+              )}
             </div>
 
             {/* Lote: confirmar as sugestões selecionadas, ignorar qualquer linha. */}
@@ -1565,6 +1608,7 @@ export function ReconciliationDashboard() {
               menuOpenId={menuOpenId}
               onMenuOpenChange={setMenuOpenId}
               onClearFilters={clearFilters}
+              emptyState={periodDoneMessage}
             />
             <p className="border-t px-4 py-2 text-xs text-muted-foreground">
               Teclado: <Kbd>j</Kbd> <Kbd>k</Kbd> navega · <Kbd>Enter</Kbd> ação
@@ -1581,7 +1625,7 @@ export function ReconciliationDashboard() {
                 <p className="text-center text-sm font-medium">
                   {searchTerm
                     ? `Nenhum resultado para "${searchTerm}"`
-                    : "Nenhuma linha nesta aba"}
+                    : (periodDoneMessage ?? "Nenhuma linha nesta aba")}
                 </p>
                 <Button
                   variant="link"
