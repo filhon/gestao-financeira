@@ -93,6 +93,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCostCenterBalances, useCostCenters } from "@/hooks/useCostCenters";
 import { useDocumentExtraction } from "@/hooks/useDocumentExtraction";
+import { useBankAccounts } from "@/hooks/useBankAccounts";
 import {
   accountRequiredFor,
   useChartOfAccounts,
@@ -402,7 +403,7 @@ export function TransactionForm({
   const counterpartLabel = isPayable ? "Fornecedor" : "Cliente";
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
-  const { onlyOwnPayables } = usePermissions();
+  const { onlyOwnPayables, canViewReconciliation } = usePermissions();
   // O papel `user` só lê o que ele mesmo lançou: as consultas precisam dizer isso.
   const ownOnly = onlyOwnPayables ? user?.uid : undefined;
 
@@ -634,6 +635,24 @@ export function TransactionForm({
   const selectedAccount = accounts.find(
     (a) => a.id === form.watch("accountId"),
   );
+
+  // ── Conta bancária ──────────────────────────────────────────────────────────
+  // Só para quem enxerga as contas (as rules escondem `bank_accounts` do
+  // `user`). Com uma conta só, ela já vem escolhida.
+  const { accounts: bankAccounts } = useBankAccounts(
+    canViewReconciliation ? selectedCompany?.id : undefined,
+  );
+  const watchedBankAccountId = form.watch("bankAccountId");
+  const activeBankAccounts = bankAccounts.filter(
+    (a) => a.active || a.id === watchedBankAccountId,
+  );
+  const onlyBankAccountId =
+    activeBankAccounts.length === 1 ? activeBankAccounts[0].id : undefined;
+  useEffect(() => {
+    if (isCreate && onlyBankAccountId && !form.getValues("bankAccountId")) {
+      form.setValue("bankAccountId", onlyBankAccountId);
+    }
+  }, [isCreate, onlyBankAccountId, form]);
 
   // ── Centros de custo ────────────────────────────────────────────────────────
   const balanceYear = watchedDueDate
@@ -1945,6 +1964,46 @@ export function TransactionForm({
                 </div>
               ))}
             </div>
+          )}
+
+          {activeBankAccounts.length > 0 && (
+            <FormField
+              control={form.control}
+              name="bankAccountId"
+              render={({ field }) => (
+                <FormItem className="col-span-12 @2xl:col-span-6">
+                  <FormLabel>
+                    Conta de {isPayable ? "saída" : "entrada"}
+                  </FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value ?? ""}
+                    // Na conciliação a conta é a do extrato.
+                    disabled={variant === "reconcile"}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Não definida" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {activeBankAccounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                          {a.accountNumber && (
+                            <span className="text-muted-foreground font-financial">
+                              {" "}
+                              · {a.accountNumber}
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           )}
 
           {variant === "reconcile" && paymentDate && (

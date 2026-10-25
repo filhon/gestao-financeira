@@ -158,6 +158,7 @@ export function lineTransaction(
     dueDate: date,
     paymentDate: date,
     paymentMethod: "transfer",
+    bankAccountId: tx.bankAccountId,
     costCenterAllocation: [
       { costCenterId: template.costCenterId, percentage: 100, amount },
     ],

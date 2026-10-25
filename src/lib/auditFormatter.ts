@@ -17,6 +17,7 @@ export const FIELD_LABELS: Record<string, string> = {
   dueDate: "Data de Vencimento",
   paymentDate: "Data de Pagamento",
   paymentMethod: "Forma de Pagamento",
+  bankAccountId: "Conta Bancária",
   supplierOrClient: "Fornecedor/Cliente",
   entityId: "Entidade",
   costCenterId: "Centro de Custo",

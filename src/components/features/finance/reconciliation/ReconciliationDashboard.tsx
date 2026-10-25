@@ -1630,6 +1630,7 @@ export function ReconciliationDashboard() {
                 paymentDate: new Date(selectedBankTx.date),
                 status: "paid",
                 paymentMethod: "transfer",
+                bankAccountId: selectedBankTx.bankAccountId,
                 supplierOrClient: selectedBankTx.description,
               }}
               onSubmit={handleCreateSubmit}

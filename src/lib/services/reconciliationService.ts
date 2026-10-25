@@ -256,6 +256,13 @@ export class ReconciliationService {
     // "steal" a match that was already confirmed against another statement line.
     let relevantSystemTxs = systemTransactions.filter((tx) => {
       if (tx.reconciled) return false;
+      // Título com conta definida só casa com o extrato dessa conta.
+      if (
+        tx.bankAccountId &&
+        bankTx.bankAccountId &&
+        tx.bankAccountId !== bankTx.bankAccountId
+      )
+        return false;
       if (bankTx.amount < 0 && tx.type === "payable") return true;
       if (bankTx.amount > 0 && tx.type === "receivable") return true;
       return false;

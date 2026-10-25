@@ -209,6 +209,7 @@ async function setStatusViaLedger(
     finalAmount: number;
     discount: number;
     interest: number;
+    bankAccountId?: string;
   },
 ) {
   const call = httpsCallable<
@@ -224,7 +225,9 @@ async function setStatusViaLedger(
   const { data } = await call({
     transactionId,
     status,
-    ...(settlement ? { settlement: serializeForCallable(settlement) } : {}),
+    ...(settlement
+      ? { settlement: serializeForCallable(stripUndefined(settlement)) }
+      : {}),
   });
 
   return data;
@@ -1339,6 +1342,7 @@ export const transactionService = {
       finalAmount: number;
       discount: number;
       interest: number;
+      bankAccountId?: string;
     },
     user: { uid: string; email: string },
     companyId: string,

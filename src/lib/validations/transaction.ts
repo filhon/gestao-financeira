@@ -105,6 +105,8 @@ export const transactionSchema = z.object({
   paymentMethod: z
     .enum(["pix", "boleto", "transfer", "credit_card", "cash"])
     .optional(),
+  /** Conta bancária por onde o dinheiro sai (despesa) ou entra (receita). */
+  bankAccountId: z.string().optional(),
   details: z
     .string()
     .max(2000, "Detalhes devem ter no máximo 2000 caracteres")

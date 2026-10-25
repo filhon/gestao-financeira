@@ -1911,6 +1911,7 @@ export const setTransactionStatus = functions
         finalAmount?: number;
         discount?: number;
         interest?: number;
+        bankAccountId?: string;
       };
     };
 
@@ -1985,6 +1986,21 @@ export const setTransactionStatus = functions
       patch.finalAmount = settlement.finalAmount;
       patch.discount = settlement.discount;
       patch.interest = settlement.interest;
+
+      if (settlement.bankAccountId) {
+        // A conta decide em que extrato o título vai casar: tem de ser desta empresa.
+        const accountSnap = await db()
+          .collection("bank_accounts")
+          .doc(settlement.bankAccountId)
+          .get();
+        if (!accountSnap.exists || accountSnap.get("companyId") !== companyId) {
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            "Conta bancária inválida para esta empresa.",
+          );
+        }
+        patch.bankAccountId = settlement.bankAccountId;
+      }
     }
 
     const outcome = await commitValidatedPatch(

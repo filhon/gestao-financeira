@@ -53,7 +53,7 @@ import {
   lateCharges,
   lateFeeRule,
 } from "@/lib/transactionTabs";
-import { PaymentDialog } from "./PaymentDialog";
+import { PaymentDialog, type PaymentConfirmation } from "./PaymentDialog";
 import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
 import { db } from "@/lib/firebase/client";
@@ -71,6 +71,7 @@ import { TransactionFormData } from "@/lib/validations/transaction";
 import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
+import { useBankAccounts } from "@/hooks/useBankAccounts";
 
 const PIX_KEY_TYPE_LABELS: Record<NonNullable<Entity["pixKeyType"]>, string> = {
   cpf: "CPF",
@@ -114,6 +115,7 @@ export function TransactionDetailsDialog({
     canApprovePayables,
     canPayPayables,
     canEditReceivables,
+    canViewReconciliation,
   } = usePermissions();
 
   const [holdReason, setHoldReason] = useState("");
@@ -138,6 +140,12 @@ export function TransactionDetailsDialog({
   );
   const account = transaction?.accountId
     ? accounts.find((a) => a.id === transaction.accountId)
+    : undefined;
+  const { accounts: bankAccounts } = useBankAccounts(
+    isOpen && canViewReconciliation ? transaction?.companyId : undefined,
+  );
+  const bankAccount = transaction?.bankAccountId
+    ? bankAccounts.find((a) => a.id === transaction.bankAccountId)
     : undefined;
 
   const [activeTab, setActiveTab] = useState<"details" | "billing">("details");
@@ -397,12 +405,7 @@ export function TransactionDetailsDialog({
   );
 
   const handlePaymentConfirm = useCallback(
-    async (data: {
-      paymentDate: Date;
-      finalAmount: number;
-      discount: number;
-      interest: number;
-    }) => {
+    async (data: PaymentConfirmation) => {
       if (!user || !selectedCompany || !transaction) return;
       try {
         setIsProcessing(true);
@@ -767,6 +770,14 @@ export function TransactionDetailsDialog({
             {transaction.paymentMethod || "-"}
           </p>
         </div>
+        {bankAccount && (
+          <div>
+            <h4 className="text-sm font-medium text-muted-foreground">
+              Conta de {transaction.type === "payable" ? "saída" : "entrada"}
+            </h4>
+            <p className="text-sm">{bankAccount.name}</p>
+          </div>
+        )}
 
         {transaction.paymentDate && (
           <div>

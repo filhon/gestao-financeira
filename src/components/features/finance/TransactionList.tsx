@@ -71,7 +71,10 @@ import {
   ResponsiveModalTitle,
 } from "@/components/ui/responsive-modal";
 import { TransactionDetailsDialog } from "@/components/features/finance/TransactionDetailsDialog";
-import { PaymentDialog } from "@/components/features/finance/PaymentDialog";
+import {
+  PaymentDialog,
+  type PaymentConfirmation,
+} from "@/components/features/finance/PaymentDialog";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -786,12 +789,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     setPayingTx(t);
   };
 
-  const confirmPay = async (data: {
-    paymentDate: Date;
-    finalAmount: number;
-    discount: number;
-    interest: number;
-  }) => {
+  const confirmPay = async (data: PaymentConfirmation) => {
     if (!payingTx || !actor || !companyId) return;
     try {
       await transactionService.settle(payingTx.id, data, actor, companyId);

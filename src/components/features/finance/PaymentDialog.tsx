@@ -25,16 +25,29 @@ import { ptBR } from "date-fns/locale";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import currency from "currency.js";
 import { lateCharges, type LateFeeRule } from "@/lib/transactionTabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCompany } from "@/components/providers/CompanyProvider";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useBankAccounts } from "@/hooks/useBankAccounts";
+
+export interface PaymentConfirmation {
+  paymentDate: Date;
+  finalAmount: number;
+  discount: number;
+  interest: number;
+  bankAccountId?: string;
+}
 
 interface PaymentDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (data: {
-    paymentDate: Date;
-    finalAmount: number;
-    discount: number;
-    interest: number;
-  }) => Promise<void>;
+  onConfirm: (data: PaymentConfirmation) => Promise<void>;
   transaction: Transaction;
   type: "pay" | "receive";
   /** Quando informado, sugere o valor com multa e juros pela data escolhida. */
@@ -55,6 +68,23 @@ export function PaymentDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Depois que o usuário digita um valor, trocar a data não o sobrescreve.
   const [amountEdited, setAmountEdited] = useState(false);
+
+  // Conta por onde o dinheiro passou: a do título, ou a única cadastrada.
+  const { selectedCompany } = useCompany();
+  const { canViewReconciliation } = usePermissions();
+  const { accounts } = useBankAccounts(
+    canViewReconciliation ? selectedCompany?.id : undefined,
+  );
+  const activeAccounts = accounts.filter(
+    (a) => a.active || a.id === transaction.bankAccountId,
+  );
+  const [bankAccountId, setBankAccountId] = useState<string | undefined>();
+  const defaultAccountId =
+    transaction.bankAccountId ??
+    (activeAccounts.length === 1 ? activeAccounts[0].id : undefined);
+  useEffect(() => {
+    if (isOpen) setBankAccountId(defaultAccountId);
+  }, [isOpen, defaultAccountId]);
 
   const charges = lateFee
     ? lateCharges(transaction.amount, transaction.dueDate, date, lateFee)
@@ -101,6 +131,7 @@ export function PaymentDialog({
         finalAmount,
         discount,
         interest,
+        bankAccountId,
       });
       onClose();
     } catch (error) {
@@ -163,6 +194,26 @@ export function PaymentDialog({
               </PopoverContent>
             </Popover>
           </div>
+          {activeAccounts.length > 0 && (
+            <div className="grid gap-2">
+              <Label>Conta de {type === "pay" ? "saída" : "entrada"}</Label>
+              <Select
+                value={bankAccountId ?? ""}
+                onValueChange={setBankAccountId}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Não definida" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="grid gap-2">
             <Label>Valor {type === "pay" ? "Pago" : "Recebido"}</Label>
             {/* CurrencyInput aceita `number` e expõe `number` — sem parseFloat manual.
