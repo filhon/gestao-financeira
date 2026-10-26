@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import {
   Search,
   Receipt,
+  ReceiptText,
   Users,
   Building2,
   Settings,
@@ -23,7 +23,7 @@ import {
   Layers,
   Scale,
   Clock,
-  ArrowRight,
+  Bookmark,
   Loader2,
   Plus,
 } from "lucide-react";
@@ -38,52 +38,17 @@ import {
 } from "@/components/ui/command";
 import { usePermissions, Permissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { useAuth } from "@/components/providers/AuthProvider";
-import { transactionService } from "@/lib/services/transactionService";
-import { Transaction } from "@/lib/types";
+import {
+  recentSearches,
+  savedSearches,
+  useSearch,
+  type SavedSearch,
+} from "@/hooks/useSearch";
+import { normalizeText, statusKey, statusLabel } from "@/lib/search/query";
 import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-
-// ── Recent searches ───────────────────────────────────────────────────────────
-
-function getRecentSearches(companyId: string): string[] {
-  try {
-    const raw = localStorage.getItem(`recent-searches-${companyId}`);
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecentSearch(companyId: string, query: string): void {
-  try {
-    const prev = getRecentSearches(companyId);
-    const next = [query, ...prev.filter((q) => q !== query)].slice(0, 5);
-    localStorage.setItem(`recent-searches-${companyId}`, JSON.stringify(next));
-  } catch {
-    // localStorage may be unavailable (SSR, private browsing)
-  }
-}
-
-// ── Matching utilities ────────────────────────────────────────────────────────
-
-function normalizeText(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-}
-
-function matchesQueryPalette(t: Transaction, normalizedQ: string): boolean {
-  return [
-    t.description,
-    t.supplierOrClient ?? "",
-    t.requestOrigin?.name ?? "",
-  ].some((f) => normalizeText(f).includes(normalizedQ));
-}
 
 // ── Navigation pages ──────────────────────────────────────────────────────────
 
@@ -132,6 +97,13 @@ const navigationPages: NavigationPage[] = [
     icon: Layers,
     keywords: ["lotes", "batch", "pagamento"],
     permission: "canViewBatches",
+  },
+  {
+    name: "Reembolsos",
+    href: "/financeiro/reembolsos",
+    icon: ReceiptText,
+    keywords: ["reembolso", "rd", "despesa", "relatorio de despesa"],
+    permission: "canViewPayables",
   },
   {
     name: "Recorrências",
@@ -242,19 +214,22 @@ const navigationPages: NavigationPage[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const matches = (q: string, ...texts: string[]) =>
+  texts.some((t) => normalizeText(t).includes(q));
+
 export function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [saved, setSaved] = useState<SavedSearch[]>([]);
 
   const router = useRouter();
   const permissions = usePermissions();
   const { selectedCompany } = useCompany();
-  const { user } = useAuth();
   const { openTransaction } = useTransactionDetailStore();
 
-  // Handles open/close: clears query on close, loads recents on open
+  // Abrir carrega recentes e salvas; fechar limpa o campo.
   const handleOpenChange = useCallback(
     (value: boolean) => {
       setOpen(value);
@@ -262,13 +237,13 @@ export function GlobalSearch() {
         setSearchQuery("");
         setDebouncedQuery("");
       } else if (selectedCompany?.id) {
-        setRecentSearches(getRecentSearches(selectedCompany.id));
+        setRecent(recentSearches.get(selectedCompany.id));
+        setSaved(savedSearches.get(selectedCompany.id));
       }
     },
     [selectedCompany],
   );
 
-  // Keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -280,87 +255,64 @@ export function GlobalSearch() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleOpenChange, open]);
 
-  // Debounce search query by 250ms
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 200);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // React Query — same queryKey as busca page so cache is shared
-  const { data: allTransactions = [], isLoading: isLoadingTx } = useQuery({
-    queryKey: [
-      "busca-transactions",
-      selectedCompany?.id,
-      permissions.onlyOwnPayables ? user?.uid : null,
-    ],
-    queryFn: () =>
-      transactionService.getAll({
-        companyId: selectedCompany!.id,
-        ...(permissions.onlyOwnPayables && user ? { createdBy: user.uid } : {}),
-      }),
-    enabled: open && !!selectedCompany && !!user,
-    staleTime: 60_000,
+  const isNav = searchQuery.startsWith("/");
+  const textQuery = !isNav && debouncedQuery.length >= 2 ? debouncedQuery : "";
+  const q = normalizeText(searchQuery.replace(/^\//, "").trim());
+
+  // Mesma rota e mesma linguagem da página /busca: o que aparece aqui é um
+  // recorte do que "Ver todos" vai mostrar.
+  const { data, isFetching } = useSearch(textQuery, {
+    limit: 5,
+    enabled: open,
   });
-
-  // Derived state
-  const isTextQuery = debouncedQuery.length > 0 && !searchQuery.startsWith("/");
-
-  const { previewTransactions, totalMatchCount } = useMemo(() => {
-    if (!isTextQuery) return { previewTransactions: [], totalMatchCount: 0 };
-    const normalizedQ = normalizeText(debouncedQuery);
-    const matches = allTransactions.filter((t) =>
-      matchesQueryPalette(t, normalizedQ),
-    );
-    return {
-      previewTransactions: matches.slice(0, 5),
-      totalMatchCount: matches.length,
-    };
-  }, [allTransactions, debouncedQuery, isTextQuery]);
+  const result = textQuery && data ? data : null;
 
   const filteredPages = useMemo(() => {
-    const permitted = navigationPages.filter((page) => {
-      if (page.permission === "always") return true;
-      return permissions[page.permission as keyof Permissions] === true;
-    });
-    if (!searchQuery.trim()) return permitted;
-    const q = searchQuery.toLowerCase().replace(/^\//, "");
-    return permitted.filter(
+    const permitted = navigationPages.filter(
       (page) =>
-        page.name.toLowerCase().includes(q) ||
-        page.keywords.some((kw) => kw.includes(q)),
+        page.permission === "always" ||
+        permissions[page.permission as keyof Permissions] === true,
     );
-  }, [searchQuery, permissions]);
+    if (!q) return permitted;
+    return permitted.filter((page) => matches(q, page.name, ...page.keywords));
+  }, [q, permissions]);
 
   const actions = useMemo(() => {
     const items: { label: string; href: string }[] = [];
-    if (permissions.canCreatePayables) {
+    if (permissions.canCreatePayables)
       items.push({
         label: "Nova conta a pagar",
-        href: "/financeiro/contas-pagar",
+        href: "/financeiro/contas-pagar?novo=1",
       });
-    }
-    if (permissions.canCreateReceivables) {
+    if (permissions.canCreateReceivables)
       items.push({
-        label: "Novo recebível",
-        href: "/financeiro/contas-receber",
+        label: "Nova conta a receber",
+        href: "/financeiro/contas-receber?novo=1",
       });
-    }
-    if (permissions.canManageReconciliation) {
-      items.push({ label: "Importar OFX", href: "/financeiro/conciliacao" });
-    }
-    return items;
-  }, [permissions]);
+    if (permissions.canManageReconciliation)
+      items.push({
+        label: "Importar extrato (OFX)",
+        href: "/financeiro/conciliacao",
+      });
+    return q ? items.filter((a) => matches(q, a.label)) : items;
+  }, [permissions, q]);
 
-  // Handlers
+  const close = () => setOpen(false);
+
   const handleSearch = useCallback(
-    (q?: string) => {
-      const term = (q ?? searchQuery).trim();
-      if (!term) return;
-      if (selectedCompany?.id) saveRecentSearch(selectedCompany.id, term);
-      router.push(`/busca?q=${encodeURIComponent(term)}`);
+    (term: string) => {
+      const t = term.trim();
+      if (!t) return;
+      if (selectedCompany?.id) recentSearches.add(selectedCompany.id, t);
+      router.push(`/busca?q=${encodeURIComponent(t)}`);
       setOpen(false);
     },
-    [searchQuery, router, selectedCompany],
+    [router, selectedCompany],
   );
 
   const handleNavigate = useCallback(
@@ -371,149 +323,212 @@ export function GlobalSearch() {
     [router],
   );
 
-  const showRecents = !searchQuery.trim() && recentSearches.length > 0;
-  const showTransactions = isTextQuery;
-  const showActions = !searchQuery.startsWith("/");
+  const empty = !searchQuery.trim();
+  const today = new Date();
 
   return (
     <CommandDialog
       open={open}
       onOpenChange={handleOpenChange}
-      title="Busca Global"
-      description="Buscar transações ou navegar rapidamente"
+      shouldFilter={false}
+      title="Busca global"
+      description="Buscar transações, cadastros, lotes e RDs, ou navegar"
     >
       <CommandInput
-        placeholder="Buscar ou digite / para navegar..."
+        placeholder="Buscar, ou / para ir a uma tela"
+        className="pr-8"
         value={searchQuery}
         onValueChange={setSearchQuery}
       />
-      <CommandList className="max-h-[380px]">
+      <CommandList className="max-h-[420px]">
         <CommandEmpty>
           <div className="py-6 text-center text-sm text-muted-foreground">
-            Nenhum resultado encontrado.
+            Nenhum resultado.
           </div>
         </CommandEmpty>
 
-        {/* Recent searches — empty query only */}
-        {showRecents && (
-          <CommandGroup heading="Recentes">
-            {recentSearches.map((q) => (
+        {empty && saved.length > 0 && (
+          <CommandGroup heading="Buscas salvas">
+            {saved.map((s) => (
               <CommandItem
-                key={`recent-${q}`}
-                value={`recente ${q}`}
-                onSelect={() => handleSearch(q)}
+                key={`saved-${s.name}`}
+                value={`salva ${s.name}`}
+                onSelect={() => handleNavigate(`/busca?${s.params}`)}
               >
-                <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span>{q}</span>
+                <Bookmark className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span>{s.name}</span>
               </CommandItem>
             ))}
           </CommandGroup>
         )}
 
-        {/* Transaction preview — text query only */}
-        {showTransactions && (
-          <>
-            {showRecents && <CommandSeparator />}
-            <CommandGroup heading="Transações">
-              {isLoadingTx ? (
-                <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                  Buscando...
-                </div>
-              ) : previewTransactions.length > 0 ? (
-                <>
-                  {previewTransactions.map((t) => (
-                    <CommandItem
-                      key={t.id}
-                      value={[
-                        t.description,
-                        t.supplierOrClient,
-                        t.requestOrigin?.name,
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      onSelect={() => {
-                        openTransaction(t);
-                        setOpen(false);
-                      }}
-                    >
-                      <span
-                        className={cn(
-                          "shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                          t.type === "payable"
-                            ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400"
-                            : "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400",
-                        )}
-                      >
-                        {t.type === "payable" ? "Pagar" : "Receber"}
-                      </span>
-                      <span className="ml-2 flex-1 truncate text-sm">
-                        {t.description}
-                      </span>
-                      <span
-                        className={cn(
-                          "ml-auto shrink-0 font-financial tabular-nums text-xs",
-                          t.type === "payable"
-                            ? "text-red-600 dark:text-red-400"
-                            : "text-emerald-600 dark:text-emerald-400",
-                        )}
-                      >
-                        {t.type === "payable" ? "−" : "+"}
-                        {formatCurrency(t.amount)}
-                      </span>
-                      <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-                        {format(t.dueDate, "dd/MM", { locale: ptBR })}
-                      </span>
-                    </CommandItem>
-                  ))}
-                  <CommandItem
-                    value={`ver todos ${debouncedQuery}`}
-                    onSelect={() => handleSearch()}
-                    className="text-muted-foreground"
-                  >
-                    <ArrowRight className="mr-2 h-4 w-4" />
-                    Ver todos os {totalMatchCount} resultado
-                    {totalMatchCount !== 1 ? "s" : ""}
-                  </CommandItem>
-                </>
-              ) : (
+        {empty && recent.length > 0 && (
+          <CommandGroup heading="Recentes">
+            {recent.map((r) => (
+              <CommandItem
+                key={`recent-${r}`}
+                value={`recente ${r}`}
+                onSelect={() => handleSearch(r)}
+              >
+                <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span>{r}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {textQuery && (
+          <CommandGroup heading="Transações">
+            <CommandItem
+              value={`buscar ${textQuery}`}
+              onSelect={() => handleSearch(searchQuery)}
+            >
+              <Search className="mr-2 h-4 w-4" />
+              <span className="flex-1 truncate">
+                Buscar “{searchQuery.trim()}”
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {isFetching && !result ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : result ? (
+                  `${result.total.toLocaleString("pt-BR")} resultado${result.total !== 1 ? "s" : ""}`
+                ) : null}
+              </span>
+            </CommandItem>
+            {result?.rows.map(({ tx }) => {
+              const late = statusKey(tx, today) === "late";
+              return (
                 <CommandItem
-                  value={`buscar ${debouncedQuery}`}
-                  onSelect={() => handleSearch()}
+                  key={tx.id}
+                  value={`tx ${tx.id}`}
+                  onSelect={() => {
+                    openTransaction(tx);
+                    close();
+                  }}
                 >
-                  <Search className="mr-2 h-4 w-4" />
-                  Buscar por &quot;{debouncedQuery}&quot;
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm">
+                      {tx.description}
+                    </span>
+                    {tx.supplierOrClient && (
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {tx.supplierOrClient}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 text-xs",
+                      late
+                        ? "font-medium text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {statusLabel(tx, today)}
+                  </span>
+                  <span
+                    className={cn(
+                      "ml-3 shrink-0 font-financial text-xs tabular-nums",
+                      tx.type === "receivable" &&
+                        "text-emerald-700 dark:text-emerald-400",
+                    )}
+                  >
+                    {tx.type === "payable" ? "−" : "+"}
+                    {formatCurrency(tx.amount)}
+                  </span>
+                  <span className="ml-3 w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                    {format(tx.dueDate, "dd/MM/yy")}
+                  </span>
                 </CommandItem>
-              )}
+              );
+            })}
+          </CommandGroup>
+        )}
+
+        {result && result.entities.length > 0 && (
+          <CommandGroup heading="Cadastros">
+            {result.entities.map((e) => (
+              <CommandItem
+                key={e.id}
+                value={`entidade ${e.id}`}
+                onSelect={() => handleNavigate(`/cadastros/entidades/${e.id}`)}
+              >
+                <Users className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span className="flex-1 truncate">{e.name}</span>
+                {e.document && (
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {e.document}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {result && result.batches.length > 0 && (
+          <CommandGroup heading="Lotes de pagamento">
+            {result.batches.map((b) => (
+              <CommandItem
+                key={b.id}
+                value={`lote ${b.id}`}
+                onSelect={() => handleNavigate(`/financeiro/lotes/${b.id}`)}
+              >
+                <Layers className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span className="flex-1 truncate">{b.name}</span>
+                <span className="font-financial text-xs tabular-nums text-muted-foreground">
+                  {formatCurrency(b.totalAmount)}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {result && result.reimbursements.length > 0 && (
+          <CommandGroup heading="Reembolsos">
+            {result.reimbursements.map((r) => (
+              <CommandItem
+                key={r.id}
+                value={`rd ${r.id}`}
+                onSelect={() => handleNavigate("/financeiro/reembolsos")}
+              >
+                <ReceiptText className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span className="flex-1 truncate">
+                  {r.rdNumber} · {r.employeeName}
+                </span>
+                <span className="font-financial text-xs tabular-nums text-muted-foreground">
+                  {formatCurrency(r.totalAmount)}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {filteredPages.length > 0 && (
+          <>
+            {!empty && <CommandSeparator />}
+            <CommandGroup heading="Ir para">
+              {filteredPages.map((page) => (
+                <CommandItem
+                  key={page.href}
+                  value={`pagina ${page.href}`}
+                  onSelect={() => handleNavigate(page.href)}
+                >
+                  <page.icon className="mr-2 h-4 w-4" />
+                  <span>{page.name}</span>
+                </CommandItem>
+              ))}
             </CommandGroup>
-            <CommandSeparator />
           </>
         )}
 
-        {/* Navigation */}
-        {filteredPages.length > 0 && (
-          <CommandGroup heading="Navegação Rápida">
-            {filteredPages.map((page) => (
-              <CommandItem
-                key={page.href}
-                onSelect={() => handleNavigate(page.href)}
-              >
-                <page.icon className="mr-2 h-4 w-4" />
-                <span>{page.name}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-
-        {/* Actions */}
-        {showActions && actions.length > 0 && (
+        {!isNav && actions.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading="Ações">
               {actions.map(({ label, href }) => (
                 <CommandItem
                   key={label}
-                  value={label}
+                  value={`acao ${label}`}
                   onSelect={() => handleNavigate(href)}
                 >
                   <Plus className="mr-2 h-4 w-4" />
@@ -525,11 +540,12 @@ export function GlobalSearch() {
         )}
       </CommandList>
 
-      {/* Keyboard shortcuts footer */}
       <div className="flex items-center gap-2 border-t px-3 py-2 text-[10px] text-muted-foreground">
         <span>↑↓ navegar</span>
         <span className="opacity-40">·</span>
         <span>↵ abrir</span>
+        <span className="opacity-40">·</span>
+        <span>/ telas</span>
         <span className="opacity-40">·</span>
         <span>esc fechar</span>
       </div>

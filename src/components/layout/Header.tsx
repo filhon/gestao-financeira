@@ -69,18 +69,19 @@ export function Header() {
         </span>
       </div>
 
-      <div
+      <button
+        type="button"
         className="hidden md:flex w-72 items-center gap-2 px-2.5 py-1.5 rounded-md border bg-muted/40 cursor-pointer hover:bg-muted/70 hover:border-border/80 transition-colors group"
         onClick={openSearch}
       >
         <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <span className="flex-1 text-sm text-muted-foreground/70">
-          Buscar transações...
+        <span className="flex-1 text-left text-sm text-muted-foreground/70">
+          Buscar ou ir para…
         </span>
         <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border border-border/60 bg-background px-1.5 font-mono text-[10px] font-medium text-muted-foreground/60 sm:flex">
           {isMac ? "⌘K" : "Ctrl+K"}
         </kbd>
-      </div>
+      </button>
 
       {/* Actions */}
       <div className="flex items-center gap-0.5">

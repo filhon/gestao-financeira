@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -70,6 +70,14 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // "Nova conta…" no Ctrl+K chega com ?novo=1: abre o formulário direto.
+  useEffect(() => {
+    if (!canCreate || !new URLSearchParams(window.location.search).has("novo"))
+      return;
+    setIsFormOpen(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [canCreate]);
 
   const closeForm = () => {
     setIsFormOpen(false);

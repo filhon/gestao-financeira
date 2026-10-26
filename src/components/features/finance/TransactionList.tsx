@@ -89,7 +89,9 @@ import { entityService } from "@/lib/services/entityService";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
-import type { CostCenter, PaymentBatch, Transaction } from "@/lib/types";
+import { reviveTransaction } from "@/hooks/useSearch";
+import { AddToBatchDialog } from "@/components/features/finance/AddToBatchDialog";
+import type { CostCenter, Transaction } from "@/lib/types";
 import {
   agingBucket,
   agingRange,
@@ -237,26 +239,6 @@ function descendantIds(rootId: string, all: CostCenter[]): string[] {
       .flatMap((c) => descendantIds(c.id, all)),
   ];
 }
-
-const reviveDates = (t: Record<string, unknown>) => {
-  const d = (v: unknown) => (v ? new Date(v as string) : undefined);
-  const hold = t.paymentHold as Record<string, unknown> | null;
-  const promise = t.paymentPromise as Record<string, unknown> | null;
-  return {
-    ...t,
-    dueDate: d(t.dueDate) ?? new Date(),
-    paymentDate: d(t.paymentDate),
-    approvedAt: d(t.approvedAt),
-    releasedAt: d(t.releasedAt),
-    createdAt: d(t.createdAt),
-    updatedAt: d(t.updatedAt),
-    approvalTokenExpiresAt: d(t.approvalTokenExpiresAt),
-    paymentHold: hold ? { ...hold, at: d(hold.at) } : null,
-    paymentPromise: promise
-      ? { ...promise, date: d(promise.date), at: d(promise.at) }
-      : null,
-  } as Transaction;
-};
 
 // ── Componente ────────────────────────────────────────────────────────────────
 
@@ -423,7 +405,9 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       );
       if (!res.ok) throw new Error(`Search failed: ${res.status}`);
       const json = await res.json();
-      return ((json.data ?? []) as Record<string, unknown>[]).map(reviveDates);
+      return ((json.data ?? []) as Record<string, unknown>[]).map(
+        reviveTransaction,
+      );
     },
     enabled: !!companyId && !!user && !!debouncedSearch,
   });
@@ -849,8 +833,6 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   >(null);
   const [bulkDate, setBulkDate] = useState<Date>(new Date());
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
-  const [openBatches, setOpenBatches] = useState<PaymentBatch[]>([]);
-  const [newBatchName, setNewBatchName] = useState("");
 
   const bulkPayable = selectedRows.filter(
     (t) => t.status !== "paid" && !t.paymentHold,
@@ -914,48 +896,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       "Erro ao reverter pagamentos em lote.",
     );
 
-  const addToBatch = (batchId?: string) =>
-    runBulk(
-      async () => {
-        if (!companyId || !user) return;
-        if (selectedRows.some((t) => t.status !== "draft")) {
-          throw new Error(
-            "Apenas transações em rascunho podem ser adicionadas ao lote.",
-          );
-        }
-        let id = batchId;
-        if (!id) {
-          if (!newBatchName.trim()) throw new Error("Dê um nome ao novo lote.");
-          id = (
-            await paymentBatchService.create(
-              newBatchName.trim(),
-              companyId,
-              user.uid,
-            )
-          ).id;
-        }
-        await paymentBatchService.addTransactions(id, selectedRows);
-        setNewBatchName("");
-      },
-      "Transações adicionadas ao lote!",
-      "Erro ao adicionar ao lote.",
-    );
-
-  const openBatchDialog = async () => {
-    setBulkDialog("batch");
-    if (!companyId) return;
-    try {
-      const { batches } = await paymentBatchService.getAll(
-        companyId,
-        50,
-        null,
-        ["open"],
-      );
-      setOpenBatches(batches);
-    } catch {
-      toast.error("Erro ao carregar lotes.");
-    }
-  };
+  const openBatchDialog = () => setBulkDialog("batch");
 
   // ── Teclado ──────────────────────────────────────────────────────────────
   const moveActive = (delta: number) => {
@@ -2123,62 +2064,16 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         </ResponsiveModalContent>
       </ResponsiveModal>
 
-      <ResponsiveModal
+      <AddToBatchDialog
         open={bulkDialog === "batch"}
         onOpenChange={(o) => !o && setBulkDialog(null)}
-      >
-        <ResponsiveModalContent>
-          <ResponsiveModalHeader>
-            <ResponsiveModalTitle>
-              Adicionar ao lote de pagamento
-            </ResponsiveModalTitle>
-          </ResponsiveModalHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Lotes abertos</Label>
-              {openBatches.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum lote aberto.
-                </p>
-              ) : (
-                <div className="grid gap-2">
-                  {openBatches.map((b) => (
-                    <Button
-                      key={b.id}
-                      variant="outline"
-                      className="justify-between"
-                      disabled={isBulkProcessing}
-                      onClick={() => addToBatch(b.id)}
-                    >
-                      {b.name}
-                      <span className="font-financial text-muted-foreground">
-                        {formatCurrency(b.totalAmount)}
-                      </span>
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-batch">Ou crie um novo</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="new-batch"
-                  placeholder="Nome do novo lote"
-                  value={newBatchName}
-                  onChange={(e) => setNewBatchName(e.target.value)}
-                />
-                <Button
-                  disabled={isBulkProcessing}
-                  onClick={() => addToBatch()}
-                >
-                  Criar e adicionar
-                </Button>
-              </div>
-            </div>
-          </div>
-        </ResponsiveModalContent>
-      </ResponsiveModal>
+        transactions={selectedRows}
+        onDone={() => {
+          setBulkDialog(null);
+          setSelectedIds(new Set());
+          refresh();
+        }}
+      />
 
       <ResponsiveModal
         open={bulkDialog === "revert"}

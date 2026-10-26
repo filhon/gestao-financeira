@@ -56,6 +56,14 @@ export function validateCnpj(cnpj: string): boolean {
  * @param value - The raw or partially formatted CNPJ string
  * @returns The formatted CNPJ string
  */
+/** CPF (11 dígitos) ou CNPJ (14) com máscara; outro tamanho volta como veio. */
+export function formatCpfCnpj(value: string): string {
+  const d = stripNonDigits(value);
+  if (d.length === 11)
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  return d.length === 14 ? formatCnpj(d) : value;
+}
+
 export function formatCnpj(value: string): string {
   const digits = stripNonDigits(value);
 

@@ -2,7 +2,8 @@
  * GET /api/internal/transactions/search
  *
  * Busca textual de transações executada inteiramente no servidor.
- * Autenticação via cookie `auth_token` (Firebase ID Token).
+ * Autenticação via cookie `auth_token` (Firebase ID Token) e papel na
+ * empresa pedida; para o papel "user", `type` e `createdBy` são forçados.
  *
  * O Firebase não suporta full-text search nativo; a filtragem é feita
  * em memória no servidor após uma query base indexada (companyId + type
@@ -24,8 +25,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
-import { cookies } from "next/headers";
-import { adminDb, adminAuth } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
+import { authorizeCompany } from "@/lib/api/companyAccess";
 import { logger } from "@/lib/logger";
 
 const TRANSACTIONS_COLLECTION = "transactions";
@@ -36,32 +37,21 @@ const MAX_SCAN_DOCS = 5_000;
 const VALID_TYPES = new Set(["payable", "receivable"]);
 
 export async function GET(request: NextRequest) {
-  // ── Autenticação via cookie ────────────────────────────────────────────────
-  const cookieStore = await cookies();
-  const token = cookieStore.get("auth_token")?.value;
-
-  if (!token) {
-    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
-  }
-
-  let uid: string;
-  try {
-    const decoded = await adminAuth.verifyIdToken(token);
-    uid = decoded.uid;
-  } catch {
-    return NextResponse.json(
-      { error: "Token inválido ou expirado." },
-      { status: 401 },
-    );
-  }
-
   // ── Query params ──────────────────────────────────────────────────────────
   const { searchParams } = new URL(request.url);
 
   const qParam = searchParams.get("q")?.trim() ?? "";
   const companyId = searchParams.get("companyId")?.trim() ?? "";
-  const typeParam = searchParams.get("type");
-  const createdByParam = searchParams.get("createdBy");
+
+  // ── Autenticação + papel na empresa ───────────────────────────────────────
+  const access = await authorizeCompany(companyId);
+  if (!access.ok) return access.response;
+
+  // O papel "user" só enxerga as contas a pagar que ele mesmo lançou,
+  // independentemente do que o cliente pedir.
+  const isUser = access.role === "user";
+  const typeParam = isUser ? "payable" : searchParams.get("type");
+  const createdByParam = isUser ? access.uid : searchParams.get("createdBy");
   const allDates = searchParams.get("allDates") === "true";
   const startDateParam = searchParams.get("startDate");
   const endDateParam = searchParams.get("endDate");
@@ -84,23 +74,11 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   }
-  if (!companyId) {
-    return NextResponse.json(
-      { error: "Parâmetro 'companyId' é obrigatório." },
-      { status: 400 },
-    );
-  }
   if (typeParam && !VALID_TYPES.has(typeParam)) {
     return NextResponse.json(
       { error: `'type' inválido. Use: ${[...VALID_TYPES].join(", ")}` },
       { status: 400 },
     );
-  }
-
-  // Garante que o usuário só pode buscar na própria empresa
-  // (uma verificação mais completa de companyRoles pode ser adicionada se necessário)
-  if (!uid) {
-    return NextResponse.json({ error: "Não autorizado." }, { status: 403 });
   }
 
   // ── Intervalo de datas ─────────────────────────────────────────────────────

@@ -16,7 +16,8 @@
     "check:dashboard": "jiti scripts/check-dashboard.ts",
     "check:reconciliation-rules": "jiti scripts/check-reconciliation-rules.ts",
     "check:auto-confirm": "jiti scripts/check-auto-confirm.ts",
-    "check:receipt-learning": "jiti scripts/check-receipt-learning.ts"
+    "check:receipt-learning": "jiti scripts/check-receipt-learning.ts",
+    "check:search": "jiti scripts/check-search.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

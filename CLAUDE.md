@@ -21,7 +21,7 @@ No test suite configured.
 - **Forms**: React Hook Form + Zod validation
 - **Export**: jsPDF + jspdf-autotable, ExcelJS, PapaParse
 - **Email**: Resend + React Email templates
-- **AI**: Google GenAI (intent parser, document extraction)
+- **AI**: Google GenAI (document extraction, busca em linguagem natural em `/api/internal/search/interpret`)
 
 ## Multi-Tenancy & RBAC
 

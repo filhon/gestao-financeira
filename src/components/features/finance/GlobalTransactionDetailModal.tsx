@@ -7,11 +7,11 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCostCenters } from "@/hooks/useCostCenters";
+import { invalidateSearch } from "@/hooks/useSearch";
 
 const TX_QUERY_KEYS = [
   "payable-transactions",
   "receivable-transactions",
-  "busca-transactions",
   "overdue-transactions",
   "pending-approvals",
 ];
@@ -32,6 +32,7 @@ export function GlobalTransactionDetailModal() {
     queryClient.invalidateQueries({
       predicate: (query) => TX_QUERY_KEYS.includes(query.queryKey[0] as string),
     });
+    invalidateSearch(queryClient);
   };
 
   return (

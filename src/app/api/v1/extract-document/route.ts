@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractDocumentData } from "@/lib/services/documentExtractionService";
 import { adminDb } from "@/lib/firebase/admin";
+import { authorizeCompany } from "@/lib/api/companyAccess";
 
 const ALLOWED_MIME_TYPES = [
   "application/pdf",
@@ -23,6 +24,11 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Sessão do app (cookie) com papel na empresa: sem isso, qualquer um
+    // gastaria a cota da IA e leria cadastros de outras empresas.
+    const access = await authorizeCompany(companyId);
+    if (!access.ok) return access.response;
 
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       return NextResponse.json(
