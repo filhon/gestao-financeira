@@ -1,6 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { addDays, format, isValid, parse, startOfDay, subDays } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import type { DateRange } from "react-day-picker";
+import {
+  AlertCircle,
+  CalendarIcon,
+  ChevronDown,
+  Download,
+  RotateCcw,
+} from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -10,11 +24,45 @@ import { transactionService } from "@/lib/services/transactionService";
 import { entityService } from "@/lib/services/entityService";
 import { reportService } from "@/lib/services/reportService";
 import { recurrenceService } from "@/lib/services/recurrenceService";
-import { Transaction, Entity } from "@/lib/types";
+import { dashboardService } from "@/lib/services/dashboardService";
+import { descendantIds, flattenTree } from "@/lib/costCenterTree";
+import {
+  buildDre,
+  DRE_MIN_COVERAGE,
+  dreAmount,
+  DreRegime,
+  effectiveDate,
+} from "@/lib/chartOfAccounts";
+import {
+  buildCashFlow,
+  Comparison,
+  comparisonRange,
+  DEFAULT_FORECAST,
+  defaultGranularity,
+  FlowStage,
+  FORECAST_STAGES,
+  formatPercent,
+  Granularity,
+  openingFromToday,
+  periodText,
+  projectRecurrences,
+  quickPeriods,
+  situationOf,
+  STAGE_INFO,
+} from "@/lib/reports";
+import { Transaction } from "@/lib/types";
+import { cn, formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Calendar } from "@/components/ui/calendar";
+import { CurrencyInput } from "@/components/ui/currency-input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -22,1072 +70,900 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
-  FileText,
-  Download,
-  CalendarIcon,
-  TrendingUp,
-  BarChart3,
-  Layers,
-  Sparkles,
-  Sheet as SheetIcon,
-  SlidersHorizontal,
-  X,
-  Landmark,
-} from "lucide-react";
-import { toast } from "sonner";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
-  startOfMonth,
-  endOfMonth,
-  subMonths,
-  format,
-  addDays,
-  addWeeks,
-  addMonths,
-  addYears,
-  isAfter,
-} from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
-import { CurrencyInput } from "@/components/ui/currency-input";
+  CashFlowView,
+  Drill,
+  DrillLine,
+  DrillSheet,
+  DreView,
+  Segmented,
+} from "@/components/features/reports/ReportTables";
 
-const REPORT_TYPES = [
-  {
-    value: "cash_flow",
-    label: "Fluxo de Caixa",
-    description: "Entradas e saídas por período com saldo acumulado",
-    icon: TrendingUp,
-    accentClass: "text-emerald-600 dark:text-emerald-400",
-    bgClass: "bg-emerald-50 dark:bg-emerald-950/60",
-    borderClass: "border-emerald-200 dark:border-emerald-800",
-    iconBg: "bg-emerald-100 dark:bg-emerald-900/50",
-  },
-  {
-    value: "consolidated",
-    label: "Fluxo Consolidado",
-    description: "Inclui projeções de recorrências futuras",
-    icon: Layers,
-    accentClass: "text-blue-600 dark:text-blue-400",
-    bgClass: "bg-blue-50 dark:bg-blue-950/60",
-    borderClass: "border-blue-200 dark:border-blue-800",
-    iconBg: "bg-blue-100 dark:bg-blue-900/50",
-  },
-  {
-    value: "dre",
-    label: "DRE Gerencial",
-    description:
-      "Resultado pelo plano de contas, com análise vertical; mês a mês no Excel",
-    icon: BarChart3,
-    accentClass: "text-violet-600 dark:text-violet-400",
-    bgClass: "bg-violet-50 dark:bg-violet-950/60",
-    borderClass: "border-violet-200 dark:border-violet-800",
-    iconBg: "bg-violet-100 dark:bg-violet-900/50",
-  },
-  {
-    value: "transfer_guide",
-    label: "Guia de Transferências",
-    description: "PIX agrupado por entidade/dia e boletos com linha digitável",
-    icon: Landmark,
-    accentClass: "text-amber-600 dark:text-amber-400",
-    bgClass: "bg-amber-50 dark:bg-amber-950/60",
-    borderClass: "border-amber-200 dark:border-amber-800",
-    iconBg: "bg-amber-100 dark:bg-amber-900/50",
-  },
-];
+type ReportKind = "cash_flow" | "dre";
+type FlowMode = "realized" | "forecast" | "both";
+type ExportFormat = "pdf" | "excel" | "csv";
 
-const QUICK_PERIODS = [
-  {
-    label: "Este mês",
-    start: startOfMonth(new Date()),
-    end: endOfMonth(new Date()),
-  },
-  {
-    label: "Mês anterior",
-    start: startOfMonth(subMonths(new Date(), 1)),
-    end: endOfMonth(subMonths(new Date(), 1)),
-  },
-  {
-    label: "Trimestre",
-    start: new Date(
-      new Date().getFullYear(),
-      Math.floor(new Date().getMonth() / 3) * 3,
-      1,
-    ),
-    end: new Date(
-      new Date().getFullYear(),
-      Math.floor(new Date().getMonth() / 3) * 3 + 3,
-      0,
-    ),
-  },
-  {
-    label: "Este ano",
-    start: new Date(new Date().getFullYear(), 0, 1),
-    end: new Date(new Date().getFullYear(), 11, 31),
-  },
-];
-
-const STATUS_LABELS: Record<string, string> = {
-  all: "Todos os status",
-  paid: "Somente Pagas",
-  authorized: "Somente Autorizadas",
-  approved: "Somente Aprovadas",
-  pending_approval: "Somente Pendentes",
-  draft: "Somente Rascunhos",
+const EXPORTS: Record<
+  ReportKind,
+  { format: ExportFormat; label: string; hint: string }[]
+> = {
+  cash_flow: [
+    { format: "pdf", label: "PDF", hint: "Extrato dia a dia com saldo" },
+    {
+      format: "excel",
+      label: "Excel",
+      hint: "Extrato, tabela do fluxo e resumo",
+    },
+    { format: "csv", label: "CSV", hint: "Um lançamento por linha" },
+  ],
+  dre: [
+    { format: "pdf", label: "PDF", hint: "DRE com análise vertical" },
+    {
+      format: "excel",
+      label: "Excel",
+      hint: "Mês a mês, com os lançamentos de cada linha",
+    },
+    { format: "csv", label: "CSV", hint: "A tabela da DRE, meses em colunas" },
+  ],
 };
 
+const MODE_LABEL: Record<FlowMode, string> = {
+  realized: "Realizado",
+  forecast: "Previsto",
+  both: "Realizado + previsto",
+};
+
+/** Junta as consultas (vencimento, pagamento, competência) sem repetir. */
+function dedupe(lists: Transaction[][]) {
+  const seen = new Set<string>();
+  return lists.flat().filter((t) => !seen.has(t.id) && !!seen.add(t.id));
+}
+
+// ── Estado na URL: o relatório aberto é um link que dá para salvar e enviar ──
+
+const oneOf = <T extends string>(
+  v: string | null,
+  allowed: readonly T[],
+  fallback: T,
+): T => (allowed.includes(v as T) ? (v as T) : fallback);
+
+const parseDay = (v: string | null) => {
+  const d = v ? parse(v, "yyyy-MM-dd", new Date()) : null;
+  return d && isValid(d) ? d : null;
+};
+
+function rangeFromParams(sp: URLSearchParams) {
+  const periods = quickPeriods();
+  const p = periods.find((x) => x.key === sp.get("periodo"));
+  if (p) return { start: p.start, end: p.end, key: p.key as string | null };
+  const start = parseDay(sp.get("de"));
+  const end = parseDay(sp.get("ate"));
+  if (start && end && start <= end) return { start, end, key: null };
+  return { start: periods[0].start, end: periods[0].end, key: periods[0].key };
+}
+
+/** useSearchParams exige Suspense para a página continuar pré-renderizada. */
 export default function ReportsPage() {
+  return (
+    <Suspense fallback={null}>
+      <Reports />
+    </Suspense>
+  );
+}
+
+function Reports() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
-  const { onlyOwnPayables } = usePermissions();
-  const [loadingFormat, setLoadingFormat] = useState<
-    "pdf" | "csv" | "excel" | null
-  >(null);
-  const isLoading = loadingFormat !== null;
+  const { onlyOwnPayables, canViewReports } = usePermissions();
 
-  const [startDate, setStartDate] = useState<Date>(startOfMonth(new Date()));
-  const [endDate, setEndDate] = useState<Date>(endOfMonth(new Date()));
-  const [reportType, setReportType] = useState("cash_flow");
-  const [initialBalance, setInitialBalance] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [costCenterFilter, setCostCenterFilter] = useState("all");
-  const [activeQuickPeriod, setActiveQuickPeriod] = useState<string | null>(
-    "Este mês",
-  );
-  const [mobileConfigOpen, setMobileConfigOpen] = useState(false);
-
-  const { costCenters } = useCostCenters(
-    selectedCompany?.id,
-    onlyOwnPayables ? user?.uid : undefined,
-  );
-  const { accounts } = useChartOfAccounts(selectedCompany?.id);
-
-  // Ao selecionar o Guia de Transferências, pré-seleciona status "Autorizado"
-  // (apenas se o filtro ainda estiver no padrão "all")
   useEffect(() => {
-    if (reportType === "transfer_guide" && statusFilter === "all") {
-      setStatusFilter("authorized");
+    if (!canViewReports) router.push("/dashboard");
+  }, [canViewReports, router]);
+
+  const periods = quickPeriods();
+  const [kind, setKind] = useState<ReportKind>(() =>
+    oneOf(searchParams.get("relatorio"), ["cash_flow", "dre"], "cash_flow"),
+  );
+  const [range, setRange] = useState(() => rangeFromParams(searchParams));
+  const [costCenterFilter, setCostCenterFilter] = useState(
+    () => searchParams.get("cc") ?? "all",
+  );
+  const [comparison, setComparison] = useState<Comparison>(() =>
+    oneOf(searchParams.get("comparar"), ["none", "previous", "year"], "none"),
+  );
+  const [mode, setMode] = useState<FlowMode>(() =>
+    oneOf(
+      searchParams.get("situacao"),
+      ["realized", "forecast", "both"],
+      "both",
+    ),
+  );
+  const [forecast, setForecast] = useState<FlowStage[]>(DEFAULT_FORECAST);
+  const [granularity, setGranularity] = useState<Granularity | "auto">("auto");
+  const [openingOverride, setOpeningOverride] = useState<{
+    start: number;
+    value: number;
+  } | null>(null);
+  const [regime, setRegime] = useState<DreRegime>(() =>
+    oneOf(searchParams.get("regime"), ["competence", "cash"], "competence"),
+  );
+  const [monthly, setMonthly] = useState(false);
+  const [hideZero, setHideZero] = useState(true);
+  const [drill, setDrill] = useState<Drill | null>(null);
+  const [exporting, setExporting] = useState<ExportFormat | null>(null);
+  const [confirmExport, setConfirmExport] = useState<ExportFormat | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [draftRange, setDraftRange] = useState<DateRange | undefined>();
+
+  useEffect(() => {
+    const params = new URLSearchParams({ relatorio: kind });
+    if (range.key) params.set("periodo", range.key);
+    else {
+      params.set("de", format(range.start, "yyyy-MM-dd"));
+      params.set("ate", format(range.end, "yyyy-MM-dd"));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportType]);
+    if (costCenterFilter !== "all") params.set("cc", costCenterFilter);
+    if (comparison !== "none") params.set("comparar", comparison);
+    if (kind === "cash_flow" && mode !== "both") params.set("situacao", mode);
+    if (kind === "dre" && regime !== "competence") params.set("regime", regime);
+    const next = params.toString();
+    if (next !== window.location.search.slice(1)) {
+      router.replace(`/relatorios?${next}`, { scroll: false });
+    }
+  }, [kind, range, costCenterFilter, comparison, mode, regime, router]);
 
-  const selectedReportType =
-    REPORT_TYPES.find((r) => r.value === reportType) ?? REPORT_TYPES[0];
+  const companyId = selectedCompany?.id;
+  const createdBy = onlyOwnPayables ? user?.uid : undefined;
+  const { costCenters } = useCostCenters(companyId, createdBy);
+  const { accounts } = useChartOfAccounts(companyId);
+  const ccTree = useMemo(() => flattenTree(costCenters), [costCenters]);
+  const ccIds = useMemo(
+    () =>
+      costCenterFilter === "all"
+        ? undefined
+        : descendantIds(costCenterFilter, costCenters),
+    [costCenterFilter, costCenters],
+  );
+  const ccName = costCenters.find((c) => c.id === costCenterFilter)?.name;
 
-  const activeConfigCount =
-    (statusFilter !== "all" ? 1 : 0) + (costCenterFilter !== "all" ? 1 : 0);
+  const stages = useMemo<FlowStage[]>(
+    () =>
+      mode === "realized"
+        ? ["realized"]
+        : mode === "forecast"
+          ? forecast
+          : ["realized", ...forecast],
+    [mode, forecast],
+  );
+  const isFlow = kind === "cash_flow";
+  const wantsRecurring = isFlow && stages.includes("recurring");
+  // Saldo da empresa não vale para um recorte (centro de custo ou só os
+  // próprios lançamentos): aí o fluxo mostra o acumulado do recorte.
+  const hasOpening = isFlow && !ccIds && !onlyOwnPayables;
+  const compRange = useMemo(
+    () => comparisonRange(range.start, range.end, comparison),
+    [range, comparison],
+  );
+  const competence = kind === "dre" && regime === "competence";
 
-  const handleGenerate = async (formatType: "pdf" | "csv" | "excel") => {
-    if (!selectedCompany || !user) return;
+  // ── Dados ────────────────────────────────────────────────────────────────
+  const scopeKey = [
+    companyId,
+    createdBy ?? "",
+    ccIds?.join(",") ?? "",
+    competence ? "competence" : "dates",
+  ];
 
-    try {
-      setLoadingFormat(formatType);
+  const fetchPeriod = async (start: Date, end: Date) => {
+    const base = {
+      companyId: companyId!,
+      startDate: start,
+      endDate: end,
+      createdBy,
+      costCenterIds: ccIds,
+    };
+    const [byDue, byPayment, byCompetence] = await Promise.all([
+      transactionService.getAll(base),
+      transactionService.getByPaymentDate(base),
+      competence
+        ? transactionService
+            .getByCompetence({
+              companyId: companyId!,
+              from: format(start, "yyyy-MM"),
+              to: format(end, "yyyy-MM"),
+              createdBy,
+              costCenterIds: ccIds,
+            })
+            .catch((error) => {
+              // Sem o índice publicado a DRE ainda sai, só sem os lançamentos
+              // de competência no período e data fora dele; a tela avisa.
+              console.warn("Consulta por competência indisponível", error);
+              return null;
+            })
+        : [],
+    ]);
+    return {
+      transactions: dedupe([byDue, byPayment, byCompetence ?? []]),
+      competenceMissing: byCompetence === null,
+    };
+  };
 
-      // Duas queries paralelas para capturar todas as transações do período:
-      // 1. Por dueDate — transações não-pagas cuja data de vencimento cai no período
-      // 2. Por paymentDate — transações pagas cuja data de pagamento cai no período
-      //    (independente da data de vencimento)
-      // Depois mesclamos e deduplicamos por ID.
-      const dueDateFilter: {
-        companyId: string;
-        createdBy?: string;
-        startDate?: Date;
-        endDate?: Date;
-        costCenterId?: string;
-      } = {
-        companyId: selectedCompany.id,
-        startDate: startDate,
-        endDate: endDate,
-      };
-      if (onlyOwnPayables) {
-        dueDateFilter.createdBy = user.uid;
-      }
-      if (costCenterFilter !== "all") {
-        dueDateFilter.costCenterId = costCenterFilter;
-      }
+  const current = useQuery({
+    queryKey: ["report", ...scopeKey, +range.start, +range.end],
+    queryFn: () => fetchPeriod(range.start, range.end),
+    enabled: !!companyId && canViewReports,
+    staleTime: 60_000,
+  });
+  const prior = useQuery({
+    queryKey: [
+      "report",
+      ...scopeKey,
+      +(compRange?.start ?? 0),
+      +(compRange?.end ?? 0),
+    ],
+    queryFn: () => fetchPeriod(compRange!.start, compRange!.end),
+    enabled: !!companyId && canViewReports && !!compRange,
+    staleTime: 60_000,
+  });
+  const templatesQuery = useQuery({
+    queryKey: ["recurring-templates", companyId, "active"],
+    queryFn: () => recurrenceService.getTemplates(companyId!, { active: true }),
+    enabled: !!companyId && wantsRecurring,
+    staleTime: 5 * 60_000,
+  });
+  const templates = useMemo(
+    () =>
+      (templatesQuery.data ?? []).filter(
+        (t) => !createdBy || t.baseTransactionData.createdBy === createdBy,
+      ),
+    [templatesQuery.data, createdBy],
+  );
 
-      const paymentDateFilter: {
-        companyId: string;
-        startDate: Date;
-        endDate: Date;
-        createdBy?: string;
-        costCenterId?: string;
-      } = {
-        companyId: selectedCompany.id,
-        startDate: startDate,
-        endDate: endDate,
-      };
-      if (onlyOwnPayables) {
-        paymentDateFilter.createdBy = user.uid;
-      }
-      if (costCenterFilter !== "all") {
-        paymentDateFilter.costCenterId = costCenterFilter;
-      }
-
-      const [byDueDate, byPaymentDate, entities] = await Promise.all([
-        transactionService.getAll(dueDateFilter),
-        transactionService.getByPaymentDate(paymentDateFilter),
-        entityService.getAll(selectedCompany.id),
-      ]);
-
-      // Mesclar e deduplicar por ID
-      const seen = new Set<string>();
-      const allTransactions: Transaction[] = [];
-      for (const t of byDueDate) {
-        if (!seen.has(t.id)) {
-          seen.add(t.id);
-          allTransactions.push(t);
-        }
-      }
-      for (const t of byPaymentDate) {
-        if (!seen.has(t.id)) {
-          seen.add(t.id);
-          allTransactions.push(t);
-        }
-      }
-
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-
-      // Filtro em memória pela data efetiva (paymentDate p/ pagas, dueDate p/ demais)
-      let filtered = allTransactions.filter((t) => {
-        const dateToCheck =
-          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-        return dateToCheck >= start && dateToCheck <= end;
-      });
-
-      if (reportType === "consolidated") {
-        const templates = await recurrenceService.getTemplates(
-          selectedCompany.id,
-          { active: true },
-        );
-
-        const projectedTransactions: Transaction[] = [];
-
-        templates.forEach((template) => {
-          let nextDate = template.nextDueDate;
-          const interval = template.interval || 1;
-
-          while (
-            !isAfter(nextDate, end) &&
-            (!template.endDate || !isAfter(nextDate, template.endDate))
-          ) {
-            if (nextDate >= start) {
-              projectedTransactions.push({
-                ...template.baseTransactionData,
-                id: `proj_${template.id}_${nextDate.getTime()}`,
-                companyId: selectedCompany.id,
-                description: `${template.description} (Projeção)`,
-                amount: template.amount,
-                type: template.type,
-                status: "draft",
-                dueDate: nextDate,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                createdBy: "system",
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              } as any as Transaction);
-            }
-
-            switch (template.frequency) {
-              case "daily":
-                nextDate = addDays(nextDate, interval);
-                break;
-              case "weekly":
-                nextDate = addWeeks(nextDate, interval);
-                break;
-              case "monthly":
-                nextDate = addMonths(nextDate, interval);
-                break;
-              case "yearly":
-                nextDate = addYears(nextDate, interval);
-                break;
-              default:
-                nextDate = addMonths(nextDate, interval);
-            }
-          }
+  const openingQuery = useQuery({
+    queryKey: [
+      "report-opening",
+      companyId,
+      +range.start,
+      stages.join(","),
+      templates.length,
+    ],
+    queryFn: async () => {
+      const { balance, hasCompanyStats } =
+        await dashboardService.getCashBalance(companyId!);
+      if (!hasCompanyStats) return null;
+      const today = new Date();
+      let movements: Transaction[];
+      if (range.start <= today) {
+        movements = await transactionService.getByPaymentDate({
+          companyId: companyId!,
+          startDate: range.start,
+          endDate: today,
         });
-
-        filtered = [...filtered, ...projectedTransactions];
-        filtered.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-      }
-
-      if (statusFilter !== "all") {
-        filtered = filtered.filter((t) => t.status === statusFilter);
-      }
-
-      // ── Guia de Transferências ──────────────────────────────────────────
-      if (reportType === "transfer_guide") {
-        if (formatType !== "excel") {
-          toast.info(
-            "O Guia de Transferências está disponível apenas no formato Excel.",
-          );
-          return;
-        }
-        const payablesForGuide = filtered.filter((t) => t.type === "payable");
-        const hasData = payablesForGuide.some(
-          (t) => t.paymentMethod === "pix" || t.paymentMethod === "boleto",
-        );
-        if (!hasData) {
-          toast.warning(
-            "Nenhuma transação com forma de pagamento PIX ou Boleto encontrada no período.",
-          );
-          return;
-        }
-        await reportService.exportTransferGuide(
-          payablesForGuide,
-          start,
-          end,
-          selectedCompany.name,
-          entities as Entity[],
-        );
-        toast.success("Guia de Transferências gerado!");
-        return;
-      }
-
-      if (filtered.length === 0) {
-        toast.warning("Nenhuma transação encontrada no período.");
-        return;
-      }
-
-      const dreFilters = {
-        costCenterId: costCenterFilter !== "all" ? costCenterFilter : undefined,
-        costCenterName:
-          costCenterFilter !== "all"
-            ? costCenters.find((c) => c.id === costCenterFilter)?.name
-            : undefined,
-        statusLabel:
-          statusFilter !== "all" ? STATUS_LABELS[statusFilter] : undefined,
-      };
-
-      if (formatType === "csv") {
-        reportService.exportToCSV(filtered, accounts);
-        toast.success("Exportação CSV concluída!");
-      } else if (formatType === "excel" && reportType === "dre") {
-        await reportService.exportDREExcel(
-          filtered,
-          start,
-          end,
-          selectedCompany.name,
-          accounts,
-          dreFilters,
-        );
-        toast.success("DRE exportada para Excel!");
-      } else if (formatType === "excel") {
-        await reportService.exportToExcel(
-          filtered,
-          start,
-          end,
-          selectedCompany.name,
-          entities as Entity[],
-        );
-        toast.success("Exportação Excel concluída!");
       } else {
-        if (reportType === "cash_flow") {
-          await reportService.generateCashFlowPDF(
-            filtered,
-            start,
-            end,
-            selectedCompany.name,
-            entities as Entity[],
-          );
-        } else if (reportType === "dre") {
-          await reportService.generateDREPDF(
-            filtered,
-            start,
-            end,
-            selectedCompany.name,
-            accounts,
-            dreFilters,
-          );
-        } else if (reportType === "consolidated") {
-          await reportService.generateConsolidatedCashFlowPDF(
-            filtered,
-            start,
-            end,
-            selectedCompany.name,
-            initialBalance,
-          );
-        }
-        toast.success("Relatório PDF gerado!");
+        const from = addDays(startOfDay(today), 1);
+        const eve = subDays(range.start, 1);
+        movements = [
+          ...(await transactionService.getAll({
+            companyId: companyId!,
+            startDate: from,
+            endDate: eve,
+          })),
+          ...(wantsRecurring ? projectRecurrences(templates, from, eve) : []),
+        ];
+      }
+      return {
+        value: openingFromToday(balance, range.start, today, movements, stages),
+        todayBalance: balance,
+      };
+    },
+    enabled:
+      !!companyId &&
+      hasOpening &&
+      (!wantsRecurring || templatesQuery.isSuccess),
+    staleTime: 60_000,
+  });
+
+  const openingTyped =
+    openingOverride?.start === +range.start ? openingOverride.value : null;
+  const opening = hasOpening
+    ? (openingTyped ?? openingQuery.data?.value ?? 0)
+    : 0;
+
+  // ── Relatórios (os mesmos números vão para a tela e para os arquivos) ────
+  const gran =
+    granularity === "auto"
+      ? defaultGranularity(range.start, range.end)
+      : granularity;
+
+  const flow = useMemo(() => {
+    if (!isFlow || !current.data) return null;
+    const projected = wantsRecurring
+      ? projectRecurrences(templates, range.start, range.end)
+      : [];
+    return buildCashFlow([...current.data.transactions, ...projected], {
+      start: range.start,
+      end: range.end,
+      opening,
+      stages,
+      costCenterIds: ccIds,
+      granularity: gran,
+    });
+  }, [
+    isFlow,
+    current.data,
+    templates,
+    wantsRecurring,
+    range,
+    opening,
+    stages,
+    ccIds,
+    gran,
+  ]);
+
+  const flowPrev = useMemo(() => {
+    if (!isFlow || !compRange || !prior.data) return null;
+    const projected = wantsRecurring
+      ? projectRecurrences(templates, compRange.start, compRange.end)
+      : [];
+    return buildCashFlow([...prior.data.transactions, ...projected], {
+      start: compRange.start,
+      end: compRange.end,
+      stages,
+      costCenterIds: ccIds,
+      granularity: gran,
+    });
+  }, [
+    isFlow,
+    prior.data,
+    templates,
+    wantsRecurring,
+    compRange,
+    stages,
+    ccIds,
+    gran,
+  ]);
+
+  const dre = useMemo(
+    () =>
+      kind === "dre" && current.data
+        ? buildDre(current.data.transactions, accounts, {
+            start: range.start,
+            end: range.end,
+            costCenterIds: ccIds,
+            regime,
+          })
+        : null,
+    [kind, current.data, accounts, range, ccIds, regime],
+  );
+  const drePrev = useMemo(
+    () =>
+      kind === "dre" && compRange && prior.data
+        ? buildDre(prior.data.transactions, accounts, {
+            start: compRange.start,
+            end: compRange.end,
+            costCenterIds: ccIds,
+            regime,
+          })
+        : null,
+    [kind, prior.data, accounts, compRange, ccIds, regime],
+  );
+
+  const dreLine = (t: Transaction): DrillLine => ({
+    tx: t,
+    date: effectiveDate(t),
+    amount: dreAmount(t, ccIds),
+    status: situationOf(t),
+  });
+
+  const isEmpty = isFlow
+    ? !!flow && flow.lines.length === 0
+    : !!dre && !dre.rows.some((r) => r.total !== 0);
+
+  // ── Ações ────────────────────────────────────────────────────────────────
+  const filtersText = [
+    isFlow
+      ? MODE_LABEL[mode] +
+        (mode !== "realized" && forecast.length < FORECAST_STAGES.length
+          ? ` (previsto: ${forecast.map((s) => STAGE_INFO[s].label.toLowerCase()).join(", ")})`
+          : "")
+      : regime === "cash"
+        ? "Regime de caixa"
+        : "Regime de competência",
+    ccName ? `Centro de custo: ${ccName} e subordinados` : null,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+
+  const handleExport = async (fmt: ExportFormat) => {
+    if (!selectedCompany || !companyId) return;
+    setExporting(fmt);
+    try {
+      const ctx = {
+        start: range.start,
+        end: range.end,
+        companyName: selectedCompany.name,
+        filters: filtersText,
+        accounts,
+        costCenters,
+        costCenterIds: ccIds,
+        entities: await entityService.getAll(companyId),
+      };
+      if (isFlow && flow) {
+        if (fmt === "pdf") await reportService.generateCashFlowPDF(flow, ctx);
+        if (fmt === "excel") await reportService.exportCashFlowExcel(flow, ctx);
+        if (fmt === "csv") reportService.exportCashFlowCSV(flow, ctx);
+      } else if (dre) {
+        const dreCtx = {
+          ...ctx,
+          regime,
+          competenceMissing: current.data?.competenceMissing,
+        };
+        if (fmt === "pdf") await reportService.generateDREPDF(dre, dreCtx);
+        if (fmt === "excel") await reportService.exportDREExcel(dre, dreCtx);
+        if (fmt === "csv") reportService.exportDRECSV(dre, dreCtx);
       }
     } catch (error) {
       console.error(error);
-      toast.error("Erro ao gerar relatório.");
+      toast.error("Não foi possível gerar o arquivo. Tente novamente.");
     } finally {
-      setLoadingFormat(null);
+      setExporting(null);
     }
   };
 
+  const pickPeriod = (key: string) => {
+    const p = periods.find((x) => x.key === key)!;
+    setRange({ start: p.start, end: p.end, key: p.key });
+  };
+
+  const toggleStage = (stage: FlowStage) =>
+    setForecast((prev) =>
+      prev.includes(stage)
+        ? prev.filter((s) => s !== stage)
+        : FORECAST_STAGES.filter((s) => prev.includes(s) || s === stage),
+    );
+
+  // DRE em que o resultado das contas não representa o período: o arquivo só
+  // sai depois de a pessoa confirmar que viu isso.
+  const lowCoverage = !isFlow && !!dre && dre.coverage < DRE_MIN_COVERAGE;
+  const requestExport = (fmt: ExportFormat) =>
+    lowCoverage ? setConfirmExport(fmt) : handleExport(fmt);
+
+  const unclassified = dre?.rows.filter((r) => r.kind === "info") ?? [];
+  const unclassifiedLines = unclassified.flatMap((r) => r.sources ?? []);
+  const resultOf = (key: string) =>
+    dre?.rows.find((r) => r.key === key)?.total ?? 0;
+
+  const emptyHint =
+    isFlow && mode === "realized"
+      ? "Nada foi pago ou recebido no período. Para ver o que vem por aí, escolha Previsto em Situação."
+      : ccIds
+        ? "Retire o filtro de centro de custo ou escolha um período maior."
+        : "Escolha um período maior.";
+
+  if (!canViewReports) return null;
+
+  const loading =
+    current.isLoading || (wantsRecurring && templatesQuery.isLoading);
+
   return (
-    <div className="flex flex-col gap-6 pb-28 md:pb-0">
-      {/* Header — padrão do sistema */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+    <div className="flex flex-col gap-5">
+      {/* ── Cabeçalho ─────────────────────────────────────────────────── */}
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="space-y-3">
+          <h1 className="text-xl font-bold tracking-tight md:text-3xl">
             Relatórios
           </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
-            Gere e exporte relatórios financeiros por período.
-          </p>
+          <Tabs value={kind} onValueChange={(v) => setKind(v as ReportKind)}>
+            <TabsList>
+              <TabsTrigger value="cash_flow" className="px-3">
+                Fluxo de caixa
+              </TabsTrigger>
+              <TabsTrigger value="dre" className="px-3">
+                DRE gerencial
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-      </div>
-
-      {/* Report Type selector */}
-      <div className="rounded-xl border bg-card divide-y overflow-hidden">
-        {REPORT_TYPES.map((type) => {
-          const Icon = type.icon;
-          const isSelected = reportType === type.value;
-          return (
-            <button
-              key={type.value}
-              type="button"
-              onClick={() => setReportType(type.value)}
-              className={cn(
-                "w-full flex items-center gap-4 px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                isSelected ? type.bgClass : "hover:bg-accent",
-              )}
+        {/* Não modal: o item pode abrir a confirmação, e dois modais Radix
+            seguidos deixam a página sem cliques. */}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              loading={exporting !== null}
+              disabled={
+                exporting !== null || loading || isEmpty || !!current.error
+              }
             >
-              <div
-                className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
-                  isSelected ? type.iconBg : "bg-muted",
-                )}
+              {exporting === null && <Download className="h-4 w-4" />}
+              Exportar
+              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            {EXPORTS[kind].map((e) => (
+              <DropdownMenuItem
+                key={e.format}
+                onSelect={() => requestExport(e.format)}
               >
-                <Icon
-                  className={cn(
-                    "h-4 w-4",
-                    isSelected ? type.accentClass : "text-muted-foreground",
-                  )}
-                />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p
-                  className={cn(
-                    "text-sm font-semibold leading-none mb-1",
-                    isSelected ? type.accentClass : "text-foreground",
-                  )}
-                >
-                  {type.label}
-                </p>
-                <p className="text-xs text-muted-foreground leading-snug">
-                  {type.description}
-                </p>
-              </div>
-              {isSelected && (
-                <div className="h-1.5 w-1.5 rounded-full bg-current shrink-0 opacity-60" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ── Mobile: compact config summary ──────────────────────────────── */}
-      <div className="md:hidden space-y-3">
-        {/* Active config chips — scrollable horizontal row */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {/* Period chip — always shown */}
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted pl-2.5 pr-3 py-1 text-xs font-medium text-foreground">
-            <CalendarIcon className="h-3 w-3 text-muted-foreground" />
-            {format(startDate, "dd MMM", { locale: ptBR })}
-            {" → "}
-            {format(endDate, "dd MMM yy", { locale: ptBR })}
-          </span>
-
-          {/* Status chip */}
-          {statusFilter !== "all" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-              {STATUS_LABELS[statusFilter] ?? statusFilter}
-              <button
-                onClick={() => setStatusFilter("all")}
-                className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                aria-label="Remover filtro de status"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          )}
-
-          {/* Cost center chip */}
-          {costCenterFilter !== "all" && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary max-w-[140px]">
-              <span className="truncate">
-                {costCenters.find((c) => c.id === costCenterFilter)?.name ??
-                  "CC"}
-              </span>
-              <button
-                onClick={() => setCostCenterFilter("all")}
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                aria-label="Remover filtro de centro de custo"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          )}
-        </div>
-
-        {/* Config button */}
-        <button
-          type="button"
-          onClick={() => setMobileConfigOpen(true)}
-          className={cn(
-            "relative flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors",
-            activeConfigCount > 0
-              ? "border-primary/40 bg-primary/5 text-primary"
-              : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
-          )}
-        >
-          <SlidersHorizontal className="h-4 w-4" />
-          Configurar relatório
-          {activeConfigCount > 0 && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-              {activeConfigCount}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* ── Desktop: Period & Filters Card ──────────────────────────────── */}
-      <div className="hidden md:block">
-        <Card>
-          <CardHeader>
-            <CardTitle>Configurar Relatório</CardTitle>
-          </CardHeader>
-
-          <CardContent className="space-y-6">
-            {/* Período */}
-            <div className="space-y-3">
-              <Label>Período</Label>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_PERIODS.map((range) => (
-                  <button
-                    key={range.label}
-                    type="button"
-                    onClick={() => {
-                      setStartDate(range.start);
-                      setEndDate(range.end);
-                      setActiveQuickPeriod(range.label);
-                    }}
-                    className={cn(
-                      "text-xs px-3 py-1.5 rounded-md border transition-all duration-100 font-medium",
-                      activeQuickPeriod === range.label
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted",
-                    )}
-                  >
-                    {range.label}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-muted-foreground">
-                    Data Inicial
-                  </Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full pl-3 text-left font-normal",
-                          !startDate && "text-muted-foreground",
-                        )}
-                      >
-                        {startDate
-                          ? format(startDate, "dd MMM yyyy", { locale: ptBR })
-                          : "Selecione"}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={startDate}
-                        onSelect={(date) => {
-                          if (date) {
-                            setStartDate(date);
-                            setActiveQuickPeriod(null);
-                          }
-                        }}
-                        locale={ptBR}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                <div>
+                  <p>{e.label}</p>
+                  <p className="text-xs text-muted-foreground">{e.hint}</p>
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-muted-foreground">
-                    Data Final
-                  </Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full pl-3 text-left font-normal",
-                          !endDate && "text-muted-foreground",
-                        )}
-                      >
-                        {endDate
-                          ? format(endDate, "dd MMM yyyy", { locale: ptBR })
-                          : "Selecione"}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={endDate}
-                        onSelect={(date) => {
-                          if (date) {
-                            setEndDate(date);
-                            setActiveQuickPeriod(null);
-                          }
-                        }}
-                        locale={ptBR}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </div>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
 
-            {/* Separator */}
-            <div className="h-px bg-border" />
-
-            {/* Filtros */}
-            <div className="space-y-3">
-              <Label>Filtros</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-muted-foreground">
-                    Status das Transações
-                  </Label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos os status</SelectItem>
-                      <SelectItem value="authorized">
-                        Somente Autorizadas
-                      </SelectItem>
-                      <SelectItem value="approved">
-                        Somente Aprovadas
-                      </SelectItem>
-                      <SelectItem value="paid">Somente Pagas</SelectItem>
-                      <SelectItem value="pending_approval">
-                        Somente Pendentes
-                      </SelectItem>
-                      <SelectItem value="draft">Somente Rascunhos</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-muted-foreground">
-                    Centro de Custo
-                  </Label>
-                  <Select
-                    value={costCenterFilter}
-                    onValueChange={setCostCenterFilter}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos os centros</SelectItem>
-                      {costCenters.map((cc) => (
-                        <SelectItem key={cc.id} value={cc.id}>
-                          {cc.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            {/* Saldo Inicial (apenas para fluxo consolidado) */}
-            {reportType === "consolidated" && (
-              <>
-                <div className="h-px bg-border" />
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Label>Saldo Inicial</Label>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-full px-2 py-0.5">
-                      <Sparkles className="h-2.5 w-2.5" />
-                      Projeção
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground -mt-1">
-                    Saldo das contas no dia anterior ao início do período.
-                  </p>
-                  <div className="w-full sm:max-w-[200px]">
-                    <CurrencyInput
-                      value={initialBalance}
-                      onChange={setInitialBalance}
-                      placeholder="R$ 0,00"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Nota para Guia de Transferências */}
-            {reportType === "transfer_guide" && (
-              <>
-                <div className="h-px bg-border" />
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 space-y-1">
-                  <p className="font-semibold flex items-center gap-1.5">
-                    <Landmark className="h-4 w-4 shrink-0" />
-                    Guia de Transferências
-                  </p>
-                  <ul className="list-disc list-inside text-xs space-y-0.5 text-amber-700 dark:text-amber-400">
-                    <li>
-                      <strong>Aba PIX:</strong> transações agrupadas por
-                      entidade + dia — uma transferência por grupo.
-                    </li>
-                    <li>
-                      <strong>Aba Boletos:</strong> listagem individual com
-                      linha digitável para cada boleto.
-                    </li>
-                    <li>
-                      Recomenda-se filtrar por status{" "}
-                      <strong>Autorizado</strong> ou <strong>Aprovado</strong>{" "}
-                      para exibir apenas o que ainda precisa ser pago.
-                    </li>
-                    <li>
-                      Os dados bancários (banco, agência, conta, chave PIX) são
-                      carregados do cadastro da entidade.
-                    </li>
-                  </ul>
-                </div>
-              </>
-            )}
-
-            {/* Separator + Actions */}
-            <div className="h-px bg-border" />
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  {format(startDate, "dd MMM", { locale: ptBR })}
-                </span>
-                {" → "}
-                <span className="font-medium text-foreground">
-                  {format(endDate, "dd MMM yyyy", { locale: ptBR })}
-                </span>
-                {" · "}
-                {selectedReportType.label}
-              </p>
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {reportType !== "transfer_guide" && (
-                  <Button
-                    variant="outline"
-                    onClick={() => handleGenerate("csv")}
-                    disabled={isLoading}
-                    loading={loadingFormat === "csv"}
-                    className="w-full sm:w-auto"
-                  >
-                    {loadingFormat !== "csv" && (
-                      <Download className="h-4 w-4" />
-                    )}
-                    Exportar CSV
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={() => handleGenerate("excel")}
-                  disabled={isLoading}
-                  loading={loadingFormat === "excel"}
-                  className={cn(
-                    "w-full sm:w-auto",
-                    reportType === "transfer_guide"
-                      ? "text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950"
-                      : "text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950",
-                  )}
-                >
-                  {loadingFormat !== "excel" && (
-                    <SheetIcon className="h-4 w-4" />
-                  )}
-                  {reportType === "transfer_guide"
-                    ? "Gerar Guia (Excel)"
-                    : "Exportar Excel"}
-                </Button>
-                {reportType !== "transfer_guide" && (
-                  <Button
-                    onClick={() => handleGenerate("pdf")}
-                    disabled={isLoading}
-                    loading={loadingFormat === "pdf"}
-                    className="w-full sm:w-auto"
-                  >
-                    {loadingFormat !== "pdf" && (
-                      <FileText className="h-4 w-4" />
-                    )}
-                    Gerar PDF
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── Mobile: sticky export bar ───────────────────────────────────── */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] left-0 right-0 z-40 md:hidden border-t bg-background/95 backdrop-blur-sm px-4 py-3 space-y-2">
-        <p className="text-xs text-muted-foreground">
-          <span className={cn("font-medium", selectedReportType.accentClass)}>
-            {selectedReportType.label}
-          </span>
-          {" · "}
-          <span className="font-medium text-foreground">
-            {format(startDate, "dd MMM", { locale: ptBR })}
-            {" → "}
-            {format(endDate, "dd MMM yy", { locale: ptBR })}
-          </span>
-        </p>
-        {reportType === "transfer_guide" ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleGenerate("excel")}
-            disabled={isLoading}
-            loading={loadingFormat === "excel"}
-            className="w-full text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950"
+      {/* ── Filtros ───────────────────────────────────────────────────── */}
+      <section
+        aria-label="Filtros do relatório"
+        className="flex flex-col gap-3 rounded-lg border bg-card p-3"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Popover
+            open={calendarOpen}
+            onOpenChange={(o) => {
+              setCalendarOpen(o);
+              if (o) setDraftRange(undefined);
+            }}
           >
-            {loadingFormat !== "excel" && <SheetIcon className="h-3.5 w-3.5" />}
-            Gerar Guia (Excel)
-          </Button>
-        ) : (
-          <div className="grid grid-cols-3 gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleGenerate("csv")}
-              disabled={isLoading}
-              loading={loadingFormat === "csv"}
-            >
-              {loadingFormat !== "csv" && <Download className="h-3.5 w-3.5" />}
-              CSV
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleGenerate("excel")}
-              disabled={isLoading}
-              loading={loadingFormat === "excel"}
-              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-950"
-            >
-              {loadingFormat !== "excel" && (
-                <SheetIcon className="h-3.5 w-3.5" />
-              )}
-              Excel
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => handleGenerate("pdf")}
-              disabled={isLoading}
-              loading={loadingFormat === "pdf"}
-            >
-              {loadingFormat !== "pdf" && <FileText className="h-3.5 w-3.5" />}
-              PDF
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* ── Mobile: config sheet ─────────────────────────────────────────── */}
-      <Sheet open={mobileConfigOpen} onOpenChange={setMobileConfigOpen}>
-        <SheetContent
-          side="bottom"
-          className="rounded-t-2xl max-h-[92dvh] overflow-y-auto px-4 pb-6 pt-3"
-        >
-          <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/25 shrink-0" />
-          <SheetTitle className="mb-4 text-base font-semibold">
-            Configurar Relatório
-          </SheetTitle>
-
-          <div className="space-y-5">
-            {/* Período rápido */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Período Rápido
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_PERIODS.map((range) => (
-                  <button
-                    key={range.label}
-                    type="button"
-                    onClick={() => {
-                      setStartDate(range.start);
-                      setEndDate(range.end);
-                      setActiveQuickPeriod(range.label);
-                    }}
-                    className={cn(
-                      "text-xs px-3 py-1.5 rounded-md border transition-all duration-100 font-medium",
-                      activeQuickPeriod === range.label
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted",
-                    )}
-                  >
-                    {range.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Período personalizado — native date inputs (evita conflito Popover/Sheet) */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Período Personalizado
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">De</Label>
-                  <Input
-                    type="date"
-                    value={format(startDate, "yyyy-MM-dd")}
-                    onChange={(e) => {
-                      const d = e.target.valueAsDate;
-                      if (!d) return;
-                      const adjusted = new Date(
-                        d.getTime() + d.getTimezoneOffset() * 60000,
-                      );
-                      setStartDate(adjusted);
-                      setActiveQuickPeriod(null);
-                    }}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Até</Label>
-                  <Input
-                    type="date"
-                    value={format(endDate, "yyyy-MM-dd")}
-                    onChange={(e) => {
-                      const d = e.target.valueAsDate;
-                      if (!d) return;
-                      const adjusted = new Date(
-                        d.getTime() + d.getTimezoneOffset() * 60000,
-                      );
-                      setEndDate(adjusted);
-                      setActiveQuickPeriod(null);
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Status */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Status
-              </p>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os status</SelectItem>
-                  <SelectItem value="authorized">
-                    Somente Autorizadas
-                  </SelectItem>
-                  <SelectItem value="approved">Somente Aprovadas</SelectItem>
-                  <SelectItem value="paid">Somente Pagas</SelectItem>
-                  <SelectItem value="pending_approval">
-                    Somente Pendentes
-                  </SelectItem>
-                  <SelectItem value="draft">Somente Rascunhos</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Centro de Custo */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Centro de Custo
-              </p>
-              <Select
-                value={costCenterFilter}
-                onValueChange={setCostCenterFilter}
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="font-financial font-normal"
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os centros</SelectItem>
-                  {costCenters.map((cc) => (
-                    <SelectItem key={cc.id} value={cc.id}>
-                      {cc.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Saldo Inicial (apenas para fluxo consolidado) */}
-            {reportType === "consolidated" && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Saldo Inicial
-                  </p>
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-full px-2 py-0.5">
-                    <Sparkles className="h-2.5 w-2.5" />
-                    Projeção
-                  </span>
-                </div>
-                <CurrencyInput
-                  value={initialBalance}
-                  onChange={setInitialBalance}
-                  placeholder="R$ 0,00"
-                />
-              </div>
-            )}
-
-            {/* Nota para Guia de Transferências (mobile) */}
-            {reportType === "transfer_guide" && (
-              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400 space-y-1">
-                <p className="font-semibold text-amber-800 dark:text-amber-300">
-                  Guia de Transferências
-                </p>
-                <p>
-                  Gera um Excel com 2 abas: <strong>PIX</strong> (agrupado por
-                  entidade/dia) e <strong>Boletos</strong> (com linha
-                  digitável). Recomende filtrar por status{" "}
-                  <strong>Autorizado</strong>.
-                </p>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="flex gap-3 pt-2">
-              {activeConfigCount > 0 && (
+                <CalendarIcon className="h-4 w-4 opacity-60" />
+                {periodText(range.start, range.end)}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="range"
+                numberOfMonths={2}
+                defaultMonth={range.start}
+                selected={draftRange ?? { from: range.start, to: range.end }}
+                onSelect={setDraftRange}
+                locale={ptBR}
+              />
+              <div className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+                <span className="font-financial">
+                  {draftRange?.from
+                    ? `${format(draftRange.from, "dd/MM/yyyy")} a ${
+                        draftRange.to
+                          ? format(draftRange.to, "dd/MM/yyyy")
+                          : "…"
+                      }`
+                    : "Escolha o primeiro e o último dia"}
+                </span>
                 <Button
-                  variant="outline"
-                  className="flex-1"
+                  size="sm"
+                  disabled={!draftRange?.from}
                   onClick={() => {
-                    setStatusFilter("all");
-                    setCostCenterFilter("all");
+                    const from = draftRange!.from!;
+                    const to = draftRange!.to ?? from;
+                    setRange({ start: from, end: to, key: null });
+                    setCalendarOpen(false);
                   }}
                 >
-                  Limpar filtros
+                  Aplicar
                 </Button>
-              )}
-              <Button
-                className="flex-1"
-                onClick={() => setMobileConfigOpen(false)}
-              >
-                Aplicar
-              </Button>
-            </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <div className="max-w-full overflow-x-auto">
+            <Segmented
+              label="Atalhos de período"
+              hideLabel
+              value={range.key ?? ""}
+              onChange={pickPeriod}
+              options={periods.map((p) => ({ value: p.key, label: p.label }))}
+            />
           </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Centro de custo
+            <Select
+              value={costCenterFilter}
+              onValueChange={setCostCenterFilter}
+            >
+              <SelectTrigger size="sm" className="min-w-44 text-foreground">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {ccTree.map(({ cc, depth }) => (
+                  <SelectItem key={cc.id} value={cc.id}>
+                    <span style={{ paddingLeft: `${depth * 0.75}rem` }}>
+                      {cc.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+
+          {isFlow ? (
+            <>
+              <Segmented
+                label="Situação"
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: "realized", label: "Realizado" },
+                  { value: "forecast", label: "Previsto" },
+                  { value: "both", label: MODE_LABEL.both },
+                ]}
+              />
+              <Segmented
+                label="Agrupar por"
+                value={granularity === "auto" ? gran : granularity}
+                onChange={setGranularity}
+                options={[
+                  { value: "day", label: "Dia" },
+                  { value: "month", label: "Mês" },
+                ]}
+              />
+            </>
+          ) : (
+            <>
+              <Segmented
+                label="Regime"
+                value={regime}
+                onChange={setRegime}
+                options={[
+                  { value: "competence", label: "Competência" },
+                  { value: "cash", label: "Caixa" },
+                ]}
+              />
+              <Segmented
+                label="Colunas"
+                value={monthly ? "monthly" : "total"}
+                onChange={(v) => setMonthly(v === "monthly")}
+                options={[
+                  { value: "total", label: "Só o total" },
+                  { value: "monthly", label: "Mês a mês" },
+                ]}
+              />
+              <Segmented
+                label="Linhas zeradas"
+                value={hideZero ? "hide" : "show"}
+                onChange={(v) => setHideZero(v === "hide")}
+                options={[
+                  { value: "hide", label: "Ocultar" },
+                  { value: "show", label: "Mostrar" },
+                ]}
+              />
+            </>
+          )}
+
+          <Segmented
+            label="Comparar com"
+            value={comparison}
+            onChange={setComparison}
+            options={[
+              { value: "none", label: "Sem comparação" },
+              { value: "previous", label: "Período anterior" },
+              { value: "year", label: "Mesmo período do ano anterior" },
+            ]}
+          />
+        </div>
+
+        {isFlow && mode !== "realized" && (
+          <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
+            <span className="mr-1 text-xs text-muted-foreground">
+              Previsto inclui
+            </span>
+            {FORECAST_STAGES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={forecast.includes(s)}
+                onClick={() => toggleStage(s)}
+                className={cn(
+                  "h-7 rounded-full border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  forecast.includes(s)
+                    ? "border-foreground/30 bg-foreground/6 text-foreground"
+                    : "border-dashed text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {STAGE_INFO[s].label}
+                <span className="ml-1.5 text-muted-foreground">
+                  {STAGE_INFO[s].hint.toLowerCase()}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {hasOpening && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
+            <span>Saldo inicial em {format(range.start, "dd/MM/yyyy")}</span>
+            <div className="w-40">
+              <CurrencyInput
+                value={opening}
+                onChange={(value) =>
+                  setOpeningOverride({ start: +range.start, value })
+                }
+                className="h-8 font-financial text-sm text-foreground"
+                aria-label="Saldo inicial"
+              />
+            </div>
+            {openingTyped !== null ? (
+              <button
+                type="button"
+                onClick={() => setOpeningOverride(null)}
+                className="inline-flex items-center gap-1 hover:text-foreground"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Usar o calculado
+              </button>
+            ) : openingQuery.isLoading ? (
+              <span>calculando…</span>
+            ) : openingQuery.data ? (
+              <span>
+                Calculado do saldo de hoje (
+                {formatCurrency(openingQuery.data.todayBalance)}) até o início
+                do período. Pode ajustar.
+              </span>
+            ) : (
+              <span>Sem saldo de referência: digite o saldo das contas.</span>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Relatório ─────────────────────────────────────────────────── */}
+      {current.error ? (
+        <div className="flex flex-col items-center gap-3 rounded-lg border py-16 text-center">
+          <AlertCircle className="h-6 w-6 text-muted-foreground" />
+          <p className="text-sm">Não foi possível carregar os lançamentos.</p>
+          <Button size="sm" variant="outline" onClick={() => current.refetch()}>
+            Tentar de novo
+          </Button>
+        </div>
+      ) : loading || (!flow && !dre) ? (
+        <div className="space-y-3">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-72 w-full" />
+        </div>
+      ) : isEmpty ? (
+        <div className="rounded-lg border py-16 text-center">
+          <p className="text-sm">
+            Nenhum lançamento no período com esses filtros.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{emptyHint}</p>
+        </div>
+      ) : isFlow && flow ? (
+        <CashFlowView
+          report={flow}
+          previous={flowPrev}
+          showStages={mode !== "realized"}
+          hasOpening={hasOpening}
+          granularity={gran}
+          onDrill={setDrill}
+        />
+      ) : dre ? (
+        <div className="space-y-3">
+          {current.data?.competenceMissing && (
+            <div
+              role="status"
+              className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <p className="font-medium">Esta DRE pode estar incompleta.</p>
+              <p className="mt-1 text-amber-900 dark:text-amber-200">
+                Lançamentos com competência neste período, mas vencimento ou
+                pagamento em outro mês, ficaram de fora: a busca por competência
+                ainda não foi liberada no banco de dados. Peça ao administrador
+                do sistema para publicar os índices do Firestore.
+              </p>
+            </div>
+          )}
+          {lowCoverage && (
+            <div
+              role="status"
+              className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <p className="font-medium">
+                Só {formatPercent(dre.coverage)} do movimento do período tem
+                conta contábil.
+              </p>
+              <p className="mt-1 text-amber-900 dark:text-amber-200">
+                O resultado das contas classificadas é{" "}
+                <span className="font-financial font-medium">
+                  {formatCurrency(resultOf("Resultado Líquido do Período"))}
+                </span>
+                ; com os {unclassifiedLines.length} lançamentos sem conta, o
+                período fecha em{" "}
+                <span className="font-financial font-medium">
+                  {formatCurrency(
+                    resultOf("Resultado com Lançamentos sem Conta"),
+                  )}
+                </span>
+                . Classifique-os para a DRE valer como demonstrativo.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDrill({
+                      title: "Lançamentos sem conta contábil",
+                      subtitle: `${periodText(range.start, range.end)} · abra um lançamento para escolher a conta`,
+                      lines: unclassifiedLines.map(dreLine),
+                    })
+                  }
+                  className="underline underline-offset-2 hover:no-underline"
+                >
+                  Ver os {unclassifiedLines.length} lançamentos
+                </button>
+                <Link
+                  href={`/busca?q=${encodeURIComponent("sem:conta")}`}
+                  className="underline underline-offset-2 hover:no-underline"
+                >
+                  Todos os sem conta na busca
+                </Link>
+              </div>
+            </div>
+          )}
+          <DreView
+            dre={dre}
+            previous={drePrev}
+            monthly={monthly}
+            hideZero={hideZero}
+            lineFor={dreLine}
+            onDrill={setDrill}
+          />
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            <li>
+              {regime === "cash"
+                ? "Regime de caixa: só o que foi pago ou recebido, no mês da baixa."
+                : "Regime de competência: o mês de competência do lançamento; sem competência, a data de pagamento ou de vencimento."}{" "}
+              Rejeitadas não entram.{" "}
+              {dre.base > 0
+                ? "AV % sobre a receita líquida."
+                : "AV % indisponível: não há receita líquida classificada no período."}
+            </li>
+            {accounts.length === 0 && (
+              <li>
+                Sem plano de contas, tudo aparece como &ldquo;sem conta
+                contábil&rdquo;.{" "}
+                <Link
+                  href="/cadastros/plano-de-contas"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  Cadastrar o plano
+                </Link>
+              </li>
+            )}
+          </ul>
+        </div>
+      ) : null}
+
+      <DrillSheet drill={drill} onClose={() => setDrill(null)} />
+      <ConfirmDialog
+        open={confirmExport !== null}
+        onOpenChange={(o) => !o && setConfirmExport(null)}
+        title="Exportar uma DRE com pouca classificação?"
+        description={`Só ${dre ? formatPercent(dre.coverage) : ""} do movimento do período tem conta contábil, então o resultado das contas classificadas não representa o período. O arquivo sai com esse aviso no topo.`}
+        confirmText="Exportar com o aviso"
+        onConfirm={() => {
+          const fmt = confirmExport;
+          setConfirmExport(null);
+          if (fmt) void handleExport(fmt);
+        }}
+      />
     </div>
   );
 }

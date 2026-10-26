@@ -217,6 +217,9 @@ async function paidTotals(
 }
 
 export const dashboardService = {
+  /** Saldo em caixa hoje (company_stats); base do saldo inicial dos relatórios. */
+  getCashBalance: readCompanyBalance,
+
   /**
    * O que espera ação hoje, com contagem e total reais (agregados no
    * servidor). Usa os mesmos filtros das abas das listas, então o número do

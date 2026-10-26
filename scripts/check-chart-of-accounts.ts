@@ -133,7 +133,15 @@ assert.equal(row("Resultado Operacional").total, 600);
 assert.equal(row("Energia elétrica").total, -300);
 assert.equal(row("Administrativas").total, -300);
 assert.equal(dre.unclassifiedCount, 1);
-assert.equal(row("Total do Período (inclui lançamentos sem conta)").total, 550);
+const byKey = (key: string) => dre.rows.find((r) => r.key === key)!;
+assert.equal(byKey("Resultado com Lançamentos sem Conta").total, 550);
+// Com lançamento sem conta, o resultado é só das contas classificadas, e o
+// rótulo diz isso e o sinal.
+assert.equal(
+  byKey("Resultado Líquido do Período").label,
+  "Resultado das Contas Classificadas (Superávit)",
+);
+assert.equal(dre.coverage, 1400 / 1450);
 
 const byCc = buildDre(
   [
@@ -152,9 +160,37 @@ const byCc = buildDre(
   {
     start: new Date(2027, 0, 1),
     end: new Date(2027, 0, 31),
-    costCenterId: "A",
+    costCenterIds: ["A"],
   },
 );
 assert.equal(byCc.rows.find((r) => r.code === "4.2.02")!.total, -66);
+assert.equal(byCc.rows.find((r) => r.code === "4.2.02")!.sources!.length, 1);
+
+// Regime: competência manda o mês; caixa só conta a baixa, no dia dela.
+const regimeTxs = [
+  tx({
+    type: "payable",
+    amount: 100,
+    accountId: "4.2.02",
+    competence: "2027-01",
+    dueDate: new Date(2027, 1, 10),
+  }),
+  tx({
+    type: "payable",
+    amount: 40,
+    accountId: "4.2.02",
+    status: "paid",
+    dueDate: new Date(2026, 11, 20),
+    paymentDate: new Date(2027, 0, 5),
+  }),
+];
+const janOnly = { start: new Date(2027, 0, 1), end: new Date(2027, 0, 31) };
+const energy = (r: ReturnType<typeof buildDre>) =>
+  r.rows.find((x) => x.code === "4.2.02")!.total;
+assert.equal(energy(buildDre(regimeTxs, plan, janOnly)), -140);
+assert.equal(
+  energy(buildDre(regimeTxs, plan, { ...janOnly, regime: "cash" })),
+  -40,
+);
 
 console.log("plano de contas: ok");

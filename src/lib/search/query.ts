@@ -18,6 +18,7 @@ import { hasComprovante, isOverdue } from "../transactionTabs";
  *   venc:2026  venc:2026-07  venc:07/2026  venc:01/07/2026..31/07/2026
  *   pago:...   mesmos formatos, pela data de pagamento
  *   sem:comprovante   pagas sem comprovante, desde o início do controle
+ *   sem:conta         sem conta contábil (fora dos grupos da DRE)
  *   -termo     exclui      "frase exata"   casa junta
  */
 
@@ -95,6 +96,7 @@ type Tx = Pick<
   | "comprovanteId"
   | "comprovanteStoragePath"
   | "comprovanteUrl"
+  | "accountId"
 >;
 
 export const isSettled = (t: Pick<Transaction, "status">) =>
@@ -244,6 +246,7 @@ export interface ParsedQuery {
   due?: DayRange;
   paid?: DayRange;
   missingReceipt?: boolean;
+  missingAccount?: boolean;
   tokens: QueryToken[];
 }
 
@@ -325,6 +328,9 @@ export function parseQuery(raw: string): ParsedQuery {
         if (v === "comprovante") {
           q.missingReceipt = true;
           token("Sem comprovante");
+        } else if (v === "conta") {
+          q.missingAccount = true;
+          token("Sem conta contábil");
         } else token(whole, true);
         break;
       default:
@@ -375,7 +381,8 @@ export const hasFilters = (q: ParsedQuery) =>
   !!q.amount ||
   !!q.due ||
   !!q.paid ||
-  !!q.missingReceipt;
+  !!q.missingReceipt ||
+  !!q.missingAccount;
 
 // ── Matching ─────────────────────────────────────────────────────────────────
 
@@ -428,6 +435,11 @@ export function matchTransaction(
   if (q.due && !inRange(t.dueDate, q.due)) return false;
   if (q.paid && !inRange(t.paymentDate, q.paid)) return false;
   if (q.missingReceipt && !needsReceipt(t, receiptsStart)) return false;
+  // ponytail: só a falta do campo; conta excluída ou sintética também cai em
+  // "sem conta" na DRE e aqui não aparece.
+  if (q.missingAccount && (t.accountId || t.status === "rejected")) {
+    return false;
+  }
   for (const term of q.terms) {
     const hit =
       hay.text.includes(term.text) ||

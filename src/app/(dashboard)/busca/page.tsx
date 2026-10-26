@@ -173,6 +173,10 @@ const SYNTAX: { examples: string[]; meaning: string }[] = [
     examples: ["sem:comprovante"],
     meaning: "pagas sem comprovante, desde o início do controle",
   },
+  {
+    examples: ["sem:conta"],
+    meaning: "sem conta contábil, fora dos grupos da DRE",
+  },
 ];
 
 const csv = (v: string | null) => (v ? v.split(",").filter(Boolean) : []);

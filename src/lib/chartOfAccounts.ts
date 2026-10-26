@@ -424,7 +424,7 @@ export interface DreColumn {
   label: string; // "jan/27"
 }
 
-export interface DreRow {
+export interface DreRow<T = DreTx> {
   kind: "group" | "account" | "subtotal" | "result" | "heading" | "info";
   label: string;
   code?: string;
@@ -432,48 +432,89 @@ export interface DreRow {
   level: number;
   values: number[];
   total: number;
+  /** Lançamentos que formam a linha (grupo, conta e "sem conta"). */
+  sources?: T[];
+  /**
+   * Identidade estável de subtotais e resultados, cujo rótulo muda com o
+   * sinal ("Superávit"/"Déficit"): é por ela que a comparação casa as linhas.
+   */
+  key?: string;
 }
 
-export interface DreReport {
+export interface DreReport<T = DreTx> {
   columns: DreColumn[];
-  rows: DreRow[];
+  rows: DreRow<T>[];
   /** Receita líquida do período — base da análise vertical. */
   base: number;
   unclassifiedCount: number;
+  /**
+   * Parte do movimento (receitas + despesas, em valor absoluto) que tem conta
+   * contábil, de 0 a 1. Baixa, o resultado das contas não representa o período.
+   */
+  coverage: number;
 }
 
-type DreTx = Pick<
+/** Abaixo disso a DRE avisa que o resultado não representa o período. */
+export const DRE_MIN_COVERAGE = 0.95;
+
+/**
+ * Competência: o mês a que o resultado pertence (o lançamento sem competência
+ * vale pela data efetiva). Caixa: só o que foi pago ou recebido, no dia da baixa.
+ */
+export type DreRegime = "competence" | "cash";
+
+export type DreTx = Pick<
   Transaction,
   | "type"
   | "status"
   | "amount"
   | "finalAmount"
   | "accountId"
+  | "costCenterId"
   | "costCenterAllocation"
   | "dueDate"
   | "paymentDate"
   | "competence"
 >;
 
-const isSettled = (t: DreTx) =>
+export const isSettled = (t: Pick<Transaction, "status" | "paymentDate">) =>
   (t.status === "paid" || t.status === "received") && !!t.paymentDate;
 
 /** Data efetiva — a mesma dos demais relatórios: pagamento se pago, senão vencimento. */
-export const effectiveDate = (t: DreTx) =>
-  isSettled(t) ? (t.paymentDate as Date) : t.dueDate;
+export const effectiveDate = (
+  t: Pick<Transaction, "status" | "paymentDate" | "dueDate">,
+) => (isSettled(t) ? (t.paymentDate as Date) : t.dueDate);
 
 /**
- * Valor da conta no relatório. Com filtro de centro de custo, só a parcela do
- * rateio daquele centro, proporcional ao valor final.
+ * Valor do lançamento no relatório. Com filtro de centro de custo, só a parcela
+ * do rateio que cai nos centros escolhidos (o centro e os descendentes),
+ * proporcional ao valor final. Lançamento antigo sem rateio, com o centro
+ * principal dentro do filtro, entra inteiro.
  */
-export function dreAmount(t: DreTx, costCenterId?: string) {
+export function dreAmount(t: DreTx, costCenterIds?: readonly string[]) {
   const full = t.finalAmount ?? t.amount;
-  if (!costCenterId) return full;
-  const share = (t.costCenterAllocation ?? [])
-    .filter((a) => a.costCenterId === costCenterId)
+  if (!costCenterIds?.length) return full;
+  const allocation = t.costCenterAllocation ?? [];
+  if (allocation.length === 0) {
+    return t.costCenterId && costCenterIds.includes(t.costCenterId) ? full : 0;
+  }
+  const share = allocation
+    .filter((a) => costCenterIds.includes(a.costCenterId))
     .reduce((s, a) => s.add(a.amount), currency(0)).value;
   if (!t.amount) return 0;
   return currency(full).multiply(share).divide(t.amount).value;
+}
+
+/** Mês (yyyy-MM) em que o lançamento entra na DRE, ou null se não entra. */
+export function dreMonth(t: DreTx, regime: DreRegime = "competence") {
+  if (t.status === "rejected") return null;
+  if (regime === "cash") {
+    // Baixa antiga sem paymentDate vale pelo vencimento, como na data efetiva.
+    return t.status === "paid" || t.status === "received"
+      ? format(effectiveDate(t), "yyyy-MM")
+      : null;
+  }
+  return t.competence ?? format(effectiveDate(t), "yyyy-MM");
 }
 
 const SECTIONS: Array<
@@ -495,7 +536,7 @@ const SECTIONS: Array<
   { group: "other_expenses", label: "(−) Outras Despesas" },
   { subtotal: "Resultado Antes dos Tributos sobre o Resultado" },
   { group: "income_taxes", label: "(−) Tributos sobre o Resultado" },
-  { result: "Resultado Líquido do Período (Superávit / Déficit)" },
+  { result: "Resultado Líquido do Período" },
   { heading: "Movimentações fora do resultado" },
   { group: "investments", label: "(±) Investimentos" },
   {
@@ -505,20 +546,42 @@ const SECTIONS: Array<
   { result: "Resultado após Investimentos e Financiamentos", outside: true },
 ];
 
+const outcome = (v: number) => (v >= 0 ? "Superávit" : "Déficit");
+
 /**
- * DRE gerencial do período, mês a mês, pela competência quando o lançamento
- * a tem, senão pela data efetiva.
+ * Rótulo dos resultados. Com lançamento sem conta, o resultado é só das contas
+ * classificadas: chamá-lo de "Resultado Líquido do Período" seria afirmar o
+ * que o número não mede.
+ */
+const RESULT_LABEL: Record<string, (partial: boolean, v: number) => string> = {
+  "Resultado Líquido do Período": (partial, v) =>
+    `${partial ? "Resultado das Contas Classificadas" : "Resultado Líquido do Período"} (${outcome(v)})`,
+  "Resultado após Investimentos e Financiamentos": (partial) =>
+    partial
+      ? "Resultado das Contas Classificadas após Investimentos e Financiamentos"
+      : "Resultado após Investimentos e Financiamentos",
+  "Resultado com Lançamentos sem Conta": (_, v) =>
+    `Resultado do Período com Lançamentos sem Conta (${outcome(v)})`,
+};
+
+/**
+ * DRE gerencial do período, mês a mês, pelo regime escolhido (ver `dreMonth`).
  *
  * Valores com sinal: entrada positiva, saída negativa, então todo subtotal é
  * a soma acumulada do que veio acima. Rejeitadas ficam fora. Lançamento sem
  * conta (ou com conta excluída/sintética) não some: vai para "sem conta
  * contábil" no fim, e a última linha fecha com o total do período.
  */
-export function buildDre(
-  transactions: DreTx[],
+export function buildDre<T extends DreTx>(
+  transactions: T[],
   accounts: ChartAccount[],
-  opts: { start: Date; end: Date; costCenterId?: string },
-): DreReport {
+  opts: {
+    start: Date;
+    end: Date;
+    costCenterIds?: readonly string[];
+    regime?: DreRegime;
+  },
+): DreReport<T> {
   const columns: DreColumn[] = eachMonthOfInterval({
     start: opts.start,
     end: opts.end,
@@ -540,52 +603,57 @@ export function buildDre(
   const groupOf = groupResolver(accounts);
 
   const perAccount = new Map<string, number[]>();
+  const sourcesOf = new Map<string, T[]>();
   const unclassified = { revenue: zero(), expense: zero() };
+  const unclassifiedSources = { revenue: [] as T[], expense: [] as T[] };
   let unclassifiedCount = 0;
+  let classifiedVolume = currency(0);
+  let unclassifiedVolume = currency(0);
 
   for (const t of transactions) {
-    if (t.status === "rejected") continue;
-    // Competência manda quando informada: é o mês a que o resultado pertence.
-    // ponytail: a tela de relatórios busca pelo período da data efetiva, então
-    // um lançamento com competência no período e vencimento fora dele não
-    // entra; buscar também por `competence` se isso aparecer.
-    const col = colIndex.get(
-      t.competence ?? format(effectiveDate(t), "yyyy-MM"),
-    );
+    const month = dreMonth(t, opts.regime);
+    const col = month === null ? undefined : colIndex.get(month);
     if (col === undefined) continue;
-    const raw = dreAmount(t, opts.costCenterId);
+    const raw = dreAmount(t, opts.costCenterIds);
     if (!raw) continue;
     const signed = t.type === "receivable" ? raw : -raw;
 
     const account = t.accountId ? byId.get(t.accountId) : undefined;
     if (!account || account.type !== "analytic" || !account.dreGroup) {
-      const bucket =
-        t.type === "receivable" ? unclassified.revenue : unclassified.expense;
+      const side = t.type === "receivable" ? "revenue" : "expense";
+      const bucket = unclassified[side];
       bucket[col] = currency(bucket[col]).add(signed).value;
+      unclassifiedSources[side].push(t);
       unclassifiedCount++;
+      unclassifiedVolume = unclassifiedVolume.add(Math.abs(raw));
       continue;
     }
+    classifiedVolume = classifiedVolume.add(Math.abs(raw));
     const vals = perAccount.get(account.id) ?? zero();
     vals[col] = currency(vals[col]).add(signed).value;
     perAccount.set(account.id, vals);
+    sourcesOf.set(account.id, [...(sourcesOf.get(account.id) ?? []), t]);
   }
 
   const groupsInPlan = new Set(accounts.map((a) => a.dreGroup).filter(Boolean));
   const hasOutside =
     groupsInPlan.has("investments") || groupsInPlan.has("financing");
-  const rows: DreRow[] = [];
+  const rows: DreRow<T>[] = [];
   const running = zero();
   let groupsShown = 0;
   let base: number | null = null;
 
-  const pushTotal = (kind: "subtotal" | "result", label: string) => {
+  const partial = unclassifiedCount > 0;
+  const pushTotal = (kind: "subtotal" | "result", key: string) => {
     if (groupsShown === 0) return;
+    const total = sum(running);
     rows.push({
       kind,
-      label,
+      key,
+      label: RESULT_LABEL[key]?.(partial, total) ?? key,
       level: 0,
       values: [...running],
-      total: sum(running),
+      total,
     });
   };
 
@@ -631,18 +699,23 @@ export function buildDre(
       level: 0,
       values: groupValues,
       total: sum(groupValues),
+      sources: analytic.flatMap((a) => sourcesOf.get(a.id) ?? []),
     });
     add(running, groupValues);
 
     const shown = new Map<string, number[]>();
+    const shownSources = new Map<string, T[]>();
     for (const a of analytic) {
       const vals = perAccount.get(a.id)!;
+      const src = sourcesOf.get(a.id) ?? [];
       shown.set(a.code, [...vals]);
+      shownSources.set(a.code, [...src]);
       for (let p = parentCodeOf(a.code); p; p = parentCodeOf(p)) {
         if (!byCode.has(p) || groupOf(p) !== s.group) continue;
         const acc = shown.get(p) ?? zero();
         add(acc, vals);
         shown.set(p, acc);
+        shownSources.set(p, [...(shownSources.get(p) ?? []), ...src]);
       }
     }
     const codes = [...shown.keys()].sort(compareCodes);
@@ -660,6 +733,7 @@ export function buildDre(
         level,
         values,
         total: sum(values),
+        sources: shownSources.get(code),
       });
     }
   }
@@ -672,10 +746,11 @@ export function buildDre(
       values: zero(),
       total: 0,
     });
-    for (const [label, vals] of [
-      ["Receitas sem conta", unclassified.revenue],
-      ["Despesas sem conta", unclassified.expense],
+    for (const [label, side] of [
+      ["Receitas sem conta", "revenue"],
+      ["Despesas sem conta", "expense"],
     ] as const) {
+      const vals = unclassified[side];
       if (vals.some((v) => v !== 0)) {
         rows.push({
           kind: "info",
@@ -683,12 +758,20 @@ export function buildDre(
           level: 1,
           values: vals,
           total: sum(vals),
+          sources: unclassifiedSources[side],
         });
         add(running, vals);
       }
     }
-    pushTotal("result", "Total do Período (inclui lançamentos sem conta)");
+    pushTotal("result", "Resultado com Lançamentos sem Conta");
   }
 
-  return { columns, rows, base: base ?? 0, unclassifiedCount };
+  const volume = classifiedVolume.add(unclassifiedVolume).value;
+  return {
+    columns,
+    rows,
+    base: base ?? 0,
+    unclassifiedCount,
+    coverage: volume ? classifiedVolume.value / volume : 1,
+  };
 }

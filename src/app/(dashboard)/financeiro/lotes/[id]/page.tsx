@@ -31,6 +31,8 @@ import {
   paymentBatchService,
 } from "@/lib/services/paymentBatchService";
 import { transactionService } from "@/lib/services/transactionService";
+import { entityService } from "@/lib/services/entityService";
+import { reportService } from "@/lib/services/reportService";
 import { notificationService } from "@/lib/services/notificationService";
 import { emailService } from "@/lib/services/emailService";
 import { Transaction } from "@/lib/types";
@@ -39,6 +41,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Collapsible,
   CollapsibleContent,
@@ -315,6 +323,38 @@ export default function PaymentBatchPage() {
     }
   };
 
+  // Guia para quem executa no banco: só o que ainda falta pagar no lote.
+  const handleTransferGuide = async () => {
+    const toPay = transactions.filter(
+      (t) =>
+        t.type === "payable" && t.status !== "paid" && t.status !== "rejected",
+    );
+    if (
+      !toPay.some(
+        (t) => t.paymentMethod === "pix" || t.paymentMethod === "boleto",
+      )
+    ) {
+      toast.warning("Nenhuma conta a pagar por PIX ou boleto neste lote.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const dues = toPay.map((t) => t.dueDate.getTime());
+      await reportService.exportTransferGuide(
+        toPay,
+        batch.startDate ?? new Date(Math.min(...dues)),
+        batch.endDate ?? new Date(Math.max(...dues)),
+        selectedCompany?.name ?? "",
+        await entityService.getAll(batch.companyId),
+      );
+    } catch (error) {
+      console.error("Error exporting transfer guide", error);
+      toast.error("Não foi possível gerar a guia. Tente novamente.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleApproved = () => {
     refresh();
     if (!user || !selectedCompany) return;
@@ -413,18 +453,41 @@ export default function PaymentBatchPage() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {!approving && actions.renderAction(batch, step, "default")}
-          <Button
-            variant="outline"
-            onClick={handleExport}
-            disabled={isExporting || transactions.length === 0}
-          >
-            {isExporting ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-4 w-4" />
-            )}
-            Exportar
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                disabled={isExporting || transactions.length === 0}
+              >
+                {isExporting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Exportar
+                <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuItem onSelect={handleExport}>
+                <div>
+                  <p>Planilha do lote</p>
+                  <p className="text-xs text-muted-foreground">
+                    Transações, saldo após os pagamentos e resumos
+                  </p>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleTransferGuide}>
+                <div>
+                  <p>Guia de transferências</p>
+                  <p className="text-xs text-muted-foreground">
+                    PIX agrupado por favorecido e dia, boletos com linha
+                    digitável
+                  </p>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {actions.renderMenu(batch)}
         </div>
       </header>

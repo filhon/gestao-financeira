@@ -22,6 +22,38 @@ export interface CostCenterTree {
 export const parentOf = (cc: CostCenter | undefined) =>
   cc?.parentId && cc.parentId !== "none" ? cc.parentId : null;
 
+/** O centro e todos os descendentes: filtrar por um pai inclui os filhos. */
+export function descendantIds(rootId: string, all: CostCenter[]): string[] {
+  return [
+    rootId,
+    ...all
+      .filter((c) => parentOf(c) === rootId)
+      .flatMap((c) => descendantIds(c.id, all)),
+  ];
+}
+
+/**
+ * Lista em ordem de árvore com a profundidade, para selects indentados.
+ * Tolera lista parcial (usuário que só vê os próprios centros): quem não tem
+ * o pai na lista vira raiz.
+ */
+export function flattenTree(all: CostCenter[]) {
+  const ids = new Set(all.map((c) => c.id));
+  const out: { cc: CostCenter; depth: number }[] = [];
+  const walk = (cc: CostCenter, depth: number) => {
+    out.push({ cc, depth });
+    all
+      .filter((c) => parentOf(c) === cc.id)
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+      .forEach((c) => walk(c, depth + 1));
+  };
+  all
+    .filter((c) => !ids.has(parentOf(c) ?? ""))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+    .forEach((c) => walk(c, 0));
+  return out;
+}
+
 /**
  * Monta o índice da hierarquia. Exige raiz única — é regra de negócio, não
  * convenção, e um segundo raiz significaria receita entrando em dois caixas.

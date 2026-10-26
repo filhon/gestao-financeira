@@ -9,29 +9,71 @@ const loadPdf = async () => {
   ]);
   return { jsPDF, autoTable };
 };
-import { Transaction, Entity, ChartAccount } from "@/lib/types";
-import { format, addDays, startOfDay, isAfter, isBefore } from "date-fns";
+import currency from "currency.js";
+import { Transaction, Entity, ChartAccount, CostCenter } from "@/lib/types";
+import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { formatCurrency } from "@/lib/utils";
 import {
-  buildDre,
-  dreAmount,
+  DRE_MIN_COVERAGE,
+  DreRegime,
+  DreReport,
   DreRow,
   DRE_GROUP_LABEL,
+  dreAmount,
   effectiveDate,
   groupResolver,
 } from "@/lib/chartOfAccounts";
+import {
+  CashFlowReport,
+  FlowLine,
+  STAGE_INFO,
+  isProjection,
+  periodSlug,
+  periodText,
+  situationOf,
+  toCsv,
+} from "@/lib/reports";
 
-/** Filtros da tela de relatórios que mudam o que a DRE mostra. */
-export interface DreFilters {
-  costCenterId?: string;
-  costCenterName?: string;
-  statusLabel?: string;
+/**
+ * O que a tela mostrava quando o arquivo foi gerado. `filters` vai impresso
+ * no cabeçalho: quem recebe o arquivo precisa saber o recorte sem perguntar.
+ */
+export interface ReportContext {
+  start: Date;
+  end: Date;
+  companyName: string;
+  /** Ex.: "Realizado + previsto  ·  Centro de custo: Obras". */
+  filters?: string;
+  entities?: Entity[];
+  accounts?: ChartAccount[];
+  costCenters?: CostCenter[];
+  costCenterIds?: string[];
 }
 
-const dreFilterText = (f: DreFilters) =>
-  (f.costCenterName ? `  ·  Centro de custo: ${f.costCenterName}` : "") +
-  (f.statusLabel ? `  ·  ${f.statusLabel}` : "");
+const filterSuffix = (ctx: ReportContext) =>
+  ctx.filters ? `  ·  ${ctx.filters}` : "";
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+const XLSX_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const lineStatus = (line: FlowLine) => situationOf(line.tx);
+
+const lineDescription = (line: FlowLine) =>
+  isProjection(line.tx)
+    ? `${line.tx.description} (recorrência)`
+    : line.tx.description || "-";
 
 /** Saída entre parênteses, como na DRE publicada. */
 const formatDreValue = (v: number) =>
@@ -44,7 +86,55 @@ const formatAv = (v: number, base: number) =>
     ? `${((v / base) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
     : "";
 
-const dreRowLabel = (r: DreRow) => {
+/** Opções da DRE que mudam o que o arquivo precisa avisar. */
+export type DreExportContext = ReportContext & {
+  regime: DreRegime;
+  /** A consulta por competência falhou: o arquivo sai sem parte dos lançamentos. */
+  competenceMissing?: boolean;
+};
+
+/**
+ * Notas impressas no arquivo. Os avisos de completude vêm primeiro: quem
+ * recebe o PDF não viu a tela e não pode descobrir sozinho que falta algo.
+ */
+const dreNotes = (dre: DreReport<Transaction>, ctx: DreExportContext) => [
+  ...(dre.coverage < DRE_MIN_COVERAGE
+    ? [
+        `ATENÇÃO: só ${formatPercentText(dre.coverage)} do movimento do período tem conta contábil. O resultado das contas classificadas não representa o período; o resultado com os lançamentos sem conta está na última linha.`,
+      ]
+    : []),
+  ...(ctx.competenceMissing
+    ? [
+        "ATENÇÃO: lançamentos com competência no período e vencimento ou pagamento fora dele não foram incluídos (consulta por competência indisponível).",
+      ]
+    : []),
+  ctx.regime === "cash"
+    ? "Regime de caixa: só o que foi pago ou recebido, no mês da baixa. Rejeitadas não entram."
+    : "Regime de competência: o mês de competência do lançamento; sem competência, a data efetiva (pagamento se pago, senão vencimento). Rejeitadas não entram.",
+  dre.base > 0
+    ? "AV % (análise vertical): participação de cada linha sobre a receita líquida do período. Valores entre parênteses são saídas."
+    : "AV % indisponível: não há receita líquida classificada no período. Valores entre parênteses são saídas.",
+  ...(dre.unclassifiedCount > 0
+    ? [
+        `${dre.unclassifiedCount} lançamento(s) sem conta contábil aparecem em linha própria e não entram nos grupos da DRE.`,
+      ]
+    : []),
+];
+
+const formatPercentText = (v: number) =>
+  `${(v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+
+/** Lançamentos que formam a DRE, cada um uma vez, em ordem de data. */
+const dreSources = (dre: DreReport<Transaction>) => {
+  const seen = new Set<string>();
+  return dre.rows
+    .filter((r) => r.kind === "group" || r.kind === "info")
+    .flatMap((r) => r.sources ?? [])
+    .filter((t) => !seen.has(t.id) && !!seen.add(t.id))
+    .sort((a, b) => effectiveDate(a).getTime() - effectiveDate(b).getTime());
+};
+
+const dreRowLabel = (r: DreRow<unknown>) => {
   if (r.kind === "account") {
     return `${"    ".repeat(Math.max(r.level - 1, 0))}${r.code}  ${r.label}`;
   }
@@ -124,13 +214,9 @@ export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
   // EXTRATO DE FLUXO DE CAIXA — redesign profissional
   // ─────────────────────────────────────────────────────────────────────────
-  generateCashFlowPDF: async (
-    transactions: Transaction[],
-    startDate: Date,
-    endDate: Date,
-    companyName: string,
-    entities: Entity[] = [],
-  ) => {
+  generateCashFlowPDF: async (report: CashFlowReport, ctx: ReportContext) => {
+    const { start: startDate, end: endDate, companyName } = ctx;
+    const entities = ctx.entities ?? [];
     const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF({
       orientation: "landscape",
@@ -168,17 +254,10 @@ export const reportService = {
     const textRGB = (c: [number, number, number]) =>
       doc.setTextColor(c[0], c[1], c[2]);
 
-    // ── Pré-calcular totais ───────────────────────────────────────────────
-    const eff = (t: Transaction) =>
-      t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-
-    const totalIn = transactions
-      .filter((t) => t.type === "receivable")
-      .reduce((s, t) => s + eff(t), 0);
-    const totalOut = transactions
-      .filter((t) => t.type === "payable")
-      .reduce((s, t) => s + eff(t), 0);
-    const netBal = totalIn - totalOut;
+    // ── Totais: os mesmos da tela ─────────────────────────────────────────
+    const totalIn = report.inflow;
+    const totalOut = report.outflow;
+    const closing = report.closing;
 
     // ── Função de rodapé (chamada depois de todas as páginas serem geradas) ──
     const drawFooter = (pageNum: number, totalPages: number) => {
@@ -225,7 +304,7 @@ export const reportService = {
     doc.setFontSize(7.5);
     textRGB(GRAY_300);
     doc.text(
-      `Período: ${format(startDate, "dd/MM/yyyy")} — ${format(endDate, "dd/MM/yyyy")}`,
+      `Período: ${periodText(startDate, endDate)}`,
       PAGE_W - MARGIN,
       15,
       { align: "right" },
@@ -236,14 +315,17 @@ export const reportService = {
       23,
       { align: "right" },
     );
+    if (ctx.filters) {
+      doc.text(ctx.filters, PAGE_W - MARGIN, 31, { align: "right" });
+    }
 
     // ════════════════════════════════════════════════════════════════════════
-    // KPI CARDS (3 caixas de resumo)
+    // KPI CARDS (4 caixas de resumo)
     // ════════════════════════════════════════════════════════════════════════
     const kpiY = 42;
     const kpiH = 22;
     const kpiGap = 5;
-    const kpiW = (USABLE_W - kpiGap * 2) / 3;
+    const kpiW = (USABLE_W - kpiGap * 3) / 4;
 
     const kpis: {
       label: string;
@@ -252,6 +334,13 @@ export const reportService = {
       bg: [number, number, number];
       border: [number, number, number];
     }[] = [
+      {
+        label: "SALDO INICIAL",
+        value: formatCurrency(report.opening),
+        accent: SLATE_600,
+        bg: SLATE_50,
+        border: SLATE_300,
+      },
       {
         label: "TOTAL ENTRADAS",
         value: formatCurrency(totalIn),
@@ -267,11 +356,11 @@ export const reportService = {
         border: RED_200,
       },
       {
-        label: "SALDO DO PERÍODO",
-        value: formatCurrency(netBal),
-        accent: netBal >= 0 ? GREEN_600 : RED_600,
-        bg: netBal >= 0 ? GREEN_50 : RED_50,
-        border: netBal >= 0 ? GREEN_200 : RED_200,
+        label: "SALDO FINAL",
+        value: formatCurrency(closing),
+        accent: closing >= 0 ? GREEN_600 : RED_600,
+        bg: closing >= 0 ? GREEN_50 : RED_50,
+        border: closing >= 0 ? GREEN_200 : RED_200,
       },
     ];
 
@@ -311,54 +400,43 @@ export const reportService = {
       {} as Record<string, Entity>,
     );
 
-    // Ordenar por data efetiva
-    const sorted = [...transactions].sort((a, b) => {
-      const dA =
-        a.status === "paid" && a.paymentDate ? a.paymentDate : a.dueDate;
-      const dB =
-        b.status === "paid" && b.paymentDate ? b.paymentDate : b.dueDate;
-      return dA.getTime() - dB.getTime();
-    });
-
-    // Agrupar por dia
-    const dayMap = new Map<string, { date: Date; txs: Transaction[] }>();
-    const dayOrder: string[] = [];
-
-    sorted.forEach((t) => {
-      const d =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      const key = format(d, "yyyy-MM-dd");
-      if (!dayMap.has(key)) {
-        dayMap.set(key, { date: d, txs: [] });
-        dayOrder.push(key);
-      }
-      dayMap.get(key)!.txs.push(t);
-    });
+    // Agrupar por dia (as linhas já vêm em ordem de data efetiva)
+    const dayMap = new Map<string, { date: Date; lines: FlowLine[] }>();
+    for (const line of report.lines) {
+      const key = format(line.date, "yyyy-MM-dd");
+      if (!dayMap.has(key)) dayMap.set(key, { date: line.date, lines: [] });
+      dayMap.get(key)!.lines.push(line);
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tableBody: any[][] = [];
+    let running = currency(report.opening);
 
-    dayOrder.forEach((dateKey) => {
-      const { date, txs } = dayMap.get(dateKey)!;
-
+    dayMap.forEach(({ date, lines }) => {
       // ── Ordenar por favorecido dentro do mesmo dia ───────────────────────
-      const txsSorted = [...txs].sort((a, b) => {
-        const entA = a.entityId ? entitiesMap[a.entityId] : undefined;
-        const entB = b.entityId ? entitiesMap[b.entityId] : undefined;
-        const nameA = (entA?.name || a.supplierOrClient || "").toLowerCase();
-        const nameB = (entB?.name || b.supplierOrClient || "").toLowerCase();
-        return nameA.localeCompare(nameB, "pt-BR", { sensitivity: "base" });
-      });
+      const nameOf = (t: Transaction) =>
+        (
+          (t.entityId ? entitiesMap[t.entityId]?.name : undefined) ||
+          t.supplierOrClient ||
+          ""
+        ).toLowerCase();
+      const linesSorted = [...lines].sort((a, b) =>
+        nameOf(a.tx).localeCompare(nameOf(b.tx), "pt-BR", {
+          sensitivity: "base",
+        }),
+      );
 
-      const dayIn = txs
-        .filter((t) => t.type === "receivable")
-        .reduce((s, t) => s + eff(t), 0);
-      const dayOut = txs
-        .filter((t) => t.type === "payable")
-        .reduce((s, t) => s + eff(t), 0);
+      const sumOf = (type: Transaction["type"]) =>
+        lines
+          .filter((l) => l.tx.type === type)
+          .reduce((s, l) => s.add(l.amount), currency(0)).value;
+      const dayIn = sumOf("receivable");
+      const dayOut = sumOf("payable");
+      running = running.add(dayIn).subtract(dayOut);
       const daySummary = [
         dayIn > 0 ? `+${formatCurrency(dayIn)}` : null,
         dayOut > 0 ? `-${formatCurrency(dayOut)}` : null,
+        `Saldo ${formatCurrency(running.value)}`,
       ]
         .filter(Boolean)
         .join("  ");
@@ -392,36 +470,29 @@ export const reportService = {
       ]);
 
       // ── Linhas de transação (já ordenadas por favorecido) ────────────────
-      txsSorted.forEach((t) => {
-        const effectiveDate =
-          t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-        const effectiveAmount = eff(t);
+      linesSorted.forEach((line) => {
+        const t = line.tx;
         const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
         const entityName = entity?.name || t.supplierOrClient || "-";
         const entityDoc = entity?.document || "-";
         const isIncome = t.type === "receivable";
-        const statusText = STATUS_LABEL[t.status] || t.status;
         const statusColor: [number, number, number] =
-          t.status === "paid"
-            ? GREEN_600
-            : t.status === "rejected"
-              ? RED_600
-              : SLATE_600;
+          line.stage === "realized" ? GREEN_600 : SLATE_600;
 
         tableBody.push([
           {
-            content: format(effectiveDate, "dd/MM"),
+            content: format(line.date, "dd/MM"),
             styles: { halign: "center" },
           },
-          t.description || "-",
+          lineDescription(line),
           entityName,
           entityDoc,
           {
-            content: statusText,
+            content: lineStatus(line),
             styles: { textColor: statusColor, halign: "center" },
           },
           {
-            content: `${isIncome ? "+" : "-"}${formatCurrency(effectiveAmount)}`,
+            content: `${isIncome ? "+" : "-"}${formatCurrency(line.amount)}`,
             styles: {
               textColor: isIncome ? GREEN_600 : RED_600,
               fontStyle: "bold",
@@ -517,6 +588,11 @@ export const reportService = {
 
     const summaryItems = [
       {
+        label: "Saldo Inicial",
+        value: formatCurrency(report.opening),
+        color: GRAY_300,
+      },
+      {
         label: "Total Entradas",
         value: formatCurrency(totalIn),
         color: [134, 239, 172] as [number, number, number],
@@ -527,10 +603,10 @@ export const reportService = {
         color: [252, 165, 165] as [number, number, number],
       },
       {
-        label: "Saldo Líquido",
-        value: formatCurrency(netBal),
+        label: "Saldo Final",
+        value: formatCurrency(closing),
         color:
-          netBal >= 0
+          closing >= 0
             ? ([134, 239, 172] as [number, number, number])
             : ([252, 165, 165] as [number, number, number]),
       },
@@ -549,19 +625,15 @@ export const reportService = {
       doc.text(item.value, x, finalY + 16);
     });
 
-    doc.save(`fluxo_caixa_${format(new Date(), "yyyyMMdd")}.pdf`);
+    doc.save(`fluxo_caixa_${periodSlug(startDate, endDate)}.pdf`);
   },
 
   // ─────────────────────────────────────────────────────────────────────────
   // EXPORTAR EXCEL — workbook profissional
   // ─────────────────────────────────────────────────────────────────────────
-  exportToExcel: async (
-    transactions: Transaction[],
-    startDate: Date,
-    endDate: Date,
-    companyName: string,
-    entities: Entity[] = [],
-  ) => {
+  exportCashFlowExcel: async (report: CashFlowReport, ctx: ReportContext) => {
+    const { start: startDate, end: endDate, companyName } = ctx;
+    const entities = ctx.entities ?? [];
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "FinControl";
@@ -576,32 +648,25 @@ export const reportService = {
       {} as Record<string, Entity>,
     );
 
-    const eff = (t: Transaction) =>
-      t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
+    const nameOf = (t: Transaction) =>
+      (
+        (t.entityId ? entitiesMap[t.entityId]?.name : undefined) ||
+        t.supplierOrClient ||
+        ""
+      ).toLowerCase();
+    const sorted = [...report.lines].sort(
+      (a, b) =>
+        a.date.getTime() - b.date.getTime() ||
+        // Ordenação secundária por favorecido (mesmo critério do PDF)
+        nameOf(a.tx).localeCompare(nameOf(b.tx), "pt-BR", {
+          sensitivity: "base",
+        }),
+    );
 
-    const sorted = [...transactions].sort((a, b) => {
-      const dA =
-        a.status === "paid" && a.paymentDate ? a.paymentDate : a.dueDate;
-      const dB =
-        b.status === "paid" && b.paymentDate ? b.paymentDate : b.dueDate;
-      const dateDiff = dA.getTime() - dB.getTime();
-      if (dateDiff !== 0) return dateDiff;
-      // Ordenação secundária por favorecido (mesmo critério do PDF)
-      const entA = a.entityId ? entitiesMap[a.entityId] : undefined;
-      const entB = b.entityId ? entitiesMap[b.entityId] : undefined;
-      const nameA = (entA?.name || a.supplierOrClient || "").toLowerCase();
-      const nameB = (entB?.name || b.supplierOrClient || "").toLowerCase();
-      return nameA.localeCompare(nameB, "pt-BR", { sensitivity: "base" });
-    });
-
-    // ── Totais ────────────────────────────────────────────────────────────
-    const totalIn = sorted
-      .filter((t) => t.type === "receivable")
-      .reduce((s, t) => s + eff(t), 0);
-    const totalOut = sorted
-      .filter((t) => t.type === "payable")
-      .reduce((s, t) => s + eff(t), 0);
-    const netBal = totalIn - totalOut;
+    // ── Totais: os mesmos da tela ─────────────────────────────────────────
+    const totalIn = report.inflow;
+    const totalOut = report.outflow;
+    const netBal = report.net;
 
     // ══════════════════════════════════════════════════════════════════════
     // ABA "Extrato"
@@ -642,7 +707,7 @@ export const reportService = {
     // ── Linha 2: Subtítulo ────────────────────────────────────────────────
     sheet.mergeCells("A2:M2");
     const r2 = sheet.getCell("A2");
-    r2.value = `Extrato de Fluxo de Caixa  ·  ${format(startDate, "dd/MM/yyyy")} — ${format(endDate, "dd/MM/yyyy")}  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
+    r2.value = `Extrato de Fluxo de Caixa  ·  ${periodText(startDate, endDate)}${filterSuffix(ctx)}  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
     r2.font = { size: 9, color: { argb: "FF64748B" } };
     r2.fill = {
       type: "pattern",
@@ -663,9 +728,9 @@ export const reportService = {
       "Favorecido",
       "CNPJ/CPF",
       "Tipo",
-      "Status",
+      "Situação",
       "Valor Original (R$)",
-      "Valor Final (R$)",
+      "Valor no Fluxo (R$)",
       "Forma de Pagamento",
       "Observações",
       "NF",
@@ -693,12 +758,11 @@ export const reportService = {
     // ── Linhas de dados ───────────────────────────────────────────────────
     const BRL_FMT = '"R$" #,##0.00';
 
-    sorted.forEach((t, idx) => {
-      const effectiveDate =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
+    sorted.forEach((line, idx) => {
+      const t = line.tx;
       const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
       const isIncome = t.type === "receivable";
-      const effAmount = eff(t);
+      const effAmount = line.amount;
 
       // Localizar URL da NF (anexo com categoria "invoice")
       const invoiceAttachment = t.attachments?.find(
@@ -708,13 +772,13 @@ export const reportService = {
       const comprovanteUrl = t.comprovanteUrl || "";
 
       const row = sheet.addRow([
-        format(effectiveDate, "dd/MM/yyyy"),
+        format(line.date, "dd/MM/yyyy"),
         format(t.dueDate, "dd/MM/yyyy"),
-        t.description || "",
+        lineDescription(line),
         entity?.name || t.supplierOrClient || "",
         entity?.document || "",
         isIncome ? "Receita" : "Despesa",
-        STATUS_LABEL[t.status] || t.status,
+        lineStatus(line),
         t.amount,
         isIncome ? effAmount : -effAmount,
         t.paymentMethod || "",
@@ -794,7 +858,7 @@ export const reportService = {
       }
     });
 
-    // ── Linha de totais ───────────────────────────────────────────────────
+    // ── Linha de totais: resultado do período na coluna do valor no fluxo ─
     const totalsRow = sheet.addRow([
       "",
       "",
@@ -802,8 +866,8 @@ export const reportService = {
       "",
       "",
       "",
-      "TOTAL",
-      totalIn,
+      "",
+      "RESULTADO",
       netBal,
       "",
       "",
@@ -812,25 +876,10 @@ export const reportService = {
     ]);
     totalsRow.height = 20;
 
-    const tLabel = totalsRow.getCell(7);
+    const tLabel = totalsRow.getCell(8);
     tLabel.font = { bold: true, size: 9, color: { argb: "FF0F172A" } };
-    tLabel.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFF1F5F9" },
-    };
+    tLabel.alignment = { horizontal: "right" };
     tLabel.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
-
-    const tIn = totalsRow.getCell(8);
-    tIn.numFmt = BRL_FMT;
-    tIn.font = { bold: true, color: { argb: "FF16A34A" } };
-    tIn.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFF0FDF4" },
-    };
-    tIn.alignment = { horizontal: "right" };
-    tIn.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
 
     const tBal = totalsRow.getCell(9);
     tBal.numFmt = BRL_FMT;
@@ -838,13 +887,56 @@ export const reportService = {
       bold: true,
       color: { argb: netBal >= 0 ? "FF16A34A" : "FFDC2626" },
     };
-    tBal.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: netBal >= 0 ? "FFF0FDF4" : "FFFEF2F2" },
-    };
     tBal.alignment = { horizontal: "right" };
     tBal.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ABA "Fluxo" — a mesma tabela da tela, com saldo acumulado
+    // ══════════════════════════════════════════════════════════════════════
+    const flow = workbook.addWorksheet("Fluxo", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    flow.columns = [
+      { header: "Período", width: 16 },
+      { header: "Entradas", width: 18 },
+      { header: "Saídas", width: 18 },
+      { header: "Resultado", width: 18 },
+      { header: "Saldo", width: 18 },
+      { header: "Tem previsto", width: 14 },
+    ];
+    flow.getRow(1).font = { bold: true };
+    const openingRow = flow.addRow([
+      "Saldo inicial",
+      null,
+      null,
+      null,
+      report.opening,
+      "",
+    ]);
+    openingRow.font = { italic: true };
+    for (const b of report.buckets) {
+      flow.addRow([
+        b.label,
+        b.inflow,
+        -b.outflow,
+        b.net,
+        b.balance,
+        b.forecast ? "sim" : "",
+      ]);
+    }
+    const flowTotal = flow.addRow([
+      "Total",
+      totalIn,
+      -totalOut,
+      netBal,
+      report.closing,
+      "",
+    ]);
+    flowTotal.font = { bold: true };
+    flow.eachRow((row, n) => {
+      if (n === 1) return;
+      for (let c = 2; c <= 5; c++) row.getCell(c).numFmt = BRL_FMT;
+    });
 
     // ══════════════════════════════════════════════════════════════════════
     // ABA "Resumo"
@@ -893,36 +985,39 @@ export const reportService = {
 
     addSummaryTitle("Informações do Relatório");
     addSummaryRow("Empresa", companyName);
-    addSummaryRow(
-      "Período",
-      `${format(startDate, "dd/MM/yyyy")} — ${format(endDate, "dd/MM/yyyy")}`,
-    );
+    addSummaryRow("Período", periodText(startDate, endDate));
+    if (ctx.filters) addSummaryRow("Recorte", ctx.filters);
     addSummaryRow("Gerado em", format(new Date(), "dd/MM/yyyy HH:mm"));
     addSummaryRow("Total de lançamentos", sorted.length);
     summary.addRow([]);
 
     addSummaryTitle("Resultado Financeiro");
+    addSummaryRow("Saldo Inicial", report.opening, BRL_FMT);
     addSummaryRow("Total Entradas", totalIn, BRL_FMT, "FF16A34A");
     addSummaryRow("Total Saídas", totalOut, BRL_FMT, "FFDC2626");
     addSummaryRow(
-      "Saldo Líquido",
-      netBal,
+      "Saldo Final",
+      report.closing,
       BRL_FMT,
-      netBal >= 0 ? "FF16A34A" : "FFDC2626",
+      report.closing >= 0 ? "FF16A34A" : "FFDC2626",
+    );
+    addSummaryRow(
+      `Menor saldo (${format(report.lowest.date, "dd/MM/yyyy")})`,
+      report.lowest.balance,
+      BRL_FMT,
+      report.lowest.balance >= 0 ? undefined : "FFDC2626",
     );
     summary.addRow([]);
 
-    addSummaryTitle("Entradas por Status");
-    const byStatus = sorted.reduce(
-      (acc, t) => {
-        acc[t.status] = (acc[t.status] || 0) + eff(t);
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-    Object.entries(byStatus).forEach(([status, total]) => {
-      addSummaryRow(STATUS_LABEL[status] || status, total, BRL_FMT);
-    });
+    addSummaryTitle("Por Situação (entradas − saídas)");
+    for (const s of report.byStage) {
+      if (s.lines.length === 0) continue;
+      addSummaryRow(
+        STAGE_INFO[s.stage].label,
+        currency(s.inflow).subtract(s.outflow).value,
+        BRL_FMT,
+      );
+    }
     summary.addRow([]);
 
     // ── Aviso de confidencialidade ────────────────────────────────────────
@@ -952,234 +1047,24 @@ export const reportService = {
 
     // ── Gerar arquivo e disparar download ─────────────────────────────────
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `fluxo_caixa_${format(new Date(), "yyyyMMdd")}.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  },
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // FLUXO DE CAIXA CONSOLIDADO (projeções)
-  // ─────────────────────────────────────────────────────────────────────────
-  generateConsolidatedCashFlowPDF: async (
-    transactions: Transaction[],
-    startDate: Date,
-    endDate: Date,
-    companyName: string,
-    initialBalance: number = 0,
-  ) => {
-    const { jsPDF, autoTable } = await loadPdf();
-    const doc = new jsPDF();
-    const reportFont = await ensureReportFont(doc);
-
-    const headerColor = [34, 47, 62];
-
-    doc.setFontSize(22);
-    doc.setTextColor(headerColor[0], headerColor[1], headerColor[2]);
-    doc.text("Fluxo de Caixa Consolidado", 14, 20);
-
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(companyName, 14, 28);
-    doc.text(
-      `Período de Análise: ${format(startDate, "dd/MM/yyyy")} a ${format(endDate, "dd/MM/yyyy")}`,
-      14,
-      33,
+    downloadBlob(
+      new Blob([buffer], { type: XLSX_TYPE }),
+      `fluxo_caixa_${periodSlug(startDate, endDate)}.xlsx`,
     );
-    doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 14, 38);
-
-    const dayMap = new Map<string, { in: number; out: number }>();
-
-    transactions.forEach((t) => {
-      const date =
-        t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      if (isBefore(date, startOfDay(startDate)) || isAfter(date, endDate))
-        return;
-
-      const dateKey = format(date, "yyyy-MM-dd");
-      const current = dayMap.get(dateKey) || { in: 0, out: 0 };
-
-      const effectiveAmount =
-        t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
-
-      if (t.type === "receivable") {
-        current.in += effectiveAmount;
-      } else {
-        current.out += effectiveAmount;
-      }
-      dayMap.set(dateKey, current);
-    });
-
-    let currentBalance = initialBalance;
-    let minBalance = initialBalance;
-    let minBalanceDate = startDate;
-
-    const tableRows: (string | number)[][] = [];
-    let currDate = startOfDay(startDate);
-    const end = startOfDay(endDate);
-
-    if (initialBalance !== 0) {
-      tableRows.push([
-        format(startDate, "dd/MM/yyyy"),
-        "-",
-        "-",
-        formatCurrency(initialBalance),
-      ]);
-    }
-
-    while (!isAfter(currDate, end)) {
-      const dateKey = format(currDate, "yyyy-MM-dd");
-      const dayData = dayMap.get(dateKey);
-
-      if (dayData) {
-        currentBalance += dayData.in - dayData.out;
-
-        if (currentBalance < minBalance) {
-          minBalance = currentBalance;
-          minBalanceDate = new Date(currDate);
-        }
-
-        tableRows.push([
-          format(currDate, "dd/MM/yyyy"),
-          formatCurrency(dayData.in),
-          formatCurrency(dayData.out),
-          formatCurrency(currentBalance),
-        ]);
-      }
-
-      currDate = addDays(currDate, 1);
-    }
-
-    autoTable(doc, {
-      startY: 45,
-      head: [["Data", "Entradas", "Saídas", "Saldo Acumulado"]],
-      body: tableRows,
-      theme: "plain",
-      showHead: "firstPage",
-      styles: {
-        font: reportFont,
-        fontSize: 10,
-        cellPadding: 3,
-        lineColor: [220, 220, 220],
-        lineWidth: 0.1,
-      },
-      headStyles: {
-        font: reportFont,
-        fillColor: [245, 245, 245],
-        textColor: [50, 50, 50],
-        fontStyle: "bold",
-        lineWidth: 0,
-      },
-      columnStyles: {
-        0: { cellWidth: 40 },
-        1: { cellWidth: 40, halign: "right", textColor: [27, 94, 32] },
-        2: { cellWidth: 40, halign: "right", textColor: [183, 28, 28] },
-        3: { cellWidth: 40, halign: "right", fontStyle: "bold" },
-      },
-      didParseCell: (data) => {
-        if (data.section === "body" && data.column.index === 3) {
-          const balanceStr = data.cell.raw as string;
-          if (balanceStr.includes("-")) {
-            data.cell.styles.textColor = [192, 57, 43];
-          }
-        }
-      },
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let finalY = (doc as any).lastAutoTable.finalY + 15;
-
-    if (finalY > 250) {
-      doc.addPage();
-      finalY = 20;
-    }
-
-    doc.setFontSize(14);
-    doc.setTextColor(headerColor[0], headerColor[1], headerColor[2]);
-    doc.text("Análise de Riscos & Sugestões", 14, finalY);
-
-    doc.setFontSize(10);
-    doc.setTextColor(60);
-    finalY += 8;
-
-    const saldoFinal = currentBalance;
-
-    doc.text(
-      `Saldo Inicial Informado: ${formatCurrency(initialBalance)}`,
-      14,
-      finalY,
-    );
-    finalY += 6;
-    doc.text(
-      `Saldo Final do Período: ${formatCurrency(saldoFinal)}`,
-      14,
-      finalY,
-    );
-    finalY += 10;
-
-    if (minBalance < 0) {
-      doc.setFillColor(253, 237, 236);
-      doc.setDrawColor(192, 57, 43);
-      doc.rect(14, finalY, 180, 25, "FD");
-
-      doc.setTextColor(192, 57, 43);
-      doc.setFont("helvetica", "bold");
-      doc.text("ALERTA DE CAIXA: QUEBRA IDENTIFICADA", 20, finalY + 8);
-
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(50);
-      doc.text(
-        `Identificamos que o saldo atingirá o valor mínimo de ${formatCurrency(minBalance)} no dia ${format(minBalanceDate, "dd/MM/yyyy")}.`,
-        20,
-        finalY + 16,
-      );
-      doc.text(
-        `Sugestão de Aporte: Recomenda-se um aporte de pelo menos ${formatCurrency(Math.abs(minBalance))} antes desta data.`,
-        20,
-        finalY + 22,
-      );
-    } else {
-      doc.setFillColor(232, 248, 245);
-      doc.setDrawColor(39, 174, 96);
-      doc.rect(14, finalY, 180, 15, "FD");
-
-      doc.setTextColor(39, 174, 96);
-      doc.setFont("helvetica", "bold");
-      doc.text("CENÁRIO SAUDÁVEL", 20, finalY + 10);
-    }
-
-    doc.save(`fluxo_caixa_consolidado_${format(new Date(), "yyyyMMdd")}.pdf`);
   },
 
   // ─────────────────────────────────────────────────────────────────────────
   // DRE
   // ─────────────────────────────────────────────────────────────────────────
   /**
-   * DRE gerencial pelo plano de contas. Sem plano, todo lançamento cai em
-   * "sem conta contábil" e o relatório vira o resumo receitas − despesas de
-   * antes — mas agora sem contar as rejeitadas.
+   * DRE gerencial já montada na tela (`buildDre`), em PDF. Sem plano de
+   * contas, todo lançamento cai em "sem conta contábil" e o relatório vira o
+   * resumo receitas − despesas.
    */
   generateDREPDF: async (
-    transactions: Transaction[],
-    startDate: Date,
-    endDate: Date,
-    companyName: string,
-    accounts: ChartAccount[] = [],
-    filters: DreFilters = {},
+    dre: DreReport<Transaction>,
+    ctx: DreExportContext,
   ) => {
-    const dre = buildDre(transactions, accounts, {
-      start: startDate,
-      end: endDate,
-      costCenterId: filters.costCenterId,
-    });
-
     const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF();
     const reportFont = await ensureReportFont(doc);
@@ -1190,16 +1075,29 @@ export const reportService = {
     doc.text("Demonstração do Resultado — DRE Gerencial", 14, 18);
     doc.setFontSize(10);
     doc.setTextColor(71, 85, 105);
-    doc.text(companyName, 14, 25);
+    doc.text(ctx.companyName, 14, 25);
     doc.text(
-      `Período: ${format(startDate, "dd/MM/yyyy")} a ${format(endDate, "dd/MM/yyyy")}` +
-        dreFilterText(filters),
+      `Período: ${periodText(ctx.start, ctx.end)}${filterSuffix(ctx)}`,
       14,
       30.5,
     );
 
+    // Avisos de completude também no topo: é o que quem recebe lê primeiro.
+    let tableY = 37;
+    const warnings = dreNotes(dre, ctx).filter((n) => n.startsWith("ATENÇÃO"));
+    if (warnings.length) {
+      doc.setFontSize(8.5);
+      doc.setTextColor(180, 83, 9);
+      for (const w of warnings) {
+        const lines = doc.splitTextToSize(w, pageWidth - 28);
+        doc.text(lines, 14, tableY);
+        tableY += lines.length * 4;
+      }
+      tableY += 3;
+    }
+
     autoTable(doc, {
-      startY: 37,
+      startY: tableY,
       head: [["Conta", "Valor (R$)", "AV %"]],
       body: dre.rows.map((r) => [
         dreRowLabel(r),
@@ -1255,24 +1153,13 @@ export const reportService = {
     let y = (doc as any).lastAutoTable.finalY + 6;
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    const notes = [
-      "Valores pela data efetiva: pagamento para contas pagas ou recebidas, vencimento para as demais. Rejeitadas não entram.",
-      "AV % (análise vertical): participação de cada linha sobre a receita líquida do período. Valores entre parênteses são saídas.",
-      ...(dre.unclassifiedCount > 0
-        ? [
-            `${dre.unclassifiedCount} lançamento(s) sem conta contábil aparecem em linha própria e não entram nos grupos da DRE.`,
-          ]
-        : []),
-    ];
-    for (const note of notes) {
+    for (const note of dreNotes(dre, ctx)) {
       const lines = doc.splitTextToSize(note, pageWidth - 28);
       doc.text(lines, 14, y);
       y += lines.length * 3.6;
     }
 
-    doc.save(
-      `dre_${format(startDate, "yyyyMM")}_${format(endDate, "yyyyMM")}.pdf`,
-    );
+    doc.save(`dre_${periodSlug(ctx.start, ctx.end)}.pdf`);
   },
 
   /**
@@ -1281,19 +1168,10 @@ export const reportService = {
    * contador.
    */
   exportDREExcel: async (
-    transactions: Transaction[],
-    startDate: Date,
-    endDate: Date,
-    companyName: string,
-    accounts: ChartAccount[] = [],
-    filters: DreFilters = {},
+    dre: DreReport<Transaction>,
+    ctx: DreExportContext,
   ) => {
-    const dre = buildDre(transactions, accounts, {
-      start: startDate,
-      end: endDate,
-      costCenterId: filters.costCenterId,
-    });
-
+    const accounts = ctx.accounts ?? [];
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "FinControl";
@@ -1314,15 +1192,28 @@ export const reportService = {
     const lastCol = 2 + dre.columns.length + 2;
 
     sheet.mergeCells(1, 1, 1, lastCol);
-    sheet.getCell(1, 1).value = `${companyName} — DRE Gerencial`;
+    sheet.getCell(1, 1).value = `${ctx.companyName} — DRE Gerencial`;
     sheet.getCell(1, 1).font = { bold: true, size: 13 };
     sheet.mergeCells(2, 1, 2, lastCol);
     sheet.getCell(2, 1).value =
-      `Período: ${format(startDate, "dd/MM/yyyy")} a ${format(endDate, "dd/MM/yyyy")}` +
-      dreFilterText(filters) +
+      `Período: ${periodText(ctx.start, ctx.end)}${filterSuffix(ctx)}` +
       `  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
     sheet.getCell(2, 1).font = { size: 9, color: { argb: "FF64748B" } };
-    sheet.getRow(3).height = 4;
+    // Linha congelada logo acima do cabeçalho: os avisos ficam sempre à vista.
+    const warnings = dreNotes(dre, ctx).filter((n) => n.startsWith("ATENÇÃO"));
+    if (warnings.length) {
+      sheet.mergeCells(3, 1, 3, lastCol);
+      sheet.getCell(3, 1).value = warnings.join("  ");
+      sheet.getCell(3, 1).font = {
+        size: 9,
+        bold: true,
+        color: { argb: "FFB45309" },
+      };
+      sheet.getCell(3, 1).alignment = { wrapText: true, vertical: "middle" };
+      sheet.getRow(3).height = 18 * warnings.length + 6;
+    } else {
+      sheet.getRow(3).height = 4;
+    }
 
     const header = sheet.addRow([
       "Código",
@@ -1379,14 +1270,12 @@ export const reportService = {
     }
 
     sheet.addRow([]);
-    for (const note of [
-      "Valores pela data efetiva: pagamento para contas pagas ou recebidas, vencimento para as demais. Rejeitadas não entram.",
-      "AV %: participação sobre a receita líquida do período. Entradas positivas, saídas negativas.",
-    ]) {
+    for (const note of dreNotes(dre, ctx)) {
       sheet.addRow(["", note]).font = { size: 8, color: { argb: "FF64748B" } };
     }
 
-    // Aba de lançamentos: a origem de cada número da DRE.
+    // Aba de lançamentos: a origem de cada número da DRE, exatamente os que
+    // entraram nas linhas (mesmo regime, mesmo recorte de centro de custo).
     const byId = new Map(accounts.map((a) => [a.id, a]));
     const groupOf = groupResolver(accounts);
     const detail = workbook.addWorksheet("Lançamentos", {
@@ -1394,6 +1283,7 @@ export const reportService = {
     });
     detail.columns = [
       { header: "Data efetiva", width: 13 },
+      { header: "Competência", width: 12 },
       { header: "Descrição", width: 42 },
       { header: "Favorecido", width: 30 },
       { header: "Tipo", width: 10 },
@@ -1404,18 +1294,15 @@ export const reportService = {
       { header: "Valor", width: 15 },
     ];
     detail.getRow(1).font = { bold: true };
-    const included = transactions
-      .filter((t) => t.status !== "rejected")
-      .map((t) => ({ t, date: effectiveDate(t) }))
-      .filter(({ date }) => date >= startDate && date <= endDate)
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
-    for (const { t, date } of included) {
+    for (const t of dreSources(dre)) {
       const account = t.accountId ? byId.get(t.accountId) : undefined;
       const group = account ? groupOf(account.code) : undefined;
-      const amount = dreAmount(t, filters.costCenterId);
-      if (!amount) continue;
+      const amount = dreAmount(t, ctx.costCenterIds);
       const row = detail.addRow([
-        date,
+        effectiveDate(t),
+        t.competence
+          ? `${t.competence.slice(5)}/${t.competence.slice(0, 4)}`
+          : "",
         t.description,
         t.supplierOrClient ?? "",
         t.type === "payable" ? "Despesa" : "Receita",
@@ -1426,22 +1313,35 @@ export const reportService = {
         t.type === "payable" ? -amount : amount,
       ]);
       row.getCell(1).numFmt = "dd/mm/yyyy";
-      row.getCell(9).numFmt = MONEY;
+      row.getCell(10).numFmt = MONEY;
     }
-    detail.autoFilter = { from: "A1", to: "I1" };
+    detail.autoFilter = { from: "A1", to: "J1" };
 
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `dre_${format(startDate, "yyyyMM")}_${format(endDate, "yyyyMM")}.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(
+      new Blob([buffer], { type: XLSX_TYPE }),
+      `dre_${periodSlug(ctx.start, ctx.end)}.xlsx`,
+    );
+  },
+
+  /** DRE em CSV: a mesma tabela da tela, com os meses em colunas. */
+  exportDRECSV: (dre: DreReport<Transaction>, ctx: DreExportContext) => {
+    const rows = [
+      ["Código", "Conta", ...dre.columns.map((c) => c.label), "Total", "AV %"],
+      ...dre.rows
+        .filter((r) => r.kind !== "heading")
+        .map((r) => [
+          r.code ?? "",
+          dreRowLabel(r).trim(),
+          ...r.values,
+          r.total,
+          dre.base > 0 ? formatAv(r.total, dre.base) : "",
+        ]),
+    ];
+    downloadBlob(
+      new Blob([toCsv(rows)], { type: "text/csv;charset=utf-8;" }),
+      `dre_${periodSlug(ctx.start, ctx.end)}.csv`,
+    );
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2219,63 +2119,78 @@ export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
   // EXPORTAR CSV
   // ─────────────────────────────────────────────────────────────────────────
-  exportToCSV: (transactions: Transaction[], accounts: ChartAccount[] = []) => {
-    const escapeCSV = (value: string | undefined | null): string => {
-      const str = value ?? "";
-      return `"${str.replace(/"/g, '""')}"`;
-    };
-    const accountById = new Map(accounts.map((a) => [a.id, a]));
-    const accountText = (id?: string) => {
-      const a = id ? accountById.get(id) : undefined;
-      return a ? `${a.code} ${a.name}` : "";
-    };
+  /**
+   * Lançamentos do fluxo em CSV para o Excel em português: um por linha, com
+   * o valor que entrou no fluxo, nomes em vez de códigos internos.
+   */
+  exportCashFlowCSV: (report: CashFlowReport, ctx: ReportContext) => {
+    const accountById = new Map((ctx.accounts ?? []).map((a) => [a.id, a]));
+    const ccName = new Map((ctx.costCenters ?? []).map((c) => [c.id, c.name]));
+    const entityById = new Map((ctx.entities ?? []).map((e) => [e.id, e]));
+    const costCentersOf = (t: Transaction) =>
+      (t.costCenterAllocation?.length
+        ? t.costCenterAllocation.map((a) => a.costCenterId)
+        : t.costCenterId
+          ? [t.costCenterId]
+          : []
+      )
+        .map((id) => ccName.get(id) ?? id)
+        .join(", ");
 
-    const headers = [
-      "Data Vencimento",
-      "Data Pagamento",
-      "Descrição",
-      "Tipo",
-      "Entidade",
-      "Valor Original",
-      "Valor Final",
-      "Status",
-      "Centro de Custo",
-      "Conta Contábil",
-      "Forma de Pagamento",
-      "Detalhes",
-      "Observações",
+    const rows = [
+      [
+        "Data Efetiva",
+        "Vencimento",
+        "Pagamento",
+        "Descrição",
+        "Tipo",
+        "Favorecido",
+        "CNPJ/CPF",
+        "Situação",
+        "Valor Original",
+        "Valor no Fluxo",
+        "Centro de Custo",
+        "Conta Contábil",
+        "Competência",
+        "Forma de Pagamento",
+        "Detalhes",
+      ],
+      ...report.lines.map((line) => {
+        const t = line.tx;
+        const entity = t.entityId ? entityById.get(t.entityId) : undefined;
+        const account = t.accountId ? accountById.get(t.accountId) : undefined;
+        return [
+          line.date,
+          t.dueDate,
+          t.paymentDate,
+          lineDescription(line),
+          t.type === "payable" ? "Despesa" : "Receita",
+          entity?.name ?? t.supplierOrClient ?? "",
+          entity?.document ?? "",
+          lineStatus(line),
+          t.amount,
+          t.type === "payable" ? -line.amount : line.amount,
+          costCentersOf(t),
+          account ? `${account.code} ${account.name}` : "",
+          t.competence
+            ? `${t.competence.slice(5)}/${t.competence.slice(0, 4)}`
+            : "",
+          t.paymentMethod ? (PAYMENT_METHOD_TEXT[t.paymentMethod] ?? "") : "",
+          t.details ?? "",
+        ];
+      }),
     ];
-
-    const rows = transactions.map((t) => [
-      format(t.dueDate, "yyyy-MM-dd"),
-      t.paymentDate ? format(t.paymentDate, "yyyy-MM-dd") : "",
-      escapeCSV(t.description),
-      t.type === "payable" ? "Despesa" : "Receita",
-      escapeCSV(t.supplierOrClient),
-      t.amount.toFixed(2),
-      (t.finalAmount ?? t.amount).toFixed(2),
-      t.status,
-      t.costCenterId ?? "",
-      escapeCSV(accountText(t.accountId)),
-      t.paymentMethod ?? "",
-      escapeCSV(t.details),
-      escapeCSV(t.notes),
-    ]);
-
-    const BOM = "\uFEFF";
-    const csvContent =
-      BOM + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute(
-      "download",
-      `transacoes_${format(new Date(), "yyyyMMdd")}.csv`,
+    downloadBlob(
+      new Blob([toCsv(rows)], { type: "text/csv;charset=utf-8;" }),
+      `fluxo_caixa_${periodSlug(ctx.start, ctx.end)}.csv`,
     );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   },
+};
+
+const PAYMENT_METHOD_TEXT: Record<string, string> = {
+  pix: "PIX",
+  boleto: "Boleto",
+  transfer: "Transferência",
+  credit_card: "Cartão de crédito",
+  cash: "Dinheiro",
 };

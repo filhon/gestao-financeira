@@ -104,6 +104,11 @@ assert.ok(
 );
 assert.ok(!needsReceipt({ ...paid, paymentDate: undefined }, cutoff));
 
+// Sem conta contábil: o que a DRE mostra como "sem conta"; rejeitada não entra.
+assert.ok(match("sem:conta", paid));
+assert.ok(!match("sem:conta", { ...paid, accountId: "a1" }));
+assert.ok(!match("sem:conta", { ...paid, status: "rejected" }));
+
 // Tokens viram chips; inválidos ficam marcados e saem na sanitização.
 const q = parseQuery("tipo:pagar status:atrasado valor:>100 Filipe obs:x");
 assert.deepEqual(

@@ -91,7 +91,8 @@ import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
 import { reviveTransaction } from "@/hooks/useSearch";
 import { AddToBatchDialog } from "@/components/features/finance/AddToBatchDialog";
-import type { CostCenter, Transaction } from "@/lib/types";
+import type { Transaction } from "@/lib/types";
+import { descendantIds } from "@/lib/costCenterTree";
 import {
   agingBucket,
   agingRange,
@@ -229,15 +230,6 @@ export function refreshTransactionList(qc: QueryClient, type: Kind) {
   for (const key of ["tx-list", "tx-tabs", "tx-search"]) {
     qc.invalidateQueries({ queryKey: [key, type] });
   }
-}
-
-function descendantIds(rootId: string, all: CostCenter[]): string[] {
-  return [
-    rootId,
-    ...all
-      .filter((c) => c.parentId === rootId)
-      .flatMap((c) => descendantIds(c.id, all)),
-  ];
 }
 
 // ── Componente ────────────────────────────────────────────────────────────────

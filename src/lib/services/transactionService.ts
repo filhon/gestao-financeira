@@ -93,6 +93,15 @@ type ListFilter = {
   costCenterIds?: string[];
 };
 
+/** Um centro: array-contains. Vários (centro + descendentes): array-contains-any. */
+function costCenterConstraint(ids: string[]) {
+  // ponytail: array-contains-any aceita até 30 valores; acima disso o filtro
+  // corta os descendentes excedentes.
+  return ids.length === 1
+    ? where("costCenterIds", "array-contains", ids[0])
+    : where("costCenterIds", "array-contains-any", ids.slice(0, 30));
+}
+
 function listConstraints(companyId: string, filters: ListFilter) {
   const constraints = [where("companyId", "==", companyId)];
   let memoryStatus: ((status: string) => boolean) | null = null;
@@ -101,15 +110,7 @@ function listConstraints(companyId: string, filters: ListFilter) {
 
   const ccIds = filters.costCenterIds ?? [];
   const multiCc = ccIds.length > 1;
-  if (ccIds.length === 1) {
-    constraints.push(where("costCenterIds", "array-contains", ccIds[0]));
-  } else if (multiCc) {
-    // ponytail: array-contains-any aceita até 30 valores; acima disso o filtro
-    // corta os descendentes excedentes.
-    constraints.push(
-      where("costCenterIds", "array-contains-any", ccIds.slice(0, 30)),
-    );
-  }
+  if (ccIds.length) constraints.push(costCenterConstraint(ccIds));
 
   if (filters.status) {
     constraints.push(where("status", "==", filters.status));
@@ -402,6 +403,8 @@ export const transactionService = {
     endDate?: Date;
     limit?: number;
     costCenterId?: string;
+    /** Centro e descendentes (array-contains-any, até 30). Vence `costCenterId`. */
+    costCenterIds?: string[];
   }): Promise<Transaction[]> => {
     let q = query(collection(db, COLLECTION_NAME), orderBy("dueDate", "desc"));
 
@@ -419,7 +422,9 @@ export const transactionService = {
     if (filter?.batchId !== undefined) {
       q = query(q, where("batchId", "==", filter.batchId));
     }
-    if (filter?.costCenterId) {
+    if (filter?.costCenterIds?.length) {
+      q = query(q, costCenterConstraint(filter.costCenterIds));
+    } else if (filter?.costCenterId) {
       q = query(
         q,
         where("costCenterIds", "array-contains", filter.costCenterId),
@@ -464,6 +469,7 @@ export const transactionService = {
     endDate: Date;
     createdBy?: string;
     costCenterId?: string;
+    costCenterIds?: string[];
   }): Promise<Transaction[]> => {
     let q = query(
       collection(db, COLLECTION_NAME),
@@ -477,13 +483,45 @@ export const transactionService = {
     if (filter.createdBy) {
       q = query(q, where("createdBy", "==", filter.createdBy));
     }
-    if (filter.costCenterId) {
+    if (filter.costCenterIds?.length) {
+      q = query(q, costCenterConstraint(filter.costCenterIds));
+    } else if (filter.costCenterId) {
       q = query(
         q,
         where("costCenterIds", "array-contains", filter.costCenterId),
       );
     }
 
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) =>
+      convertDates({ id: doc.id, ...doc.data() }),
+    );
+  },
+
+  /**
+   * Lançamentos com competência (yyyy-MM) no intervalo, qualquer que seja o
+   * vencimento: a DRE por competência precisa deles mesmo quando vencem ou
+   * foram pagos fora do período.
+   */
+  getByCompetence: async (filter: {
+    companyId: string;
+    from: string;
+    to: string;
+    createdBy?: string;
+    costCenterIds?: string[];
+  }): Promise<Transaction[]> => {
+    let q = query(
+      collection(db, COLLECTION_NAME),
+      where("companyId", "==", filter.companyId),
+      where("competence", ">=", filter.from),
+      where("competence", "<=", filter.to),
+    );
+    if (filter.createdBy) {
+      q = query(q, where("createdBy", "==", filter.createdBy));
+    }
+    if (filter.costCenterIds?.length) {
+      q = query(q, costCenterConstraint(filter.costCenterIds));
+    }
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) =>
       convertDates({ id: doc.id, ...doc.data() }),
