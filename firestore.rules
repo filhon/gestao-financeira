@@ -407,10 +407,66 @@ service cloud.firestore {
     }
 
     // Regras do Roadmap
+    // Sugestão e planejado: só a empresa de quem sugeriu. A partir de
+    // "Em execução" (in_progress, done) vale para todos os clientes.
+    // Mudança de status e união de itens passam por /api/internal/roadmap.
     match /roadmap_items/{itemId} {
-      allow read: if true; // Público
-      allow create: if isAuthenticated(); // Usuários logados
-      allow update, delete: if isGlobalAdmin(); // Apenas admins
+      function anyRole() {
+        return ['admin', 'financial_manager', 'approver', 'releaser', 'auditor', 'user'];
+      }
+      function isPublic(data) { return data.status in ['in_progress', 'done']; }
+      function canSee(data) {
+        return isPublic(data) || hasCompanyRole(data.companyId, anyRole());
+      }
+      function validText(data) {
+        return data.title is string && data.title.size() >= 3 && data.title.size() <= 100 &&
+               data.description is string && data.description.size() >= 10 && data.description.size() <= 1000;
+      }
+      // Entrada "<companyId>:<uid>" do próprio usuário, numa empresa onde ele tem papel
+      function ownVote(entry) {
+        let parts = entry.split(':');
+        return parts.size() == 2 && parts[1] == request.auth.uid && hasCompanyRole(parts[0], anyRole());
+      }
+      // Exatamente um voto do próprio usuário entra ou sai; nada mais muda
+      function isVoteChange() {
+        let before = resource.data.get('voters', []);
+        let after = request.resource.data.voters;
+        let added = after.removeAll(before);
+        let removed = before.removeAll(after);
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voters']) &&
+               resource.data.status in ['suggestion', 'planned', 'in_progress'] &&
+               ((added.size() == 1 && removed.size() == 0 && after.size() == before.size() + 1 && ownVote(added[0])) ||
+                (removed.size() == 1 && added.size() == 0 && after.size() == before.size() - 1 && ownVote(removed[0])));
+      }
+      function isAuthorEditing() {
+        return resource.data.userId == request.auth.uid &&
+               resource.data.status == 'suggestion' &&
+               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'updatedAt']) &&
+               validText(request.resource.data);
+      }
+
+      allow read: if isAuthenticated() && (isGlobalAdmin() || canSee(resource.data));
+      allow create: if isAuthenticated() && (isGlobalAdmin() || (
+        request.resource.data.keys().hasOnly(['title', 'description', 'status', 'companyId', 'userId', 'authorName', 'voters', 'createdAt', 'updatedAt']) &&
+        request.resource.data.status == 'suggestion' &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.authorName is string && request.resource.data.authorName.size() <= 100 &&
+        hasCompanyRole(request.resource.data.companyId, anyRole()) &&
+        request.resource.data.voters == [request.resource.data.companyId + ':' + request.auth.uid] &&
+        validText(request.resource.data)
+      ));
+      allow update: if isAuthenticated() && (
+        isGlobalAdmin() ||
+        (canSee(resource.data) && isVoteChange()) ||
+        isAuthorEditing()
+      );
+      // O autor retira a sugestão enquanto ninguém mais votou nela
+      allow delete: if isAuthenticated() && (
+        isGlobalAdmin() ||
+        (resource.data.userId == request.auth.uid &&
+         resource.data.status == 'suggestion' &&
+         resource.data.get('voters', []).size() <= 1)
+      );
     }
 
     // 12b. Cost Center Ledger (envelope budgeting — single source of truth for balance)

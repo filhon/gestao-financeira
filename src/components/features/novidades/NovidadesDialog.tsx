@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { differenceInDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -83,6 +84,15 @@ export function NovidadesDialog({ releases, version }: NovidadesDialogProps) {
           {releases.map((release) => (
             <ReleaseRow key={release.title} release={release} />
           ))}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-6 py-3 text-sm text-muted-foreground sm:px-8">
+          Falta algo para o seu dia a dia?
+          <Button variant="link" size="sm" className="h-auto px-0" asChild>
+            <Link href="/roadmap" onClick={() => handleOpenChange(false)}>
+              Sugerir ou votar no roadmap
+            </Link>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
