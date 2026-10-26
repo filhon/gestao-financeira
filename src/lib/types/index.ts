@@ -531,7 +531,8 @@ export interface AuditLog {
     | "release_hold"
     | "promise"
     | "close_period"
-    | "reopen_period";
+    | "reopen_period"
+    | "export";
   entity:
     | "transaction"
     | "company"
@@ -544,8 +545,15 @@ export interface AuditLog {
     | "comprovante"
     | "chart_account"
     | "bank_account"
-    | "reconciliation_rule";
+    | "reconciliation_rule"
+    | "audit_log";
   entityId: string;
+  /** Nome legível do registro no momento da ação (sobrevive à exclusão). */
+  subject?: string;
+  /** Campos tocados; derivado de `details` ao gravar, para filtrar por campo. */
+  changedFields?: string[];
+  /** Outros registros afetados (lote, comprovante → transações). */
+  relatedIds?: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   details: Record<string, any>;
   ipAddress?: string;

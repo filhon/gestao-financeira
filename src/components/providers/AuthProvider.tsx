@@ -7,6 +7,7 @@ import {
   signOut,
   onIdTokenChanged,
   signInWithEmailAndPassword,
+  type User as FirebaseUser,
 } from "firebase/auth";
 import {
   doc,
@@ -36,6 +37,23 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
+
+/** Registra o login com IP no servidor. Falhar aqui não impede de entrar. */
+function logLogin(user: FirebaseUser, method: "google" | "email") {
+  user
+    .getIdToken()
+    .then((token) =>
+      fetch("/api/internal/audit/login", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ method }),
+      }),
+    )
+    .catch((err) => console.error("Login audit failed:", err));
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -186,7 +204,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const credential = await signInWithPopup(auth, provider);
+      logLogin(credential.user, "google");
       // Navigation handled by onAuthStateChanged based on user status
     } catch (error) {
       console.error("Error logging in with Google:", error);
@@ -196,7 +215,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithEmail = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      logLogin(credential.user, "email");
       // Navigation handled by onAuthStateChanged based on user status
     } catch (error) {
       console.error("Error logging in with Email:", error);

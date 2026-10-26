@@ -322,8 +322,17 @@ service cloud.firestore {
             isGlobalAdmin() ||
             hasCompanyRole(getCompanyId(), ['auditor', 'approver', 'releaser', 'financial_manager'])
         );
-        // Allow authenticated users to create audit logs (client-side logging)
-        allow create: if isAuthenticated();
+        // Cliente só grava log em nome próprio, numa empresa em que tem papel,
+        // com a hora do servidor (serverTimestamp): sem log forjado em nome de
+        // outro usuário, de outra empresa ou com data retroativa.
+        allow create: if isAuthenticated() &&
+            request.resource.data.userId == request.auth.uid &&
+            request.resource.data.createdAt == request.time &&
+            (
+              (request.resource.data.companyId == 'global' && isGlobalAdmin()) ||
+              hasCompanyRole(request.resource.data.companyId,
+                ['admin', 'financial_manager', 'approver', 'releaser', 'auditor', 'user'])
+            );
         // Prevent updates and deletes (audit logs should be immutable)
         allow update, delete: if false;
     }

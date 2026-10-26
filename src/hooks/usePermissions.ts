@@ -239,12 +239,17 @@ export function usePermissions(): Permissions {
       // Admin & Settings
       canManageUsers: isAdminOrManager, // Manager manages company users
       canManageCompanies: isAdmin, // Only global admin
-      canViewAuditLogs: isOneOf(["admin", "auditor", "approver", "releaser"]), // Spec: Admin, Approver(11), Auditor(7). Releaser (same as approver?). Releaser spec didn't explicitly say yes/no on logs but said "same as approver", so I assume Yes?
-      // Re-reading Spec: "Usuários releaser... Terá o mesmo acesso do approver...".
-      // Approver item 11: "Poderá visualizar os logs de auditoria".
-      // Manager item 12: "Não poderá visualizar os logs de auditoria". STRANGE but spec says so.
-      // Admin: Yes.
-      // User: No.
+      // Spec original (Manager item 12) vetava o gestor; revisto em 2026-10-26:
+      // o log é imutável e as rules já liberavam a leitura, então esconder a
+      // tela não protegia nada e deixava o gestor sem como investigar.
+      // Releaser tem o mesmo acesso do approver. User: não.
+      canViewAuditLogs: isOneOf([
+        "admin",
+        "financial_manager",
+        "auditor",
+        "approver",
+        "releaser",
+      ]),
 
       canAccessSettings: isAdminOrManager, // General 'Settings' menu access
       canManageFeedback: isAdmin, // Only global admin can manage feedbacks

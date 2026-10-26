@@ -72,6 +72,7 @@ import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
+import { RecordHistory } from "@/components/features/audit/RecordHistory";
 
 const PIX_KEY_TYPE_LABELS: Record<NonNullable<Entity["pixKeyType"]>, string> = {
   cpf: "CPF",
@@ -116,6 +117,7 @@ export function TransactionDetailsDialog({
     canPayPayables,
     canEditReceivables,
     canViewReconciliation,
+    canViewAuditLogs,
   } = usePermissions();
 
   const [holdReason, setHoldReason] = useState("");
@@ -1098,6 +1100,17 @@ export function TransactionDetailsDialog({
               </p>
             )}
           </div>
+        </>
+      )}
+
+      {canViewAuditLogs && (
+        <>
+          <Separator />
+          <RecordHistory
+            key={transaction.id}
+            companyId={transaction.companyId}
+            recordId={transaction.id}
+          />
         </>
       )}
     </div>

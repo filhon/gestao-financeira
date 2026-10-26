@@ -361,6 +361,16 @@ function requestApprovalInBackground(
   );
 }
 
+/** Como a transação aparece no log de auditoria. */
+function transactionSubject(t: {
+  description?: string;
+  supplierOrClient?: string;
+}): string | undefined {
+  return (
+    [t.description, t.supplierOrClient].filter(Boolean).join(" · ") || undefined
+  );
+}
+
 export const transactionService = {
   getByIds: async (ids: string[]): Promise<Transaction[]> => {
     if (!ids.length) return [];
@@ -1024,6 +1034,7 @@ export const transactionService = {
       action: "create",
       entity: "transaction",
       entityId: docRef.id,
+      subject: transactionSubject(transactionData),
       details: {
         amount: transactionData.amount,
         description: transactionData.description,
@@ -1121,6 +1132,7 @@ export const transactionService = {
       action: "update",
       entity: "transaction",
       entityId: id,
+      subject: transactionSubject({ ...currentData, ...cleanData }),
       details: { changes },
     });
   },
@@ -1325,6 +1337,8 @@ export const transactionService = {
         action: "update",
         entity: "transaction",
         entityId: originalTransaction.installments.groupId,
+        subject: transactionSubject(originalTransaction),
+        relatedIds: snapshot.docs.map((d) => d.id),
         details: stripUndefined({
           ...data,
           scope,
@@ -1384,6 +1398,9 @@ export const transactionService = {
     // tirar uma despesa de `rejected` reocupa o envelope que a recusa liberou.
     await setStatusViaLedger(id, status);
 
+    // Fetch and return updated transaction
+    const updatedDoc = await getDoc(docRef);
+
     await auditService.log({
       companyId,
       userId: user.uid,
@@ -1396,11 +1413,12 @@ export const transactionService = {
             : "update",
       entity: "transaction",
       entityId: id,
+      subject: updatedDoc.exists()
+        ? transactionSubject(updatedDoc.data())
+        : undefined,
       details: { status },
     });
 
-    // Fetch and return updated transaction
-    const updatedDoc = await getDoc(docRef);
     if (!updatedDoc.exists()) {
       throw new Error("Transaction not found after update");
     }
@@ -1418,6 +1436,8 @@ export const transactionService = {
 
     // Fetch before delete to update usage and check batch membership
     const currentDoc = await getDoc(docRef);
+    // Depois de excluída, o log é o único lugar que diz o que ela era.
+    const snapshot = currentDoc.exists() ? currentDoc.data() : undefined;
     if (currentDoc.exists()) {
       const currentData = currentDoc.data();
       const oldTransaction = convertDates({
@@ -1450,7 +1470,15 @@ export const transactionService = {
       action: "delete",
       entity: "transaction",
       entityId: id,
-      details: {},
+      subject: snapshot ? transactionSubject(snapshot) : undefined,
+      details: snapshot
+        ? stripUndefined({
+            amount: snapshot.amount,
+            dueDate: snapshot.dueDate,
+            status: snapshot.status,
+            documentNumber: snapshot.documentNumber,
+          })
+        : {},
     });
   },
 
@@ -1776,6 +1804,8 @@ export const transactionService = {
       action: "update",
       entity: "transaction",
       entityId: `batch:${ids.length}`,
+      subject: `${ids.length} transações`,
+      relatedIds: ids,
       details: stripUndefined({ ...cleanData, count: ids.length }),
     });
   },

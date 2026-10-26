@@ -19,7 +19,7 @@ import { db } from "@/lib/firebase/client";
 import { Entity } from "@/lib/types";
 import { auditService } from "./auditService";
 import { generateChanges } from "@/lib/auditFormatter";
-import { normalizeText } from "@/lib/utils";
+import { normalizeText, stripUndefined } from "@/lib/utils";
 
 const COLLECTION_NAME = "entities";
 
@@ -317,6 +317,7 @@ export const entityService = {
       action: "update",
       entity: "entity",
       entityId: id,
+      subject: (cleanData.name ?? currentData.name) as string | undefined,
       details: { changes },
     });
   },
@@ -328,6 +329,8 @@ export const entityService = {
   ): Promise<void> => {
     entityService.invalidateCache(companyId); // BUG-03: invalidate before delete
     const docRef = doc(db, COLLECTION_NAME, id);
+    // Depois de excluído, o log é o único lugar que guarda o nome.
+    const snap = await getDoc(docRef);
     await deleteDoc(docRef);
 
     await auditService.log({
@@ -337,7 +340,10 @@ export const entityService = {
       action: "delete",
       entity: "entity",
       entityId: id,
-      details: {},
+      subject: snap.data()?.name,
+      details: snap.exists()
+        ? stripUndefined({ document: snap.data().document })
+        : {},
     });
   },
 };
