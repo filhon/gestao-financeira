@@ -82,7 +82,9 @@ for (const docs of groups.values()) {
   }
   const authorName =
     data.authorName ??
-    (user ? user.displayName || String(user.email ?? "").split("@")[0] : "Equipe");
+    (user
+      ? user.displayName || String(user.email ?? "").split("@")[0]
+      : "Equipe");
 
   const voters = new Set(data.voters ?? []);
   if (companyId && data.userId && voters.size === 0) {

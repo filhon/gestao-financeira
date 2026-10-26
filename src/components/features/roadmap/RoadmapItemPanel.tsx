@@ -144,7 +144,9 @@ export function RoadmapItemPanel({
 
   const saveText = async () => {
     if (title.trim().length < 3 || description.trim().length < 10) {
-      toast.error("Título com 3 ou mais caracteres e descrição com 10 ou mais.");
+      toast.error(
+        "Título com 3 ou mais caracteres e descrição com 10 ou mais.",
+      );
       return;
     }
     setBusy("text");
@@ -252,7 +254,9 @@ export function RoadmapItemPanel({
               </div>
               <div className="flex gap-2">
                 <Button size="sm" onClick={saveText} disabled={!!busy}>
-                  {busy === "text" && <Loader2 className="size-4 animate-spin" />}
+                  {busy === "text" && (
+                    <Loader2 className="size-4 animate-spin" />
+                  )}
                   Salvar
                 </Button>
                 <Button
@@ -374,7 +378,8 @@ export function RoadmapItemPanel({
                       ))}
                     </SelectContent>
                   </Select>
-                  {status === "in_progress" && item.status !== "in_progress" &&
+                  {status === "in_progress" &&
+                    item.status !== "in_progress" &&
                     item.status !== "done" && (
                       <p className="text-xs text-muted-foreground">
                         A partir daqui o item fica visível para todos os

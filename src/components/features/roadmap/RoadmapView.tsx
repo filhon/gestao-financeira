@@ -95,12 +95,14 @@ export function RoadmapView() {
 
   const hasVoted = (item: RoadmapItem) =>
     item.voters.some((v) => v.endsWith(`:${uid}`));
-  const isMine = (item: RoadmapItem) =>
-    item.userId === uid || hasVoted(item);
+  const isMine = (item: RoadmapItem) => item.userId === uid || hasVoted(item);
 
   const scoped = mineOnly ? items.filter(isMine) : items;
   const counts = Object.fromEntries(
-    ROADMAP_STATUSES.map((s) => [s, scoped.filter((i) => i.status === s).length]),
+    ROADMAP_STATUSES.map((s) => [
+      s,
+      scoped.filter((i) => i.status === s).length,
+    ]),
   ) as Record<RoadmapStatus, number>;
 
   const needle = normalizeText(search.trim());
@@ -116,7 +118,9 @@ export function RoadmapView() {
       if (sort === "votes" && b.voters.length !== a.voters.length) {
         return b.voters.length - a.voters.length;
       }
-      return time(b.updatedAt ?? b.createdAt) - time(a.updatedAt ?? a.createdAt);
+      return (
+        time(b.updatedAt ?? b.createdAt) - time(a.updatedAt ?? a.createdAt)
+      );
     });
 
   const toggleVote = async (item: RoadmapItem) => {
@@ -148,8 +152,7 @@ export function RoadmapView() {
     refetch();
   };
 
-  const showSort =
-    searching || tab === "suggestion" || tab === "planned";
+  const showSort = searching || tab === "suggestion" || tab === "planned";
 
   return (
     <div className="space-y-4">

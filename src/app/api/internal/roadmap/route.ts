@@ -106,7 +106,8 @@ export async function POST(request: NextRequest) {
   try {
     if (body.action === "status") {
       const status = body.status as RoadmapStatus;
-      if (!ROADMAP_STATUSES.includes(status)) return fail("Situação inválida.", 400);
+      if (!ROADMAP_STATUSES.includes(status))
+        return fail("Situação inválida.", 400);
       const response =
         typeof body.response === "string" ? body.response.trim() : "";
       if (response.length > 1000) {

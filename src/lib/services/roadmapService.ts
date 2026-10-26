@@ -14,11 +14,7 @@ import {
   DocumentData,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
-import {
-  PUBLIC_STATUSES,
-  voterKey,
-  type RoadmapItem,
-} from "@/lib/roadmap";
+import { PUBLIC_STATUSES, voterKey, type RoadmapItem } from "@/lib/roadmap";
 
 const COLLECTION_NAME = "roadmap_items";
 

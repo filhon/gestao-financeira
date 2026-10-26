@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -185,10 +185,13 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
         )}
       </div>
 
-      <TransactionList
-        type={type}
-        onCreate={canCreate ? () => setIsFormOpen(true) : undefined}
-      />
+      {/* A lista lê ?tab=: useSearchParams exige Suspense no pré-render. */}
+      <Suspense fallback={null}>
+        <TransactionList
+          type={type}
+          onCreate={canCreate ? () => setIsFormOpen(true) : undefined}
+        />
+      </Suspense>
 
       <Sheet
         open={isFormOpen}

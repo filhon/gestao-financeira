@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useQuery,
   useQueryClient,
@@ -285,6 +286,23 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   }, [prefs, type]);
   const setPref = <K extends keyof Prefs>(key: K, value: Prefs[K]) =>
     setPrefs((p) => ({ ...p, [key]: value }));
+
+  // "Minha fila" no menu leva ?tab=queue sem remontar a página quando ela já
+  // está aberta. Aplica e tira da URL, para o próximo clique valer de novo.
+  const urlTab = useSearchParams().get("tab") as TabId | null;
+  useEffect(() => {
+    if (!urlTab) return;
+    setPrefs((p) => ({ ...p, tab: urlTab }));
+    setSearchTerm("");
+    const params = new URLSearchParams(window.location.search);
+    params.delete("tab");
+    const rest = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + (rest ? `?${rest}` : ""),
+    );
+  }, [urlTab]);
 
   const [period, setPeriod] = useState<DateRange | undefined>(() =>
     defaultPeriod(),

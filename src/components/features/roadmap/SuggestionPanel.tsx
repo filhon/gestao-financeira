@@ -190,7 +190,10 @@ export function SuggestionPanel({
                 </p>
                 <ul className="divide-y">
                   {similar.map((item) => (
-                    <li key={item.id} className="flex items-start gap-3 px-3 py-2.5">
+                    <li
+                      key={item.id}
+                      className="flex items-start gap-3 px-3 py-2.5"
+                    >
                       <VoteButton
                         count={item.voters.length}
                         voted={hasVoted(item)}

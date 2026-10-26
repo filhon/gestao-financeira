@@ -3,126 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import {
-  LayoutDashboard,
-  Wallet,
-  Receipt,
-  FileText,
-  MoreHorizontal,
-  RefreshCw,
-  Scale,
-  Layers,
-  FileCheck,
-  Building2,
-  Users,
-  Settings,
-  Map as MapIcon,
-  Megaphone,
-  ListTree,
-  Landmark,
-  type LucideIcon,
-} from "lucide-react";
+import { MoreHorizontal, Map as MapIcon, Megaphone } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { useMemo, useState } from "react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
+import {
+  activeHref,
+  flatNav,
+  useNavBadges,
+  visibleNav,
+} from "@/components/layout/navItems";
 
-interface NavTab {
-  title: string;
-  href: string;
-  icon: LucideIcon;
-  permission?: keyof ReturnType<typeof usePermissions>;
-}
-
-const mainTabs: NavTab[] = [
-  {
-    title: "Início",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    permission: "canViewDashboard",
-  },
-  {
-    title: "A Pagar",
-    href: "/financeiro/contas-pagar",
-    icon: Wallet,
-    permission: "canViewPayables",
-  },
-  {
-    title: "A Receber",
-    href: "/financeiro/contas-receber",
-    icon: Receipt,
-    permission: "canViewReceivables",
-  },
-  {
-    title: "Relatórios",
-    href: "/relatorios",
-    icon: FileText,
-    permission: "canViewReports",
-  },
-];
-
-const moreItems: NavTab[] = [
-  {
-    title: "Recorrências",
-    href: "/financeiro/recorrencias",
-    icon: RefreshCw,
-    permission: "canViewRecurrences",
-  },
-  {
-    title: "Conciliação",
-    href: "/financeiro/conciliacao",
-    icon: Scale,
-    permission: "canViewReconciliation",
-  },
-  {
-    title: "Lotes",
-    href: "/financeiro/lotes",
-    icon: Layers,
-    permission: "canViewBatches",
-  },
-  {
-    title: "Comprovantes",
-    href: "/financeiro/comprovantes",
-    icon: FileCheck,
-    permission: "canViewPayables",
-  },
-  {
-    title: "Centros de Custo",
-    href: "/centros-custo",
-    icon: Building2,
-    permission: "canViewCostCenters",
-  },
-  {
-    title: "Plano de Contas",
-    href: "/cadastros/plano-de-contas",
-    icon: ListTree,
-    permission: "canViewChartOfAccounts",
-  },
-  {
-    title: "Contas Bancárias",
-    href: "/cadastros/contas-bancarias",
-    icon: Landmark,
-    permission: "canViewBankAccounts",
-  },
-  {
-    title: "Outros Cadastros",
-    href: "/cadastros",
-    icon: Users,
-    permission: "canViewEntities",
-  },
-  {
-    title: "Configurações",
-    href: "/configuracoes",
-    icon: Settings,
-    permission: "canAccessSettings",
-  },
-  {
-    title: "Roadmap",
-    href: "/roadmap",
-    icon: MapIcon,
-  },
-];
+/** Abas fixas da barra inferior, com rótulo curto; o resto vai para "Mais". */
+const TAB_LABELS: Record<string, string> = {
+  "/dashboard": "Início",
+  "/financeiro/contas-pagar": "A Pagar",
+  "/financeiro/contas-receber": "A Receber",
+  "/relatorios": "Relatórios",
+};
 
 export function MobileNav() {
   const pathname = usePathname();
@@ -131,21 +31,15 @@ export function MobileNav() {
   const setNovidadesOpen = useGlobalStore((s) => s.setNovidadesOpen);
   const novidadesNew = useGlobalStore((s) => s.novidadesNew);
 
-  const visibleTabs = useMemo(() => {
-    return mainTabs.filter((tab) => {
-      if (!tab.permission) return true;
-      return permissions[tab.permission as keyof typeof permissions] === true;
-    });
-  }, [permissions]);
+  const flat = useMemo(() => flatNav(visibleNav(permissions)), [permissions]);
+  const visibleTabs = flat.filter((i) => i.href in TAB_LABELS);
+  const visibleMoreItems = flat.filter((i) => !(i.href in TAB_LABELS));
+  const current = activeHref(pathname, flat);
+  const badges = useNavBadges(permissions);
 
-  const visibleMoreItems = useMemo(() => {
-    return moreItems.filter((item) => {
-      if (!item.permission) return true;
-      return permissions[item.permission as keyof typeof permissions] === true;
-    });
-  }, [permissions]);
-
-  const isMoreActive = visibleMoreItems.some((item) => pathname === item.href);
+  const isMoreActive =
+    visibleMoreItems.some((item) => item.href === current) ||
+    pathname.startsWith("/roadmap");
 
   return (
     <>
@@ -155,8 +49,7 @@ export function MobileNav() {
           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         >
           {visibleTabs.map((tab) => {
-            const isActive =
-              pathname === tab.href || pathname.startsWith(tab.href + "/");
+            const isActive = tab.href === current;
             const Icon = tab.icon;
             return (
               <Link
@@ -176,7 +69,7 @@ export function MobileNav() {
                   <Icon className="h-5 w-5 shrink-0" />
                 </div>
                 <span className="text-[10px] font-medium leading-none truncate max-w-full px-1">
-                  {tab.title}
+                  {TAB_LABELS[tab.href]}
                 </span>
               </Link>
             );
@@ -197,7 +90,7 @@ export function MobileNav() {
             >
               <MoreHorizontal className="h-5 w-5" />
               {novidadesNew && (
-                <span className="absolute right-2.5 top-0.5 h-2 w-2 rounded-full bg-foreground" />
+                <span className="absolute right-2.5 top-0.5 h-2 w-2 rounded-full bg-primary" />
               )}
             </div>
             <span className="text-[10px] font-medium leading-none">Mais</span>
@@ -225,8 +118,9 @@ export function MobileNav() {
           {/* Nav grid */}
           <div className="grid grid-cols-2 gap-2 mb-5">
             {visibleMoreItems.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive = item.href === current;
               const Icon = item.icon;
+              const count = item.badge ? badges[item.badge] : undefined;
               return (
                 <Link
                   key={item.href}
@@ -252,9 +146,24 @@ export function MobileNav() {
                   <span className="text-sm font-medium leading-tight">
                     {item.title}
                   </span>
+                  {!!count && (
+                    <span className="ml-auto text-xs font-medium tabular-nums text-muted-foreground">
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
                 </Link>
               );
             })}
+            <Link
+              href="/roadmap"
+              onClick={() => setMoreOpen(false)}
+              className="flex items-center gap-3 rounded-xl bg-muted/40 px-3.5 py-3.5 text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-muted-foreground">
+                <MapIcon className="h-[18px] w-[18px]" />
+              </div>
+              <span className="text-sm font-medium leading-tight">Roadmap</span>
+            </Link>
             <button
               type="button"
               onClick={() => {
@@ -264,20 +173,16 @@ export function MobileNav() {
               className="flex items-center gap-3 rounded-xl bg-muted/40 px-3.5 py-3.5 text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
             >
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-foreground">
-                <Megaphone
-                  className={cn(
-                    "h-[18px] w-[18px]",
-                    novidadesNew && "animate-pulse motion-reduce:animate-none",
-                  )}
-                />
+                <Megaphone className="h-[18px] w-[18px]" />
               </div>
               <span className="text-sm font-medium leading-tight">
                 Novidades
               </span>
               {novidadesNew && (
-                <span className="ml-auto rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide text-background">
-                  Novo
-                </span>
+                <span
+                  aria-label="nova versão"
+                  className="ml-auto h-1.5 w-1.5 rounded-full bg-primary"
+                />
               )}
             </button>
           </div>
