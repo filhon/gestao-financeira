@@ -61,6 +61,7 @@ export const FIELD_LABELS: Record<string, string> = {
   lateFeePercent: "Multa por Atraso (%)",
   monthlyInterestPercent: "Juros de Mora (% a.m.)",
   relatedParty: "Parte Relacionada",
+  autoConfirmReceipts: "Confirmar Comprovantes Automaticamente",
   paymentHold: "Bloqueio de Pagamento",
   paymentPromise: "Promessa de Pagamento",
   reason: "Motivo",
@@ -155,7 +156,10 @@ export const ACTION_LABELS: Record<string, string> = {
   release_hold: "desbloqueou o pagamento de",
   promise: "registrou promessa de pagamento em",
   confirm_match: "conciliou",
+  auto_confirm_match: "conciliou automaticamente",
+  reject_match: "rejeitou a sugestão de",
   remove_match: "desfez a conciliação de",
+  delete_comprovante: "excluiu",
   close_period: "fechou a conciliação de",
   reopen_period: "reabriu a conciliação de",
 };
@@ -173,6 +177,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   chart_account: "Plano de Contas",
   bank_account: "Conta Bancária",
   reconciliation_rule: "Regra de Conciliação",
+  comprovante: "Comprovante",
 };
 
 /**

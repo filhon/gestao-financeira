@@ -21,6 +21,7 @@ const pathNames: Record<string, string> = {
   recorrencias: "Recorrências",
   conciliacao: "Conciliação Bancária",
   comprovantes: "Comprovantes",
+  regras: "Regras",
   reembolsos: "Reembolsos",
   "contas-bancarias": "Contas Bancárias",
   cadastros: "Cadastros",

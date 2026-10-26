@@ -34,7 +34,7 @@
  */
 
 import type { Transaction } from "@/lib/types";
-import { parseReceipt } from "./receipt";
+import { parseReceipt, type ReceiptFacts } from "./receipt";
 import { scoreCandidates, type MatchOptions, type MatchOutcome } from "./score";
 
 export { parseReceipt, primaryAmount, primaryDate } from "./receipt";
@@ -47,6 +47,38 @@ export type {
   ReceiptFacts,
 } from "./receipt";
 export { scoreCandidates } from "./score";
+export { autoConfirmReason } from "./autoConfirm";
+export {
+  entityIdentifiers,
+  hasAliases,
+  learnableAliases,
+  type ReceiptAliases,
+} from "./learn";
+
+/** Campos que o usuário corrigiu: substituem a leitura automática. */
+export interface FactOverrides {
+  amount?: number;
+  date?: Date;
+}
+
+export function applyOverrides(
+  facts: ReceiptFacts,
+  overrides?: FactOverrides,
+): ReceiptFacts {
+  if (!overrides) return facts;
+  const label = "informado pelo usuário";
+  return {
+    ...facts,
+    amounts:
+      overrides.amount != null
+        ? [{ value: overrides.amount, weight: 1, label, index: 0 }]
+        : facts.amounts,
+    dates: overrides.date
+      ? [{ date: overrides.date, weight: 1, label, index: 0 }]
+      : facts.dates,
+    isEmpty: facts.isEmpty && overrides.amount == null && !overrides.date,
+  };
+}
 export type {
   EntityEvidence,
   MatchOptions,
@@ -64,8 +96,10 @@ export type {
 export function matchComprovante(
   extractedText: string,
   transactions: Transaction[],
-  options: MatchOptions = {},
+  options: MatchOptions & { overrides?: FactOverrides } = {},
 ): MatchOutcome {
-  const facts = parseReceipt(extractedText);
+  let facts = applyOverrides(parseReceipt(extractedText), options.overrides);
+  // Beneficiário afirmado pelo usuário já é fato, mesmo com texto ilegível.
+  if (options.confirmedEntityId) facts = { ...facts, isEmpty: false };
   return scoreCandidates(facts, transactions, options);
 }

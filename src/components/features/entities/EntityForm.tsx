@@ -83,6 +83,7 @@ const entitySchema = z.object({
   lateFeePercent: z.number().min(0).max(100).nullable().optional(),
   monthlyInterestPercent: z.number().min(0).max(100).nullable().optional(),
   relatedParty: z.boolean().optional(),
+  autoConfirmReceipts: z.boolean().optional(),
 });
 
 type EntityFormData = z.infer<typeof entitySchema>;
@@ -214,6 +215,7 @@ export function EntityForm({
         lateFeePercent: defaultValues.lateFeePercent ?? null,
         monthlyInterestPercent: defaultValues.monthlyInterestPercent ?? null,
         relatedParty: defaultValues.relatedParty ?? false,
+        autoConfirmReceipts: defaultValues.autoConfirmReceipts ?? false,
       });
     }
   }, [defaultValues, form]);
@@ -435,6 +437,33 @@ export function EntityForm({
                       Mantenedora, coligada, dirigente ou empresa ligada à
                       organização. Aparece destacada na cobrança e nos alertas
                       de caixa, porque esses valores pedem divulgação à parte.
+                    </p>
+                  </div>
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <div className="col-span-12">
+            <FormField
+              control={form.control}
+              name="autoConfirmReceipts"
+              render={({ field }) => (
+                <FormItem className="flex items-start gap-3 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={!!field.value}
+                      onCheckedChange={(v) => field.onChange(v === true)}
+                    />
+                  </FormControl>
+                  <div className="space-y-0.5">
+                    <FormLabel>
+                      Confirmar comprovantes automaticamente
+                    </FormLabel>
+                    <p className="text-xs text-muted-foreground">
+                      Comprovante deste fornecedor com valor exato, sem empate e
+                      sem divergência é associado sem revisão, mesmo quando só o
+                      nome aparece. Cada associação fica na auditoria.
                     </p>
                   </div>
                 </FormItem>

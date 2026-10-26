@@ -13,6 +13,8 @@ import {
   where,
   limit,
   Timestamp,
+  updateDoc,
+  deleteField,
 } from "firebase/firestore";
 import { Company } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
@@ -35,6 +37,36 @@ const normalizeCnpj = (cnpj: string): string => {
 };
 
 export const companyService = {
+  /** Início do controle de comprovantes (ou `null` quando não definido). */
+  getReceiptsStartDate: async (companyId: string): Promise<Date | null> => {
+    const snap = await getDoc(doc(db, COLLECTION_NAME, companyId));
+    return (
+      (snap.data()?.receiptsStartDate as Timestamp | undefined)?.toDate() ??
+      null
+    );
+  },
+
+  setReceiptsStartDate: async (
+    companyId: string,
+    date: Date | null,
+    actor: { uid: string; email: string },
+  ) => {
+    await updateDoc(doc(db, COLLECTION_NAME, companyId), {
+      receiptsStartDate: date ? Timestamp.fromDate(date) : deleteField(),
+    });
+    auditService.log({
+      companyId,
+      userId: actor.uid,
+      userEmail: actor.email,
+      action: "update",
+      entity: "company",
+      entityId: companyId,
+      details: {
+        receiptsStartDate: date ? date.toLocaleDateString("pt-BR") : "sem data",
+      },
+    });
+  },
+
   /**
    * Find company by CNPJ (primary) or normalized name (fallback)
    * Optimized for minimal reads

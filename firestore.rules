@@ -91,7 +91,7 @@ service cloud.firestore {
         (hasCompanyRole(companyId, ['financial_manager', 'user']) &&
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rdCounter'])) ||
         (isManager(companyId) &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom']));
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom', 'receiptsStartDate']));
 
       // Subcoleção: sugestões de lotes geradas pela Cloud Function noturna.
       // Leitura: roles que gerenciam lotes de pagamento.
@@ -488,6 +488,7 @@ service cloud.firestore {
           'extractedText', 'matchConfidence', 'matchConfidenceLevel',
           'matchedAmount', 'matchedDate', 'matchedEntity',
           'matchReasons', 'matchIsAmbiguous', 'matchAlternatives',
+          'matchSignals', 'possibleDuplicateOf', 'autoConfirmReason', 'manualFields',
           'fileHash', 'storagePath', 'uploadedBy', 'companyId'
         ]) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['suggestedTransactionId']) ||

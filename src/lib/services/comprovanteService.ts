@@ -84,11 +84,52 @@ const stripUndefined = (obj: any): any => {
 };
 
 export type ComprovanteFilter = {
-  matchStatus?: ComprovanteMatchStatus | "all";
+  /** Vazio = todos os status. */
+  statuses?: ComprovanteMatchStatus[];
+  /** Data de envio (createdAt). */
   startDate?: Date;
   endDate?: Date;
   uploadBatchId?: string;
   searchText?: string;
+};
+
+// Mesmos filtros para a página e para a contagem: o total exibido é o real.
+const filterConstraints = (companyId: string, filters?: ComprovanteFilter) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const constraints: any[] = [where("companyId", "==", companyId)];
+
+  const statuses = filters?.statuses ?? [];
+  if (statuses.length === 1) {
+    constraints.push(where("matchStatus", "==", statuses[0]));
+  } else if (statuses.length > 1) {
+    constraints.push(where("matchStatus", "in", statuses));
+  }
+  if (filters?.uploadBatchId) {
+    constraints.push(where("uploadBatchId", "==", filters.uploadBatchId));
+  }
+  if (filters?.searchText) {
+    // Multi-word queries: pick the longest word for best precision.
+    // Composite index (companyId + searchTokens + createdAt) supports
+    // array-contains combined with the date range below.
+    const words = normalizeSearch(filters.searchText)
+      .split(/\s+/)
+      .filter((w) => w.length >= 2);
+    const primaryToken =
+      words.sort((a, b) => b.length - a.length)[0] ??
+      normalizeSearch(filters.searchText);
+    constraints.push(where("searchTokens", "array-contains", primaryToken));
+  }
+  if (filters?.startDate) {
+    constraints.push(
+      where("createdAt", ">=", Timestamp.fromDate(filters.startDate)),
+    );
+  }
+  if (filters?.endDate) {
+    constraints.push(
+      where("createdAt", "<=", Timestamp.fromDate(filters.endDate)),
+    );
+  }
+  return constraints;
 };
 
 export const comprovanteService = {
@@ -126,39 +167,7 @@ export const comprovanteService = {
     lastDoc: QueryDocumentSnapshot | null;
     hasMore: boolean;
   }> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const constraints: any[] = [where("companyId", "==", companyId)];
-
-    if (filters?.matchStatus && filters.matchStatus !== "all") {
-      constraints.push(where("matchStatus", "==", filters.matchStatus));
-    }
-    if (filters?.uploadBatchId) {
-      constraints.push(where("uploadBatchId", "==", filters.uploadBatchId));
-    }
-    if (filters?.searchText) {
-      // Multi-word queries: pick the longest word for best precision.
-      // Composite index (companyId + searchTokens + createdAt) supports
-      // array-contains combined with the date range below.
-      const words = normalizeSearch(filters.searchText)
-        .split(/\s+/)
-        .filter((w) => w.length >= 2);
-      const primaryToken =
-        words.sort((a, b) => b.length - a.length)[0] ??
-        normalizeSearch(filters.searchText);
-      constraints.push(where("searchTokens", "array-contains", primaryToken));
-    }
-    // Date range applies regardless of search text — composite index supports it
-    if (filters?.startDate) {
-      constraints.push(
-        where("createdAt", ">=", Timestamp.fromDate(filters.startDate)),
-      );
-    }
-    if (filters?.endDate) {
-      constraints.push(
-        where("createdAt", "<=", Timestamp.fromDate(filters.endDate)),
-      );
-    }
-
+    const constraints = filterConstraints(companyId, filters);
     constraints.push(orderBy("createdAt", "desc"));
     if (lastDoc != null) constraints.push(startAfter(lastDoc));
     constraints.push(limit(pageSize));
@@ -171,6 +180,63 @@ export const comprovanteService = {
       lastDoc: snap.docs[snap.docs.length - 1] ?? null,
       hasMore: snap.docs.length === pageSize,
     };
+  },
+
+  async count(companyId: string, filters?: ComprovanteFilter): Promise<number> {
+    const snap = await getCountFromServer(
+      query(
+        collection(db, COLLECTION),
+        ...filterConstraints(companyId, filters),
+      ),
+    );
+    return snap.data().count;
+  },
+
+  /**
+   * Corrige a leitura (beneficiário, valor, data) e refaz a sugestão no
+   * servidor. O beneficiário informado também ensina a entidade.
+   */
+  async calibrate(
+    companyId: string,
+    body: {
+      comprovanteId: string;
+      entityId?: string;
+      amount?: number;
+      date?: string; // yyyy-MM-dd
+      learnOnly?: boolean;
+    },
+  ): Promise<{
+    patch: Partial<Comprovante>;
+    learned: { documents: string[]; pixKeys: string[]; names: string[] };
+  }> {
+    const res = await fetch("/api/internal/comprovantes/calibrate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-company-id": companyId,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error ?? "Erro ao recalcular a sugestão.");
+    }
+    // null do servidor = campo limpo; no client isso é undefined.
+    const patch = Object.fromEntries(
+      Object.entries(data.patch ?? {}).map(([k, v]) => [k, v ?? undefined]),
+    ) as Partial<Comprovante> & { matchedDate?: string | Date };
+    if (typeof patch.matchedDate === "string") {
+      patch.matchedDate = new Date(patch.matchedDate);
+    }
+    if (patch.manualFields) {
+      const m = patch.manualFields as unknown as Record<string, unknown>;
+      patch.manualFields = {
+        ...patch.manualFields,
+        date: m.date ? new Date(m.date as string) : undefined,
+        at: new Date((m.at as string) ?? Date.now()),
+      };
+    }
+    return { patch: patch as Partial<Comprovante>, learned: data.learned };
   },
 
   // ── Pending review list ──────────────────────────────────────────────────────
@@ -229,19 +295,17 @@ export const comprovanteService = {
       where("companyId", "==", companyId),
     );
 
-    const [total, matched, pendingReview, unmatched, rejected] =
+    const byStatus = (s: ComprovanteMatchStatus) =>
+      getCountFromServer(query(base, where("matchStatus", "==", s)));
+
+    const [total, matched, pendingReview, unmatched, rejected, needsManual] =
       await Promise.all([
         getCountFromServer(base),
-        getCountFromServer(query(base, where("matchStatus", "==", "matched"))),
-        getCountFromServer(
-          query(base, where("matchStatus", "==", "pending_review")),
-        ),
-        getCountFromServer(
-          query(base, where("matchStatus", "==", "unmatched")),
-        ),
-        getCountFromServer(
-          query(base, where("matchStatus", "==", "rejected_match")),
-        ),
+        byStatus("matched"),
+        byStatus("pending_review"),
+        byStatus("unmatched"),
+        byStatus("rejected_match"),
+        byStatus("needs_manual"),
       ]);
 
     return {
@@ -250,6 +314,7 @@ export const comprovanteService = {
       pendingReview: pendingReview.data().count,
       unmatched: unmatched.data().count,
       rejectedMatch: rejected.data().count,
+      needsManual: needsManual.data().count,
     };
   },
 
@@ -280,13 +345,12 @@ export const comprovanteService = {
       transactionEntities: transactions.map((t) => t.supplierOrClient),
     });
 
+    // A sugestão fica guardada: é o que permite "desfazer" voltar para a fila.
     batch.update(doc(db, COLLECTION, comprovanteId), {
       matchStatus: "matched",
       transactionId: primaryId,
       transactionIds,
       isConsolidated: transactionIds.length > 1,
-      suggestedTransactionId: null,
-      suggestedTransactionIds: null,
       reviewedBy,
       reviewedAt: serverTimestamp(),
       searchText,
@@ -348,21 +412,29 @@ export const comprovanteService = {
     }
   },
 
+  /**
+   * Desfaz uma associação. `restoreTo: "pending_review"` é o "desfazer" logo
+   * após confirmar: devolve à fila mantendo a sugestão original.
+   */
   async removeMatch(
     comprovanteId: string,
     transactionIds: string[],
     removedBy?: string,
     actor?: { companyId: string; userEmail: string },
+    restoreTo: Exclude<ComprovanteMatchStatus, "matched"> = "unmatched",
   ): Promise<void> {
     const batch = writeBatch(db);
 
     batch.update(doc(db, COLLECTION, comprovanteId), {
-      matchStatus: "unmatched",
+      matchStatus: restoreTo,
       transactionId: null,
       transactionIds: null,
       isConsolidated: false,
-      suggestedTransactionId: null,
-      suggestedTransactionIds: null,
+      autoConfirmed: false,
+      ...(restoreTo === "unmatched" && {
+        suggestedTransactionId: null,
+        suggestedTransactionIds: null,
+      }),
       reviewedBy: null,
       reviewedAt: null,
       updatedAt: serverTimestamp(),

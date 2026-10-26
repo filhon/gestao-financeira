@@ -55,6 +55,8 @@ export type EntityEvidence =
   | "bank_account"
   | "name"
   | "initials"
+  /** Beneficiário informado pelo usuário na calibragem do comprovante. */
+  | "confirmed"
   | "none";
 
 export interface MatchSignals {
@@ -99,6 +101,8 @@ export interface MatchOptions {
   penalizeAlreadyMatched?: boolean;
   /** Score mínimo para constar no resultado. Padrão: 25. */
   minScore?: number;
+  /** Entidade que o usuário afirmou ser o beneficiário deste comprovante. */
+  confirmedEntityId?: string;
   /** Janela de dias para agrupar transações consolidadas. Padrão: 7. */
   consolidationWindowDays?: number;
   /** Tamanho máximo de uma associação consolidada. Padrão: 8. */
@@ -135,6 +139,11 @@ interface PreparedTransaction {
   pixKey?: string;
   agency?: string;
   account?: string;
+  /** Identificadores aprendidos de comprovantes confirmados pelo usuário. */
+  aliasDocuments: string[];
+  aliasPixKeys: string[];
+  aliasNames: string[];
+  confirmedByUser: boolean;
   barcode?: string;
   descriptionTokens: string[];
   documentNumbers: string[];
@@ -202,6 +211,14 @@ function prepare(
       pixKey: entity?.pixKey ? normalizePixKey(entity.pixKey) : undefined,
       agency: entity?.agency ? digitsOnly(entity.agency) : undefined,
       account: entity?.account ? digitsOnly(entity.account) : undefined,
+      aliasDocuments: (entity?.receiptAliases?.documents ?? []).map(digitsOnly),
+      aliasPixKeys: (entity?.receiptAliases?.pixKeys ?? []).map(
+        normalizePixKey,
+      ),
+      aliasNames: (entity?.receiptAliases?.names ?? []).map(normalize),
+      confirmedByUser:
+        !!options.confirmedEntityId &&
+        tx.entityId === options.confirmedEntityId,
       barcode: tx.barcode ? (toBarcode(tx.barcode) ?? undefined) : undefined,
       descriptionTokens: significantTokens(freeText),
       documentNumbers: collectNumbers(freeText),
@@ -346,9 +363,19 @@ function evaluateEntity(
     }
   };
 
+  if (candidate.confirmedByUser) promote(1, "confirmed");
+
   // ── Documento (CNPJ/CPF) ────────────────────────────────────────────────────
   const relevantDocs = facts.documents.filter((d) => d.role !== "payer");
   let documentConflict = false;
+
+  // CNPJ/CPF aprendido de um comprovante que o usuário confirmou vale como
+  // o do cadastro (ex.: o fornecedor recebe numa conta de outra razão social).
+  for (const doc of relevantDocs) {
+    if (!doc.masked && candidate.aliasDocuments.includes(doc.digits)) {
+      promote(doc.role === "beneficiary" ? 1 : 0.95, "document");
+    }
+  }
 
   if (candidate.documentDigits) {
     const expected = candidate.documentDigits;
@@ -388,6 +415,19 @@ function evaluateEntity(
   // ── Chave Pix ───────────────────────────────────────────────────────────────
   if (candidate.pixKey && facts.pixKeys.includes(candidate.pixKey)) {
     promote(1, "pix_key");
+  }
+  if (facts.pixKeys.some((k) => candidate.aliasPixKeys.includes(k))) {
+    promote(1, "pix_key");
+  }
+
+  // ── Nome aprendido (grafia do banco, abreviações) ───────────────────────────
+  if (
+    candidate.aliasNames.length > 0 &&
+    facts.beneficiaryNames.some((n) =>
+      candidate.aliasNames.includes(normalize(n)),
+    )
+  ) {
+    promote(0.95, "name");
   }
 
   // ── Agência + conta ─────────────────────────────────────────────────────────
@@ -576,6 +616,7 @@ function assemble(
       bank_account: `Agência e conta de ${entity.matchedName}`,
       name: `Beneficiário "${entity.matchedName}" identificado no comprovante`,
       initials: `Sigla de "${entity.matchedName}" identificada`,
+      confirmed: `Beneficiário ${entity.matchedName} informado pelo usuário`,
       none: "",
     };
     if (label[entity.evidence]) reasons.push(label[entity.evidence]);
@@ -635,7 +676,8 @@ function assemble(
   const strongIdentity =
     input.barcodeMatch ||
     entity.evidence === "document" ||
-    entity.evidence === "pix_key";
+    entity.evidence === "pix_key" ||
+    entity.evidence === "confirmed";
 
   // Sem valor não existe match confiável: é o eixo central de um comprovante.
   if (amount.score === 0 && !strongIdentity) {
@@ -968,7 +1010,7 @@ export function scoreCandidates(
   if (isAmbiguous) {
     best.isAmbiguous = true;
     best.reasons.push(
-      "⚠ Outra transação apresenta evidências equivalentes — confirme manualmente",
+      "⚠ Outra transação apresenta evidências equivalentes. Confirme manualmente",
     );
     if (best.confidenceLevel === "HIGH") best.confidenceLevel = "MEDIUM";
   }

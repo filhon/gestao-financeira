@@ -52,9 +52,25 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // ── Pré-visualização de comprovantes ─────────────────────────────────
+      // O proxy é embutido no painel de revisão (<iframe>); com DENY o
+      // navegador recusa e a prévia nunca aparece. Só o próprio app embute.
+      {
+        source: "/api/internal/storage-proxy",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains; preload",
+          },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
       // ── Segurança geral ──────────────────────────────────────────────────
       {
-        source: "/:path*",
+        source: "/((?!api/internal/storage-proxy).*)",
         headers: [
           {
             key: "X-DNS-Prefetch-Control",

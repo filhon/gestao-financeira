@@ -59,6 +59,12 @@ export interface Company {
    * (por ano de vencimento). Ausente: a classificação é opcional.
    */
   chartOfAccountsRequiredFrom?: number;
+
+  /**
+   * Início do controle de comprovantes: pagamentos anteriores não entram em
+   * "Pagos sem comprovante". Ausente: o sistema sugere uma data.
+   */
+  receiptsStartDate?: Date;
 }
 
 export interface UserProfile {
@@ -301,6 +307,22 @@ export interface Entity {
   /** Mantenedora, coligada ou outra ligada à organização (ITG 2002 / NBC TG 05). */
   relatedParty?: boolean;
 
+  /**
+   * Fornecedor de confiança: comprovante com valor exato e sem conflito é
+   * confirmado sem revisão, mesmo identificado só pelo nome.
+   */
+  autoConfirmReceipts?: boolean;
+
+  /**
+   * Identificadores lidos em comprovantes que o usuário confirmou como deste
+   * fornecedor. Valem como evidência no matching (server-authored).
+   */
+  receiptAliases?: {
+    documents?: string[];
+    pixKeys?: string[];
+    names?: string[];
+  };
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -501,6 +523,7 @@ export interface AuditLog {
     | "authorize"
     | "release"
     | "confirm_match"
+    | "auto_confirm_match"
     | "reject_match"
     | "remove_match"
     | "delete_comprovante"
@@ -626,6 +649,15 @@ export interface ComprovanteMatchAlternative {
   reason?: string | null;
 }
 
+export interface ComprovanteMatchSignals {
+  /** Diferença em reais entre o valor lido e o do título. */
+  amountDelta?: number;
+  /** barcode | document | pix_key | bank_account | name | ... | none */
+  entityEvidence: string;
+  /** Conflitos aplicados: documento_divergente, ja_conciliada, soma_ambigua, metodo_divergente. */
+  penalties: string[];
+}
+
 export interface Comprovante {
   id: string;
   companyId: string;
@@ -651,6 +683,19 @@ export interface Comprovante {
   matchReasons?: string[]; // Evidências que sustentam a sugestão (server-authored)
   matchIsAmbiguous?: boolean; // Outro candidato tem evidência equivalente
   matchAlternatives?: ComprovanteMatchAlternative[]; // Próximos colocados, para revisão manual
+  matchSignals?: ComprovanteMatchSignals; // Evidência estruturada (server-authored)
+  possibleDuplicateOf?: string; // Outro comprovante com mesmo valor, data e beneficiário
+  autoConfirmed?: boolean; // Confirmado pela regra automática, sem revisão humana
+  autoConfirmReason?: string;
+  /** Campos corrigidos pelo usuário (valem sobre a leitura automática). */
+  manualFields?: {
+    amount?: number;
+    date?: Date;
+    entityId?: string;
+    entityName?: string;
+    by: string;
+    at: Date;
+  };
   extractedText?: string; // Raw text extracted from the PDF page
   fileHash?: string; // SHA-256 of the page blob — used to detect duplicate uploads
 

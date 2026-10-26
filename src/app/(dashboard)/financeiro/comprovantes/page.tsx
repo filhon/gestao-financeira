@@ -2,31 +2,27 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo, memo } from "react";
 import {
-  FileCheck,
   Upload,
   Search,
   Download,
   Eye,
   Link2Off,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  FileX,
-  Filter,
   MoreHorizontal,
   RefreshCw,
   Share2,
-  ChevronUp,
-  ChevronDown,
-  ChevronsUpDown,
   SlidersHorizontal,
   X,
   Loader2,
   FileText,
   Trash2,
+  Sparkles,
+  CheckCircle2,
+  Settings2,
 } from "lucide-react";
+import Link from "next/link";
+import { companyService } from "@/lib/services/companyService";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -39,17 +35,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,7 +48,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
-import { format, endOfDay, startOfDay, addDays } from "date-fns";
+import { format, endOfDay, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -68,143 +57,72 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Comprovante, Transaction, ComprovanteMatchStatus } from "@/lib/types";
-import { comprovanteService } from "@/lib/services/comprovanteService";
+import {
+  comprovanteService,
+  type ComprovanteFilter,
+} from "@/lib/services/comprovanteService";
 import { transactionService } from "@/lib/services/transactionService";
-import { formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
+import { cn, formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { ComprovanteStatusBadge } from "@/components/features/finance/comprovantes/ComprovanteStatusBadge";
-import { ConfidenceBadge } from "@/components/features/finance/comprovantes/ConfidenceBadge";
 import { UploadComprovanteDialog } from "@/components/features/finance/comprovantes/UploadComprovanteDialog";
-import { MatchReviewDialog } from "@/components/features/finance/comprovantes/MatchReviewDialog";
+import {
+  MatchReviewPanel,
+  txCandidatesKey,
+  type ReviewResult,
+} from "@/components/features/finance/comprovantes/MatchReviewPanel";
+import { InsightLine } from "@/components/features/finance/comprovantes/InsightLine";
+import {
+  amountDifference,
+  isSafeToBulkConfirm,
+  lacksReceipt,
+  linkedTransactionIds,
+  readNameDiffers,
+  receiptInsight,
+  receiptsStartKey,
+  suggestedReceiptsStart,
+  titlesTotal,
+} from "@/components/features/finance/comprovantes/receiptInsight";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_ORDER: Record<string, number> = {
-  pending_review: 0,
-  unmatched: 1,
-  rejected_match: 2,
-  matched: 3,
+type TabKey =
+  | "pending"
+  | "unmatched"
+  | "manual"
+  | "missing"
+  | "matched"
+  | "all";
+
+const TAB_STATUSES: Record<
+  Exclude<TabKey, "missing">,
+  ComprovanteMatchStatus[]
+> = {
+  pending: ["pending_review"],
+  unmatched: ["unmatched", "rejected_match"],
+  manual: ["needs_manual"],
+  matched: ["matched"],
+  all: [],
 };
+
+/** Status que ainda pedem uma decisão humana. */
+const ACTIONABLE = new Set<ComprovanteMatchStatus>([
+  "pending_review",
+  "unmatched",
+  "rejected_match",
+  "needs_manual",
+]);
 
 const STATS_QUERY_KEY = (companyId: string | undefined) => [
   "comprovante-stats",
   companyId,
 ];
 
-// ── Animated number ──────────────────────────────────────────────────────────
-
-function useAnimatedValue(target: number, duration = 600) {
-  const [current, setCurrent] = useState(target);
-  const startRef = useRef(target);
-  const startTimeRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    startRef.current = current;
-    startTimeRef.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target]);
-
-  useEffect(() => {
-    let raf: number;
-    const animate = (ts: number) => {
-      if (!startTimeRef.current) startTimeRef.current = ts;
-      const progress = Math.min((ts - startTimeRef.current) / duration, 1);
-      const ease = 1 - Math.pow(1 - progress, 4);
-      setCurrent(startRef.current + (target - startRef.current) * ease);
-      if (progress < 1) raf = requestAnimationFrame(animate);
-    };
-    raf = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(raf);
-  }, [target, duration]);
-
-  return current;
-}
-
-// ── Stat cell (used inside the unified stats strip) ──────────────────────────
-
-function StatCell({
-  title,
-  value,
-  icon: Icon,
-  colorClass,
-  loading,
-}: {
-  title: string;
-  value: number;
-  icon: React.ElementType;
-  colorClass: string;
-  loading?: boolean;
-}) {
-  const animated = useAnimatedValue(value);
-  return (
-    <div className="flex items-center gap-3 px-5 py-4">
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${colorClass}`}
-      >
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground leading-none mb-1">
-          {title}
-        </p>
-        {loading ? (
-          <Skeleton className="h-6 w-12" />
-        ) : (
-          <>
-            <p
-              className="text-xl font-bold tabular-nums leading-none"
-              aria-hidden
-            >
-              {Math.round(animated)}
-            </p>
-            <span className="sr-only" aria-live="polite" aria-atomic>
-              {value}
-            </span>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Sort header button ───────────────────────────────────────────────────────
-
-function SortHeader({
-  label,
-  active,
-  dir,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  dir: "asc" | "desc";
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-1 select-none hover:text-foreground transition-colors"
-    >
-      {label}
-      {active ? (
-        dir === "asc" ? (
-          <ChevronUp className="h-3.5 w-3.5" />
-        ) : (
-          <ChevronDown className="h-3.5 w-3.5" />
-        )
-      ) : (
-        <ChevronsUpDown className="h-3.5 w-3.5 opacity-40" />
-      )}
-    </button>
-  );
-}
+const normalize = (s: string) =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
 // ── Swipe helper ─────────────────────────────────────────────────────────────
 
-function useSwipe(
-  onSwipeLeft?: () => void,
-  onSwipeRight?: () => void,
-  threshold = 60,
-) {
+function useSwipe(onSwipeLeft?: () => void, threshold = 60) {
   const startX = useRef<number | null>(null);
 
   const onTouchStart = (e: React.TouchEvent) => {
@@ -215,69 +133,35 @@ function useSwipe(
     if (startX.current === null) return;
     const dx = e.changedTouches[0].clientX - startX.current;
     if (dx < -threshold) onSwipeLeft?.();
-    else if (dx > threshold) onSwipeRight?.();
     startX.current = null;
   };
 
   return { onTouchStart, onTouchEnd };
 }
 
-// ── Mobile skeletons ──────────────────────────────────────────────────────────
+// ── Row actions (desktop + mobile) ───────────────────────────────────────────
 
-function MobileCardSkeleton() {
-  return (
-    <div className="divide-y">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="flex items-start gap-3 px-4 py-3.5">
-          <Skeleton className="h-9 w-9 rounded-md shrink-0 mt-0.5" />
-          <div className="flex-1 space-y-2 min-w-0">
-            <div className="flex items-start justify-between gap-2">
-              <Skeleton className="h-4 flex-1 max-w-[180px]" />
-              <Skeleton className="h-4 w-20 shrink-0" />
-            </div>
-            <Skeleton className="h-3 w-32" />
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-5 w-20 rounded-full" />
-              <Skeleton className="h-5 w-16 rounded-full" />
-            </div>
-          </div>
-          <Skeleton className="h-8 w-8 rounded shrink-0" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Mobile comprovante card ───────────────────────────────────────────────────
-
-interface MobileComprovanteCardProps {
+interface RowActionsProps {
   comprovante: Comprovante;
-  tx: Transaction | null;
   canUpload: boolean;
-  sharingId: string | null;
+  sharing: boolean;
   onOpenReview: (c: Comprovante) => void;
   onShare: (c: Comprovante) => void;
   onSetRemoveId: (id: string) => void;
   onSetDeleteId: (id: string) => void;
-  downloadUrl: string;
+  triggerClassName?: string;
 }
 
-const MobileComprovanteCard = memo(function MobileComprovanteCard({
+function RowActions({
   comprovante: c,
-  tx,
   canUpload,
-  sharingId,
+  sharing,
   onOpenReview,
   onShare,
   onSetRemoveId,
   onSetDeleteId,
-  downloadUrl,
-}: MobileComprovanteCardProps) {
-  const canReview =
-    (c.matchStatus === "pending_review" ||
-      c.matchStatus === "unmatched" ||
-      c.matchStatus === "rejected_match") &&
-    canUpload;
+  triggerClassName,
+}: RowActionsProps) {
   const canRemove =
     c.matchStatus === "matched" && !!c.transactionId && canUpload;
   const canDelete =
@@ -286,139 +170,124 @@ const MobileComprovanteCard = memo(function MobileComprovanteCard({
       c.matchStatus === "needs_manual") &&
     canUpload;
 
-  const swipe = useSwipe(
-    canReview ? () => onOpenReview(c) : undefined,
-    undefined,
-    60,
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("text-muted-foreground", triggerClassName)}
+          aria-label="Ações do comprovante"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem onClick={() => onOpenReview(c)} className="gap-2">
+          <Eye className="h-4 w-4" />
+          {ACTIONABLE.has(c.matchStatus) && canUpload
+            ? "Revisar associação"
+            : "Ver comprovante"}
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a
+            href={comprovanteProxyUrl(c.storagePath)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex cursor-pointer items-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Baixar comprovante
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => onShare(c)}
+          disabled={sharing}
+          className="gap-2"
+        >
+          {sharing ? (
+            <RefreshCw className="h-4 w-4 animate-spin" />
+          ) : (
+            <Share2 className="h-4 w-4" />
+          )}
+          {sharing ? "Preparando…" : "Enviar"}
+        </DropdownMenuItem>
+        {(canRemove || canDelete) && <DropdownMenuSeparator />}
+        {canRemove && (
+          <DropdownMenuItem
+            onClick={() => onSetRemoveId(c.id)}
+            className="gap-2 text-destructive focus:text-destructive"
+          >
+            <Link2Off className="h-4 w-4" />
+            Remover associação
+          </DropdownMenuItem>
+        )}
+        {canDelete && (
+          <DropdownMenuItem
+            onClick={() => onSetDeleteId(c.id)}
+            className="gap-2 text-destructive focus:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir comprovante
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
+}
+
+// ── Mobile comprovante card ───────────────────────────────────────────────────
+
+const MobileComprovanteCard = memo(function MobileComprovanteCard({
+  txs,
+  ...actions
+}: RowActionsProps & { txs: Transaction[] }) {
+  const c = actions.comprovante;
+  const canReview = ACTIONABLE.has(c.matchStatus) && actions.canUpload;
+  const swipe = useSwipe(canReview ? () => actions.onOpenReview(c) : undefined);
+  const date = c.matchedDate ?? txs[0]?.paymentDate;
 
   return (
     <div
       {...swipe}
-      className="relative flex items-start gap-3 px-4 py-3.5 transition-colors select-none"
+      className="flex select-none items-start gap-3 px-4 py-3.5"
+      onClick={() => actions.onOpenReview(c)}
     >
-      {/* File icon */}
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary mt-0.5">
-        <FileCheck className="h-4 w-4" />
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 min-w-0 py-0.5">
+      <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <p className="text-sm font-medium leading-snug truncate">
-              {tx?.description ??
-                c.matchedEntity ??
-                `Pág. ${c.pageNumber}/${c.totalPages}`}
-            </p>
-            {c.isConsolidated && (c.transactionIds?.length ?? 0) > 1 && (
-              <span className="inline-flex shrink-0 items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                +{(c.transactionIds?.length ?? 1) - 1}
+          <p className="truncate text-sm font-medium leading-snug">
+            {txs[0]?.description ?? c.matchedEntity ?? "Sem título vinculado"}
+            {txs.length > 1 && (
+              <span className="text-muted-foreground">
+                {" "}
+                e mais {txs.length - 1}
               </span>
             )}
-          </div>
-          <span className="text-sm font-bold font-financial shrink-0">
-            {c.matchedAmount
+          </p>
+          <span className="shrink-0 font-financial text-sm font-semibold">
+            {c.matchedAmount != null
               ? formatCurrency(c.matchedAmount)
-              : tx
-                ? formatCurrency(tx.finalAmount ?? tx.amount)
-                : "—"}
+              : txs.length
+                ? formatCurrency(titlesTotal(txs))
+                : "sem valor"}
           </span>
         </div>
-        {(tx?.supplierOrClient ?? c.matchedEntity) && (
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            {tx?.supplierOrClient ?? c.matchedEntity}
-          </p>
-        )}
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          {(c.matchedDate ?? tx?.paymentDate) && (
-            <span className="text-xs text-muted-foreground">
-              {c.matchedDate
-                ? format(c.matchedDate, "dd MMM yyyy", { locale: ptBR })
-                : tx?.paymentDate
-                  ? format(tx.paymentDate, "dd MMM yyyy", { locale: ptBR })
-                  : null}
-            </span>
-          )}
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {[
+            txs[0]?.supplierOrClient ?? c.matchedEntity,
+            date && format(date, "dd MMM yyyy", { locale: ptBR }),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <ComprovanteStatusBadge status={c.matchStatus} />
-          {c.matchConfidenceLevel && (
-            <ConfidenceBadge
-              level={c.matchConfidenceLevel}
-              score={c.matchConfidence}
-            />
-          )}
+          <InsightLine insight={receiptInsight(c, txs)} />
         </div>
-        {canReview && (
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            ← deslize para revisar
-          </p>
-        )}
       </div>
-
-      {/* Actions menu — min 44×44 touch area */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            className="h-11 w-11 p-0 shrink-0 -mr-2"
-            aria-label="Ações do comprovante"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Ações</DropdownMenuLabel>
-          <DropdownMenuItem asChild>
-            <a
-              href={downloadUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <Download className="h-4 w-4" />
-              Baixar comprovante
-            </a>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onShare(c)}
-            disabled={sharingId === c.id}
-            className="gap-2"
-          >
-            {sharingId === c.id ? (
-              <RefreshCw className="h-4 w-4 animate-spin" />
-            ) : (
-              <Share2 className="h-4 w-4" />
-            )}
-            {sharingId === c.id ? "Preparando…" : "Enviar"}
-          </DropdownMenuItem>
-          {canReview && (
-            <DropdownMenuItem onClick={() => onOpenReview(c)} className="gap-2">
-              <Eye className="h-4 w-4" />
-              Revisar associação
-            </DropdownMenuItem>
-          )}
-          {canRemove && <DropdownMenuSeparator />}
-          {canRemove && (
-            <DropdownMenuItem
-              onClick={() => onSetRemoveId(c.id)}
-              className="gap-2 text-destructive focus:text-destructive"
-            >
-              <Link2Off className="h-4 w-4" />
-              Remover associação
-            </DropdownMenuItem>
-          )}
-          {canDelete && <DropdownMenuSeparator />}
-          {canDelete && (
-            <DropdownMenuItem
-              onClick={() => onSetDeleteId(c.id)}
-              className="gap-2 text-destructive focus:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-              Excluir comprovante
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <RowActions {...actions} triggerClassName="-mr-2 h-11 w-11" />
     </div>
   );
 });
@@ -429,82 +298,126 @@ export default function ComprovantesPage() {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
   const { isAdmin, isFinancialManager } = usePermissions();
+  const queryClient = useQueryClient();
 
   const canUpload = isAdmin || isFinancialManager;
-
-  // ── Sort ─────────────────────────────────────────────────────────────────────
-  type SortField = "date" | "amount" | "status" | "confidence";
-  type SortDir = "asc" | "desc";
-  const [sortField, setSortField] = useState<SortField>("date");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir(field === "date" ? "desc" : "asc");
-    }
-  };
+  const companyId = selectedCompany?.id;
+  const actor =
+    selectedCompany && user
+      ? { companyId: selectedCompany.id, userEmail: user.email ?? "" }
+      : undefined;
 
   // ── Filters ──────────────────────────────────────────────────────────────────
-  const [statusFilter, setStatusFilter] = useState<
-    ComprovanteMatchStatus | "all"
-  >("all");
-
-  const defaultDateRange: DateRange = {
-    from: startOfDay(addDays(new Date(), -90)),
-    to: endOfDay(new Date()),
-  };
-
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(
-    defaultDateRange,
-  );
+  // A fila abre primeiro: é o trabalho do dia. O resto é arquivo.
+  const [tab, setTab] = useState<TabKey>("pending");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 400);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  const isDateRangeDefault =
-    dateRange?.from?.toDateString() === defaultDateRange.from?.toDateString() &&
-    dateRange?.to?.toDateString() === defaultDateRange.to?.toDateString();
-
-  const activeFilterCount =
-    (statusFilter !== "all" ? 1 : 0) +
-    (!isDateRangeDefault && !!dateRange ? 1 : 0);
-  const hasActiveFilters = activeFilterCount > 0 || !!searchTerm;
-
-  const statusLabels: Record<string, string> = {
-    all: "Todos",
-    matched: "Associados",
-    pending_review: "Pendentes",
-    unmatched: "Sem Associação",
-    rejected_match: "Rejeitados",
-  };
-
+  const hasActiveFilters = !!dateRange?.from || !!searchTerm;
   const clearFilters = () => {
-    setStatusFilter("all");
-    setDateRange(defaultDateRange);
+    setDateRange(undefined);
     setSearchTerm("");
   };
 
-  const queryClient = useQueryClient();
+  const filters: ComprovanteFilter = useMemo(
+    () => ({
+      statuses: tab === "missing" ? [] : TAB_STATUSES[tab],
+      startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
+      endDate: dateRange?.from
+        ? endOfDay(dateRange.to ?? dateRange.from)
+        : undefined,
+      searchText: debouncedSearch || undefined,
+    }),
+    [tab, dateRange, debouncedSearch],
+  );
 
   // ── Stats ────────────────────────────────────────────────────────────────────
-  const {
-    data: stats = {
-      total: 0,
-      matched: 0,
-      pendingReview: 0,
-      unmatched: 0,
-      rejectedMatch: 0,
-    },
-    isLoading: statsLoading,
-  } = useQuery({
-    queryKey: STATS_QUERY_KEY(selectedCompany?.id),
-    queryFn: () => comprovanteService.getStats(selectedCompany!.id),
-    enabled: !!selectedCompany,
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: STATS_QUERY_KEY(companyId),
+    queryFn: () => comprovanteService.getStats(companyId!),
+    enabled: !!companyId,
     staleTime: 60_000,
   });
+
+  const { data: filteredCount } = useQuery({
+    queryKey: ["comprovante-count", companyId, filters],
+    queryFn: () => comprovanteService.count(companyId!, filters),
+    enabled: !!companyId && tab !== "missing",
+    staleTime: 60_000,
+  });
+
+  // Pagáveis pagos/autorizados: alimentam "Pagos sem comprovante" e a busca
+  // manual do painel (mesma chave, uma leitura só).
+  const { data: txCandidates = [], isLoading: candidatesLoading } = useQuery({
+    queryKey: txCandidatesKey(companyId),
+    queryFn: () =>
+      transactionService.getAll({
+        companyId: companyId!,
+        type: "payable",
+        statuses: ["paid", "authorized"],
+      }),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Data de corte: pagamentos de antes do controle de comprovantes não são
+  // pendência. Sem data definida, vale a sugestão (mês do 1º comprovante).
+  const { data: receiptsStart, isLoading: receiptsStartLoading } = useQuery({
+    queryKey: receiptsStartKey(companyId),
+    queryFn: () => companyService.getReceiptsStartDate(companyId!),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  });
+  const suggestedStart = useMemo(
+    () => suggestedReceiptsStart(txCandidates),
+    [txCandidates],
+  );
+  const cutoff = receiptsStart ?? suggestedStart;
+
+  const missingAll = useMemo(
+    () =>
+      receiptsStartLoading
+        ? []
+        : txCandidates.filter(
+            (t) =>
+              lacksReceipt(t) &&
+              (!cutoff || (!!t.paymentDate && t.paymentDate >= cutoff)),
+          ),
+    [txCandidates, cutoff, receiptsStartLoading],
+  );
+  const missing = useMemo(() => {
+    const terms = normalize(searchTerm).split(/\s+/).filter(Boolean);
+    const from = dateRange?.from ? startOfDay(dateRange.from) : null;
+    const to = dateRange?.from
+      ? endOfDay(dateRange.to ?? dateRange.from)
+      : null;
+    return missingAll
+      .filter((t) => {
+        if (
+          from &&
+          (!t.paymentDate || t.paymentDate < from || t.paymentDate > to!)
+        ) {
+          return false;
+        }
+        if (!terms.length) return true;
+        const hay = normalize(`${t.description} ${t.supplierOrClient ?? ""}`);
+        return terms.every((term) => hay.includes(term));
+      })
+      .sort(
+        (a, b) =>
+          (b.paymentDate?.getTime() ?? 0) - (a.paymentDate?.getTime() ?? 0),
+      );
+  }, [missingAll, searchTerm, dateRange]);
+
+  const invalidateCounts = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: STATS_QUERY_KEY(companyId) });
+    queryClient.invalidateQueries({
+      queryKey: ["comprovante-count", companyId],
+    });
+    queryClient.invalidateQueries({ queryKey: txCandidatesKey(companyId) });
+  }, [queryClient, companyId]);
 
   // ── Pagination ────────────────────────────────────────────────────────────────
   const {
@@ -515,30 +428,19 @@ export default function ComprovantesPage() {
     isFetchingNextPage,
     refresh,
     isError,
+    updateItem,
   } = usePaginatedQuery<Comprovante>({
-    queryKey: [
-      "comprovantes",
-      selectedCompany?.id,
-      statusFilter,
-      dateRange?.from?.toISOString(),
-      dateRange?.to?.toISOString(),
-      debouncedSearch,
-    ],
+    queryKey: ["comprovantes", companyId, filters],
     queryFn: async (pageSize, lastDoc) => {
-      if (!selectedCompany) return { items: [], lastDoc: null, hasMore: false };
+      if (!companyId) return { items: [], lastDoc: null, hasMore: false };
       return comprovanteService.getPaginated(
-        selectedCompany.id,
+        companyId,
         pageSize,
         lastDoc,
-        {
-          matchStatus: statusFilter,
-          startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
-          endDate: dateRange?.to ? endOfDay(dateRange.to) : undefined,
-          searchText: debouncedSearch || undefined,
-        },
+        filters,
       );
     },
-    enabled: !!selectedCompany,
+    enabled: !!companyId && tab !== "missing",
   });
 
   // ── Transaction index for inline display ─────────────────────────────────────
@@ -548,135 +450,306 @@ export default function ComprovantesPage() {
   useEffect(() => {
     setTxMap(new Map());
     fetchedTxIds.current = new Set();
-  }, [selectedCompany?.id]);
+  }, [companyId]);
 
   useEffect(() => {
     const missingIds = [
       ...new Set(
         items
-          .flatMap((c) => [
-            c.transactionId,
-            c.suggestedTransactionId,
-            ...(c.transactionIds ?? []),
-            ...(c.suggestedTransactionIds ?? []),
-          ])
-          .filter((id): id is string => !!id && !fetchedTxIds.current.has(id)),
+          .flatMap(linkedTransactionIds)
+          .filter((id) => !fetchedTxIds.current.has(id)),
       ),
     ];
     if (!missingIds.length) return;
+    missingIds.forEach((id) => fetchedTxIds.current.add(id));
     transactionService
       .getByIds(missingIds)
       .then((txs) => {
-        missingIds.forEach((id) => fetchedTxIds.current.add(id));
         setTxMap((prev) => {
           const next = new Map(prev);
           txs.forEach((t) => next.set(t.id, t));
           return next;
         });
       })
-      .catch(console.error);
+      .catch((err) => {
+        missingIds.forEach((id) => fetchedTxIds.current.delete(id));
+        console.error(err);
+      });
   }, [items]);
 
-  // Client-side sort only (filtering is done server-side)
-  const filtered = useMemo(
-    () =>
-      items.slice().sort((a, b) => {
-        let cmp = 0;
-        if (sortField === "date") {
-          const aDate =
-            a.matchedDate ??
-            (a.transactionId
-              ? txMap.get(a.transactionId)?.paymentDate
-              : undefined);
-          const bDate =
-            b.matchedDate ??
-            (b.transactionId
-              ? txMap.get(b.transactionId)?.paymentDate
-              : undefined);
-          cmp = (aDate?.getTime() ?? 0) - (bDate?.getTime() ?? 0);
-        } else if (sortField === "amount") {
-          const aAmt =
-            a.matchedAmount ??
-            (a.transactionId
-              ? (txMap.get(a.transactionId)?.finalAmount ??
-                txMap.get(a.transactionId)?.amount ??
-                0)
-              : 0);
-          const bAmt =
-            b.matchedAmount ??
-            (b.transactionId
-              ? (txMap.get(b.transactionId)?.finalAmount ??
-                txMap.get(b.transactionId)?.amount ??
-                0)
-              : 0);
-          cmp = aAmt - bAmt;
-        } else if (sortField === "status") {
-          cmp =
-            (STATUS_ORDER[a.matchStatus] ?? 99) -
-            (STATUS_ORDER[b.matchStatus] ?? 99);
-        } else if (sortField === "confidence") {
-          cmp = (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0);
-        }
-        return sortDir === "asc" ? cmp : -cmp;
-      }),
-    [items, txMap, sortField, sortDir],
+  // Os pagáveis já carregados cobrem quase todos os títulos ligados: a linha
+  // aparece completa na hora, sem esperar o getByIds.
+  const candidateById = useMemo(
+    () => new Map(txCandidates.map((t) => [t.id, t])),
+    [txCandidates],
+  );
+  const txsFor = useCallback(
+    (c: Comprovante) =>
+      linkedTransactionIds(c)
+        .map((id) => txMap.get(id) ?? candidateById.get(id))
+        .filter((t): t is Transaction => !!t),
+    [txMap, candidateById],
   );
 
-  const sentinelEnabled = hasMore && !isFetchingNextPage;
-
+  // ── Infinite scroll ───────────────────────────────────────────────────────────
   const { targetRef: sentinelRef, isIntersecting } =
     useIntersectionObserver<HTMLDivElement>({
       threshold: 0.1,
-      enabled: sentinelEnabled,
+      enabled: hasMore && !isFetchingNextPage,
     });
 
   useEffect(() => {
-    if (isIntersecting && hasMore && !isFetchingNextPage) {
-      loadMore();
-    }
+    if (isIntersecting && hasMore && !isFetchingNextPage) loadMore();
   }, [isIntersecting, hasMore, isFetchingNextPage, loadMore]);
 
-  // ── Dialogs ───────────────────────────────────────────────────────────────────
+  // ── Selection (bulk confirm) ──────────────────────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const selectable = tab === "pending" && canUpload;
+
+  useEffect(() => setSelected(new Set()), [filters]);
+
+  const safeIds = useMemo(
+    () =>
+      selectable
+        ? items
+            .filter((c) => isSafeToBulkConfirm(c, txsFor(c)))
+            .map((c) => c.id)
+        : [],
+    [selectable, items, txsFor],
+  );
+  const pendingLoaded = items.filter((c) => c.matchStatus === "pending_review");
+  const allSelected =
+    pendingLoaded.length > 0 && pendingLoaded.every((c) => selected.has(c.id));
+
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const handleBulkConfirm = async () => {
+    if (!user || selected.size === 0) return;
+    setBulkBusy(true);
+    const used = new Set<string>();
+    const done: { id: string; ids: string[] }[] = [];
+    let skipped = 0;
+
+    for (const id of selected) {
+      const c = items.find((i) => i.id === id);
+      if (!c || c.matchStatus !== "pending_review") continue;
+      const ids = linkedTransactionIds(c);
+      const txs = txsFor(c);
+      // Dois comprovantes apontando para o mesmo título não passam em lote.
+      if (
+        !ids.length ||
+        txs.length !== ids.length ||
+        ids.some((x) => used.has(x))
+      ) {
+        skipped++;
+        continue;
+      }
+      try {
+        await comprovanteService.confirmMatch(
+          c.id,
+          ids,
+          txs,
+          user.uid,
+          c.storagePath,
+          actor,
+        );
+        ids.forEach((x) => used.add(x));
+        done.push({ id: c.id, ids });
+        updateItem(c.id, (prev) => ({
+          ...prev,
+          matchStatus: "matched",
+          transactionId: ids[0],
+          transactionIds: ids,
+          isConsolidated: ids.length > 1,
+          reviewedAt: new Date(),
+        }));
+      } catch {
+        skipped++;
+      }
+    }
+
+    setBulkBusy(false);
+    setSelected(new Set());
+    invalidateCounts();
+    toast.success(
+      `${done.length} associaç${done.length !== 1 ? "ões confirmadas" : "ão confirmada"}` +
+        (skipped ? `. ${skipped} ficaram para revisão individual.` : "."),
+      done.length
+        ? {
+            action: {
+              label: "Desfazer",
+              onClick: async () => {
+                for (const d of done) {
+                  await comprovanteService.removeMatch(
+                    d.id,
+                    d.ids,
+                    user.uid,
+                    actor,
+                    "pending_review",
+                  );
+                }
+                refresh();
+                invalidateCounts();
+              },
+            },
+          }
+        : undefined,
+    );
+  };
+
+  // ── Review panel ──────────────────────────────────────────────────────────────
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const reviewIndex = reviewId ? items.findIndex((i) => i.id === reviewId) : -1;
+  const reviewing = reviewIndex >= 0 ? items[reviewIndex] : null;
+  // Ao acabar a página carregada, avança assim que a próxima chegar.
+  const advanceFrom = useRef<number | null>(null);
+
+  const openReview = useCallback((c: Comprovante) => setReviewId(c.id), []);
+
+  const navigate = useCallback(
+    (dir: 1 | -1) => {
+      const next = reviewIndex + dir;
+      if (dir > 0 && next >= items.length - 3 && hasMore) loadMore();
+      if (next >= 0 && next < items.length) setReviewId(items[next].id);
+      else if (dir > 0 && !hasMore) toast.info("Fim da lista.");
+    },
+    [reviewIndex, items, hasMore, loadMore],
+  );
+
+  const advanceAfter = useCallback(
+    (index: number, doneId: string) => {
+      const next = items
+        .slice(index + 1)
+        .find((i) => i.id !== doneId && ACTIONABLE.has(i.matchStatus));
+      if (next) {
+        setReviewId(next.id);
+        if (items.indexOf(next) >= items.length - 3 && hasMore) loadMore();
+      } else if (hasMore) {
+        advanceFrom.current = items.length - 1;
+        loadMore();
+      } else {
+        setReviewId(null);
+        toast.success("Lista revisada até o fim.");
+      }
+    },
+    [items, hasMore, loadMore],
+  );
+
+  useEffect(() => {
+    if (advanceFrom.current === null || isFetchingNextPage) return;
+    const from = advanceFrom.current;
+    if (items.length - 1 <= from) return;
+    advanceFrom.current = null;
+    const next = items
+      .slice(from + 1)
+      .find((i) => ACTIONABLE.has(i.matchStatus));
+    setReviewId(next?.id ?? null);
+  }, [items, isFetchingNextPage]);
+
+  const handleReviewDone = useCallback(
+    (result: ReviewResult) => {
+      const index = items.findIndex((i) => i.id === result.id);
+      const original = items[index];
+      updateItem(result.id, (prev) => ({ ...prev, ...result.patch }));
+      invalidateCounts();
+
+      if (result.kind === "confirmed") {
+        toast.success("Associação confirmada.", {
+          action: {
+            label: "Desfazer",
+            onClick: async () => {
+              try {
+                await result.undo();
+                if (original) updateItem(result.id, () => original);
+                invalidateCounts();
+              } catch {
+                toast.error("Não foi possível desfazer.");
+              }
+            },
+          },
+        });
+      } else {
+        toast.info(
+          "Sugestão rejeitada. O comprovante foi para Sem associação.",
+        );
+      }
+      advanceAfter(index, result.id);
+    },
+    [items, updateItem, invalidateCounts, advanceAfter],
+  );
+
+  // ── Auto-confirm backlog ──────────────────────────────────────────────────────
+  const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+
+  const runAutoConfirm = async () => {
+    if (!companyId) return;
+    setAutoBusy(true);
+    try {
+      const res = await fetch("/api/internal/comprovantes/auto-confirm", {
+        method: "POST",
+        headers: { "x-company-id": companyId },
+      });
+      const data = (await res.json()) as {
+        checked?: number;
+        confirmed?: number;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error);
+      toast.success(
+        data.confirmed
+          ? `${data.confirmed} de ${data.checked} pendentes associados pela regra estrita. Cada um está na auditoria.`
+          : `Nenhum dos ${data.checked} pendentes passou na regra estrita. Eles precisam de revisão.`,
+      );
+      refresh();
+      invalidateCounts();
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "Erro ao aplicar a confirmação automática.",
+      );
+    } finally {
+      setAutoBusy(false);
+      setAutoConfirmOpen(false);
+    }
+  };
+
+  // ── Remove / delete / share ───────────────────────────────────────────────────
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewing, setReviewing] = useState<Comprovante | null>(null);
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
-
-  const handleOpenReview = useCallback((c: Comprovante) => {
-    setReviewing(c);
-    setReviewOpen(true);
-  }, []);
 
   const handleRemoveMatch = async () => {
     if (!removeId) return;
     const c = items.find((i) => i.id === removeId);
     if (!c?.transactionId) return;
-    const txIds = c.transactionIds ?? [c.transactionId];
     try {
       await comprovanteService.removeMatch(
         c.id,
-        txIds,
+        c.transactionIds ?? [c.transactionId],
         user?.uid,
-        selectedCompany && user
-          ? { companyId: selectedCompany.id, userEmail: user.email ?? "" }
-          : undefined,
+        actor,
       );
-      toast.success("Associação removida.");
+      toast.success(
+        "Associação removida. O comprovante foi para Sem associação.",
+      );
       refresh();
-      queryClient.invalidateQueries({
-        queryKey: STATS_QUERY_KEY(selectedCompany?.id),
-      });
+      invalidateCounts();
     } catch {
       toast.error("Erro ao remover associação.");
     } finally {
       setRemoveId(null);
     }
   };
-
-  const handleSetRemoveId = useCallback((id: string) => setRemoveId(id), []);
-  const handleSetDeleteId = useCallback((id: string) => setDeleteId(id), []);
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -695,10 +768,9 @@ export default function ComprovantesPage() {
           : undefined,
       );
       toast.success("Comprovante excluído.");
+      if (reviewId === c.id) setReviewId(null);
       refresh();
-      queryClient.invalidateQueries({
-        queryKey: STATS_QUERY_KEY(selectedCompany?.id),
-      });
+      invalidateCounts();
     } catch {
       toast.error("Erro ao excluir comprovante.");
     } finally {
@@ -708,15 +780,9 @@ export default function ComprovantesPage() {
 
   const handleShare = useCallback(
     async (c: Comprovante) => {
-      const tx = c.transactionId ? txMap.get(c.transactionId) : null;
-      const allTxs =
-        c.isConsolidated && (c.transactionIds?.length ?? 0) > 1
-          ? (c.transactionIds ?? [])
-              .map((id) => txMap.get(id))
-              .filter((t): t is Transaction => !!t)
-          : tx
-            ? [tx]
-            : [];
+      const allTxs = linkedTransactionIds(c)
+        .map((id) => txMap.get(id))
+        .filter((t): t is Transaction => !!t);
 
       const entity = allTxs[0]?.supplierOrClient ?? c.matchedEntity ?? null;
       const title =
@@ -724,23 +790,18 @@ export default function ComprovantesPage() {
           ? `Comprovante${entity ? ` · ${entity}` : ""}`
           : `Comprovante · ${allTxs[0]?.description ?? c.matchedEntity ?? c.id}`;
 
-      const dateStr = c.matchedDate
-        ? format(c.matchedDate, "dd/MM/yyyy", { locale: ptBR })
-        : allTxs[0]?.paymentDate
-          ? format(allTxs[0].paymentDate, "dd/MM/yyyy", { locale: ptBR })
-          : null;
-
+      const date = c.matchedDate ?? allTxs[0]?.paymentDate;
       const lines: string[] = [title];
-
       if (entity) lines.push(`Beneficiário: ${entity}`);
-      if (dateStr) lines.push(`Data: ${dateStr}`);
+      if (date) lines.push(`Data: ${format(date, "dd/MM/yyyy")}`);
 
       if (allTxs.length > 1) {
         // Consolidated: list each transaction with its individual amount
         lines.push(`\nTransações incluídas (${allTxs.length}):`);
         allTxs.forEach((t, i) => {
-          const amt = formatCurrency(t.finalAmount ?? t.amount);
-          lines.push(`  ${i + 1}. ${t.description} — ${amt}`);
+          lines.push(
+            `  ${i + 1}. ${t.description}: ${formatCurrency(t.finalAmount ?? t.amount)}`,
+          );
         });
         if (c.matchedAmount) {
           lines.push(`\nTotal: ${formatCurrency(c.matchedAmount)}`);
@@ -754,10 +815,10 @@ export default function ComprovantesPage() {
       }
 
       const text = lines.join("\n");
+      const proxyLink = `${window.location.origin}${comprovanteProxyUrl(c.storagePath)}`;
 
       if (!navigator.share) {
         try {
-          const proxyLink = `${window.location.origin}${comprovanteProxyUrl(c.storagePath)}`;
           await navigator.clipboard.writeText(proxyLink);
           toast.success("Link copiado para a área de transferência.");
         } catch {
@@ -768,8 +829,7 @@ export default function ComprovantesPage() {
 
       setSharingId(c.id);
       try {
-        const proxyUrl = comprovanteProxyUrl(c.storagePath);
-        const response = await fetch(proxyUrl);
+        const response = await fetch(comprovanteProxyUrl(c.storagePath));
         if (!response.ok) throw new Error("proxy_error");
         const blob = await response.blob();
         const fileLabel = entity ?? allTxs[0]?.description ?? c.id;
@@ -779,11 +839,7 @@ export default function ComprovantesPage() {
         if (navigator.canShare?.({ files: [file] })) {
           await navigator.share({ title, text, files: [file] });
         } else {
-          await navigator.share({
-            title,
-            text,
-            url: `${window.location.origin}${comprovanteProxyUrl(c.storagePath)}`,
-          });
+          await navigator.share({ title, text, url: proxyLink });
         }
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
@@ -796,772 +852,631 @@ export default function ComprovantesPage() {
     [txMap],
   );
 
-  const onUploadSuccess = () => {
-    refresh();
-    queryClient.invalidateQueries({
-      queryKey: STATS_QUERY_KEY(selectedCompany?.id),
-    });
+  // ── Derived copy ──────────────────────────────────────────────────────────────
+  const tabCounts: Record<TabKey, number | undefined> = {
+    pending: stats?.pendingReview,
+    unmatched:
+      stats != null ? stats.unmatched + stats.rejectedMatch : undefined,
+    manual: stats?.needsManual,
+    missing: candidatesLoading ? undefined : missingAll.length,
+    matched: stats?.matched,
+    all: stats?.total,
   };
 
-  const onReviewUpdated = () => {
-    refresh();
-    queryClient.invalidateQueries({
-      queryKey: STATS_QUERY_KEY(selectedCompany?.id),
-    });
-  };
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: "pending", label: "Pendentes" },
+    { key: "unmatched", label: "Sem associação" },
+    { key: "manual", label: "Ilegíveis" },
+    { key: "missing", label: "Pagos sem comprovante" },
+    { key: "matched", label: "Associados" },
+    { key: "all", label: "Todos" },
+  ];
 
-  const pendingCount = stats.pendingReview;
+  const resultCount = tab === "missing" ? missing.length : filteredCount;
+  const listLoading = tab === "missing" ? candidatesLoading : isLoading;
+
+  const actionProps = (c: Comprovante) => ({
+    comprovante: c,
+    canUpload,
+    sharing: sharingId === c.id,
+    onOpenReview: openReview,
+    onShare: handleShare,
+    onSetRemoveId: setRemoveId,
+    onSetDeleteId: setDeleteId,
+  });
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  const emptyState = (
+    <div className="flex flex-col items-center gap-3 px-4 py-14 text-center text-muted-foreground">
+      {hasActiveFilters ? (
+        <>
+          <p className="text-sm font-medium">
+            Nada encontrado com esses filtros.
+          </p>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={clearFilters}
+          >
+            Limpar filtros
+          </Button>
+        </>
+      ) : tab === "pending" ? (
+        <>
+          <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+          <p className="text-sm font-medium text-foreground">
+            Fila zerada. Nenhum comprovante aguardando revisão.
+          </p>
+          {missingAll.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTab("missing")}
+            >
+              Ver {missingAll.length} pagamento
+              {missingAll.length !== 1 ? "s" : ""} sem comprovante
+            </Button>
+          )}
+        </>
+      ) : tab === "missing" ? (
+        <>
+          <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+          <p className="text-sm font-medium text-foreground">
+            Todos os pagamentos têm comprovante.
+          </p>
+        </>
+      ) : tab === "all" ? (
+        <>
+          <FileText className="h-8 w-8 opacity-40" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              Nenhum comprovante enviado ainda.
+            </p>
+            <p className="text-xs">
+              Cada página de PDF vira um comprovante e é associada ao título
+              correspondente.
+            </p>
+          </div>
+          {canUpload && (
+            <Button
+              size="sm"
+              className="mt-1 gap-2"
+              onClick={() => setUploadOpen(true)}
+            >
+              <Upload className="h-4 w-4" />
+              Enviar comprovantes
+            </Button>
+          )}
+        </>
+      ) : (
+        <p className="text-sm">Nenhum comprovante nesta situação.</p>
+      )}
+    </div>
+  );
+
+  const errorState = (
+    <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
+      <p className="text-sm font-medium text-destructive">
+        Não foi possível carregar os comprovantes.
+      </p>
+      <Button variant="outline" size="sm" onClick={() => refresh()}>
+        Tentar novamente
+      </Button>
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-5">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight flex items-center gap-2">
-            <FileCheck className="h-6 w-6 text-primary" />
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Comprovantes
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Gerencie os comprovantes de pagamento associados às transações
-          </p>
+          <div className="mt-1 text-sm text-muted-foreground tabular-nums">
+            {statsLoading || !stats ? (
+              <Skeleton className="h-4 w-64" />
+            ) : (
+              <>
+                {stats.pendingReview > 0
+                  ? `${stats.pendingReview} aguardando revisão`
+                  : "Fila zerada"}
+                {missingAll.length > 0 &&
+                  ` · ${missingAll.length} pago${missingAll.length !== 1 ? "s" : ""} sem comprovante`}
+                {` · ${stats.total} no total`}
+              </>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex shrink-0 gap-2">
           <Button
             variant="outline"
             size="icon"
             onClick={() => {
               refresh();
-              queryClient.invalidateQueries({
-                queryKey: STATS_QUERY_KEY(selectedCompany?.id),
-              });
+              invalidateCounts();
             }}
-            title="Atualizar"
+            aria-label="Atualizar"
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
-          {canUpload && (
+          <Button variant="outline" className="gap-2" asChild>
+            <Link href="/financeiro/comprovantes/regras">
+              <Settings2 className="h-4 w-4" />
+              <span className="hidden sm:inline">Regras</span>
+            </Link>
+          </Button>
+          {canUpload && (stats?.pendingReview ?? 0) > 0 && (
             <Button
-              onClick={() => setUploadOpen(true)}
-              size="sm"
-              className="h-9 gap-2"
+              variant="outline"
+              className="gap-2"
+              onClick={() => setAutoConfirmOpen(true)}
+              disabled={autoBusy}
             >
+              {autoBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Confirmar automáticas</span>
+            </Button>
+          )}
+          {canUpload && (
+            <Button onClick={() => setUploadOpen(true)} className="gap-2">
               <Upload className="h-4 w-4" />
-              <span className="hidden sm:inline">Enviar Comprovantes</span>
+              <span className="hidden sm:inline">Enviar comprovantes</span>
             </Button>
           )}
         </div>
       </div>
 
-      {/* ── Validation queue alert ───────────────────────────────────────── */}
-      {pendingCount > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-          <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-              Fila de Validação: {pendingCount} comprovante
-              {pendingCount !== 1 ? "s" : ""} aguardando revisão
-            </p>
-            <p className="text-xs text-amber-600/70 dark:text-amber-500/70">
-              Revise as sugestões automáticas de associação abaixo.
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-            onClick={() => setStatusFilter("pending_review")}
-          >
-            Ver pendentes
-          </Button>
-        </div>
-      )}
-
-      {/* ── Stats strip ──────────────────────────────────────────────────── */}
-      <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="px-5 pt-3 pb-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-            Totais gerais
-          </p>
-        </div>
-        <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-4 md:divide-y-0">
-          <StatCell
-            title="Total"
-            value={stats.total}
-            icon={FileCheck}
-            colorClass="bg-primary/10 text-primary"
-            loading={statsLoading}
-          />
-          <StatCell
-            title="Associados"
-            value={stats.matched}
-            icon={CheckCircle2}
-            colorClass="bg-emerald-500/10 text-emerald-500"
-            loading={statsLoading}
-          />
-          <StatCell
-            title="Pendentes"
-            value={stats.pendingReview}
-            icon={Clock}
-            colorClass="bg-amber-500/10 text-amber-500"
-            loading={statsLoading}
-          />
-          <StatCell
-            title="Sem associação"
-            value={stats.unmatched}
-            icon={FileX}
-            colorClass="bg-red-500/10 text-red-500"
-            loading={statsLoading}
-          />
-        </div>
-      </div>
-
-      {/* ── Table Card ───────────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          {/* ── Desktop: título numa linha, filtros na linha abaixo ──── */}
-          <div className="hidden md:block space-y-3">
-            <div className="flex items-center justify-between gap-4">
-              <CardTitle>Comprovantes</CardTitle>
-              {!isLoading && (
-                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                  {filtered.length}
-                  {hasMore ? "+" : ""} resultado
-                  {filtered.length !== 1 ? "s" : ""}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Select
-                value={statusFilter}
-                onValueChange={(v) =>
-                  setStatusFilter(v as ComprovanteMatchStatus | "all")
-                }
-              >
-                <SelectTrigger className="w-[180px]">
-                  <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os Status</SelectItem>
-                  <SelectItem value="matched">Associados</SelectItem>
-                  <SelectItem value="pending_review">Pendentes</SelectItem>
-                  <SelectItem value="unmatched">Sem Associação</SelectItem>
-                  <SelectItem value="rejected_match">Rejeitados</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <DatePickerWithRange date={dateRange} setDate={setDateRange} />
-
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por descrição, fornecedor…"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 pr-8"
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm("")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Limpar busca"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-
-              {hasActiveFilters && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={clearFilters}
+      {/* ── Work surface ─────────────────────────────────────────────────── */}
+      <div className="rounded-xl border bg-card">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
+          <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-none rounded-t-xl border-b bg-transparent px-2 py-0 [scrollbar-width:none]">
+            {tabs.map(({ key, label }) => {
+              const n = tabCounts[key];
+              const urgent = key === "pending" && (n ?? 0) > 0;
+              return (
+                <TabsTrigger
+                  key={key}
+                  value={key}
+                  className="h-11 flex-none rounded-none border-0 border-b-2 border-transparent px-3 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
                 >
-                  <X className="mr-1 h-3.5 w-3.5" />
-                  Limpar filtros
-                </Button>
-              )}
-            </div>
-          </div>
+                  {label}
+                  {n !== undefined && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 text-xs tabular-nums",
+                        urgent
+                          ? "bg-amber-500/15 font-semibold text-amber-800 dark:text-amber-300"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {n}
+                    </span>
+                  )}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </Tabs>
 
-          {/* ── Mobile: título ─────────────────────────────────────── */}
-          <div className="flex md:hidden items-center justify-between gap-2">
-            <CardTitle>Comprovantes</CardTitle>
-            {!isLoading && (
-              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                {filtered.length}
-                {hasMore ? "+" : ""} resultado
-                {filtered.length !== 1 ? "s" : ""}
-              </span>
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+          <div className="relative min-w-0 flex-1 md:min-w-60">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={
+                tab === "missing"
+                  ? "Buscar por descrição ou fornecedor…"
+                  : "Buscar por descrição, fornecedor ou texto do comprovante…"
+              }
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 pr-8"
+              aria-label="Buscar comprovantes"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Limpar busca"
+              >
+                <X className="h-4 w-4" />
+              </button>
             )}
           </div>
 
-          {/* ── Mobile: busca + botão de filtros numa linha ───────── */}
-          <div className="flex items-center gap-2 md:hidden">
-            <div className="relative flex-1 min-w-0">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por descrição, fornecedor…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-8 h-10"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Limpar busca"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setMobileFiltersOpen(true)}
-              aria-label="Abrir filtros"
-              className={[
-                "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors",
-                activeFilterCount > 0
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              ].join(" ")}
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-              {activeFilterCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground leading-none">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
+          <div className="hidden items-center gap-2 md:flex">
+            <span className="text-sm text-muted-foreground">
+              {tab === "missing" ? "Pago em" : "Enviado em"}
+            </span>
+            <DatePickerWithRange date={dateRange} setDate={setDateRange} />
           </div>
 
-          {/* ── Mobile: chips de filtros ativos (scroll horizontal) ── */}
-          {activeFilterCount > 0 && (
-            <div className="flex md:hidden items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              {statusFilter !== "all" && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-                  {statusLabels[statusFilter] ?? statusFilter}
-                  <button
-                    onClick={() => setStatusFilter("all")}
-                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                    aria-label="Remover filtro de status"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              )}
-              {!isDateRangeDefault && dateRange?.from && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-                  <span>
-                    {format(dateRange.from, "dd/MM")}
-                    {dateRange.to && ` – ${format(dateRange.to, "dd/MM")}`}
-                  </span>
-                  <button
-                    onClick={() => setDateRange(defaultDateRange)}
-                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                    aria-label="Remover filtro de período"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              )}
-              <button
-                onClick={clearFilters}
-                className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline hover:text-foreground transition-colors ml-1"
-              >
-                Limpar tudo
-              </button>
-            </div>
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(true)}
+            aria-label="Filtrar por período"
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors md:hidden",
+              dateRange?.from
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground",
+            )}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </button>
+
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={clearFilters}
+            >
+              <X className="mr-1 h-3.5 w-3.5" />
+              Limpar filtros
+            </Button>
           )}
-        </CardHeader>
 
-        <CardContent className="p-0 md:p-6">
-          {isLoading ? (
-            <>
-              {/* Desktop skeleton */}
-              <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {Array.from({ length: 8 }).map((_, i) => (
-                        <TableHead key={i}>
-                          <Skeleton className="h-4 w-full" />
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {Array.from({ length: 8 }).map((_, i) => (
-                      <TableRow key={i}>
-                        {Array.from({ length: 8 }).map((_, j) => (
-                          <TableCell key={j}>
-                            <Skeleton className="h-5 w-full" />
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              {/* Mobile skeleton */}
-              <div className="md:hidden">
-                <MobileCardSkeleton />
-              </div>
-            </>
-          ) : (
-            <>
-              {/* ── Desktop: Table ───────────────────────────────────── */}
-              <div className="hidden md:block overflow-hidden">
-                <Table className="table-fixed w-full">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-20 shrink-0">Página</TableHead>
-                      <TableHead className="min-w-0">
-                        Transação Associada
-                      </TableHead>
-                      <TableHead
-                        className="w-32 shrink-0"
-                        aria-sort={
-                          sortField === "amount"
-                            ? sortDir === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : "none"
-                        }
-                      >
-                        <SortHeader
-                          label="Valor"
-                          active={sortField === "amount"}
-                          dir={sortDir}
-                          onClick={() => handleSort("amount")}
-                        />
-                      </TableHead>
-                      <TableHead
-                        className="w-28 shrink-0"
-                        aria-sort={
-                          sortField === "date"
-                            ? sortDir === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : "none"
-                        }
-                      >
-                        <SortHeader
-                          label="Data"
-                          active={sortField === "date"}
-                          dir={sortDir}
-                          onClick={() => handleSort("date")}
-                        />
-                      </TableHead>
-                      <TableHead className="w-40 min-w-0">Entidade</TableHead>
-                      <TableHead
-                        className="w-36 shrink-0"
-                        aria-sort={
-                          sortField === "status"
-                            ? sortDir === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : "none"
-                        }
-                      >
-                        <SortHeader
-                          label="Status"
-                          active={sortField === "status"}
-                          dir={sortDir}
-                          onClick={() => handleSort("status")}
-                        />
-                      </TableHead>
-                      <TableHead
-                        className="w-28 shrink-0"
-                        aria-sort={
-                          sortField === "confidence"
-                            ? sortDir === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : "none"
-                        }
-                      >
-                        <SortHeader
-                          label="Confiança"
-                          active={sortField === "confidence"}
-                          dir={sortDir}
-                          onClick={() => handleSort("confidence")}
-                        />
-                      </TableHead>
-                      <TableHead className="w-10 shrink-0" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {isError ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={8}
-                          className="h-32 text-center text-destructive"
-                        >
-                          Erro ao carregar comprovantes. Tente novamente ou
-                          recarregue a página.
-                        </TableCell>
-                      </TableRow>
-                    ) : filtered.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="h-48 text-center">
-                          <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                            <FileText className="h-10 w-10 opacity-30" />
-                            {debouncedSearch || hasActiveFilters ? (
-                              <>
-                                <p className="text-sm font-medium">
-                                  Nenhum comprovante encontrado para os filtros
-                                  selecionados.
-                                </p>
-                                <Button
-                                  variant="link"
-                                  size="sm"
-                                  className="h-auto p-0 text-xs"
-                                  onClick={clearFilters}
-                                >
-                                  Limpar filtros
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <div className="space-y-1">
-                                  <p className="text-sm font-medium text-foreground">
-                                    Nenhum comprovante cadastrado.
-                                  </p>
-                                  <p className="text-xs">
-                                    Cada página do PDF enviado vira um
-                                    comprovante indexado.
-                                  </p>
-                                </div>
-                                {canUpload && (
-                                  <Button
-                                    size="sm"
-                                    className="gap-2 mt-1"
-                                    onClick={() => setUploadOpen(true)}
-                                  >
-                                    <Upload className="h-4 w-4" />
-                                    Enviar Comprovantes
-                                  </Button>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filtered.map((c) => {
-                        const tx = c.transactionId
-                          ? txMap.get(c.transactionId)
-                          : null;
-                        return (
-                          <TableRow key={c.id} className="group">
-                            {/* Page number */}
-                            <TableCell className="w-20">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
-                                  <FileCheck className="h-4 w-4" />
-                                </div>
-                                <span className="text-sm font-medium tabular-nums">
-                                  {c.pageNumber}/{c.totalPages}
-                                </span>
-                              </div>
-                            </TableCell>
+          <span className="ml-auto text-sm text-muted-foreground tabular-nums">
+            {resultCount !== undefined &&
+              `${resultCount} ${tab === "missing" ? "pagamento" : "comprovante"}${resultCount !== 1 ? "s" : ""}`}
+          </span>
+        </div>
 
-                            {/* Linked transaction — flexible, truncates */}
-                            <TableCell className="min-w-0 max-w-0">
-                              {tx ? (
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <p className="text-sm font-medium truncate">
-                                      {tx.description}
-                                    </p>
-                                    {c.isConsolidated &&
-                                      (c.transactionIds?.length ?? 0) > 1 && (
-                                        <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">
-                                          +{(c.transactionIds?.length ?? 1) - 1}
-                                        </span>
-                                      )}
-                                  </div>
-                                  {tx.supplierOrClient && (
-                                    <p className="text-xs text-muted-foreground truncate">
-                                      {tx.supplierOrClient}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-sm text-muted-foreground italic">
-                                  —
-                                </span>
-                              )}
-                            </TableCell>
+        {/* Bulk bar */}
+        {selectable && (selected.size > 0 || safeIds.length > 0) && (
+          <div className="flex flex-wrap items-center gap-3 border-b bg-muted/40 px-4 py-2 text-sm">
+            {selected.size > 0 ? (
+              <>
+                <span className="font-medium tabular-nums">
+                  {selected.size} selecionado{selected.size !== 1 ? "s" : ""}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={handleBulkConfirm}
+                  disabled={bulkBusy}
+                  className="gap-1.5"
+                >
+                  {bulkBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  Confirmar {selected.size}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setSelected(new Set())}
+                >
+                  Limpar seleção
+                </Button>
+              </>
+            ) : (
+              <>
+                <span className="text-muted-foreground">
+                  {safeIds.length} com evidência forte, sem divergência nem
+                  empate.
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelected(new Set(safeIds))}
+                >
+                  Selecionar esses
+                </Button>
+              </>
+            )}
+          </div>
+        )}
 
-                            {/* Amount — fixed, no wrap */}
-                            <TableCell className="w-32 font-financial text-sm whitespace-nowrap">
-                              {c.matchedAmount
-                                ? formatCurrency(c.matchedAmount)
-                                : tx
-                                  ? formatCurrency(tx.finalAmount ?? tx.amount)
-                                  : "—"}
-                            </TableCell>
-
-                            {/* Date — fixed, no wrap */}
-                            <TableCell className="w-28 text-sm text-muted-foreground whitespace-nowrap">
-                              {c.matchedDate
-                                ? format(c.matchedDate, "dd/MM/yyyy", {
-                                    locale: ptBR,
-                                  })
-                                : tx?.paymentDate
-                                  ? format(tx.paymentDate, "dd/MM/yyyy", {
-                                      locale: ptBR,
-                                    })
-                                  : "—"}
-                            </TableCell>
-
-                            {/* Entity — fixed width, truncates */}
-                            <TableCell className="w-40 max-w-0">
-                              <p className="text-sm text-muted-foreground truncate">
-                                {c.matchedEntity ?? tx?.supplierOrClient ?? "—"}
-                              </p>
-                            </TableCell>
-
-                            {/* Status — fixed */}
-                            <TableCell className="w-36">
-                              <ComprovanteStatusBadge status={c.matchStatus} />
-                            </TableCell>
-
-                            {/* Confidence — fixed */}
-                            <TableCell className="w-28">
-                              {c.matchConfidenceLevel ? (
-                                <ConfidenceBadge
-                                  level={c.matchConfidenceLevel}
-                                  score={c.matchConfidence}
-                                />
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  —
-                                </span>
-                              )}
-                            </TableCell>
-
-                            {/* Actions */}
-                            <TableCell className="w-10">
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem asChild>
-                                    <a
-                                      href={comprovanteProxyUrl(c.storagePath)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="flex items-center gap-2 cursor-pointer"
-                                    >
-                                      <Download className="h-4 w-4" />
-                                      Baixar comprovante
-                                    </a>
-                                  </DropdownMenuItem>
-
-                                  <DropdownMenuItem
-                                    onClick={() => handleShare(c)}
-                                    disabled={sharingId === c.id}
-                                    className="gap-2"
-                                  >
-                                    {sharingId === c.id ? (
-                                      <RefreshCw className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Share2 className="h-4 w-4" />
-                                    )}
-                                    {sharingId === c.id
-                                      ? "Preparando…"
-                                      : "Enviar"}
-                                  </DropdownMenuItem>
-
-                                  {(c.matchStatus === "pending_review" ||
-                                    c.matchStatus === "unmatched" ||
-                                    c.matchStatus === "rejected_match") &&
-                                    canUpload && (
-                                      <DropdownMenuItem
-                                        onClick={() => handleOpenReview(c)}
-                                        className="gap-2"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                        Revisar associação
-                                      </DropdownMenuItem>
-                                    )}
-
-                                  {c.matchStatus === "matched" &&
-                                    c.transactionId &&
-                                    canUpload && <DropdownMenuSeparator />}
-                                  {c.matchStatus === "matched" &&
-                                    c.transactionId &&
-                                    canUpload && (
-                                      <DropdownMenuItem
-                                        onClick={() => setRemoveId(c.id)}
-                                        className="gap-2 text-destructive focus:text-destructive"
-                                      >
-                                        <Link2Off className="h-4 w-4" />
-                                        Remover associação
-                                      </DropdownMenuItem>
-                                    )}
-                                  {(c.matchStatus === "unmatched" ||
-                                    c.matchStatus === "rejected_match" ||
-                                    c.matchStatus === "needs_manual") &&
-                                    canUpload && <DropdownMenuSeparator />}
-                                  {(c.matchStatus === "unmatched" ||
-                                    c.matchStatus === "rejected_match" ||
-                                    c.matchStatus === "needs_manual") &&
-                                    canUpload && (
-                                      <DropdownMenuItem
-                                        onClick={() => setDeleteId(c.id)}
-                                        className="gap-2 text-destructive focus:text-destructive"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                        Excluir comprovante
-                                      </DropdownMenuItem>
-                                    )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* ── Mobile: Card list ────────────────────────────────── */}
-              <div className="md:hidden">
-                {isError ? (
-                  <div className="flex flex-col items-center gap-2 py-10 px-4 text-destructive">
-                    <p className="text-sm font-medium text-center">
-                      Erro ao carregar comprovantes.
-                    </p>
-                  </div>
-                ) : filtered.length === 0 ? (
-                  <div className="flex flex-col items-center gap-3 py-12 px-4 text-muted-foreground">
-                    <FileText className="h-10 w-10 opacity-30" />
-                    {debouncedSearch || hasActiveFilters ? (
-                      <>
-                        <p className="text-sm font-medium text-center">
-                          Nenhum comprovante encontrado para os filtros
-                          selecionados.
+        {/* ── List ─────────────────────────────────────────────────────── */}
+        {listLoading ? (
+          <div className="space-y-3 p-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : tab === "missing" ? (
+          <>
+            {cutoff && (
+              <p className="border-b px-4 py-2 text-sm text-muted-foreground">
+                Contando pagamentos desde{" "}
+                <span className="font-medium text-foreground">
+                  {format(cutoff, "dd/MM/yyyy")}
+                </span>
+                {!receiptsStart &&
+                  " (sugestão: mês do primeiro pagamento com comprovante)"}
+                .{" "}
+                <Link
+                  href="/financeiro/comprovantes/regras#inicio"
+                  className="text-foreground underline underline-offset-2 hover:no-underline"
+                >
+                  {receiptsStart ? "Alterar" : "Definir data de início"}
+                </Link>
+              </p>
+            )}
+            {missing.length === 0 ? (
+              emptyState
+            ) : (
+              <Table className="w-full table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-4">Título pago</TableHead>
+                    <TableHead className="w-36 text-right">Valor</TableHead>
+                    <TableHead className="hidden w-28 md:table-cell">
+                      Pago em
+                    </TableHead>
+                    {canUpload && <TableHead className="w-48" />}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {missing.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell className="max-w-0 pl-4">
+                        <p className="truncate text-sm font-medium">
+                          {t.description}
                         </p>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="h-auto p-0 text-xs"
-                          onClick={clearFilters}
-                        >
-                          Limpar filtros
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="space-y-1 text-center">
-                          <p className="text-sm font-medium text-foreground">
-                            Nenhum comprovante cadastrado.
-                          </p>
-                          <p className="text-xs">
-                            Cada página do PDF enviado vira um comprovante
-                            indexado.
-                          </p>
-                        </div>
-                        {canUpload && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {t.supplierOrClient}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right font-financial text-sm">
+                        {formatCurrency(t.finalAmount ?? t.amount)}
+                      </TableCell>
+                      <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                        {t.paymentDate
+                          ? format(t.paymentDate, "dd/MM/yyyy")
+                          : "sem data"}
+                      </TableCell>
+                      {canUpload && (
+                        <TableCell className="text-right">
                           <Button
                             size="sm"
-                            className="gap-2 mt-1"
+                            variant="ghost"
+                            className="gap-1.5"
                             onClick={() => setUploadOpen(true)}
                           >
-                            <Upload className="h-4 w-4" />
-                            Enviar Comprovantes
+                            <Upload className="h-3.5 w-3.5" />
+                            Enviar comprovante
                           </Button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="divide-y">
-                    {filtered.map((c) => {
-                      const tx = c.transactionId
-                        ? (txMap.get(c.transactionId) ?? null)
-                        : null;
-                      return (
-                        <MobileComprovanteCard
-                          key={c.id}
-                          comprovante={c}
-                          tx={tx}
-                          canUpload={canUpload}
-                          sharingId={sharingId}
-                          onOpenReview={handleOpenReview}
-                          onShare={handleShare}
-                          onSetRemoveId={handleSetRemoveId}
-                          onSetDeleteId={handleSetDeleteId}
-                          downloadUrl={comprovanteProxyUrl(c.storagePath)}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </>
+        ) : isError ? (
+          errorState
+        ) : items.length === 0 ? (
+          emptyState
+        ) : (
+          <>
+            {/* Desktop */}
+            <div className="hidden md:block">
+              <Table className="w-full table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    {selectable && (
+                      <TableHead className="w-10 pl-4">
+                        <Checkbox
+                          checked={allSelected}
+                          onCheckedChange={(v) =>
+                            setSelected(
+                              v
+                                ? new Set(pendingLoaded.map((c) => c.id))
+                                : new Set(),
+                            )
+                          }
+                          aria-label="Selecionar todos os pendentes carregados"
                         />
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                      </TableHead>
+                    )}
+                    <TableHead className={cn(!selectable && "pl-4")}>
+                      Título
+                    </TableHead>
+                    <TableHead className="w-40 text-right">Valor</TableHead>
+                    <TableHead className="w-28">Pago em</TableHead>
+                    <TableHead className="w-72">
+                      {tab === "all" ? "Situação" : "Motivo"}
+                    </TableHead>
+                    <TableHead className="w-14" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((c) => {
+                    const txs = txsFor(c);
+                    const first = txs[0];
+                    const diff = amountDifference(c, txs);
+                    const date = c.matchedDate ?? first?.paymentDate;
+                    const settled =
+                      tab === "pending" && !ACTIONABLE.has(c.matchStatus);
+                    return (
+                      <TableRow
+                        key={c.id}
+                        tabIndex={0}
+                        data-state={
+                          reviewId === c.id || selected.has(c.id)
+                            ? "selected"
+                            : undefined
+                        }
+                        onClick={() => openReview(c)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && e.target === e.currentTarget)
+                            openReview(c);
+                        }}
+                        className={cn(
+                          "cursor-pointer focus-visible:bg-muted/60 focus-visible:outline-none",
+                          settled && "opacity-55",
+                        )}
+                      >
+                        {selectable && (
+                          <TableCell
+                            className="pl-4"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {c.matchStatus === "pending_review" && (
+                              <Checkbox
+                                checked={selected.has(c.id)}
+                                onCheckedChange={() => toggleSelected(c.id)}
+                                aria-label="Selecionar comprovante"
+                              />
+                            )}
+                          </TableCell>
+                        )}
 
-              {/* Infinite scroll sentinel */}
-              <div
-                ref={sentinelRef}
-                className={
-                  isFetchingNextPage ? "flex justify-center py-3" : "h-px"
-                }
-              >
-                {isFetchingNextPage && (
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                )}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                        <TableCell
+                          className={cn("max-w-0", !selectable && "pl-4")}
+                        >
+                          <div className="truncate text-sm font-medium">
+                            {first?.description ??
+                              (linkedTransactionIds(c).length ? (
+                                <Skeleton className="h-4 w-48" />
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  Sem título vinculado
+                                </span>
+                              ))}
+                            {txs.length > 1 && (
+                              <span className="font-normal text-muted-foreground">
+                                {" "}
+                                e mais {txs.length - 1}
+                              </span>
+                            )}
+                          </div>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {[
+                              first?.supplierOrClient ?? c.matchedEntity,
+                              `pág. ${c.pageNumber}/${c.totalPages}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                            {readNameDiffers(
+                              c.matchedEntity,
+                              first?.supplierOrClient,
+                            ) && (
+                              <span className="text-amber-800 dark:text-amber-300">
+                                {" · lido como "}
+                                {c.matchedEntity}
+                              </span>
+                            )}
+                          </p>
+                        </TableCell>
 
-      {/* ── Dialogs ──────────────────────────────────────────────────────── */}
+                        <TableCell className="text-right">
+                          <p className="font-financial text-sm">
+                            {c.matchedAmount != null
+                              ? formatCurrency(c.matchedAmount)
+                              : txs.length
+                                ? formatCurrency(titlesTotal(txs))
+                                : "sem valor"}
+                          </p>
+                          {diff !== null && (
+                            <p className="font-financial text-xs text-amber-800 dark:text-amber-300">
+                              título {formatCurrency(titlesTotal(txs))}
+                            </p>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-sm text-muted-foreground">
+                          {date ? format(date, "dd/MM/yyyy") : "sem data"}
+                        </TableCell>
+
+                        <TableCell className="max-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {tab === "all" && (
+                              <ComprovanteStatusBadge status={c.matchStatus} />
+                            )}
+                            <InsightLine insight={receiptInsight(c, txs)} />
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="pr-3 text-right">
+                          <RowActions {...actionProps(c)} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Mobile */}
+            <div className="divide-y md:hidden">
+              {items.map((c) => (
+                <MobileComprovanteCard
+                  key={c.id}
+                  txs={txsFor(c)}
+                  {...actionProps(c)}
+                />
+              ))}
+            </div>
+
+            {/* Infinite scroll sentinel */}
+            <div
+              ref={sentinelRef}
+              className={
+                isFetchingNextPage ? "flex justify-center py-3" : "h-px"
+              }
+            >
+              {isFetchingNextPage && (
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Panels & dialogs ─────────────────────────────────────────────── */}
       <UploadComprovanteDialog
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
-        onSuccess={onUploadSuccess}
+        onSuccess={() => {
+          refresh();
+          invalidateCounts();
+        }}
       />
 
-      <MatchReviewDialog
+      <MatchReviewPanel
         comprovante={reviewing}
-        open={reviewOpen}
-        onClose={() => {
-          setReviewOpen(false);
-          setReviewing(null);
-        }}
-        onUpdated={onReviewUpdated}
-        matchedTransaction={
-          reviewing?.transactionId
-            ? (txMap.get(reviewing.transactionId) ?? null)
+        position={
+          reviewing
+            ? { index: reviewIndex, total: filteredCount ?? items.length }
             : null
         }
+        canEdit={canUpload}
+        onClose={() => setReviewId(null)}
+        onNavigate={navigate}
+        onDone={handleReviewDone}
+        onPatch={(id, patch) => {
+          updateItem(id, (prev) => ({ ...prev, ...patch }));
+          invalidateCounts();
+        }}
+      />
+
+      <ConfirmDialog
+        open={autoConfirmOpen}
+        onOpenChange={(o) => !autoBusy && setAutoConfirmOpen(o)}
+        title="Confirmar automaticamente os pendentes"
+        description="Associa sem revisão só os comprovantes com confiança Alta, sem empate, valor exato e beneficiário identificado por código de barras, CNPJ/CPF ou chave Pix (ou fornecedor marcado como de confiança). Cada associação fica na auditoria e pode ser removida depois. O resto continua na fila."
+        confirmText={autoBusy ? "Aplicando…" : "Aplicar regra"}
+        onConfirm={runAutoConfirm}
       />
 
       <ConfirmDialog
         open={!!removeId}
         onOpenChange={(o) => !o && setRemoveId(null)}
         title="Remover associação"
-        description="Tem certeza que deseja remover a associação entre este comprovante e a transação? O comprovante permanecerá no sistema."
+        description="O comprovante continua no sistema, em Sem associação, e o título volta a constar como pago sem comprovante."
         confirmText="Remover"
         variant="destructive"
         onConfirm={handleRemoveMatch}
@@ -1571,117 +1486,67 @@ export default function ComprovantesPage() {
         open={!!deleteId}
         onOpenChange={(o) => !o && setDeleteId(null)}
         title="Excluir comprovante"
-        description="Tem certeza que deseja excluir permanentemente este comprovante? O arquivo será removido do sistema e esta ação não pode ser desfeita."
+        description="O arquivo será removido do sistema. Esta ação não pode ser desfeita."
         confirmText="Excluir"
         variant="destructive"
         onConfirm={handleDelete}
       />
 
-      {/* ── Mobile filter sheet ──────────────────────────────────── */}
+      {/* ── Mobile period sheet ──────────────────────────────────────── */}
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
         <SheetContent
           side="bottom"
-          className="rounded-t-2xl max-h-[92dvh] overflow-y-auto px-4 pb-6 pt-3"
+          className="max-h-[92dvh] overflow-y-auto rounded-t-2xl px-4 pb-6 pt-3"
         >
-          <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/25 shrink-0" />
+          <div className="mx-auto mb-3 h-1.5 w-10 shrink-0 rounded-full bg-muted-foreground/25" />
           <SheetTitle className="mb-4 text-base font-semibold">
-            Filtros
+            {tab === "missing" ? "Pago em" : "Enviado em"}
           </SheetTitle>
-          <div className="space-y-5">
-            {/* Período */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Período
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">De</Label>
-                  <Input
-                    type="date"
-                    value={
-                      dateRange?.from
-                        ? format(dateRange.from, "yyyy-MM-dd")
-                        : ""
-                    }
-                    onChange={(e) => {
-                      const d = e.target.valueAsDate;
-                      if (!d) return;
-                      const adjusted = new Date(
-                        d.getTime() + d.getTimezoneOffset() * 60000,
-                      );
-                      setDateRange((prev) => ({
-                        from: adjusted,
-                        to: prev?.to,
-                      }));
-                    }}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Até</Label>
-                  <Input
-                    type="date"
-                    value={
-                      dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : ""
-                    }
-                    onChange={(e) => {
-                      const d = e.target.valueAsDate;
-                      if (!d) return;
-                      const adjusted = new Date(
-                        d.getTime() + d.getTimezoneOffset() * 60000,
-                      );
-                      setDateRange((prev) => ({
-                        from: prev?.from,
-                        to: adjusted,
-                      }));
-                    }}
-                  />
-                </div>
+          <div className="grid grid-cols-2 gap-2">
+            {(["from", "to"] as const).map((edge) => (
+              <div key={edge} className="space-y-1">
+                <Label className="text-xs text-muted-foreground">
+                  {edge === "from" ? "De" : "Até"}
+                </Label>
+                <Input
+                  type="date"
+                  value={
+                    dateRange?.[edge]
+                      ? format(dateRange[edge]!, "yyyy-MM-dd")
+                      : ""
+                  }
+                  onChange={(e) => {
+                    const d = e.target.valueAsDate;
+                    if (!d) return;
+                    const local = new Date(
+                      d.getTime() + d.getTimezoneOffset() * 60000,
+                    );
+                    setDateRange((prev) => ({
+                      from: edge === "from" ? local : prev?.from,
+                      to: edge === "to" ? local : prev?.to,
+                    }));
+                  }}
+                />
               </div>
-            </div>
-
-            {/* Status */}
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Status
-              </p>
-              <Select
-                value={statusFilter}
-                onValueChange={(v) =>
-                  setStatusFilter(v as ComprovanteMatchStatus | "all")
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os Status</SelectItem>
-                  <SelectItem value="matched">Associados</SelectItem>
-                  <SelectItem value="pending_review">Pendentes</SelectItem>
-                  <SelectItem value="unmatched">Sem Associação</SelectItem>
-                  <SelectItem value="rejected_match">Rejeitados</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-3 pt-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => {
-                  clearFilters();
-                  setMobileFiltersOpen(false);
-                }}
-              >
-                Limpar
-              </Button>
-              <Button
-                className="flex-1"
-                onClick={() => setMobileFiltersOpen(false)}
-              >
-                Ver resultados
-              </Button>
-            </div>
+            ))}
+          </div>
+          <div className="flex gap-3 pt-5">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                setDateRange(undefined);
+                setMobileFiltersOpen(false);
+              }}
+            >
+              Limpar
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => setMobileFiltersOpen(false)}
+            >
+              Ver resultados
+            </Button>
           </div>
         </SheetContent>
       </Sheet>

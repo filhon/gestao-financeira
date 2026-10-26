@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
 import {
   FileUp,
   Loader2,
@@ -18,7 +17,6 @@ import {
   AlertCircle,
   FileText,
   Link2,
-  Link2Off,
 } from "lucide-react";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
@@ -30,7 +28,8 @@ import { transactionService } from "@/lib/services/transactionService";
 import { Transaction, ComprovanteMatchStatus } from "@/lib/types";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { ConfidenceBadge } from "./ConfidenceBadge";
+import { InsightLine } from "./InsightLine";
+import type { Insight } from "./receiptInsight";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -60,9 +59,48 @@ type PageResult = {
   isConsolidated?: boolean;
   matchReasons?: string[];
   matchIsAmbiguous?: boolean;
-  // user decision
-  decision: "confirm" | "skip" | null;
+  autoConfirmed?: boolean;
+  autoConfirmReason?: string;
+  possibleDuplicateOf?: string;
+  fileName: string;
+  // Só "confirmar" existe: o que não for confirmado já está na fila.
+  decision: "confirm" | null;
 };
+
+function pageInsight(page: PageResult): Insight | null {
+  if (page.autoConfirmed) {
+    return {
+      tone: "ok",
+      text: `Confirmado automaticamente: ${page.autoConfirmReason ?? "regra estrita"}`,
+    };
+  }
+  if (page.possibleDuplicateOf) {
+    return {
+      tone: "warn",
+      text: "Possível duplicado de comprovante já enviado",
+    };
+  }
+  if (page.matchIsAmbiguous) {
+    return {
+      tone: "warn",
+      text: "Outro título é igualmente compatível. Revise antes de confirmar",
+    };
+  }
+  const conflict = page.matchReasons?.find((r) => r.startsWith("⚠"));
+  if (conflict) return { tone: "warn", text: conflict.replace(/^⚠\s*/, "") };
+  if (page.matchConfidenceLevel === "LOW") {
+    return { tone: "warn", text: "Pouca evidência" };
+  }
+  return page.matchReasons?.[0]
+    ? { tone: "ok", text: page.matchReasons[0] }
+    : null;
+}
+
+const isSafe = (p: PageResult) =>
+  !p.autoConfirmed &&
+  p.matchConfidenceLevel === "HIGH" &&
+  !p.matchIsAmbiguous &&
+  !p.possibleDuplicateOf;
 
 type Step = "idle" | "processing" | "review" | "saving" | "done";
 
@@ -119,7 +157,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
       fileHash: string,
       uploadBatchId: string,
       storageRef: ReturnType<typeof ref>,
-    ): Promise<Omit<PageResult, "decision"> | null> => {
+    ): Promise<Omit<PageResult, "decision" | "fileName"> | null> => {
       if (!user || !selectedCompany) return null;
 
       // Upload to Storage first
@@ -165,6 +203,9 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         matchedEntity?: string;
         matchReasons?: string[];
         matchIsAmbiguous?: boolean;
+        autoConfirmed?: boolean;
+        autoConfirmReason?: string;
+        possibleDuplicateOf?: string;
         duplicate?: boolean;
       };
 
@@ -187,6 +228,9 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         matchedEntity: data.matchedEntity,
         matchReasons: data.matchReasons,
         matchIsAmbiguous: data.matchIsAmbiguous,
+        autoConfirmed: data.autoConfirmed,
+        autoConfirmReason: data.autoConfirmReason,
+        possibleDuplicateOf: data.possibleDuplicateOf,
       };
     },
     [user, selectedCompany],
@@ -194,25 +238,25 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
 
   // ── Main file processing ──────────────────────────────────────────────────────
 
-  const processFile = useCallback(
-    async (file: File) => {
-      if (!user || !selectedCompany) return;
+  const processFiles = useCallback(
+    async (files: File[]) => {
+      if (!user || !selectedCompany || files.length === 0) return;
 
-      const mimeType = file.type || "application/pdf";
-      const isPdf = mimeType === "application/pdf";
-      const isImage = mimeType.startsWith("image/");
-
-      if (!isPdf && !isImage) {
+      const accepted = files.filter((f) => {
+        const type = f.type || "application/pdf";
+        return type === "application/pdf" || type.startsWith("image/");
+      });
+      if (accepted.length < files.length) {
         toast.error(
-          "Apenas arquivos PDF e imagens (JPG, PNG, WebP) são aceitos.",
+          `${files.length - accepted.length} arquivo(s) ignorado(s): só PDF e imagens (JPG, PNG, WebP).`,
         );
-        return;
       }
+      if (accepted.length === 0) return;
 
       try {
         setStep("processing");
         setProgress(5);
-        setProgressLabel("Lendo o arquivo...");
+        setProgressLabel("Lendo os arquivos...");
 
         // Split PDFs into pages; images are treated as a single "page"
         type PageEntry = {
@@ -220,19 +264,33 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           mimeType: string;
           pageNumber: number;
           totalPages: number;
+          fileName: string;
+          batchId: string;
         };
-        let pagesToProcess: PageEntry[];
-
-        if (isPdf) {
-          const split = await splitPdfPages(file);
-          pagesToProcess = split.map((s) => ({
-            ...s,
-            mimeType: "application/pdf",
-          }));
-        } else {
-          pagesToProcess = [
-            { blob: file, mimeType, pageNumber: 1, totalPages: 1 },
-          ];
+        const pagesToProcess: PageEntry[] = [];
+        for (const file of accepted) {
+          const mimeType = file.type || "application/pdf";
+          const batchId = uuidv4();
+          if (mimeType === "application/pdf") {
+            const split = await splitPdfPages(file);
+            split.forEach((s) =>
+              pagesToProcess.push({
+                ...s,
+                mimeType: "application/pdf",
+                fileName: file.name,
+                batchId,
+              }),
+            );
+          } else {
+            pagesToProcess.push({
+              blob: file,
+              mimeType,
+              pageNumber: 1,
+              totalPages: 1,
+              fileName: file.name,
+              batchId,
+            });
+          }
         }
 
         const total = pagesToProcess.length;
@@ -249,16 +307,19 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           })),
         );
 
-        // Batch dedup query
-        const allHashes = hashEntries.map((e) => e.fileHash);
+        // Batch dedup query (também entre arquivos do mesmo envio)
         const existingHashes = await comprovanteService.findExistingHashes(
           selectedCompany.id,
-          allHashes,
+          hashEntries.map((e) => e.fileHash),
         );
-
-        const toProcess = hashEntries.filter(
-          (e) => !existingHashes.has(e.fileHash),
-        );
+        const seen = new Set<string>();
+        const toProcess = hashEntries.filter((e) => {
+          if (existingHashes.has(e.fileHash) || seen.has(e.fileHash)) {
+            return false;
+          }
+          seen.add(e.fileHash);
+          return true;
+        });
         const duplicatesSkipped = hashEntries.length - toProcess.length;
         setProgress(20);
 
@@ -271,21 +332,17 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         setTransactions(candidates);
         setProgress(25);
 
-        const batchId = uuidv4();
         const results: PageResult[] = [];
-        const pageFailures: number[] = [];
+        const pageFailures: string[] = [];
 
         for (let i = 0; i < toProcess.length; i++) {
-          const {
-            blob,
-            mimeType: pMimeType,
-            pageNumber,
-            totalPages,
-            fileHash,
-          } = toProcess[i];
-          setProgressLabel(
-            `Processando página ${pageNumber} de ${totalPages}...`,
-          );
+          const entry = toProcess[i];
+          const { blob, mimeType: pMimeType, pageNumber, totalPages } = entry;
+          const label =
+            accepted.length > 1
+              ? `${entry.fileName}, página ${pageNumber} de ${totalPages}`
+              : `página ${pageNumber} de ${totalPages}`;
+          setProgressLabel(`Processando ${label}...`);
           setProgress(25 + Math.round((i / toProcess.length) * 65));
 
           const comprovanteId = uuidv4();
@@ -300,32 +357,32 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
               pMimeType,
               pageNumber,
               totalPages,
-              fileHash,
-              batchId,
+              entry.fileHash,
+              entry.batchId,
               storageRef,
             );
             if (!result) {
-              pageFailures.push(pageNumber);
+              pageFailures.push(label);
               continue;
             }
-
-            results.push({
+            const page = {
               ...result,
-              // Pré-marca só o que o algoritmo considera inequívoco.
-              decision:
-                result.matchConfidenceLevel === "HIGH" &&
-                !result.matchIsAmbiguous
-                  ? "confirm"
-                  : null,
+              fileName: entry.fileName,
+              decision: null,
+            };
+            // Pré-marca só o que o algoritmo considera inequívoco.
+            results.push({
+              ...page,
+              decision: isSafe(page) ? "confirm" : null,
             });
           } catch (pageErr) {
             console.error(
-              `[UploadComprovanteDialog] página ${pageNumber} falhou:`,
+              `[UploadComprovanteDialog] ${label} falhou:`,
               pageErr,
             );
             // Roll back Storage upload if it happened
             deleteObject(storageRef).catch(() => {});
-            pageFailures.push(pageNumber);
+            pageFailures.push(label);
           }
         }
 
@@ -333,7 +390,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
 
         if (pageFailures.length > 0) {
           toast.error(
-            `${pageFailures.length} página${pageFailures.length !== 1 ? "s" : ""} falharam ao enviar (página${pageFailures.length !== 1 ? "s" : ""} ${pageFailures.join(", ")}).`,
+            `${pageFailures.length} página${pageFailures.length !== 1 ? "s" : ""} falharam ao enviar: ${pageFailures.join("; ")}. Envie de novo só esse arquivo.`,
           );
         }
 
@@ -343,7 +400,7 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           pageFailures.length === 0
         ) {
           toast.warning(
-            `Todas as ${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} deste arquivo já foram enviadas anteriormente.`,
+            `Todas as ${duplicatesSkipped} página${duplicatesSkipped !== 1 ? "s" : ""} já foram enviadas anteriormente.`,
           );
           reset();
           return;
@@ -363,26 +420,26 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         setProgressLabel("Análise concluída!");
         setPages(results);
         setStep("review");
+        // Os comprovantes já existem (a fila e os automáticos mudaram).
+        onSuccess();
       } catch (err) {
         console.error("[UploadComprovanteDialog]", err);
-        toast.error("Erro ao processar o arquivo.");
+        toast.error("Erro ao processar os arquivos.");
         reset();
       }
     },
-    [user, selectedCompany, processPage],
+    [user, selectedCompany, processPage, onSuccess],
   );
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
+    processFiles(Array.from(e.target.files ?? []));
     e.target.value = "";
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) processFile(file);
+    processFiles(Array.from(e.dataTransfer.files));
   };
 
   // ── Save confirmed matches ─────────────────────────────────────────────────────
@@ -413,11 +470,13 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         );
       }
 
-      const confirmed = toConfirm.length;
+      const confirmed = toConfirm.length + autoCount;
       const total = pages.length;
+      const queued = total - confirmed;
       toast.success(
         `${total} comprovante${total > 1 ? "s" : ""} enviado${total > 1 ? "s" : ""}. ` +
-          `${confirmed} associação${confirmed !== 1 ? "ões" : ""} confirmada${confirmed !== 1 ? "s" : ""}.`,
+          `${confirmed} associado${confirmed !== 1 ? "s" : ""}` +
+          (queued > 0 ? `, ${queued} na fila de pendentes.` : "."),
       );
       setStep("done");
       onSuccess();
@@ -432,28 +491,24 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
     }
   };
 
-  const toggleDecision = (idx: number, dec: "confirm" | "skip") => {
+  const toggleDecision = (idx: number) => {
     setPages((prev) =>
       prev.map((p, i) =>
-        i === idx ? { ...p, decision: p.decision === dec ? null : dec } : p,
+        i === idx ? { ...p, decision: p.decision ? null : "confirm" } : p,
       ),
     );
   };
 
   const confirmAllHigh = () => {
     setPages((prev) =>
-      prev.map((p) =>
-        p.matchConfidenceLevel === "HIGH" && !p.matchIsAmbiguous
-          ? { ...p, decision: "confirm" }
-          : p,
-      ),
+      prev.map((p) => (isSafe(p) ? { ...p, decision: "confirm" } : p)),
     );
   };
 
-  const highCount = pages.filter(
-    (p) => p.matchConfidenceLevel === "HIGH" && !p.matchIsAmbiguous,
-  ).length;
-  const confirmedCount = pages.filter((p) => p.decision === "confirm").length;
+  const highCount = pages.filter(isSafe).length;
+  const autoCount = pages.filter((p) => p.autoConfirmed).length;
+  const confirmedCount =
+    pages.filter((p) => p.decision === "confirm").length + autoCount;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -463,17 +518,18 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         <ResponsiveModalHeader>
           <ResponsiveModalTitle>Enviar Comprovantes</ResponsiveModalTitle>
           <ResponsiveModalDescription>
-            Faça upload de um PDF com um ou mais comprovantes, ou de imagens
-            (JPG, PNG). O sistema irá associar automaticamente cada página a uma
-            transação.
+            Cada página de PDF vira um comprovante. Os que batem com valor exato
+            e CNPJ, Pix ou código de barras são associados na hora; o resto vai
+            para a fila de pendentes.
           </ResponsiveModalDescription>
         </ResponsiveModalHeader>
 
         {/* ── IDLE: drop zone ──────────────────────────────────────────────── */}
         {step === "idle" && (
-          <div
+          <button
+            type="button"
             className={cn(
-              "mt-4 flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed px-6 py-14 text-center transition-colors",
+              "mt-4 flex w-full flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed px-6 py-14 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               isDragging
                 ? "border-primary bg-primary/5"
                 : "border-border hover:border-primary/50 hover:bg-muted/30",
@@ -491,21 +547,22 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
             </div>
             <div>
               <p className="font-medium text-foreground">
-                Arraste um arquivo ou clique para selecionar
+                Arraste os arquivos ou clique para selecionar
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                PDF (cada página = um comprovante) · JPG · PNG · WebP
+                Vários de uma vez · PDF, JPG, PNG ou WebP
               </p>
             </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_TYPES}
-              className="hidden"
-              onChange={onFileChange}
-            />
-          </div>
+          </button>
         )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_TYPES}
+          className="hidden"
+          onChange={onFileChange}
+        />
 
         {/* ── PROCESSING: progress ─────────────────────────────────────────── */}
         {step === "processing" && (
@@ -524,25 +581,26 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
         {/* ── REVIEW: results table ─────────────────────────────────────────── */}
         {step === "review" && (
           <div className="mt-4 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">
-                {pages.length} comprovante{pages.length !== 1 ? "s" : ""}{" "}
-                encontrado{pages.length !== 1 ? "s" : ""}
+                {pages.length} comprovante{pages.length !== 1 ? "s" : ""}
+                {autoCount > 0 &&
+                  `, ${autoCount} associado${autoCount !== 1 ? "s" : ""} automaticamente`}
               </p>
               {highCount > 0 && (
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={confirmAllHigh}
-                  className="gap-1.5 text-xs"
+                  className="gap-1.5"
                 >
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                  Confirmar todos com Alta confiança ({highCount})
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  Marcar os seguros ({highCount})
                 </Button>
               )}
             </div>
 
-            <div className="space-y-3">
+            <ul className="divide-y rounded-lg border">
               {pages.map((page, idx) => {
                 const tx = page.bestMatchTransactionId
                   ? transactions.find(
@@ -550,147 +608,97 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
                     )
                   : null;
                 const isNeedsManual = page.matchStatus === "needs_manual";
+                const insight = pageInsight(page);
+                const extra = (page.bestMatchTransactionIds?.length ?? 1) - 1;
 
                 return (
-                  <div
-                    key={idx}
+                  <li
+                    key={page.comprovanteId}
                     className={cn(
-                      "rounded-lg border p-4 transition-colors",
-                      page.decision === "confirm" &&
-                        "border-emerald-500/40 bg-emerald-500/5",
-                      page.decision === "skip" && "opacity-50",
+                      "flex items-start gap-4 px-4 py-3 transition-colors",
+                      (page.decision === "confirm" || page.autoConfirmed) &&
+                        "bg-emerald-500/5",
                     )}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
-                          <FileText className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">
-                            Página {page.pageNumber}/{page.totalPages}
+                    <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="truncate text-xs text-muted-foreground">
+                        {page.fileName} · página {page.pageNumber} de{" "}
+                        {page.totalPages}
+                      </p>
+                      {isNeedsManual ? (
+                        <p className="flex items-center gap-2 text-sm">
+                          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+                          Não foi possível ler o arquivo. Vincule na fila de
+                          pendentes.
+                        </p>
+                      ) : tx ? (
+                        <>
+                          <p className="truncate text-sm font-medium">
+                            {tx.description}
+                            {extra > 0 && ` e mais ${extra}`}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {(page.fileSize / 1024).toFixed(0)} KB
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Match info */}
-                      <div className="flex-1 min-w-0">
-                        {isNeedsManual ? (
-                          <div className="flex items-center gap-2">
-                            <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                            <p className="text-sm text-muted-foreground">
-                              Não foi possível ler o arquivo — revise
-                              manualmente
-                            </p>
-                          </div>
-                        ) : page.matchConfidenceLevel && tx ? (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <ConfidenceBadge
-                                level={page.matchConfidenceLevel}
-                                score={page.matchConfidence}
-                              />
-                              {page.isConsolidated && (
-                                <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                                  {page.bestMatchTransactionIds?.length}{" "}
-                                  transações agrupadas
-                                </span>
+                            {tx.supplierOrClient && `${tx.supplierOrClient} · `}
+                            <span className="font-financial">
+                              {formatCurrency(
+                                page.matchedAmount ??
+                                  tx.finalAmount ??
+                                  tx.amount,
                               )}
-                              <span className="text-sm font-medium truncate">
-                                {tx.description}
-                                {page.isConsolidated &&
-                                  (page.bestMatchTransactionIds?.length ?? 0) >
-                                    1 &&
-                                  ` e mais ${(page.bestMatchTransactionIds?.length ?? 1) - 1}`}
-                              </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              {tx.supplierOrClient &&
-                                `${tx.supplierOrClient} · `}
-                              {page.matchedAmount
-                                ? formatCurrency(page.matchedAmount)
-                                : formatCurrency(tx.finalAmount ?? tx.amount)}
-                              {tx.paymentDate &&
-                                ` · ${format(tx.paymentDate, "dd/MM/yyyy", { locale: ptBR })}`}
-                            </p>
-                            {page.matchIsAmbiguous ? (
-                              <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                                Há outra transação igualmente compatível —
-                                revise antes de confirmar
-                              </p>
-                            ) : (
-                              page.matchReasons?.[0] && (
-                                <p className="text-[11px] text-muted-foreground/80">
-                                  {page.matchReasons[0]}
-                                </p>
-                              )
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <AlertCircle className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <p className="text-sm text-muted-foreground">
-                              Nenhuma transação correspondente encontrada
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      {!isNeedsManual && page.matchConfidenceLevel && (
-                        <div className="flex gap-1 shrink-0">
-                          <Button
-                            size="sm"
-                            variant={
-                              page.decision === "confirm"
-                                ? "default"
-                                : "outline"
-                            }
-                            className="gap-1.5 h-8 text-xs"
-                            onClick={() => toggleDecision(idx, "confirm")}
-                          >
-                            <Link2 className="h-3.5 w-3.5" />
-                            {page.decision === "confirm"
-                              ? "Confirmado"
-                              : "Confirmar"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant={
-                              page.decision === "skip" ? "secondary" : "ghost"
-                            }
-                            className="h-8 w-8 p-0"
-                            onClick={() => toggleDecision(idx, "skip")}
-                            title="Rejeitar sugestão"
-                          >
-                            <Link2Off className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
+                            </span>
+                            {tx.paymentDate &&
+                              ` · pago em ${format(tx.paymentDate, "dd/MM/yyyy", { locale: ptBR })}`}
+                          </p>
+                          {insight && <InsightLine insight={insight} />}
+                        </>
+                      ) : (
+                        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <AlertCircle className="h-4 w-4 shrink-0" />
+                          Nenhum título correspondente encontrado
+                        </p>
                       )}
                     </div>
-                  </div>
+
+                    {/* Actions */}
+                    {!isNeedsManual &&
+                      !page.autoConfirmed &&
+                      page.matchConfidenceLevel &&
+                      tx && (
+                        <Button
+                          size="sm"
+                          variant={
+                            page.decision === "confirm" ? "default" : "outline"
+                          }
+                          aria-pressed={page.decision === "confirm"}
+                          className="shrink-0 gap-1.5"
+                          onClick={() => toggleDecision(idx)}
+                        >
+                          <Link2 className="h-3.5 w-3.5" />
+                          {page.decision === "confirm"
+                            ? "Confirmado"
+                            : "Confirmar"}
+                        </Button>
+                      )}
+                  </li>
                 );
               })}
-            </div>
+            </ul>
 
-            <Separator />
-
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground">
-                {confirmedCount} de {pages.length} associaç
-                {confirmedCount !== 1 ? "ões confirmadas" : "ão confirmada"}. Os
-                demais entrarão na fila de validação.
+                {confirmedCount} de {pages.length} associado
+                {confirmedCount !== 1 ? "s" : ""}. Os demais já estão na fila de
+                pendentes.
               </p>
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={handleClose}>
-                  Cancelar
+                  Fechar
                 </Button>
                 <Button onClick={handleSave} className="gap-2">
                   <CheckCircle2 className="h-4 w-4" />
-                  Finalizar Envio
+                  Salvar confirmações
                 </Button>
               </div>
             </div>

@@ -17,9 +17,18 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
 import { matchComprovante } from "@/lib/matching";
-import type { Entity, Transaction, ComprovanteMatchStatus } from "@/lib/types";
+import type { Entity, ComprovanteMatchStatus } from "@/lib/types";
 import { GoogleGenAI } from "@google/genai";
 import { FieldValue } from "firebase-admin/firestore";
+import {
+  commitAutoConfirm,
+  evaluateAutoConfirm,
+  fetchCandidateTransactions,
+  fetchEntities,
+  findPossibleDuplicate,
+  signalsForStorage,
+} from "@/lib/api/comprovanteAdmin";
+import { format } from "date-fns";
 
 // ── Text helpers (mirrored from comprovanteService) ───────────────────────────
 
@@ -112,104 +121,6 @@ async function extractText(
   }
 
   return "";
-}
-
-// ── Fetch transactions (Admin SDK) ────────────────────────────────────────────
-
-interface RawTransaction {
-  companyId: string;
-  type: string;
-  status: string;
-  amount: number;
-  finalAmount?: number;
-  discount?: number;
-  interest?: number;
-  description: string;
-  notes?: string;
-  details?: string;
-  barcode?: string;
-  paymentMethod?: Transaction["paymentMethod"];
-  supplierOrClient?: string;
-  entityId?: string;
-  comprovanteId?: string;
-  paymentDate?: FirebaseFirestore.Timestamp;
-  dueDate?: FirebaseFirestore.Timestamp;
-}
-
-/**
- * Candidatos ao match: pagáveis já pagos ou autorizados.
- *
- * Traz todos os campos que o motor usa como evidência — `barcode` (linha
- * digitável), `notes`/`details` (nº de NF), juros/desconto (o valor do
- * comprovante costuma ser o ajustado) e `comprovanteId` (para despriorizar
- * transações já conciliadas). Antes daqui só saíam valor, data e nome.
- */
-async function fetchCandidateTransactions(
-  companyId: string,
-): Promise<Transaction[]> {
-  const snap = await adminDb
-    .collection("transactions")
-    .where("companyId", "==", companyId)
-    .where("type", "==", "payable")
-    .where("status", "in", ["paid", "authorized"])
-    .get();
-
-  return snap.docs.map((d) => {
-    const data = d.data() as RawTransaction;
-    return {
-      id: d.id,
-      companyId: data.companyId,
-      type: "payable",
-      status: data.status as Transaction["status"],
-      amount: data.amount,
-      finalAmount: data.finalAmount,
-      discount: data.discount,
-      interest: data.interest,
-      description: data.description,
-      notes: data.notes,
-      details: data.details,
-      barcode: data.barcode,
-      paymentMethod: data.paymentMethod,
-      supplierOrClient: data.supplierOrClient,
-      entityId: data.entityId,
-      comprovanteId: data.comprovanteId,
-      paymentDate: data.paymentDate?.toDate(),
-      dueDate: data.dueDate?.toDate() ?? new Date(),
-      createdBy: "",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as Transaction;
-  });
-}
-
-/**
- * Cadastro de entidades da empresa — habilita o match por CNPJ/CPF,
- * chave Pix e agência/conta, que são os sinais decisivos num comprovante.
- */
-async function fetchEntities(companyId: string): Promise<Entity[]> {
-  const snap = await adminDb
-    .collection("entities")
-    .where("companyId", "==", companyId)
-    .get();
-
-  return snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      id: d.id,
-      companyId: data.companyId,
-      name: data.name ?? "",
-      type: data.type ?? "company",
-      document: data.document,
-      category: data.category ?? "supplier",
-      bankName: data.bankName,
-      agency: data.agency,
-      account: data.account,
-      pixKey: data.pixKey,
-      pixKeyType: data.pixKeyType,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as Entity;
-  });
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────────
@@ -445,14 +356,29 @@ export async function POST(req: NextRequest) {
     reason: candidate.reasons[0] ?? null,
   }));
 
+  // Mesmo valor, data e beneficiário de um comprovante já enviado: o hash não
+  // pega o mesmo pagamento reenviado como print ou PDF de outro banco.
+  const duplicate = best
+    ? await findPossibleDuplicate(companyId, best).catch(() => null)
+    : null;
+
+  const reasons = best ? [...best.reasons] : [];
+  if (duplicate) {
+    reasons.unshift(
+      `⚠ Possível duplicado de um comprovante enviado${duplicate.createdAt ? ` em ${format(duplicate.createdAt, "dd/MM/yyyy")}` : " antes"}`,
+    );
+  }
+
   if (best) {
     docData.suggestedTransactionId = best.transactionId;
     docData.suggestedTransactionIds = best.transactionIds;
     docData.matchConfidence = best.score;
     docData.matchConfidenceLevel = best.confidenceLevel;
-    docData.matchReasons = best.reasons.slice(0, 6);
+    docData.matchReasons = reasons.slice(0, 6);
     docData.matchIsAmbiguous = best.isAmbiguous ?? false;
     docData.matchAlternatives = alternatives;
+    docData.matchSignals = signalsForStorage(best);
+    if (duplicate) docData.possibleDuplicateOf = duplicate.id;
     if (best.matchedAmount != null) docData.matchedAmount = best.matchedAmount;
     if (best.matchedDate != null) docData.matchedDate = best.matchedDate;
     if (best.matchedEntity) docData.matchedEntity = best.matchedEntity;
@@ -460,10 +386,52 @@ export async function POST(req: NextRequest) {
 
   const docRef = await adminDb.collection("comprovantes").add(docData);
 
+  // ── Confirmação automática (regra estrita) ───────────────────────────────────
+  const autoReason = best
+    ? evaluateAutoConfirm(best, candidates, entities, {
+        possibleDuplicate: !!duplicate,
+      })
+    : null;
+
+  let autoConfirmed = false;
+  if (best && autoReason) {
+    try {
+      const linked = candidates.filter((t) =>
+        best.transactionIds.includes(t.id),
+      );
+      const matchedSearchText = buildSearchText([
+        searchText,
+        ...linked.map((t) => t.description),
+        ...linked.map((t) => t.supplierOrClient),
+      ]);
+      await commitAutoConfirm({
+        companyId,
+        comprovanteRef: docRef,
+        best,
+        storagePath,
+        reason: autoReason,
+        actorUid: decoded.uid,
+        actorEmail: decoded.email ?? "",
+        extra: {
+          searchText: matchedSearchText,
+          searchTokens: tokenize(matchedSearchText),
+        },
+      });
+      matchStatus = "matched";
+      autoConfirmed = true;
+    } catch (err) {
+      // Falhou a gravação: o comprovante fica na fila, que é o estado seguro.
+      console.error("[process-comprovante] auto-confirm falhou:", err);
+    }
+  }
+
   return NextResponse.json(
     {
       comprovanteId: docRef.id,
       matchStatus,
+      autoConfirmed,
+      autoConfirmReason: autoConfirmed ? autoReason : undefined,
+      possibleDuplicateOf: duplicate?.id,
       suggestedTransactionId: best?.transactionId,
       suggestedTransactionIds: best?.transactionIds,
       isConsolidated: best?.isConsolidated ?? false,
@@ -472,7 +440,7 @@ export async function POST(req: NextRequest) {
       matchedAmount: best?.matchedAmount,
       matchedDate: best?.matchedDate?.toISOString(),
       matchedEntity: best?.matchedEntity,
-      matchReasons: best?.reasons.slice(0, 6),
+      matchReasons: reasons.slice(0, 6),
       matchIsAmbiguous: best?.isAmbiguous ?? false,
       matchAlternatives: alternatives,
     },
