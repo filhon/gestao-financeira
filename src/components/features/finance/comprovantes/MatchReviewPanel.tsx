@@ -32,6 +32,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { ComprovanteStatusBadge } from "./ComprovanteStatusBadge";
 import { ReadFieldsEditor } from "./ReadFieldsEditor";
+import { DocumentPreview } from "../DocumentPreview";
 import {
   amountDifference,
   linkedTransactionIds,
@@ -59,48 +60,6 @@ interface Props {
   onDone: (result: ReviewResult) => void;
   /** Atualização no lugar (leitura corrigida, nova sugestão). */
   onPatch: (id: string, patch: Partial<Comprovante>) => void;
-}
-
-const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
-
-/** PDF em <iframe> (visualizador nativo); imagem em <img>. */
-function ReceiptPreview({
-  url,
-  storagePath,
-  title,
-}: {
-  url: string;
-  storagePath: string;
-  title: string;
-}) {
-  const [loaded, setLoaded] = useState(false);
-  const isImage = IMAGE_EXT.test(storagePath);
-  return (
-    <div className="relative flex-1 overflow-hidden rounded-md border bg-background">
-      {!loaded && (
-        <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Carregando comprovante…
-        </div>
-      )}
-      {isImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={url}
-          alt={title}
-          onLoad={() => setLoaded(true)}
-          className="h-full w-full overflow-auto object-contain"
-        />
-      ) : (
-        <iframe
-          src={`${url}#view=FitH`}
-          title={title}
-          onLoad={() => setLoaded(true)}
-          className="h-full w-full"
-        />
-      )}
-    </div>
-  );
 }
 
 /** Lista de pagáveis pagos/autorizados, compartilhada com a página. */
@@ -445,9 +404,10 @@ function ReviewBody({
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_400px] md:overflow-hidden">
         {/* Prévia */}
         <div className="flex min-h-[60vh] flex-col gap-2 bg-muted/30 p-3 md:min-h-0">
-          <ReceiptPreview
+          <DocumentPreview
+            key={previewUrl}
             url={previewUrl}
-            storagePath={c.storagePath}
+            name={c.storagePath}
             title={`Comprovante página ${c.pageNumber}`}
           />
           <div className="flex gap-2">

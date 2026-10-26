@@ -433,6 +433,9 @@ export interface Transaction {
   approvedAt?: Date;
   releasedBy?: string;
   releasedAt?: Date;
+  rejectedBy?: string;
+  rejectedAt?: Date;
+  rejectionReason?: string | null;
 
   // Approval Token for Magic Links
   approvalToken?: string | null;

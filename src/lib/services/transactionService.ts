@@ -53,6 +53,7 @@ const convertDates = (data: DocumentData): Transaction => {
     paymentDate: (data.paymentDate as Timestamp)?.toDate(),
     approvedAt: (data.approvedAt as Timestamp)?.toDate(),
     releasedAt: (data.releasedAt as Timestamp)?.toDate(),
+    rejectedAt: (data.rejectedAt as Timestamp)?.toDate(),
     createdAt: (data.createdAt as Timestamp)?.toDate(),
     updatedAt: (data.updatedAt as Timestamp)?.toDate(),
     approvalTokenExpiresAt: data.approvalTokenExpiresAt
@@ -211,9 +212,15 @@ async function setStatusViaLedger(
     interest: number;
     bankAccountId?: string;
   },
+  reason?: string,
 ) {
   const call = httpsCallable<
-    { transactionId: string; status: string; settlement?: unknown },
+    {
+      transactionId: string;
+      status: string;
+      settlement?: unknown;
+      reason?: string;
+    },
     {
       success: boolean;
       budgetChanged: boolean;
@@ -228,6 +235,7 @@ async function setStatusViaLedger(
     ...(settlement
       ? { settlement: serializeForCallable(stripUndefined(settlement)) }
       : {}),
+    ...(reason ? { reason } : {}),
   });
 
   return data;
@@ -1458,13 +1466,15 @@ export const transactionService = {
     status: TransactionStatus,
     user: { uid: string; email: string },
     companyId: string,
+    /** Obrigatório para `rejected`; a função recusa sem ele. */
+    reason?: string,
   ): Promise<Transaction> => {
     const docRef = doc(db, COLLECTION_NAME, id);
 
     // A função é que carimba `approvedBy`/`releasedBy` a partir do token de
     // autenticação e gera o token do magic link, e é que revalida o orçamento:
     // tirar uma despesa de `rejected` reocupa o envelope que a recusa liberou.
-    await setStatusViaLedger(id, status);
+    await setStatusViaLedger(id, status, undefined, reason);
 
     // Fetch and return updated transaction
     const updatedDoc = await getDoc(docRef);
@@ -1484,7 +1494,7 @@ export const transactionService = {
       subject: updatedDoc.exists()
         ? transactionSubject(updatedDoc.data())
         : undefined,
-      details: { status },
+      details: stripUndefined({ status, reason }),
     });
 
     if (!updatedDoc.exists()) {

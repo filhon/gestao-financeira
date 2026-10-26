@@ -1977,7 +1977,6 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
 
       {/* ── Painel lateral ────────────────────────────────────────────── */}
       <TransactionDetailsDialog
-        panel
         transaction={panelTx}
         isOpen={panelOpen}
         onClose={() => setPanelOpen(false)}

@@ -786,7 +786,6 @@ export default function PaymentBatchPage() {
       {actions.dialogs}
 
       <TransactionDetailsDialog
-        panel
         transaction={openTx}
         isOpen={!!openTx}
         onClose={() => setOpenTxId(null)}

@@ -50,6 +50,8 @@ interface StatusUpdateEmailProps {
   transactionId: string;
   description: string;
   status: string;
+  /** Motivo da rejeição. */
+  reason?: string;
   updatedBy: string;
   link: string;
 }
@@ -58,6 +60,7 @@ export const StatusUpdateEmail: React.FC<Readonly<StatusUpdateEmailProps>> = ({
   transactionId,
   description,
   status,
+  reason,
   updatedBy,
   link,
 }) => {
@@ -89,6 +92,11 @@ export const StatusUpdateEmail: React.FC<Readonly<StatusUpdateEmailProps>> = ({
         <li>
           <strong>Atualizado por:</strong> {updatedBy}
         </li>
+        {reason && (
+          <li>
+            <strong>Motivo:</strong> {reason}
+          </li>
+        )}
       </ul>
       <p>
         <a

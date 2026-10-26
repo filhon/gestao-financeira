@@ -70,6 +70,7 @@ export const emailService = {
             transactionId: transaction.id,
             description: transaction.description,
             status: transaction.status,
+            reason: transaction.rejectionReason ?? undefined,
             updatedBy: updatedBy,
             link: `${appDomain}/financeiro/${transaction.type === "payable" ? "contas-pagar" : "contas-receber"}`,
           },

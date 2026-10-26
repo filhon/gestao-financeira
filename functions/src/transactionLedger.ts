@@ -1903,9 +1903,10 @@ export const setTransactionStatus = functions
       );
     }
 
-    const { transactionId, status, settlement } = data as {
+    const { transactionId, status, settlement, reason } = data as {
       transactionId?: string;
       status?: string;
+      reason?: string;
       settlement?: {
         paymentDate?: string;
         finalAmount?: number;
@@ -1932,6 +1933,14 @@ export const setTransactionStatus = functions
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Dados de baixa só valem para o status pago.",
+      );
+    }
+    // Quem pediu precisa saber o que corrigir; o magic link já exige o mesmo.
+    const rejectionReason = reason?.trim();
+    if (status === "rejected" && !rejectionReason) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Informe o motivo da rejeição.",
       );
     }
 
@@ -1965,6 +1974,10 @@ export const setTransactionStatus = functions
     } else if (status === "paid" || status === "received") {
       patch.releasedBy = uid;
       patch.releasedAt = now;
+    } else if (status === "rejected") {
+      patch.rejectedBy = uid;
+      patch.rejectedAt = now;
+      patch.rejectionReason = rejectionReason;
     } else if (status === "pending_approval") {
       // Token do magic link: gerado no servidor e com validade de 7 dias.
       patch.approvalToken = randomUUID();
