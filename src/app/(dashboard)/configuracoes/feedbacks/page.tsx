@@ -190,7 +190,7 @@ export default function AdminFeedbacksPage() {
         className="animate-in fade-in slide-in-from-bottom-2 duration-300"
         style={{ animationFillMode: "both" }}
       >
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">
           Gerenciamento de Feedbacks
         </h1>
         <p className="text-muted-foreground mt-1">

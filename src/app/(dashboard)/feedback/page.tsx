@@ -65,7 +65,9 @@ function FeedbackPageContent() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Feedback</h1>
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+          Feedback
+        </h1>
         <p className="text-muted-foreground">
           Ajude-nos a melhorar o sistema compartilhando sua opinião.
         </p>

@@ -196,8 +196,11 @@ export interface CostCenterBalance {
 /** Sintética agrupa e totaliza; só a analítica recebe lançamento. */
 export type AccountType = "synthetic" | "analytic";
 
-/** Receita (natureza credora, entrada) ou despesa (devedora, saída). */
-export type AccountNature = "revenue" | "expense";
+/**
+ * Receita (entrada), despesa (saída) ou patrimonial: ativo e passivo, que
+ * recebem entrada e saída (mútuo tomado e devolvido, compra e venda de bem).
+ */
+export type AccountNature = "revenue" | "expense" | "balance";
 
 /** Linha da DRE gerencial em que a conta é apresentada. */
 export type DreGroup =

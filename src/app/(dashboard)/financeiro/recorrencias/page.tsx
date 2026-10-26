@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { recurrenceService } from "@/lib/services/recurrenceService";
@@ -70,7 +70,7 @@ import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { AnimatedCounter } from "@/components/ui/animated-counter";
 
 import { usePermissions } from "@/hooks/usePermissions";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 function getFrequencyLabel(freq: string, interval: number) {
   const intervalLabel = interval > 1 ? `A cada ${interval} ` : "";
@@ -291,6 +291,14 @@ function MobileRecurrenceCard({
 }
 
 export default function RecorrenciasPage() {
+  return (
+    <Suspense>
+      <Recorrencias />
+    </Suspense>
+  );
+}
+
+function Recorrencias() {
   const { selectedCompany } = useCompany();
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
@@ -299,7 +307,11 @@ export default function RecorrenciasPage() {
     accounts.length > 0 && t.active && !t.baseTransactionData?.accountId;
 
   const [searchTerm, setSearchTermState] = useState("");
-  const [statusFilter, setStatusFilterState] = useState<string>("all");
+  // `?filtro=sem-conta`: vem do aviso do plano de contas.
+  const searchParams = useSearchParams();
+  const [statusFilter, setStatusFilterState] = useState<string>(
+    searchParams.get("filtro") === "sem-conta" ? "no_account" : "all",
+  );
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -333,11 +345,15 @@ export default function RecorrenciasPage() {
       .filter(
         (t) =>
           (statusFilter === "all" ||
-            t.active === (statusFilter === "active")) &&
+            (statusFilter === "no_account"
+              ? accounts.length > 0 &&
+                t.active &&
+                !t.baseTransactionData?.accountId
+              : t.active === (statusFilter === "active"))) &&
           (!term || normalizeText(t.description ?? "").includes(term)),
       )
       .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
-  }, [allTemplates, statusFilter, searchTerm]);
+  }, [allTemplates, statusFilter, searchTerm, accounts]);
 
   const totalPages = Math.max(
     1,
@@ -418,6 +434,7 @@ export default function RecorrenciasPage() {
   const statusLabels: Record<string, string> = {
     active: "Ativos",
     paused: "Pausados",
+    no_account: "Sem conta",
   };
 
   const pagination = (
@@ -438,7 +455,7 @@ export default function RecorrenciasPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Recorrências
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -619,6 +636,7 @@ export default function RecorrenciasPage() {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="active">Ativos</SelectItem>
                   <SelectItem value="paused">Pausados</SelectItem>
+                  <SelectItem value="no_account">Sem conta</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1002,6 +1020,7 @@ export default function RecorrenciasPage() {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="active">Ativos</SelectItem>
                   <SelectItem value="paused">Pausados</SelectItem>
+                  <SelectItem value="no_account">Sem conta</SelectItem>
                 </SelectContent>
               </Select>
             </div>

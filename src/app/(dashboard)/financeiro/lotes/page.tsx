@@ -345,7 +345,7 @@ export default function PaymentBatchesPage() {
     <div className="space-y-4 md:space-y-6">
       {/* ── Cabeçalho ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-bold tracking-tight md:text-3xl">
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">
           Lotes de Pagamento
         </h1>
 

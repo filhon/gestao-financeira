@@ -152,7 +152,9 @@ export default function SettingsPage() {
     <div className="flex flex-col gap-8 max-w-2xl">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+          Configurações
+        </h1>
         <p className="text-muted-foreground mt-1">
           Gerencie usuários, segurança e infraestrutura do sistema.
         </p>

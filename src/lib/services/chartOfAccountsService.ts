@@ -129,6 +129,7 @@ async function referencesTo(companyId: string, ids: string[]) {
  * Mudanças que deixariam lançamentos existentes num lugar impossível: conta
  * analítica com lançamento que vira sintética (sintética não recebe
  * lançamento) ou que troca de natureza (despesa classificada como receita).
+ * Virar patrimonial é seguro: ela aceita os dois lados.
  */
 async function assertSafeChanges(
   companyId: string,
@@ -141,7 +142,8 @@ async function assertSafeChanges(
     return (
       a &&
       b.type === "analytic" &&
-      (a.type !== "analytic" || a.nature !== b.nature)
+      (a.type !== "analytic" ||
+        (a.nature !== b.nature && a.nature !== "balance"))
     );
   });
   for (const account of risky) {
@@ -313,7 +315,7 @@ const INSTRUCTIONS: Array<[string, string]> = [
   ],
   [
     "Natureza",
-    "Receita (entrada) ou Despesa (saída). Obrigatória nas contas de primeiro nível; nas demais, em branco herda da conta superior. Toda a subárvore tem a mesma natureza.",
+    "Receita (entrada), Despesa (saída) ou Patrimonial (ativo e passivo: recebe entrada e saída; só nos grupos Investimentos e Financiamentos). Obrigatória nas contas de primeiro nível; nas demais, em branco herda da conta superior. Toda a subárvore tem a mesma natureza.",
   ],
   [
     "Grupo DRE",
@@ -397,7 +399,8 @@ export const chartOfAccountsService = {
   /**
    * Atualiza uma conta. Mudar o código de uma sintética leva junto todas as
    * descendentes (3.1 → 3.4 faz 3.1.02 virar 3.4.02): o código é a hierarquia,
-   * e filhas com o prefixo antigo ficariam órfãs.
+   * e filhas com o prefixo antigo ficariam órfãs. Mudar a natureza também
+   * desce a subárvore inteira, que tem sempre a mesma.
    */
   update: async (id: string, draft: AccountDraft, actor: Actor) => {
     const snap = await getDoc(doc(db, COLLECTION_NAME, id));
@@ -407,17 +410,24 @@ export const chartOfAccountsService = {
     const all = await companyAccounts(companyId);
     const self = all.find((a) => a.id === id)!;
     const oldCode = self.code;
+    const isDescendant = (code: string) => code.startsWith(`${oldCode}.`);
     const renamed = (code: string) =>
       code === oldCode
         ? draft.code
-        : code.startsWith(`${oldCode}.`)
+        : isDescendant(code)
           ? draft.code + code.slice(oldCode.length)
           : code;
+    const natureChanged = !!draft.nature && draft.nature !== self.nature;
 
     const nextDrafts = all.map((a) =>
       a.id === id
         ? { ...draft, archived: a.archived }
-        : { ...toDraft(a), code: renamed(a.code) },
+        : {
+            ...toDraft(a),
+            code: renamed(a.code),
+            nature:
+              natureChanged && isDescendant(a.code) ? draft.nature : a.nature,
+          },
     );
     const { accounts, issues } = resolvePlan(nextDrafts);
     firstIssue(issues);
@@ -429,7 +439,12 @@ export const chartOfAccountsService = {
 
     const byCode = new Map(accounts.map((a) => [a.code, a]));
     const ops = all
-      .filter((a) => a.id === id || a.code !== renamed(a.code))
+      .filter(
+        (a) =>
+          a.id === id ||
+          a.code !== renamed(a.code) ||
+          !sameAccount(a, byCode.get(a.code)!),
+      )
       .map(
         (a) => (batch: ReturnType<typeof writeBatch>) =>
           batch.update(doc(db, COLLECTION_NAME, a.id), {
@@ -450,7 +465,8 @@ export const chartOfAccountsService = {
         code: draft.code,
         name: draft.name,
         previousCode: oldCode !== draft.code ? oldCode : undefined,
-        descendantsRenamed: ops.length - 1 || undefined,
+        previousNature: natureChanged ? self.nature : undefined,
+        descendantsChanged: ops.length - 1 || undefined,
       }),
     });
   },

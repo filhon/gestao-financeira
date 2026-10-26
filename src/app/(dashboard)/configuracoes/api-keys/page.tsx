@@ -384,7 +384,9 @@ export default function ApiKeysPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Chaves de API</h1>
+            <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+              Chaves de API
+            </h1>
             <p className="text-muted-foreground text-sm mt-1">
               Gerencie as chaves de acesso à API externa do sistema.
             </p>

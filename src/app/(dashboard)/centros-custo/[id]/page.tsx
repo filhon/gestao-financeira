@@ -516,7 +516,7 @@ export default function CostCenterDashboard() {
             <span className="sr-only">Voltar</span>
           </Button>
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold tracking-tight md:text-xl">
+            <h1 className="truncate text-xl font-bold tracking-tight md:text-2xl">
               {costCenter.name}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">

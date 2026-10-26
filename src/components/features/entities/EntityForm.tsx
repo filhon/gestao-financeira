@@ -57,7 +57,7 @@ import { entityService } from "@/lib/services/entityService";
 import { cnpjService } from "@/lib/services/cnpjService";
 import { maskCpfCnpj, validateCnpj, validateCpf } from "@/lib/validations/cnpj";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
+import { natureFitsSide, useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { useCostCenters } from "@/hooks/useCostCenters";
 import { BRAZILIAN_BANKS } from "@/lib/banks";
 import { cn, normalizeText } from "@/lib/utils";
@@ -346,7 +346,8 @@ export function EntityForm({
   const isCompany = type === "company";
   const nature = category === "client" ? "revenue" : "expense";
   const hasAccounts = accounts.some(
-    (a) => a.nature === nature && a.type === "analytic" && !a.archived,
+    (a) =>
+      natureFitsSide(a.nature, nature) && a.type === "analytic" && !a.archived,
   );
 
   // O tipo sai do documento: 11 dígitos é pessoa física, 14 é jurídica.

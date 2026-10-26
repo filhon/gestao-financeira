@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { ReactNode, useEffect, useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ import {
   ChartAccountFormData,
   chartAccountSchema,
 } from "@/lib/validations/chartAccount";
-import { ChartAccount, DreGroup } from "@/lib/types";
+import { AccountNature, ChartAccount, DreGroup } from "@/lib/types";
 import {
   ACCOUNT_NATURE_LABEL,
   AccountDraft,
@@ -49,6 +49,9 @@ interface AccountFormProps {
   isLoading: boolean;
   onSubmit: (draft: AccountDraft) => Promise<void>;
   onCancel: () => void;
+  /** Ações da conta no lado esquerdo do rodapé (arquivar, excluir). */
+  footerStart?: ReactNode;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -63,6 +66,8 @@ export function AccountForm({
   isLoading,
   onSubmit,
   onCancel,
+  footerStart,
+  onDirtyChange,
 }: AccountFormProps) {
   const others = useMemo(
     () => accounts.filter((a) => a.id !== editing?.id),
@@ -99,7 +104,28 @@ export function AccountForm({
     control: form.control,
     name: ["code", "type", "nature"],
   });
+  const { isDirty } = form.formState;
+  useEffect(() => onDirtyChange?.(isDirty), [isDirty, onDirtyChange]);
+
   const parent = parentFor(parentCodeOf(code.trim()));
+
+  // Código e natureza descem a subárvore: quem salva precisa ver o alcance.
+  const descendants = editing
+    ? others.filter((a) => a.code.startsWith(`${editing.code}.`))
+    : [];
+  const newCode = code.trim();
+  const renaming = descendants.length > 0 && newCode !== editing?.code;
+  const effectiveNature = parent?.nature ?? nature;
+  const natureCascade =
+    descendants.length > 0 && effectiveNature !== editing?.nature;
+  const touched = renaming || natureCascade ? descendants.length + 1 : 0;
+  const natureHint = parent
+    ? "Igual à da conta superior."
+    : natureCascade
+      ? `Muda também nas ${descendants.length} subcontas.`
+      : effectiveNature === "balance"
+        ? "Ativo e passivo: aparece em contas a pagar e a receber, fora do resultado."
+        : null;
   const inherited = parent ? groupResolver(others)(parent.code) : undefined;
   const synthetics = withLevels(
     others.filter(
@@ -162,7 +188,7 @@ export function AccountForm({
                 {synthetics.map((a) => (
                   <SelectItem key={a.id} value={a.code}>
                     <span style={{ paddingLeft: `${a.level * 12}px` }}>
-                      <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                      <span className="font-financial tabular-nums text-xs text-muted-foreground mr-1.5">
                         {a.code}
                       </span>
                       {a.name}
@@ -180,13 +206,24 @@ export function AccountForm({
               <FormItem>
                 <FormLabel>Código</FormLabel>
                 <FormControl>
-                  <Input className="font-mono" {...field} />
+                  <Input className="font-financial tabular-nums" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
         </div>
+
+        {renaming && (
+          <p className="rounded-md bg-muted px-3 py-2 text-sm" role="status">
+            O código das {descendants.length} subcontas muda junto:{" "}
+            <span className="font-financial tabular-nums">
+              {descendants[0].code} → {newCode}
+              {descendants[0].code.slice(editing!.code.length)}
+            </span>
+            {descendants.length > 1 && " e as demais"}.
+          </p>
+        )}
 
         <FormField
           control={form.control}
@@ -217,10 +254,10 @@ export function AccountForm({
                   </FormControl>
                   <SelectContent>
                     <SelectItem value="analytic">
-                      Analítica — recebe lançamentos
+                      Analítica (recebe lançamentos)
                     </SelectItem>
                     <SelectItem value="synthetic">
-                      Sintética — agrupa outras contas
+                      Sintética (agrupa outras contas)
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -243,10 +280,7 @@ export function AccountForm({
                     if (
                       g &&
                       g !== "inherit" &&
-                      !groupFitsNature(
-                        g as DreGroup,
-                        v as "revenue" | "expense",
-                      )
+                      !groupFitsNature(g as DreGroup, v as AccountNature)
                     ) {
                       form.setValue("dreGroup", "");
                     }
@@ -265,11 +299,12 @@ export function AccountForm({
                     <SelectItem value="expense">
                       {ACCOUNT_NATURE_LABEL.expense} (saída)
                     </SelectItem>
+                    <SelectItem value="balance">
+                      {ACCOUNT_NATURE_LABEL.balance} (entrada e saída)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-                {parent && (
-                  <FormDescription>Igual à da conta superior.</FormDescription>
-                )}
+                {natureHint && <FormDescription>{natureHint}</FormDescription>}
                 <FormMessage />
               </FormItem>
             )}
@@ -348,18 +383,25 @@ export function AccountForm({
           )}
         />
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onCancel}
-            disabled={isLoading}
-          >
-            Cancelar
-          </Button>
-          <Button type="submit" loading={isLoading}>
-            {editing ? "Salvar alterações" : "Criar conta"}
-          </Button>
+        <div className="sticky bottom-0 -mx-6 flex flex-wrap items-center gap-2 border-t bg-background px-6 py-3">
+          {footerStart}
+          <div className="ml-auto flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={isLoading}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" loading={isLoading}>
+              {!editing
+                ? "Criar conta"
+                : touched
+                  ? `Salvar ${touched} contas`
+                  : "Salvar alterações"}
+            </Button>
+          </div>
         </div>
       </form>
     </Form>

@@ -25,6 +25,7 @@ import {
 } from "@/lib/services/reconciliationRuleService";
 import {
   accountRequiredFor,
+  natureFitsSide,
   useChartOfAccounts,
 } from "@/hooks/useChartOfAccounts";
 import { BalanceStrip } from "@/components/features/finance/reconciliation/BalanceStrip";
@@ -379,7 +380,10 @@ export function ReconciliationDashboard() {
       !accountId &&
       accountRequiredFor(requiredFrom, new Date(tx.date)) &&
       chartAccounts.some(
-        (a) => a.nature === nature && a.type === "analytic" && !a.archived,
+        (a) =>
+          natureFitsSide(a.nature, nature) &&
+          a.type === "analytic" &&
+          !a.archived,
       )
     );
   };

@@ -558,7 +558,7 @@ function Reports() {
       {/* ── Cabeçalho ─────────────────────────────────────────────────── */}
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-3">
-          <h1 className="text-xl font-bold tracking-tight md:text-3xl">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Relatórios
           </h1>
           <Tabs value={kind} onValueChange={(v) => setKind(v as ReportKind)}>

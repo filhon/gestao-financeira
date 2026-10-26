@@ -91,7 +91,7 @@ export default function DashboardShell({
         <div className="hidden md:block w-64 border-r bg-card" />
         <div className="flex flex-1 flex-col overflow-hidden">
           <div className="h-14 border-b bg-card" />
-          <main className="flex-1 overflow-y-auto bg-muted/10 p-4 md:p-6">
+          <main className="relative flex-1 overflow-y-auto bg-muted/10 p-4 md:p-6">
             {children}
           </main>
         </div>
@@ -105,10 +105,13 @@ export default function DashboardShell({
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main className="flex flex-1 flex-col overflow-hidden bg-muted/10">
-          <div className="hidden md:block flex-none px-6 pt-6">
-            <Breadcrumbs />
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6 min-h-0">
+          {/* `relative`: sem ancestral posicionado, um `absolute` aqui dentro
+              (ex.: `sr-only`) escapa da rolagem e estica a página inteira. */}
+          <div className="relative flex-1 overflow-y-auto p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6 min-h-0">
+            {/* Colado ao h1 da tela: os dois formam um cabeçalho só. */}
+            <div className="hidden md:block">
+              <Breadcrumbs />
+            </div>
             <ErrorBoundary>{children}</ErrorBoundary>
           </div>
         </main>

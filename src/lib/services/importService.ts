@@ -13,7 +13,7 @@ import {
   PaymentMethod,
 } from "@/lib/types";
 import { transactionService } from "./transactionService";
-import { accountRequiredFor } from "@/lib/chartOfAccounts";
+import { accountRequiredFor, natureFitsSide } from "@/lib/chartOfAccounts";
 import { normalizeText } from "@/lib/utils";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { parse, isValid, format } from "date-fns";
@@ -257,7 +257,7 @@ export const importService = {
           (a) =>
             a.type === "analytic" &&
             !a.archived &&
-            a.nature === accountCtx.nature &&
+            natureFitsSide(a.nature, accountCtx.nature) &&
             (a.code === raw || normalizeText(a.name) === key),
         );
         if (found) accountId = found.id;

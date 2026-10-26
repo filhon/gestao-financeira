@@ -99,6 +99,7 @@ import { useDocumentExtraction } from "@/hooks/useDocumentExtraction";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
 import {
   accountRequiredFor,
+  natureFitsSide,
   useChartOfAccounts,
 } from "@/hooks/useChartOfAccounts";
 import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSelect";
@@ -631,7 +632,8 @@ export function TransactionForm({
   const nature = isPayable ? "expense" : "revenue";
   const { accounts, requiredFrom } = useChartOfAccounts(selectedCompany?.id);
   const hasAccounts = accounts.some(
-    (a) => a.nature === nature && a.type === "analytic" && !a.archived,
+    (a) =>
+      natureFitsSide(a.nature, nature) && a.type === "analytic" && !a.archived,
   );
   const watchedDueDate = form.watch("dueDate");
   const accountRequired =
@@ -943,7 +945,7 @@ export function TransactionForm({
       entityAccount &&
       !entityAccount.archived &&
       entityAccount.type === "analytic" &&
-      entityAccount.nature === nature
+      natureFitsSide(entityAccount.nature, nature)
     ) {
       form.setValue("accountId", entityAccount.id);
       fromEntity.push("accountId");

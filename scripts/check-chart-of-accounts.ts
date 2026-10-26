@@ -6,7 +6,9 @@
 import assert from "node:assert/strict";
 import {
   buildDre,
+  natureFitsSide,
   nextChildCode,
+  parseAccountNature,
   parseAccountType,
   parseDreGroup,
   resolvePlan,
@@ -70,6 +72,29 @@ for (const expected of [
 ]) {
   assert.ok(bad.includes(expected), `esperava erro "${expected}"`);
 }
+
+// Patrimonial: só fora do resultado, e serve a recebimento e pagamento.
+assert.deepEqual(
+  resolvePlan([
+    { code: "1", name: "Ativo", nature: "balance", dreGroup: "investments" },
+    { code: "1.01", name: "Veículos" },
+  ]).issues,
+  [],
+);
+assert.ok(
+  resolvePlan([
+    {
+      code: "1",
+      name: "Ativo",
+      nature: "balance",
+      dreGroup: "operating_expenses",
+    },
+  ]).issues[0].message.includes("não combina"),
+);
+assert.ok(natureFitsSide("balance", "revenue"));
+assert.ok(natureFitsSide("balance", "expense"));
+assert.ok(!natureFitsSide("expense", "revenue"));
+assert.equal(parseAccountNature("Patrimonial"), "balance");
 
 // Leitura de planilha e numeração.
 assert.equal(parseAccountType("Analítica"), "analytic");

@@ -155,7 +155,9 @@ export default function NotificationsPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Notificações</h1>
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+            Notificações
+          </h1>
           <p className="text-muted-foreground">
             Fique por dentro das atualizações do sistema.
           </p>

@@ -18,11 +18,11 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { AccountNature, ChartAccount } from "@/lib/types";
-import { withLevels } from "@/lib/chartOfAccounts";
+import { natureFitsSide, withLevels } from "@/lib/chartOfAccounts";
 
 interface AccountSelectProps {
   accounts: ChartAccount[];
-  /** Despesa só vê contas de despesa; receita, de receita. */
+  /** Despesa vê contas de despesa; receita, de receita; os dois, as patrimoniais. */
   nature: AccountNature;
   value?: string;
   onChange: (accountId: string | undefined) => void;
@@ -54,7 +54,8 @@ export function AccountSelect({
     () =>
       withLevels(
         accounts.filter(
-          (a) => a.nature === nature && (!a.archived || a.id === value),
+          (a) =>
+            natureFitsSide(a.nature, nature) && (!a.archived || a.id === value),
         ),
       ),
     [accounts, nature, value],

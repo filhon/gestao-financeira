@@ -433,7 +433,7 @@ export default function UserProfilePage({
 
         <div className="min-w-0 flex-1 space-y-2">
           <div>
-            <h1 className="truncate text-2xl font-bold tracking-tight">
+            <h1 className="truncate text-xl font-bold tracking-tight md:text-2xl">
               {userProfile.displayName}
             </h1>
             <p className="text-sm text-muted-foreground">{userProfile.email}</p>

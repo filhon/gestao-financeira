@@ -141,7 +141,7 @@ export default function DashboardPage() {
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Dashboard
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-0.5 first-letter:uppercase">

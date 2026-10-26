@@ -150,7 +150,7 @@ export default function CompaniesPage() {
             <Building2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Gerenciamento de Empresas
             </h1>
             <p className="text-muted-foreground text-sm mt-0.5">

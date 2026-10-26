@@ -642,7 +642,7 @@ export default function CostCentersPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Centros de Custo
           </h1>
           {!isLoading && costCenters.length > 0 && (

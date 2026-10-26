@@ -11,7 +11,7 @@ export const chartAccountSchema = z.object({
     .min(2, "Informe o nome da conta")
     .max(120, "Até 120 caracteres"),
   type: z.enum(["synthetic", "analytic"]),
-  nature: z.enum(["revenue", "expense"]),
+  nature: z.enum(["revenue", "expense", "balance"]),
   /** Um `DreGroup` ou "inherit" (vem da conta superior). */
   dreGroup: z.string(),
   description: z.string().max(500, "Até 500 caracteres").optional(),

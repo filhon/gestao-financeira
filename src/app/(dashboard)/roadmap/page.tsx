@@ -17,9 +17,9 @@ export default function RoadmapPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
               <Map className="h-4 w-4 text-primary" />
             </div>
-            <h2 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Roadmap de Desenvolvimento
-            </h2>
+            </h1>
             <Badge variant="secondary" className="text-xs font-normal">
               Beta
             </Badge>

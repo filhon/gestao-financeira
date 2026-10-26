@@ -120,7 +120,7 @@ export function ImportChartDialog({
       );
       const { toCreate, toUpdate } = state.preview;
       toast.success(
-        `Plano de contas importado: ${toCreate.length} criada(s), ${toUpdate.length} atualizada(s).`,
+        `Plano de contas importado: ${toCreate.length} ${toCreate.length === 1 ? "criada" : "criadas"}, ${toUpdate.length} ${toUpdate.length === 1 ? "atualizada" : "atualizadas"}.`,
       );
       onImported();
       onOpenChange(false);
@@ -254,7 +254,7 @@ export function ImportChartDialog({
                 {preview.issues.length === 1
                   ? "Há 1 problema"
                   : `Há ${preview.issues.length} problemas`}{" "}
-                na planilha. Nada foi gravado — corrija e envie de novo.
+                na planilha. Nada foi gravado: corrija e envie de novo.
               </p>
             </div>
             <ul className="max-h-72 overflow-y-auto rounded-md border divide-y text-sm">
@@ -341,7 +341,9 @@ export function ImportChartDialog({
           {preview && !hasIssues && !nothingToDo ? (
             <Button onClick={confirm} loading={state.step === "saving"}>
               Importar {preview.toCreate.length + preview.toUpdate.length}{" "}
-              conta(s)
+              {preview.toCreate.length + preview.toUpdate.length === 1
+                ? "conta"
+                : "contas"}
             </Button>
           ) : (
             <Button variant="outline" onClick={() => onOpenChange(false)}>

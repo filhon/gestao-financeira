@@ -516,7 +516,7 @@ function AuditLogsContent() {
             <ShieldCheck className="h-5 w-5 text-amber-600 dark:text-amber-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Logs de Auditoria
             </h1>
             <p className="text-sm text-muted-foreground">

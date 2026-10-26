@@ -78,7 +78,7 @@ export default function BankAccountsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl md:text-3xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Contas Bancárias
           </h1>
           {!isEmpty && !isLoading && (

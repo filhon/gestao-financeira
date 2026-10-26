@@ -424,7 +424,7 @@ export default function PaymentBatchPage() {
               <span className={TONE[urgency.tone]}>{urgency.label}</span>
             )}
           </div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             {batch.name}
           </h1>
           <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground">

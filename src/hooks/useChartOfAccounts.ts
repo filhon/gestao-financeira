@@ -29,10 +29,11 @@ export function useChartOfAccounts(companyId: string | undefined) {
     ...query,
     accounts: query.data ?? EMPTY,
     requiredFrom: requiredFrom.data ?? null,
+    requiredFromLoading: requiredFrom.isLoading,
   };
 }
 
-export { accountRequiredFor } from "@/lib/chartOfAccounts";
+export { accountRequiredFor, natureFitsSide } from "@/lib/chartOfAccounts";
 
 // Referência estável: um `[]` novo a cada render dispararia efeitos dependentes.
 const EMPTY: ChartAccount[] = [];

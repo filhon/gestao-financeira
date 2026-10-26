@@ -296,7 +296,7 @@ export default function UsersPage() {
             <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Gerenciamento de Usuários
             </h1>
             <p className="text-muted-foreground text-sm mt-0.5">

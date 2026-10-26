@@ -129,7 +129,7 @@ export default function LegalDocumentsSettingsPage() {
           <FileText className="h-5 w-5 text-slate-600 dark:text-slate-400" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Documentos Legais
           </h1>
           <p className="text-sm text-muted-foreground">

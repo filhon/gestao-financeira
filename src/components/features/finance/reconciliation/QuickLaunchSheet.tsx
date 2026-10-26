@@ -25,6 +25,7 @@ import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSe
 import { useCostCenters } from "@/hooks/useCostCenters";
 import {
   accountRequiredFor,
+  natureFitsSide,
   useChartOfAccounts,
 } from "@/hooks/useChartOfAccounts";
 import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
@@ -90,7 +91,8 @@ export function QuickLaunchSheet({
   const nature = isPayable ? "expense" : "revenue";
   const { accounts, requiredFrom } = useChartOfAccounts(companyId);
   const hasAccounts = accounts.some(
-    (a) => a.nature === nature && a.type === "analytic" && !a.archived,
+    (a) =>
+      natureFitsSide(a.nature, nature) && a.type === "analytic" && !a.archived,
   );
   const accountRequired =
     hasAccounts &&

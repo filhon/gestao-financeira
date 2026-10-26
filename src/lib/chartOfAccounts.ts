@@ -8,7 +8,7 @@
  * Convenções adotadas (plano estruturado, ITG 1000 / prática de mercado):
  * - o código é a hierarquia: "3.1.02" é filha de "3.1", que é filha de "3";
  * - conta sintética agrupa e totaliza, só a analítica recebe lançamento;
- * - a natureza (receita/despesa) é a mesma em toda a subárvore;
+ * - a natureza (receita/despesa/patrimonial) é a mesma em toda a subárvore;
  * - toda analítica aponta para uma linha da DRE gerencial.
  */
 import currency from "currency.js";
@@ -32,13 +32,23 @@ export const ACCOUNT_TYPE_LABEL: Record<AccountType, string> = {
 export const ACCOUNT_NATURE_LABEL: Record<AccountNature, string> = {
   revenue: "Receita",
   expense: "Despesa",
+  balance: "Patrimonial",
 };
+
+/** Patrimonial serve aos dois lados: entra num recebimento e num pagamento. */
+export const natureFitsSide = (
+  accountNature: AccountNature,
+  side: AccountNature,
+) => accountNature === side || accountNature === "balance";
 
 interface DreGroupInfo {
   value: DreGroup;
   label: string;
-  /** `null`: aceita as duas naturezas (entrada e saída do mesmo tipo). */
-  nature: AccountNature | null;
+  /**
+   * `null`: fora do resultado, aceita qualquer natureza. É o único lugar da
+   * natureza patrimonial.
+   */
+  nature: Exclude<AccountNature, "balance"> | null;
   hint: string;
 }
 
@@ -215,6 +225,12 @@ const NATURE_ALIASES: Record<string, AccountNature> = {
   devedora: "expense",
   custo: "expense",
   expense: "expense",
+  p: "balance",
+  patrimonial: "balance",
+  "entrada e saida": "balance",
+  ativo: "balance",
+  passivo: "balance",
+  balance: "balance",
 };
 
 const GROUP_ALIASES: Record<string, DreGroup> = Object.fromEntries([
@@ -345,7 +361,10 @@ export function resolvePlan(drafts: AccountDraft[]): {
 
     const nature = d.nature ?? parent?.nature;
     if (!nature) {
-      issue(d, `Informe a natureza (Receita ou Despesa) de ${d.code}.`);
+      issue(
+        d,
+        `Informe a natureza (Receita, Despesa ou Patrimonial) de ${d.code}.`,
+      );
       continue;
     }
     if (parent && d.nature && d.nature !== parent.nature) {

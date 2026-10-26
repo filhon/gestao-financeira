@@ -10,6 +10,7 @@ import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { useCostCenters } from "@/hooks/useCostCenters";
 import {
   accountRequiredFor,
+  natureFitsSide,
   useChartOfAccounts,
 } from "@/hooks/useChartOfAccounts";
 import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSelect";
@@ -111,7 +112,7 @@ export function EditRecurrenceDialog({
   );
   const accountNature = template?.type === "receivable" ? "revenue" : "expense";
   const hasAccounts = accounts.some(
-    (a) => a.nature === accountNature && a.type === "analytic",
+    (a) => natureFitsSide(a.nature, accountNature) && a.type === "analytic",
   );
 
   const form = useForm<RecurrenceFormData>({

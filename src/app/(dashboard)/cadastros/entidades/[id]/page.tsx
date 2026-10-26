@@ -453,7 +453,7 @@ export default function EntityPage() {
           </Button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
+              <h1 className="text-xl font-bold tracking-tight md:text-2xl">
                 {entity.name}
               </h1>
               <CategoryBadge category={entity.category} />
