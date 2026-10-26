@@ -49,6 +49,7 @@ type ApprovalAlert =
   | "first_payment"
   | "above_history"
   | "entity_changed"
+  | "bank_changed"
   | "no_payment_data";
 
 function hashToken(token: string): string {
@@ -384,7 +385,13 @@ export async function GET(request: Request) {
       const createdAt = (
         entity?.createdAt as Timestamp | undefined
       )?.toMillis();
-      if (
+      const bankChangedAt = (
+        entity?.bankDetailsChangedAt as Timestamp | undefined
+      )?.toMillis();
+      if (bankChangedAt && now - bankChangedAt <= 30 * DAY) {
+        // Troca de conta recente é o padrão da fraude por e-mail falso
+        alerts.push("bank_changed");
+      } else if (
         updatedAt &&
         createdAt &&
         updatedAt - createdAt > DAY &&
@@ -416,9 +423,11 @@ export async function GET(request: Request) {
             type: (a.type as string | undefined) ?? null,
           })),
         historyAverage: average,
-        entityUpdatedAt: alerts.includes("entity_changed")
-          ? toIso(entity?.updatedAt)
-          : null,
+        entityUpdatedAt: alerts.includes("bank_changed")
+          ? toIso(entity?.bankDetailsChangedAt)
+          : alerts.includes("entity_changed")
+            ? toIso(entity?.updatedAt)
+            : null,
         alerts,
       };
     });

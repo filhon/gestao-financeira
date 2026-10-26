@@ -302,8 +302,57 @@ service cloud.firestore {
        function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
 
        allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
-       
-       allow write: if isAuthenticated() && isManager(getCompanyId());
+
+       // Dados bancários decidem para onde o dinheiro vai. Num cadastro que já
+       // existe, ninguém os troca direto: a troca fica em `pendingBankChange`
+       // e só outra pessoa (gestor ou aprovador) a aplica.
+       function bankFields() {
+         return ['bankName', 'agency', 'account', 'accountType', 'pixKeyType', 'pixKey'];
+       }
+       function changedKeys() {
+         return request.resource.data.diff(resource.data).affectedKeys();
+       }
+       // Pedido novo leva quem pediu e a hora do servidor; retirar o pedido
+       // (recusa) é livre para quem pode editar.
+       function pendingIsOwnOrRemoved() {
+         return !changedKeys().hasAny(['pendingBankChange']) ||
+                !('pendingBankChange' in request.resource.data) ||
+                (request.resource.data.pendingBankChange.requestedBy == request.auth.uid &&
+                 request.resource.data.pendingBankChange.requestedAt == request.time);
+       }
+       function appliesPendingByAnotherUser() {
+         let p = resource.data.pendingBankChange;
+         let n = request.resource.data;
+         return 'pendingBankChange' in resource.data &&
+                p.requestedBy != request.auth.uid &&
+                !('pendingBankChange' in n) &&
+                n.bankDetailsChangedAt == request.time &&
+                n.get('bankName', null) == p.get('bankName', null) &&
+                n.get('agency', null) == p.get('agency', null) &&
+                n.get('account', null) == p.get('account', null) &&
+                n.get('accountType', null) == p.get('accountType', null) &&
+                n.get('pixKeyType', null) == p.get('pixKeyType', null) &&
+                n.get('pixKey', null) == p.get('pixKey', null) &&
+                changedKeys().hasOnly(bankFields().concat(['pendingBankChange', 'bankDetailsChangedAt', 'updatedAt']));
+       }
+       function rejectsPending() {
+         return 'pendingBankChange' in resource.data &&
+                !('pendingBankChange' in request.resource.data) &&
+                changedKeys().hasOnly(['pendingBankChange', 'updatedAt']);
+       }
+
+       allow create: if isAuthenticated() && isManager(getCompanyId()) &&
+                        !('pendingBankChange' in request.resource.data) &&
+                        !('bankDetailsChangedAt' in request.resource.data);
+       allow update: if isAuthenticated() &&
+                        request.resource.data.companyId == resource.data.companyId && (
+                          (isManager(getCompanyId()) &&
+                           !changedKeys().hasAny(bankFields().concat(['bankDetailsChangedAt'])) &&
+                           pendingIsOwnOrRemoved()) ||
+                          (hasCompanyRole(getCompanyId(), ['financial_manager', 'approver']) &&
+                           (appliesPendingByAnotherUser() || rejectsPending()))
+                        );
+       allow delete: if isAuthenticated() && isManager(getCompanyId());
     }
     
     // 8. Notifications

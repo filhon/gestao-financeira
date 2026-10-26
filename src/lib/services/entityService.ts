@@ -14,14 +14,48 @@ import {
   Timestamp,
   DocumentData,
   QueryDocumentSnapshot,
+  serverTimestamp,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
-import { Entity } from "@/lib/types";
+import { ENTITY_BANK_FIELDS, Entity, EntityBankDetails } from "@/lib/types";
 import { auditService } from "./auditService";
+import { formatAddress } from "./cnpjService";
 import { generateChanges } from "@/lib/auditFormatter";
 import { normalizeText, stripUndefined } from "@/lib/utils";
 
 const COLLECTION_NAME = "entities";
+
+const ADDRESS_FIELDS = [
+  "zipCode",
+  "street",
+  "number",
+  "complement",
+  "district",
+  "city",
+  "state",
+] as const;
+
+type Actor = { uid: string; email: string };
+type EntityInput = Partial<Omit<Entity, "id" | "createdAt" | "updatedAt">>;
+
+/** Só os dados bancários preenchidos ("" e null contam como vazio). */
+const bankDetailsOf = (data: Record<string, unknown>): EntityBankDetails =>
+  Object.fromEntries(
+    ENTITY_BANK_FIELDS.map((f) => [f, data[f]]).filter(([, v]) => v),
+  );
+
+const sameBankDetails = (a: EntityBankDetails, b: EntityBankDetails) =>
+  ENTITY_BANK_FIELDS.every((f) => (a[f] ?? "") === (b[f] ?? ""));
+
+/** Endereço em uma linha recalculado quando algum campo do endereço muda. */
+const withAddressLine = (
+  data: Record<string, unknown>,
+  current: Record<string, unknown> = {},
+) =>
+  ADDRESS_FIELDS.some((f) => f in data)
+    ? { ...data, address: formatAddress({ ...current, ...data }) }
+    : data;
 
 /**
  * Busca por nome (sem acento/caixa, substring) ou por documento
@@ -38,6 +72,8 @@ export function matchesEntitySearch(entity: Entity, search: string): boolean {
     if (entity.document.replace(/\D/g, "").includes(cleanSearch)) return true;
   }
   if (normalizeText(entity.name || "").includes(normalizedSearch)) return true;
+  if (normalizeText(entity.tradeName || "").includes(normalizedSearch))
+    return true;
   if (!isNumeric && entity.document) {
     if (normalizeText(entity.document).includes(normalizedSearch)) return true;
   }
@@ -48,14 +84,25 @@ export function matchesEntitySearch(entity: Entity, search: string): boolean {
 const cache: Record<string, { data: Entity[]; timestamp: number }> = {};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-const convertDates = (data: DocumentData): Entity => {
+export const convertEntity = (data: DocumentData): Entity => {
   return {
     id: data.id,
     ...data,
     createdAt: (data.createdAt as Timestamp)?.toDate(),
     updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+    bankDetailsChangedAt: (
+      data.bankDetailsChangedAt as Timestamp | undefined
+    )?.toDate(),
+    pendingBankChange: data.pendingBankChange && {
+      ...data.pendingBankChange,
+      // serverTimestamp ainda não resolvido chega como null no cache local
+      requestedAt:
+        (data.pendingBankChange.requestedAt as Timestamp | null)?.toDate() ??
+        new Date(),
+    },
   } as Entity;
 };
+const convertDates = convertEntity;
 
 export const entityService = {
   getAll: async (
@@ -243,8 +290,10 @@ export const entityService = {
       cleanData.document = cleanData.document.replace(/\D/g, "");
     }
 
+    delete cleanData.pendingBankChange;
     const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-      ...cleanData,
+      ...withAddressLine(cleanData),
+      active: true,
       nameLower:
         typeof cleanData.name === "string" ? cleanData.name.toLowerCase() : "",
       nameNormalized:
@@ -271,12 +320,16 @@ export const entityService = {
     };
   },
 
+  /**
+   * Edição comum grava direto. Dados bancários diferentes dos atuais não:
+   * viram `pendingBankChange` e só valem depois que outra pessoa aprova.
+   */
   update: async (
     id: string,
-    data: Partial<Omit<Entity, "id" | "createdAt" | "updatedAt">>,
-    user: { uid: string; email: string },
+    data: EntityInput,
+    user: Actor,
     companyId: string,
-  ): Promise<void> => {
+  ): Promise<{ bankChangePending: boolean }> => {
     entityService.invalidateCache(companyId);
     const docRef = doc(db, COLLECTION_NAME, id);
     const now = new Date();
@@ -286,7 +339,7 @@ export const entityService = {
     const currentData = currentDoc.exists() ? currentDoc.data() : {};
 
     // Remove undefined values (Firestore doesn't accept them)
-    const cleanData = Object.fromEntries(
+    const cleanData: Record<string, unknown> = Object.fromEntries(
       Object.entries(data).filter(([, value]) => value !== undefined),
     );
 
@@ -295,11 +348,25 @@ export const entityService = {
       cleanData.document = cleanData.document.replace(/\D/g, "");
     }
 
+    const touchesBank = ENTITY_BANK_FIELDS.some((f) => f in cleanData);
+    const proposed = bankDetailsOf({ ...currentData, ...cleanData });
+    const bankChangePending =
+      touchesBank && !sameBankDetails(bankDetailsOf(currentData), proposed);
+    ENTITY_BANK_FIELDS.forEach((f) => delete cleanData[f]);
+
     await updateDoc(docRef, {
-      ...cleanData,
-      ...(cleanData.name && {
-        nameLower: (cleanData.name as string).toLowerCase(),
-        nameNormalized: normalizeText(cleanData.name as string),
+      ...withAddressLine(cleanData, currentData),
+      ...(bankChangePending && {
+        pendingBankChange: {
+          ...proposed,
+          requestedBy: user.uid,
+          requestedByEmail: user.email,
+          requestedAt: serverTimestamp(),
+        },
+      }),
+      ...(typeof cleanData.name === "string" && {
+        nameLower: cleanData.name.toLowerCase(),
+        nameNormalized: normalizeText(cleanData.name),
       }),
       updatedAt: Timestamp.fromDate(now),
     });
@@ -307,30 +374,181 @@ export const entityService = {
     // Generate changes for audit log
     const changes = generateChanges(
       currentData as Record<string, unknown>,
-      cleanData as Record<string, unknown>,
+      cleanData,
     );
+    const subject = (cleanData.name ?? currentData.name) as string | undefined;
 
+    if (changes.length > 0 || !bankChangePending) {
+      await auditService.log({
+        companyId: companyId,
+        userId: user.uid,
+        userEmail: user.email,
+        action: "update",
+        entity: "entity",
+        entityId: id,
+        subject,
+        details: { changes },
+      });
+    }
+    if (bankChangePending) {
+      await auditService.log({
+        companyId,
+        userId: user.uid,
+        userEmail: user.email,
+        action: "request_bank_change",
+        entity: "entity",
+        entityId: id,
+        subject,
+        details: {
+          changes: generateChanges(
+            bankDetailsOf(currentData) as Record<string, unknown>,
+            Object.fromEntries(
+              ENTITY_BANK_FIELDS.map((f) => [f, proposed[f] ?? ""]),
+            ),
+          ),
+        },
+      });
+    }
+    return { bankChangePending };
+  },
+
+  /**
+   * Aplica a troca pendente. Quem pediu não aprova: o serviço recusa aqui e as
+   * rules recusam no servidor.
+   */
+  approveBankChange: async (entity: Entity, user: Actor, companyId: string) => {
+    const pending = entity.pendingBankChange;
+    if (!pending) throw new Error("Não há troca de dados bancários pendente.");
+    if (pending.requestedBy === user.uid) {
+      throw new Error("Quem pediu a troca não pode aprová-la.");
+    }
+    entityService.invalidateCache(companyId);
+    await updateDoc(doc(db, COLLECTION_NAME, entity.id), {
+      ...Object.fromEntries(
+        ENTITY_BANK_FIELDS.map((f) => [f, pending[f] || deleteField()]),
+      ),
+      pendingBankChange: deleteField(),
+      bankDetailsChangedAt: serverTimestamp(),
+      updatedAt: Timestamp.now(),
+    });
     await auditService.log({
-      companyId: companyId,
+      companyId,
       userId: user.uid,
       userEmail: user.email,
-      action: "update",
+      action: "approve_bank_change",
       entity: "entity",
-      entityId: id,
-      subject: (cleanData.name ?? currentData.name) as string | undefined,
-      details: { changes },
+      entityId: entity.id,
+      subject: entity.name,
+      details: {
+        changes: generateChanges(
+          bankDetailsOf(entity as unknown as Record<string, unknown>) as Record<
+            string,
+            unknown
+          >,
+          Object.fromEntries(
+            ENTITY_BANK_FIELDS.map((f) => [f, pending[f] ?? ""]),
+          ),
+        ),
+        requestedBy: pending.requestedByEmail,
+      },
     });
   },
 
+  /** Descarta a troca pendente; os dados atuais continuam valendo. */
+  rejectBankChange: async (entity: Entity, user: Actor, companyId: string) => {
+    entityService.invalidateCache(companyId);
+    await updateDoc(doc(db, COLLECTION_NAME, entity.id), {
+      pendingBankChange: deleteField(),
+      updatedAt: Timestamp.now(),
+    });
+    await auditService.log({
+      companyId,
+      userId: user.uid,
+      userEmail: user.email,
+      action: "reject_bank_change",
+      entity: "entity",
+      entityId: entity.id,
+      subject: entity.name,
+      details: stripUndefined({
+        requestedBy: entity.pendingBankChange?.requestedByEmail,
+      }),
+    });
+  },
+
+  /** Inativo some dos formulários de lançamento; o histórico continua. */
+  setActive: async (
+    entities: Pick<Entity, "id" | "name">[],
+    active: boolean,
+    user: Actor,
+    companyId: string,
+  ) => {
+    entityService.invalidateCache(companyId);
+    await Promise.all(
+      entities.map(async (e) => {
+        await updateDoc(doc(db, COLLECTION_NAME, e.id), {
+          active,
+          updatedAt: Timestamp.now(),
+        });
+        await auditService.log({
+          companyId,
+          userId: user.uid,
+          userEmail: user.email,
+          action: active ? "reactivate" : "deactivate",
+          entity: "entity",
+          entityId: e.id,
+          subject: e.name,
+          details: {},
+        });
+      }),
+    );
+  },
+
+  /** Algum lançamento aponta para a entidade (pelo cadastro ou pelo nome)? */
+  hasTransactions: async (
+    companyId: string,
+    entity: Pick<Entity, "id" | "name">,
+  ): Promise<boolean> => {
+    const base = [where("companyId", "==", companyId), limit(1)];
+    const [byId, byName] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, "transactions"),
+          where("entityId", "==", entity.id),
+          ...base,
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, "transactions"),
+          where("supplierOrClient", "==", entity.name),
+          ...base,
+        ),
+      ),
+    ]);
+    return !byId.empty || !byName.empty;
+  },
+
+  /** Exclusão só para cadastro sem nenhum lançamento; com histórico, inative. */
   delete: async (
     id: string,
     user: { uid: string; email: string },
     companyId: string,
   ): Promise<void> => {
-    entityService.invalidateCache(companyId); // BUG-03: invalidate before delete
     const docRef = doc(db, COLLECTION_NAME, id);
     // Depois de excluído, o log é o único lugar que guarda o nome.
     const snap = await getDoc(docRef);
+    if (
+      snap.exists() &&
+      (await entityService.hasTransactions(companyId, {
+        id,
+        name: snap.data().name,
+      }))
+    ) {
+      throw new Error(
+        "Esta entidade tem lançamentos. Inative em vez de excluir para manter o histórico.",
+      );
+    }
+    entityService.invalidateCache(companyId); // BUG-03: invalidate before delete
     await deleteDoc(docRef);
 
     await auditService.log({

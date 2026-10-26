@@ -176,7 +176,7 @@ const statusLabel = (status: string, type: Kind) =>
   STATUS[status]?.label ||
   status;
 
-function StatusBadge({ status, type }: { status: string; type: Kind }) {
+export function StatusBadge({ status, type }: { status: string; type: Kind }) {
   if (status === "draft") {
     return (
       <span className="text-xs text-muted-foreground">

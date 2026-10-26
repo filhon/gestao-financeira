@@ -49,6 +49,7 @@ type Alert =
   | "first_payment"
   | "above_history"
   | "entity_changed"
+  | "bank_changed"
   | "no_payment_data";
 
 interface BatchInfo {
@@ -729,6 +730,7 @@ export default function BatchApprovalPage() {
       first_payment: "Primeiro pagamento a este fornecedor",
       above_history: `Acima do histórico (média ${formatCurrency(t.historyAverage ?? 0)})`,
       entity_changed: `Cadastro do fornecedor alterado em ${t.entityUpdatedAt ? format(t.entityUpdatedAt, "dd/MM") : "data recente"}`,
+      bank_changed: `Dados bancários trocados em ${t.entityUpdatedAt ? format(t.entityUpdatedAt, "dd/MM") : "data recente"}: confirme com o fornecedor por um contato já conhecido`,
       no_payment_data: "Sem dados de pagamento",
     })[a];
 

@@ -11,7 +11,9 @@ import {
 } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  addDays,
   addMonths,
+  startOfDay,
   differenceInCalendarDays,
   format,
   isValid,
@@ -33,6 +35,7 @@ import {
   Plus,
   Trash2,
   Upload,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -104,11 +107,12 @@ type Allocation = TransactionFormData["costCenterAllocation"][number];
 type PaymentMethod = NonNullable<TransactionFormData["paymentMethod"]>;
 
 /** De onde veio um valor que o usuário não digitou. */
-type FillSource = "document" | "boleto" | "history";
+type FillSource = "document" | "boleto" | "history" | "entity";
 const SOURCE: Record<FillSource, { label: string; Icon: typeof FileText }> = {
   document: { label: "Lido do documento", Icon: FileText },
   boleto: { label: "Lido da linha digitável", Icon: Barcode },
   history: { label: "Sugerido pelo último lançamento", Icon: History },
+  entity: { label: "Padrão do cadastro", Icon: UserCheck },
 };
 
 /** Valor lido de uma fonte que diverge do que o usuário já preencheu. */
@@ -924,6 +928,56 @@ export function TransactionForm({
    */
   const applyEntityDefaults = async (entity: Entity) => {
     if (!isNewRecord || !selectedCompany) return;
+
+    // Padrões do cadastro vêm primeiro; o último lançamento completa o resto.
+    const fromEntity: string[] = [];
+    if (!form.getValues("paymentMethod") && entity.defaultPaymentMethod) {
+      form.setValue("paymentMethod", entity.defaultPaymentMethod);
+      fromEntity.push("paymentMethod");
+    }
+    const entityAccount = accounts.find(
+      (a) => a.id === entity.defaultAccountId,
+    );
+    if (
+      !form.getValues("accountId") &&
+      entityAccount &&
+      !entityAccount.archived &&
+      entityAccount.type === "analytic" &&
+      entityAccount.nature === nature
+    ) {
+      form.setValue("accountId", entityAccount.id);
+      fromEntity.push("accountId");
+    }
+    const entityCc = costCenters.find(
+      (c) => c.id === entity.defaultCostCenterId,
+    );
+    const currentAlloc = form.getValues("costCenterAllocation");
+    if (
+      isPayable &&
+      entityCc &&
+      !entityCc.archived &&
+      !parentIds.has(entityCc.id) &&
+      currentAlloc.length === 1 &&
+      !currentAlloc[0].costCenterId
+    ) {
+      form.setValue("costCenterAllocation", [
+        {
+          costCenterId: entityCc.id,
+          percentage: 100,
+          amount: form.getValues("amount") || 0,
+        },
+      ]);
+      fromEntity.push("costCenterAllocation");
+    }
+    if (!form.getValues("dueDate") && entity.paymentTermDays != null) {
+      form.setValue(
+        "dueDate",
+        addDays(startOfDay(new Date()), entity.paymentTermDays),
+      );
+      fromEntity.push("dueDate");
+    }
+    markFilled(fromEntity, "entity");
+
     let last: Transaction | null = null;
     try {
       last = await transactionService.getLastForEntity(
@@ -981,6 +1035,22 @@ export function TransactionForm({
     }
     markFilled(filled, "history");
   };
+
+  // Aberto a partir da página da entidade (?entidade=): já vem com o
+  // fornecedor escolhido e aplica os padrões dele uma vez.
+  const presetApplied = useRef(false);
+  useEffect(() => {
+    const presetId = defaultValues?.entityId;
+    if (!isCreate || !presetId || presetApplied.current) return;
+    const entity = entities.find((e) => e.id === presetId);
+    if (!entity || (isPayable && costCenters.length === 0)) return;
+    presetApplied.current = true;
+    if (!form.getValues("supplierOrClient")) {
+      form.setValue("supplierOrClient", entity.name);
+    }
+    void applyEntityDefaults(entity);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entities, costCenters, accounts]);
 
   // ── Descrição automática ────────────────────────────────────────────────────
   // Lançamento novo nasce com "Fornecedor · nº 123"; o que o usuário (ou o
@@ -1727,40 +1797,47 @@ export function TransactionForm({
                             )}
                           </CommandEmpty>
                           <CommandGroup>
-                            {entities.map((entity) => (
-                              <CommandItem
-                                value={`${entity.name} ${entity.document ?? ""}`}
-                                key={entity.id}
-                                onSelect={() => {
-                                  form.setValue("entityId", entity.id);
-                                  form.setValue(
-                                    "supplierOrClient",
-                                    entity.name,
-                                    {
-                                      shouldDirty: true,
-                                      shouldValidate: submitCount > 0,
-                                    },
-                                  );
-                                  setOpenEntityCombobox(false);
-                                  void applyEntityDefaults(entity);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    entity.id === entityId
-                                      ? "opacity-100"
-                                      : "opacity-0",
-                                  )}
-                                />
-                                <span className="truncate">{entity.name}</span>
-                                {entity.document && (
-                                  <span className="ml-auto shrink-0 text-xs text-muted-foreground font-financial">
-                                    {entity.document}
+                            {entities
+                              // Inativa não recebe lançamento novo
+                              .filter(
+                                (e) => e.active !== false || e.id === entityId,
+                              )
+                              .map((entity) => (
+                                <CommandItem
+                                  value={`${entity.name} ${entity.tradeName ?? ""} ${entity.document ?? ""}`}
+                                  key={entity.id}
+                                  onSelect={() => {
+                                    form.setValue("entityId", entity.id);
+                                    form.setValue(
+                                      "supplierOrClient",
+                                      entity.name,
+                                      {
+                                        shouldDirty: true,
+                                        shouldValidate: submitCount > 0,
+                                      },
+                                    );
+                                    setOpenEntityCombobox(false);
+                                    void applyEntityDefaults(entity);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      entity.id === entityId
+                                        ? "opacity-100"
+                                        : "opacity-0",
+                                    )}
+                                  />
+                                  <span className="truncate">
+                                    {entity.name}
                                   </span>
-                                )}
-                              </CommandItem>
-                            ))}
+                                  {entity.document && (
+                                    <span className="ml-auto shrink-0 text-xs text-muted-foreground font-financial">
+                                      {entity.document}
+                                    </span>
+                                  )}
+                                </CommandItem>
+                              ))}
                           </CommandGroup>
                         </CommandList>
                       </Command>

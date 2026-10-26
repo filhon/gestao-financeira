@@ -63,6 +63,23 @@ export const FIELD_LABELS: Record<string, string> = {
   monthlyInterestPercent: "Juros de Mora (% a.m.)",
   relatedParty: "Parte Relacionada",
   autoConfirmReceipts: "Confirmar Comprovantes Automaticamente",
+  tradeName: "Nome Fantasia",
+  zipCode: "CEP",
+  street: "Logradouro",
+  number: "Número",
+  complement: "Complemento",
+  district: "Bairro",
+  city: "Cidade",
+  state: "UF",
+  stateRegistration: "Inscrição Estadual",
+  municipalRegistration: "Inscrição Municipal",
+  taxRegime: "Regime Tributário",
+  withholdings: "Retenções",
+  defaultAccountId: "Conta Contábil Padrão",
+  defaultCostCenterId: "Centro de Custo Padrão",
+  defaultPaymentMethod: "Forma de Pagamento Padrão",
+  paymentTermDays: "Prazo de Pagamento (dias)",
+  pendingBankChange: "Alteração Bancária Pendente",
   paymentHold: "Bloqueio de Pagamento",
   paymentPromise: "Promessa de Pagamento",
   reason: "Motivo",
@@ -155,6 +172,20 @@ export const VALUE_LABELS: Record<string, Record<string, string>> = {
     individual: "Pessoa Física",
     company: "Pessoa Jurídica",
   },
+  taxRegime: {
+    mei: "MEI",
+    simples: "Simples Nacional",
+    presumido: "Lucro Presumido",
+    real: "Lucro Real",
+    imune: "Imune / Isento",
+  },
+  defaultPaymentMethod: {
+    pix: "PIX",
+    boleto: "Boleto",
+    transfer: "Transferência",
+    credit_card: "Cartão de Crédito",
+    cash: "Dinheiro",
+  },
   scope: {
     single: "Único",
     series: "Série",
@@ -189,6 +220,11 @@ export const ACTION_LABELS: Record<string, string> = {
   close_period: "fechou a conciliação de",
   reopen_period: "reabriu a conciliação de",
   export: "exportou",
+  request_bank_change: "pediu troca de dados bancários de",
+  approve_bank_change: "aprovou a troca de dados bancários de",
+  reject_bank_change: "recusou a troca de dados bancários de",
+  deactivate: "inativou",
+  reactivate: "reativou",
 };
 
 /** Substantivo da ação, usado no badge e nos filtros. */
@@ -213,6 +249,11 @@ export const ACTION_NOUNS: Record<string, string> = {
   close_period: "Fechamento",
   reopen_period: "Reabertura",
   export: "Exportação",
+  request_bank_change: "Troca bancária pedida",
+  approve_bank_change: "Troca bancária aprovada",
+  reject_bank_change: "Troca bancária recusada",
+  deactivate: "Inativação",
+  reactivate: "Reativação",
 };
 
 /**

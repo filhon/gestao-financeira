@@ -49,13 +49,29 @@ export function validateCnpj(cnpj: string): boolean {
   return true;
 }
 
-/**
- * Format a raw digit string into CNPJ display format (XX.XXX.XXX/XXXX-XX).
- * Supports partial input for use during typing.
- *
- * @param value - The raw or partially formatted CNPJ string
- * @returns The formatted CNPJ string
- */
+/** CPF pelo algoritmo oficial (dois dígitos verificadores, módulo 11). */
+export function validateCpf(cpf: string): boolean {
+  const d = stripNonDigits(cpf);
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const check = (len: number) => {
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += parseInt(d[i]) * (len + 1 - i);
+    const rest = (sum * 10) % 11;
+    return rest === 10 ? 0 : rest;
+  };
+  return check(9) === parseInt(d[9]) && check(10) === parseInt(d[10]);
+}
+
+/** Máscara enquanto digita: até 11 dígitos é CPF, depois vira CNPJ. */
+export function maskCpfCnpj(value: string): string {
+  const d = stripNonDigits(value).slice(0, 14);
+  if (d.length > 11) return formatCnpj(d);
+  return d
+    .replace(/^(\d{3})(\d)/, "$1.$2")
+    .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d{1,2})$/, ".$1-$2");
+}
+
 /** CPF (11 dígitos) ou CNPJ (14) com máscara; outro tamanho volta como veio. */
 export function formatCpfCnpj(value: string): string {
   const d = stripNonDigits(value);

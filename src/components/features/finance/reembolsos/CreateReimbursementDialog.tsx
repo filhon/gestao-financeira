@@ -91,7 +91,11 @@ export function CreateReimbursementDialog({
     setLoadingIndividuals(true);
     entityService
       .getAll(selectedCompany.id)
-      .then((all) => setIndividuals(all.filter((e) => e.type === "individual")))
+      .then((all) =>
+        setIndividuals(
+          all.filter((e) => e.type === "individual" && e.active !== false),
+        ),
+      )
       .finally(() => setLoadingIndividuals(false));
   }, [open, selectedCompany]);
 

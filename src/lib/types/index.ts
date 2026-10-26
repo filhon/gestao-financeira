@@ -281,24 +281,81 @@ export interface ApprovalStep {
   comment?: string;
 }
 
-export interface Entity {
-  id: string;
-  companyId: string;
-  name: string;
-  type: "individual" | "company";
-  document?: string; // CPF or CNPJ
-  email?: string;
-  phone?: string;
-  address?: string;
-  category: "supplier" | "client" | "both";
+/** Campos que dizem para onde o dinheiro vai: mudar qualquer um pede aprovação. */
+export const ENTITY_BANK_FIELDS = [
+  "bankName",
+  "agency",
+  "account",
+  "accountType",
+  "pixKeyType",
+  "pixKey",
+] as const;
 
-  // Bank Details
+export interface EntityBankDetails {
   bankName?: string;
   agency?: string;
   account?: string;
   accountType?: "checking" | "savings";
   pixKeyType?: "cpf" | "cnpj" | "email" | "phone" | "random";
   pixKey?: string;
+}
+
+export type TaxRegime = "mei" | "simples" | "presumido" | "real" | "imune";
+
+export interface Entity extends EntityBankDetails {
+  id: string;
+  companyId: string;
+  name: string;
+  /** Nome fantasia: é o que costuma aparecer em boleto e comprovante. */
+  tradeName?: string;
+  type: "individual" | "company";
+  document?: string; // CPF or CNPJ
+  email?: string;
+  phone?: string;
+  /** Endereço em uma linha, montado a partir dos campos abaixo (relatórios leem este). */
+  address?: string;
+  zipCode?: string;
+  street?: string;
+  number?: string;
+  complement?: string;
+  district?: string;
+  city?: string;
+  state?: string;
+  category: "supplier" | "client" | "both";
+  /** Ausente = ativo. Inativo some dos formulários, mas o histórico fica. */
+  active?: boolean;
+
+  // Fiscal
+  stateRegistration?: string;
+  municipalRegistration?: string;
+  taxRegime?: TaxRegime;
+  /** Alíquotas de retenção na fonte, em %. Ausente = não retém. */
+  withholdings?: {
+    irrf?: number | null;
+    pcc?: number | null;
+    inss?: number | null;
+    iss?: number | null;
+  };
+
+  // Padrões para lançamentos novos
+  defaultAccountId?: string;
+  defaultCostCenterId?: string;
+  defaultPaymentMethod?: "pix" | "boleto" | "transfer" | "credit_card" | "cash";
+  /** Prazo de pagamento em dias corridos a partir da emissão. */
+  paymentTermDays?: number | null;
+
+  /**
+   * Troca de dados bancários à espera de outra pessoa aprovar. Até lá os
+   * pagamentos usam os dados atuais. As rules exigem aprovador diferente de
+   * quem pediu.
+   */
+  pendingBankChange?: EntityBankDetails & {
+    requestedBy: string;
+    requestedByEmail: string;
+    requestedAt: Date;
+  };
+  /** Última troca de dados bancários aprovada: alerta no lote de pagamento. */
+  bankDetailsChangedAt?: Date;
 
   // Encargos por atraso (padrão quando ausentes: 2% de multa + 1% a.m.)
   lateFeePercent?: number | null;
@@ -532,7 +589,12 @@ export interface AuditLog {
     | "promise"
     | "close_period"
     | "reopen_period"
-    | "export";
+    | "export"
+    | "request_bank_change"
+    | "approve_bank_change"
+    | "reject_bank_change"
+    | "deactivate"
+    | "reactivate";
   entity:
     | "transaction"
     | "company"

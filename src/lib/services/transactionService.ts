@@ -769,6 +769,74 @@ export const transactionService = {
   },
 
   /**
+   * Tudo que ainda espera pagamento (rascunho até autorizado), sem ordenação:
+   * igualdade + `in` dispensam índice composto.
+   * ponytail: teto de 5000; agregar por entidade num documento próprio se a
+   * carteira aberta passar disso.
+   */
+  getOpen: async (
+    companyId: string,
+    createdBy?: string,
+  ): Promise<Transaction[]> => {
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTION_NAME),
+        where("companyId", "==", companyId),
+        where("status", "in", [
+          "draft",
+          "pending_approval",
+          "approved",
+          "pending_authorization",
+          "authorized",
+        ]),
+        ...(createdBy ? [where("createdBy", "==", createdBy)] : []),
+        limit(5000),
+      ),
+    );
+    return snap.docs.map((d) => convertDates({ id: d.id, ...d.data() }));
+  },
+
+  /**
+   * Todos os lançamentos de uma entidade: pelo cadastro (`entityId`) e, para os
+   * antigos lançados sem cadastro, pelo nome exato. Só igualdades: dispensa
+   * índice composto.
+   */
+  getForEntity: async (
+    companyId: string,
+    entity: { id: string; name: string },
+    createdBy?: string,
+  ): Promise<Transaction[]> => {
+    const base = [
+      where("companyId", "==", companyId),
+      ...(createdBy ? [where("createdBy", "==", createdBy)] : []),
+    ];
+    const [byId, byName] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, COLLECTION_NAME),
+          ...base,
+          where("entityId", "==", entity.id),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, COLLECTION_NAME),
+          ...base,
+          where("supplierOrClient", "==", entity.name),
+        ),
+      ),
+    ]);
+    const seen = new Map<string, Transaction>();
+    for (const d of [...byId.docs, ...byName.docs]) {
+      const data = d.data();
+      // Pelo nome só vale o que não está ligado a outro cadastro
+      if (data.entityId && data.entityId !== entity.id) continue;
+      seen.set(d.id, convertDates({ id: d.id, ...data }));
+    }
+    return [...seen.values()];
+  },
+
+  /**
    * Último lançamento da entidade, para o formulário sugerir forma de
    * pagamento, conta e centro de custo. `createdBy` é obrigatório para o papel
    * `user`, que só lê o que ele mesmo lançou.

@@ -71,10 +71,15 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // "Nova conta…" no Ctrl+K chega com ?novo=1: abre o formulário direto.
+  // Fornecedor/cliente já escolhido quando vem da página da entidade
+  const [presetEntityId, setPresetEntityId] = useState<string | undefined>();
+
+  // "Nova conta…" no Ctrl+K chega com ?novo=1 (e da página da entidade, com
+  // &entidade=id): abre o formulário direto.
   useEffect(() => {
-    if (!canCreate || !new URLSearchParams(window.location.search).has("novo"))
-      return;
+    const params = new URLSearchParams(window.location.search);
+    if (!canCreate || !params.has("novo")) return;
+    setPresetEntityId(params.get("entidade") ?? undefined);
     setIsFormOpen(true);
     window.history.replaceState(null, "", window.location.pathname);
   }, [canCreate]);
@@ -82,6 +87,7 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
   const closeForm = () => {
     setIsFormOpen(false);
     setIsFormDirty(false);
+    setPresetEntityId(undefined);
   };
   // Fechar com Esc, no X ou em Cancelar não descarta o que foi digitado sem
   // perguntar.
@@ -206,6 +212,9 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
             <TransactionForm
               type={type}
               variant="create"
+              defaultValues={
+                presetEntityId ? { entityId: presetEntityId } : undefined
+              }
               onSubmit={handleSubmit}
               isLoading={isSubmitting}
               onCancel={requestClose}

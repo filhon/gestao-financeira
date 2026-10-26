@@ -42,6 +42,8 @@ export interface Permissions {
 
   canViewEntities: boolean; // Suppliers/Clients
   canManageEntities: boolean; // Create/Edit/Delete
+  /** Aplica troca de dados bancários pedida por outra pessoa (rules repetem). */
+  canApproveBankChanges: boolean;
 
   canViewChartOfAccounts: boolean;
   canManageChartOfAccounts: boolean; // Create/Edit/Import/Archive
@@ -202,6 +204,11 @@ export function usePermissions(): Permissions {
         "releaser",
       ]),
       canManageEntities: isAdminOrManager,
+      canApproveBankChanges: isOneOf([
+        "admin",
+        "financial_manager",
+        "approver",
+      ]),
 
       // Chart of accounts
       // Everyone who launches transactions picks accounts (the form reads the
