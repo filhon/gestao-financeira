@@ -18,7 +18,13 @@ import {
   deleteField,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
-import { ENTITY_BANK_FIELDS, Entity, EntityBankDetails } from "@/lib/types";
+import {
+  ENTITY_BANK_FIELDS,
+  Entity,
+  EntityBankAccount,
+  EntityBankDetails,
+} from "@/lib/types";
+import { bankAccountLabel, bankAccountSummary } from "@/lib/entityBankAccounts";
 import { auditService } from "./auditService";
 import { formatAddress } from "./cnpjService";
 import { generateChanges } from "@/lib/auditFormatter";
@@ -45,8 +51,27 @@ const bankDetailsOf = (data: Record<string, unknown>): EntityBankDetails =>
     ENTITY_BANK_FIELDS.map((f) => [f, data[f]]).filter(([, v]) => v),
   );
 
-const sameBankDetails = (a: EntityBankDetails, b: EntityBankDetails) =>
-  ENTITY_BANK_FIELDS.every((f) => (a[f] ?? "") === (b[f] ?? ""));
+/** Contas extras só com o preenchido; conta sem nenhum dado sai. */
+const extrasOf = (data: Record<string, unknown>): EntityBankAccount[] =>
+  ((data.extraBankAccounts as EntityBankAccount[] | undefined) ?? [])
+    .map((a) => ({
+      id: a.id,
+      ...bankDetailsOf(a as unknown as Record<string, unknown>),
+    }))
+    .filter((a) => Object.keys(a).length > 1);
+
+const sameBankDetails = (
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+) =>
+  ENTITY_BANK_FIELDS.every((f) => (a[f] ?? "") === (b[f] ?? "")) &&
+  JSON.stringify(extrasOf(a)) === JSON.stringify(extrasOf(b));
+
+/** Contas extras em texto, para o log de auditoria. */
+const extrasText = (data: Record<string, unknown>) =>
+  extrasOf(data)
+    .map((a, i) => `${bankAccountLabel(a, i + 1)}: ${bankAccountSummary(a)}`)
+    .join("; ");
 
 /** Endereço em uma linha recalculado quando algum campo do endereço muda. */
 const withAddressLine = (
@@ -291,6 +316,9 @@ export const entityService = {
     }
 
     delete cleanData.pendingBankChange;
+    const extras = extrasOf(cleanData);
+    if (extras.length) cleanData.extraBankAccounts = extras;
+    else delete cleanData.extraBankAccounts;
     const docRef = await addDoc(collection(db, COLLECTION_NAME), {
       ...withAddressLine(cleanData),
       active: true,
@@ -348,17 +376,23 @@ export const entityService = {
       cleanData.document = cleanData.document.replace(/\D/g, "");
     }
 
-    const touchesBank = ENTITY_BANK_FIELDS.some((f) => f in cleanData);
-    const proposed = bankDetailsOf({ ...currentData, ...cleanData });
+    const touchesBank =
+      "extraBankAccounts" in cleanData ||
+      ENTITY_BANK_FIELDS.some((f) => f in cleanData);
+    const merged = { ...currentData, ...cleanData };
+    const proposed = bankDetailsOf(merged);
+    const proposedExtras = extrasOf(merged);
     const bankChangePending =
-      touchesBank && !sameBankDetails(bankDetailsOf(currentData), proposed);
+      touchesBank && !sameBankDetails(currentData, merged);
     ENTITY_BANK_FIELDS.forEach((f) => delete cleanData[f]);
+    delete cleanData.extraBankAccounts;
 
     await updateDoc(docRef, {
       ...withAddressLine(cleanData, currentData),
       ...(bankChangePending && {
         pendingBankChange: {
           ...proposed,
+          ...(proposedExtras.length && { extraBankAccounts: proposedExtras }),
           requestedBy: user.uid,
           requestedByEmail: user.email,
           requestedAt: serverTimestamp(),
@@ -401,10 +435,16 @@ export const entityService = {
         subject,
         details: {
           changes: generateChanges(
-            bankDetailsOf(currentData) as Record<string, unknown>,
-            Object.fromEntries(
-              ENTITY_BANK_FIELDS.map((f) => [f, proposed[f] ?? ""]),
-            ),
+            {
+              ...bankDetailsOf(currentData),
+              extraBankAccounts: extrasText(currentData),
+            },
+            {
+              ...Object.fromEntries(
+                ENTITY_BANK_FIELDS.map((f) => [f, proposed[f] ?? ""]),
+              ),
+              extraBankAccounts: extrasText(merged),
+            },
           ),
         },
       });
@@ -427,6 +467,10 @@ export const entityService = {
       ...Object.fromEntries(
         ENTITY_BANK_FIELDS.map((f) => [f, pending[f] || deleteField()]),
       ),
+      // As rules comparam com o pedido: grava a lista exatamente como veio.
+      extraBankAccounts: pending.extraBankAccounts?.length
+        ? pending.extraBankAccounts
+        : deleteField(),
       pendingBankChange: deleteField(),
       bankDetailsChangedAt: serverTimestamp(),
       updatedAt: Timestamp.now(),
@@ -441,13 +485,20 @@ export const entityService = {
       subject: entity.name,
       details: {
         changes: generateChanges(
-          bankDetailsOf(entity as unknown as Record<string, unknown>) as Record<
-            string,
-            unknown
-          >,
-          Object.fromEntries(
-            ENTITY_BANK_FIELDS.map((f) => [f, pending[f] ?? ""]),
-          ),
+          {
+            ...bankDetailsOf(entity as unknown as Record<string, unknown>),
+            extraBankAccounts: extrasText(
+              entity as unknown as Record<string, unknown>,
+            ),
+          },
+          {
+            ...Object.fromEntries(
+              ENTITY_BANK_FIELDS.map((f) => [f, pending[f] ?? ""]),
+            ),
+            extraBankAccounts: extrasText(
+              pending as unknown as Record<string, unknown>,
+            ),
+          },
         ),
         requestedBy: pending.requestedByEmail,
       },

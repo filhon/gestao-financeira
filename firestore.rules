@@ -307,7 +307,7 @@ service cloud.firestore {
        // existe, ninguém os troca direto: a troca fica em `pendingBankChange`
        // e só outra pessoa (gestor ou aprovador) a aplica.
        function bankFields() {
-         return ['bankName', 'agency', 'account', 'accountType', 'pixKeyType', 'pixKey'];
+         return ['bankAccountName', 'bankName', 'agency', 'account', 'accountType', 'pixKeyType', 'pixKey', 'extraBankAccounts'];
        }
        function changedKeys() {
          return request.resource.data.diff(resource.data).affectedKeys();
@@ -327,6 +327,8 @@ service cloud.firestore {
                 p.requestedBy != request.auth.uid &&
                 !('pendingBankChange' in n) &&
                 n.bankDetailsChangedAt == request.time &&
+                n.get('bankAccountName', null) == p.get('bankAccountName', null) &&
+                n.get('extraBankAccounts', null) == p.get('extraBankAccounts', null) &&
                 n.get('bankName', null) == p.get('bankName', null) &&
                 n.get('agency', null) == p.get('agency', null) &&
                 n.get('account', null) == p.get('account', null) &&

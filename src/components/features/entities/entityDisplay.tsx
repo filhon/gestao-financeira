@@ -43,7 +43,9 @@ export const PIX_KEY_TYPE_LABELS: Record<
 
 export const isActive = (e: Pick<Entity, "active">) => e.active !== false;
 
-export const hasBankDetails = (e: Entity) => !!(e.pixKey || e.account);
+export const hasBankDetails = (e: Entity) =>
+  !!(e.pixKey || e.account) ||
+  !!e.extraBankAccounts?.some((a) => a.pixKey || a.account);
 
 /** Documento com máscara; sem documento, traço. */
 export const displayDocument = (doc?: string) =>

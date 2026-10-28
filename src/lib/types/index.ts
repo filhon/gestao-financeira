@@ -286,6 +286,7 @@ export interface ApprovalStep {
 
 /** Campos que dizem para onde o dinheiro vai: mudar qualquer um pede aprovação. */
 export const ENTITY_BANK_FIELDS = [
+  "bankAccountName",
   "bankName",
   "agency",
   "account",
@@ -295,6 +296,8 @@ export const ENTITY_BANK_FIELDS = [
 ] as const;
 
 export interface EntityBankDetails {
+  /** Nome da conta ("Matriz", "Conta salário"): é o que se escolhe no lançamento. */
+  bankAccountName?: string;
   bankName?: string;
   agency?: string;
   account?: string;
@@ -303,8 +306,17 @@ export interface EntityBankDetails {
   pixKey?: string;
 }
 
+/** Conta além da principal. O id fica no lançamento que a escolheu. */
+export interface EntityBankAccount extends EntityBankDetails {
+  id: string;
+}
+
 export type TaxRegime = "mei" | "simples" | "presumido" | "real" | "imune";
 
+/**
+ * Os campos bancários soltos no cadastro são a conta principal; as demais
+ * ficam em `extraBankAccounts`. Trocar qualquer uma pede aprovação.
+ */
 export interface Entity extends EntityBankDetails {
   id: string;
   companyId: string;
@@ -352,7 +364,10 @@ export interface Entity extends EntityBankDetails {
    * pagamentos usam os dados atuais. As rules exigem aprovador diferente de
    * quem pediu.
    */
+  extraBankAccounts?: EntityBankAccount[];
+
   pendingBankChange?: EntityBankDetails & {
+    extraBankAccounts?: EntityBankAccount[];
     requestedBy: string;
     requestedByEmail: string;
     requestedAt: Date;
@@ -401,6 +416,8 @@ export interface Transaction {
   interest?: number;
   supplierOrClient?: string; // Legacy or fallback name
   entityId?: string; // Link to Entity
+  /** Conta da entidade que recebe; ausente = a principal. */
+  entityBankAccountId?: string;
   costCenterId?: string;
   costCenterAllocation?: CostCenterAllocation[];
   /** Conta analítica do plano de contas. */

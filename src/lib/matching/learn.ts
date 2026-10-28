@@ -1,4 +1,5 @@
 import type { Entity } from "@/lib/types";
+import { bankAccountsOf } from "../entityBankAccounts";
 import { normalizePixKey } from "./brazilian";
 import type { ReceiptFacts } from "./receipt";
 import { digitsOnly, normalize } from "./text";
@@ -20,7 +21,9 @@ export function entityIdentifiers(entity: Entity) {
       ...(entity.receiptAliases?.documents ?? []).map(digitsOnly),
     ],
     pixKeys: [
-      ...(entity.pixKey ? [normalizePixKey(entity.pixKey)] : []),
+      ...bankAccountsOf(entity).flatMap((a) =>
+        a.pixKey ? [normalizePixKey(a.pixKey)] : [],
+      ),
       ...(entity.receiptAliases?.pixKeys ?? []).map(normalizePixKey),
     ],
     names: [

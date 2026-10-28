@@ -40,7 +40,16 @@ import { db } from "@/lib/firebase/client";
 import { convertEntity, entityService } from "@/lib/services/entityService";
 import { transactionService } from "@/lib/services/transactionService";
 import { effectiveAmount } from "@/lib/services/paymentBatchService";
-import { ENTITY_BANK_FIELDS, Transaction } from "@/lib/types";
+import {
+  ENTITY_BANK_FIELDS,
+  EntityBankAccount,
+  Transaction,
+} from "@/lib/types";
+import {
+  bankAccountLabel,
+  bankAccountsOf,
+  bankAccountSummary,
+} from "@/lib/entityBankAccounts";
 import { isOpen, isOverdue } from "@/lib/transactionTabs";
 import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -89,6 +98,7 @@ const KIND_LABEL: Record<Kind, string> = {
 };
 
 const BANK_FIELD_LABELS: Record<(typeof ENTITY_BANK_FIELDS)[number], string> = {
+  bankAccountName: "Nome da conta",
   pixKey: "Chave PIX",
   pixKeyType: "Tipo da chave",
   bankName: "Banco",
@@ -108,6 +118,15 @@ const bankValue = (
     return value === "savings" ? "Poupança" : "Corrente";
   return value;
 };
+
+const extrasCell = (list?: EntityBankAccount[]) =>
+  list?.length
+    ? list.map((a, i) => (
+        <p key={a.id}>
+          {bankAccountLabel(a, i + 1)}: {bankAccountSummary(a) || "—"}
+        </p>
+      ))
+    : "—";
 
 /** Data que conta para o ano: pagamento quando pago, vencimento quando não. */
 const refDate = (t: Transaction) =>
@@ -609,6 +628,20 @@ export default function EntityPage() {
                   </td>
                 </tr>
               ))}
+              {JSON.stringify(entity.extraBankAccounts ?? []) !==
+                JSON.stringify(pending.extraBankAccounts ?? []) && (
+                <tr className="border-t border-amber-200/70 align-top dark:border-amber-900/60">
+                  <td className="py-1.5 pr-4 text-muted-foreground">
+                    Outras contas
+                  </td>
+                  <td className="py-1.5 pr-4 font-financial line-through decoration-muted-foreground/50">
+                    {extrasCell(entity.extraBankAccounts)}
+                  </td>
+                  <td className="py-1.5 font-financial font-medium">
+                    {extrasCell(pending.extraBankAccounts)}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </section>
@@ -984,41 +1017,52 @@ export default function EntityPage() {
               )
             }
           >
-            {entity.pixKey && (
-              <Field label="Chave PIX" mono>
-                <span className="flex items-start gap-1.5">
-                  <span className="break-all">
-                    {entity.pixKey}
-                    {entity.pixKeyType && (
+            {bankAccountsOf(entity).map((a, i, all) => (
+              <div
+                key={a.id}
+                className={cn(i > 0 && "mt-2 border-t border-dashed pt-2")}
+              >
+                {(all.length > 1 || a.bankAccountName) && (
+                  <p className="pt-1 text-xs font-medium">
+                    {bankAccountLabel(a, i)}
+                  </p>
+                )}
+                {a.pixKey && (
+                  <Field label="Chave PIX" mono>
+                    <span className="flex items-start gap-1.5">
+                      <span className="break-all">
+                        {a.pixKey}
+                        {a.pixKeyType && (
+                          <span className="ml-1 font-sans text-xs text-muted-foreground">
+                            ({PIX_KEY_TYPE_LABELS[a.pixKeyType]})
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copy(a.pixKey!, "Chave PIX")}
+                        className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+                        aria-label="Copiar chave PIX"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </Field>
+                )}
+                {a.bankName && <Field label="Banco">{a.bankName}</Field>}
+                {(a.agency || a.account) && (
+                  <Field label="Agência / conta" mono>
+                    {[a.agency, a.account].filter(Boolean).join(" / ")}
+                    {a.accountType && (
                       <span className="ml-1 font-sans text-xs text-muted-foreground">
-                        ({PIX_KEY_TYPE_LABELS[entity.pixKeyType]})
+                        ({a.accountType === "savings" ? "poupança" : "corrente"}
+                        )
                       </span>
                     )}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => copy(entity.pixKey!, "Chave PIX")}
-                    className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label="Copiar chave PIX"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                </span>
-              </Field>
-            )}
-            {entity.bankName && <Field label="Banco">{entity.bankName}</Field>}
-            {(entity.agency || entity.account) && (
-              <Field label="Agência / conta" mono>
-                {[entity.agency, entity.account].filter(Boolean).join(" / ")}
-                {entity.accountType && (
-                  <span className="ml-1 font-sans text-xs text-muted-foreground">
-                    (
-                    {entity.accountType === "savings" ? "poupança" : "corrente"}
-                    )
-                  </span>
+                  </Field>
                 )}
-              </Field>
-            )}
+              </div>
+            ))}
             {!hasBankDetails(entity) && (
               <p className="py-1 text-sm text-amber-700 dark:text-amber-400">
                 {entity.category === "client"

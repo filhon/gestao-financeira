@@ -5,7 +5,9 @@
  */
 import assert from "node:assert/strict";
 import {
+  belongsTo,
   buildCashFlow,
+  buildPayments,
   comparisonRange,
   DEFAULT_FORECAST,
   openingFromToday,
@@ -168,6 +170,50 @@ const days = comparisonRange(
 assert.equal(days.start.getDate(), 1);
 assert.equal(variation(110, 100)!.toFixed(2), "0.10");
 assert.equal(variation(5, 0), null);
+
+// Pagamentos: só baixados, pela data da baixa, da entidade e da conta pedidas.
+const acme = { id: "e1", name: "Acme" };
+const pays = [
+  tx({
+    status: "paid",
+    amount: 100,
+    entityId: "e1",
+    paymentDate: new Date(2027, 0, 5),
+  }),
+  tx({
+    status: "paid",
+    amount: 50,
+    finalAmount: 55,
+    entityId: "e1",
+    entityBankAccountId: "x1",
+    paymentDate: new Date(2027, 0, 3),
+  }),
+  tx({ status: "approved", amount: 70, entityId: "e1" }),
+  tx({
+    status: "paid",
+    amount: 30,
+    supplierOrClient: "Acme",
+    paymentDate: new Date(2027, 1, 1),
+  }),
+  tx({
+    status: "paid",
+    amount: 10,
+    entityId: "e2",
+    paymentDate: new Date(2027, 0, 4),
+  }),
+].filter((t) => belongsTo(t, acme));
+const payJan = buildPayments(pays, {
+  start: new Date(2027, 0, 1),
+  end: new Date(2027, 0, 31),
+  type: "payable",
+});
+assert.deepEqual(
+  payJan.lines.map((l) => l.amount),
+  [55, 100],
+);
+assert.equal(payJan.total, 155);
+assert.equal(pays.filter((t) => belongsTo(t, acme, "x1")).length, 1);
+assert.equal(pays.filter((t) => belongsTo(t, acme, "main")).length, 3);
 
 // CSV que o Excel pt-BR abre em colunas.
 assert.equal(

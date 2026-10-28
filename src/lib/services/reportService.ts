@@ -11,9 +11,11 @@ const loadPdf = async () => {
 };
 import currency from "currency.js";
 import { Transaction, Entity, ChartAccount, CostCenter } from "@/lib/types";
+import { withPayeeAccount } from "@/lib/entityBankAccounts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { formatCurrency } from "@/lib/utils";
+import { comprovanteProxyUrl, formatCurrency } from "@/lib/utils";
+import { formatCpfCnpj } from "@/lib/validations/cnpj";
 import {
   DRE_MIN_COVERAGE,
   DreRegime,
@@ -27,6 +29,8 @@ import {
 import {
   CashFlowReport,
   FlowLine,
+  PaymentLine,
+  PaymentsReport,
   STAGE_INFO,
   isProjection,
   periodSlug,
@@ -198,6 +202,169 @@ const ensureReportFont = async (doc: jsPDF): Promise<ReportFont> => {
   doc.setCharSpace(0);
   return font;
 };
+
+// ── Pagamentos ───────────────────────────────────────────────────────────────
+
+export type PaymentsExportContext = ReportContext & {
+  type: Transaction["type"];
+  /** Entidade filtrada: nome e documento vão no cabeçalho. */
+  entity?: Entity;
+  /** Nome da conta da entidade que recebeu; ausente quando ela só tem uma. */
+  accountOf?: (t: Transaction) => string;
+  /** Anexa os comprovantes ao PDF. */
+  withReceipts?: boolean;
+};
+
+type PaymentKey =
+  | "date"
+  | "description"
+  | "party"
+  | "document"
+  | "account"
+  | "amount"
+  | "receipt";
+
+const paymentColumns = (
+  ctx: PaymentsExportContext,
+): { key: PaymentKey; header: string; width: number }[] => {
+  const payable = ctx.type === "payable";
+  return [
+    { key: "date", header: payable ? "Pago em" : "Recebido em", width: 12 },
+    { key: "description", header: "Descrição", width: 44 },
+    ...(ctx.entity
+      ? []
+      : [
+          {
+            key: "party" as const,
+            header: payable ? "Favorecido" : "Cliente",
+            width: 30,
+          },
+        ]),
+    { key: "document", header: "Nº documento", width: 16 },
+    ...(ctx.accountOf
+      ? [{ key: "account" as const, header: "Conta", width: 22 }]
+      : []),
+    {
+      key: "amount",
+      header: payable ? "Valor pago" : "Valor recebido",
+      width: 15,
+    },
+    { key: "receipt", header: "Comprovante", width: 13 },
+  ];
+};
+
+const paymentCell = (
+  key: PaymentKey,
+  l: PaymentLine,
+  ctx: PaymentsExportContext,
+): string => {
+  if (key === "date") return format(l.date, "dd/MM/yyyy");
+  if (key === "description") return l.tx.description || "-";
+  if (key === "party") return l.tx.supplierOrClient || "-";
+  if (key === "document") return l.tx.documentNumber || "";
+  if (key === "account") return ctx.accountOf?.(l.tx) ?? "";
+  if (key === "amount") return formatCurrency(l.amount);
+  return "";
+};
+
+const paymentsTitle = (ctx: PaymentsExportContext) =>
+  ctx.type === "payable" ? "Pagamentos realizados" : "Recebimentos";
+
+const paymentsHeader = (ctx: PaymentsExportContext) => [
+  ctx.companyName,
+  ...(ctx.entity
+    ? [
+        `${ctx.type === "payable" ? "Favorecido" : "Cliente"}: ${ctx.entity.name}${
+          ctx.entity.document
+            ? `  ·  ${formatCpfCnpj(ctx.entity.document)}`
+            : ""
+        }`,
+      ]
+    : []),
+  `Período: ${periodText(ctx.start, ctx.end)}${filterSuffix(ctx)}`,
+];
+
+const paymentsFile = (ctx: PaymentsExportContext, ext: string) => {
+  const who = ctx.entity
+    ? `_${ctx.entity.name
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase()
+        .slice(0, 40)}`
+    : "";
+  return `${ctx.type === "payable" ? "pagamentos" : "recebimentos"}${who}_${periodSlug(ctx.start, ctx.end)}.${ext}`;
+};
+
+/** Arquivo do comprovante: o caminho no Storage (via proxy) ou a URL antiga. */
+export const receiptUrl = (t: Transaction) =>
+  t.comprovanteStoragePath
+    ? comprovanteProxyUrl(t.comprovanteStoragePath, "inline")
+    : t.comprovanteUrl;
+
+/** A fonte padrão do pdf-lib só tem Latin-1. */
+const latin1 = (s: string) => s.replace(/[^\x20-\xff]/g, " ");
+
+/**
+ * Comprovantes no fim do PDF, cada um com "Anexo N" no rodapé. PDF entra
+ * página a página; JPG/PNG numa página A4. Outro formato ou falha de
+ * download conta em `failed` e o resto segue.
+ */
+async function appendReceipts(
+  pdf: ArrayBuffer,
+  lines: PaymentLine[],
+  numberOf: (l: PaymentLine) => number,
+) {
+  const { PDFDocument, StandardFonts } = await import("pdf-lib");
+  const out = await PDFDocument.load(pdf);
+  const font = await out.embedFont(StandardFonts.Helvetica);
+  const [A4W, A4H] = [595.28, 841.89];
+  let failed = 0;
+  for (const l of lines) {
+    const caption = latin1(
+      `Anexo ${numberOf(l)}  -  ${format(l.date, "dd/MM/yyyy")}  -  ${formatCurrency(l.amount)}  -  ${l.tx.description ?? ""}`,
+    ).slice(0, 120);
+    try {
+      const res = await fetch(receiptUrl(l.tx)!);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = new Uint8Array(await res.arrayBuffer());
+      const head = String.fromCharCode(...data.slice(0, 4));
+      if (head === "%PDF") {
+        const src = await PDFDocument.load(data, { ignoreEncryption: true });
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach((p, i) => {
+          out.addPage(p);
+          if (i === 0) p.drawText(caption, { x: 14, y: 8, size: 7, font });
+        });
+      } else if (head.startsWith("\x89PNG") || head.startsWith("\xff\xd8")) {
+        const img = head.startsWith("\x89PNG")
+          ? await out.embedPng(data)
+          : await out.embedJpg(data);
+        const page = out.addPage([A4W, A4H]);
+        const m = 36;
+        const scale = Math.min(
+          (A4W - 2 * m) / img.width,
+          (A4H - 2 * m - 24) / img.height,
+          1,
+        );
+        page.drawText(caption, { x: m, y: A4H - m, size: 9, font });
+        page.drawImage(img, {
+          x: m,
+          y: A4H - m - 16 - img.height * scale,
+          width: img.width * scale,
+          height: img.height * scale,
+        });
+      } else {
+        failed++;
+      }
+    } catch (error) {
+      console.warn("Comprovante fora do PDF", l.tx.id, error);
+      failed++;
+    }
+  }
+  return { bytes: await out.save(), failed };
+}
 
 // Status labels PT-BR
 const STATUS_LABEL: Record<string, string> = {
@@ -1345,6 +1512,211 @@ export const reportService = {
   },
 
   // ─────────────────────────────────────────────────────────────────────────
+  // PAGAMENTOS — extrato do que foi pago a uma entidade, para enviar a ela
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * PDF com a lista e, se pedido, cada comprovante anexado no fim (PDF copiado
+   * página a página; imagem numa página A4). Devolve os anexos que não deu
+   * para incluir, para a tela avisar.
+   */
+  generatePaymentsPDF: async (
+    report: PaymentsReport,
+    ctx: PaymentsExportContext,
+  ): Promise<{ failed: number }> => {
+    const { jsPDF, autoTable } = await loadPdf();
+    const doc = new jsPDF();
+    const reportFont = await ensureReportFont(doc);
+    const cols = paymentColumns(ctx);
+    const annex = new Map<string, number>();
+    if (ctx.withReceipts) {
+      for (const l of report.lines) {
+        if (receiptUrl(l.tx)) annex.set(l.tx.id, annex.size + 1);
+      }
+    }
+
+    doc.setFontSize(15);
+    doc.setTextColor(15, 23, 42);
+    doc.text(paymentsTitle(ctx), 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(71, 85, 105);
+    let y = 25;
+    for (const line of paymentsHeader(ctx)) {
+      doc.text(line, 14, y);
+      y += 5.5;
+    }
+
+    autoTable(doc, {
+      startY: y + 1,
+      head: [cols.map((c) => c.header)],
+      body: report.lines.map((l) =>
+        cols.map((c) =>
+          c.key === "receipt"
+            ? annex.has(l.tx.id)
+              ? `Anexo ${annex.get(l.tx.id)}`
+              : receiptUrl(l.tx)
+                ? "Sim"
+                : "—"
+            : paymentCell(c.key, l, ctx),
+        ),
+      ),
+      foot: [
+        cols.map((c, i) =>
+          i === 0
+            ? `Total (${report.lines.length})`
+            : c.key === "amount"
+              ? formatCurrency(report.total)
+              : "",
+        ),
+      ],
+      showHead: "everyPage",
+      showFoot: "lastPage",
+      theme: "plain",
+      styles: {
+        font: reportFont,
+        fontSize: 8.5,
+        cellPadding: { top: 1.6, bottom: 1.6, left: 2, right: 2 },
+        textColor: [30, 41, 59],
+      },
+      headStyles: {
+        font: reportFont,
+        fontStyle: "bold",
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+      },
+      footStyles: {
+        font: reportFont,
+        fontStyle: "bold",
+        fillColor: [226, 232, 240],
+      },
+      columnStyles: Object.fromEntries(
+        cols.flatMap((c, i) =>
+          c.key === "amount" ? [[i, { halign: "right", cellWidth: 28 }]] : [],
+        ),
+      ),
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    });
+
+    const name = paymentsFile(ctx, "pdf");
+    const pdf = doc.output("arraybuffer");
+    if (annex.size === 0) {
+      downloadBlob(new Blob([pdf], { type: "application/pdf" }), name);
+      return { failed: 0 };
+    }
+    const { bytes, failed } = await appendReceipts(
+      pdf,
+      report.lines.filter((l) => annex.has(l.tx.id)),
+      (l) => annex.get(l.tx.id)!,
+    );
+    downloadBlob(
+      new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" }),
+      name,
+    );
+    return { failed };
+  },
+
+  exportPaymentsExcel: async (
+    report: PaymentsReport,
+    ctx: PaymentsExportContext,
+  ) => {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "FinControl";
+    workbook.created = new Date();
+    const cols = paymentColumns(ctx);
+    const sheet = workbook.addWorksheet(
+      ctx.type === "payable" ? "Pagamentos" : "Recebimentos",
+      { views: [{ state: "frozen", ySplit: 5 }] },
+    );
+    sheet.columns = cols.map((c) => ({ width: c.width }));
+
+    const [company, ...details] = paymentsHeader(ctx);
+    const top = [
+      `${company} — ${paymentsTitle(ctx)}`,
+      details.join("  ·  "),
+      `Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`,
+    ];
+    top.forEach((text, i) => {
+      sheet.mergeCells(i + 1, 1, i + 1, cols.length);
+      sheet.getCell(i + 1, 1).value = text;
+      sheet.getCell(i + 1, 1).font =
+        i === 0
+          ? { bold: true, size: 13 }
+          : { size: 9, color: { argb: "FF64748B" } };
+    });
+
+    sheet.addRow([]);
+    const header = sheet.addRow(cols.map((c) => c.header));
+    header.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0F172A" },
+      };
+    });
+    const amountCol = cols.findIndex((c) => c.key === "amount") + 1;
+    for (const l of report.lines) {
+      const row = sheet.addRow(
+        cols.map((c) =>
+          c.key === "date"
+            ? l.date
+            : c.key === "amount"
+              ? l.amount
+              : c.key === "receipt"
+                ? receiptUrl(l.tx)
+                  ? "Sim"
+                  : "Não"
+                : paymentCell(c.key, l, ctx),
+        ),
+      );
+      row.getCell(1).numFmt = "dd/mm/yyyy";
+      row.getCell(amountCol).numFmt = '"R$" #,##0.00';
+    }
+    const total = sheet.addRow(
+      cols.map((c, i) =>
+        i === 0
+          ? `Total (${report.lines.length})`
+          : c.key === "amount"
+            ? report.total
+            : null,
+      ),
+    );
+    total.font = { bold: true };
+    total.getCell(amountCol).numFmt = '"R$" #,##0.00';
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    downloadBlob(
+      new Blob([buffer], { type: XLSX_TYPE }),
+      paymentsFile(ctx, "xlsx"),
+    );
+  },
+
+  exportPaymentsCSV: (report: PaymentsReport, ctx: PaymentsExportContext) => {
+    const cols = paymentColumns(ctx);
+    const rows = [
+      cols.map((c) => c.header),
+      ...report.lines.map((l) =>
+        cols.map((c) =>
+          c.key === "date"
+            ? l.date
+            : c.key === "amount"
+              ? l.amount
+              : c.key === "receipt"
+                ? receiptUrl(l.tx)
+                  ? "Sim"
+                  : "Não"
+                : paymentCell(c.key, l, ctx),
+        ),
+      ),
+    ];
+    downloadBlob(
+      new Blob([toCsv(rows)], { type: "text/csv;charset=utf-8;" }),
+      paymentsFile(ctx, "csv"),
+    );
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
   // GUIA DE TRANSFERÊNCIAS — Excel com abas PIX, Boletos, Outros e Resumo
   // ─────────────────────────────────────────────────────────────────────────
   exportTransferGuide: async (
@@ -1366,6 +1738,11 @@ export const reportService = {
       },
       {} as Record<string, Entity>,
     );
+    // Dados bancários da conta que o lançamento escolheu.
+    const payeeOf = (t: Transaction) => {
+      const e = t.entityId ? entitiesMap[t.entityId] : undefined;
+      return e && withPayeeAccount(e, t.entityBankAccountId);
+    };
 
     const eff = (t: Transaction) =>
       t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
@@ -1544,10 +1921,11 @@ export const reportService = {
         t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
       const dateKey = format(effDate, "yyyy-MM-dd");
       const entityKey =
-        t.entityId || `name:${t.supplierOrClient ?? "desconhecido"}`;
+        (t.entityId && `${t.entityId}:${t.entityBankAccountId ?? ""}`) ||
+        `name:${t.supplierOrClient ?? "desconhecido"}`;
       const key = `${entityKey}|${dateKey}`;
 
-      const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+      const entity = payeeOf(t);
       const entityName = entity?.name || t.supplierOrClient || "-";
       const entityDoc = entity?.document || "";
 
@@ -1739,7 +2117,7 @@ export const reportService = {
     sortedBoletos.forEach((t, idx) => {
       const effDate =
         t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-      const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+      const entity = payeeOf(t);
       const entityName = entity?.name || t.supplierOrClient || "-";
       const amount = eff(t);
       const missingBarcode = !t.barcode;
@@ -1850,7 +2228,7 @@ export const reportService = {
       sortedOutros.forEach((t, idx) => {
         const effDate =
           t.status === "paid" && t.paymentDate ? t.paymentDate : t.dueDate;
-        const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
+        const entity = payeeOf(t);
         const entityName = entity?.name || t.supplierOrClient || "-";
         const amount = eff(t);
         const methodLabel = t.paymentMethod

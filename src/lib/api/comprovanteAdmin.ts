@@ -97,6 +97,7 @@ export async function fetchEntities(companyId: string): Promise<Entity[]> {
       account: data.account,
       pixKey: data.pixKey,
       pixKeyType: data.pixKeyType,
+      extraBankAccounts: data.extraBankAccounts,
       autoConfirmReceipts: data.autoConfirmReceipts === true,
       receiptAliases: data.receiptAliases,
       createdAt: new Date(),

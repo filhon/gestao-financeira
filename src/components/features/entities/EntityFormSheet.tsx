@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ArrowLeft, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -10,6 +11,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EntityForm, EntityFormData } from "./EntityForm";
 import { entityService } from "@/lib/services/entityService";
@@ -52,18 +54,20 @@ function toEntityData(data: EntityFormData) {
   return out as Partial<Entity>;
 }
 
-/** Cadastro e edição de entidade em painel lateral. */
-export function EntityFormSheet({
+/**
+ * Gravação, aviso de descarte e lista para o alerta de nome repetido: o que a
+ * folha e o painel lateral têm em comum.
+ */
+function useEntityEditor({
   open,
-  onOpenChange,
   entity,
   onSaved,
+  onClose,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** null = cadastro novo. */
   entity: Entity | null;
-  onSaved?: () => void;
+  onSaved?: (created?: Entity) => void;
+  onClose: () => void;
 }) {
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
@@ -81,13 +85,14 @@ export function EntityFormSheet({
 
   const close = () => {
     setIsDirty(false);
-    onOpenChange(false);
+    onClose();
   };
   const requestClose = () => (isDirty ? setConfirmDiscard(true) : close());
 
   const handleSubmit = async (data: EntityFormData) => {
     if (!selectedCompany || !user) return;
     const actor = { uid: user.uid, email: user.email };
+    let created: Entity | undefined;
     try {
       setIsSubmitting(true);
       if (entity) {
@@ -103,7 +108,7 @@ export function EntityFormSheet({
             : "Cadastro atualizado.",
         );
       } else {
-        await entityService.create(
+        created = await entityService.create(
           {
             ...(toEntityData(data) as Omit<
               Entity,
@@ -117,7 +122,7 @@ export function EntityFormSheet({
       }
       queryClient.invalidateQueries({ queryKey: ["entities-all"] });
       queryClient.invalidateQueries({ queryKey: ["entity"] });
-      onSaved?.();
+      onSaved?.(created);
       close();
     } catch (error) {
       console.error("Error saving entity:", error);
@@ -127,11 +132,58 @@ export function EntityFormSheet({
     }
   };
 
+  const discardDialog = (
+    <ConfirmDialog
+      open={confirmDiscard}
+      onOpenChange={setConfirmDiscard}
+      title="Descartar alterações?"
+      description="O que foi preenchido será perdido."
+      confirmText="Descartar"
+      cancelText="Continuar editando"
+      variant="destructive"
+      onConfirm={close}
+    />
+  );
+
+  return {
+    companyName: selectedCompany?.name,
+    existing,
+    isSubmitting,
+    setIsDirty,
+    requestClose,
+    confirmDiscard,
+    handleSubmit,
+    discardDialog,
+  };
+}
+
+/** Cadastro e edição de entidade em painel lateral. */
+export function EntityFormSheet({
+  open,
+  onOpenChange,
+  entity,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** null = cadastro novo. */
+  entity: Entity | null;
+  onSaved?: () => void;
+}) {
+  const editor = useEntityEditor({
+    open,
+    entity,
+    onSaved,
+    onClose: () => onOpenChange(false),
+  });
+
   return (
     <>
       <Sheet
         open={open}
-        onOpenChange={(next) => (next ? onOpenChange(true) : requestClose())}
+        onOpenChange={(next) =>
+          next ? onOpenChange(true) : editor.requestClose()
+        }
       >
         <SheetContent
           onInteractOutside={(e) => e.preventDefault()}
@@ -141,34 +193,112 @@ export function EntityFormSheet({
             <SheetTitle className="text-lg">
               {entity ? `Editar ${entity.name}` : "Nova entidade"}
             </SheetTitle>
-            <SheetDescription>em {selectedCompany?.name}</SheetDescription>
+            <SheetDescription>em {editor.companyName}</SheetDescription>
           </SheetHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-2">
             {open && (
               <EntityForm
                 key={entity?.id ?? "new"}
                 defaultValues={entity ?? {}}
-                onSubmit={handleSubmit}
-                isLoading={isSubmitting}
-                onCancel={requestClose}
-                onDirtyChange={setIsDirty}
-                existing={existing}
+                onSubmit={editor.handleSubmit}
+                isLoading={editor.isSubmitting}
+                onCancel={editor.requestClose}
+                onDirtyChange={editor.setIsDirty}
+                existing={editor.existing}
               />
             )}
           </div>
         </SheetContent>
       </Sheet>
+      {editor.discardDialog}
+    </>
+  );
+}
 
-      <ConfirmDialog
-        open={confirmDiscard}
-        onOpenChange={setConfirmDiscard}
-        title="Descartar alterações?"
-        description="O que foi preenchido será perdido."
-        confirmText="Descartar"
-        cancelText="Continuar editando"
-        variant="destructive"
-        onConfirm={close}
-      />
+/**
+ * Cadastro novo como segunda folha, ao lado da folha que o abriu (mesmo
+ * padrão do visualizador de anexos no detalhe da transação). Precisa ser
+ * renderizado dentro do SheetContent da folha de origem, que deve ter
+ * `overflow-visible`; no celular cobre a folha e tem Voltar.
+ */
+export function EntitySidePanel({
+  open,
+  onClose,
+  initial,
+  title = "Nova entidade",
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Valores iniciais (ex.: o nome buscado no lançamento). */
+  initial?: Partial<Entity>;
+  title?: string;
+  onSaved: (created?: Entity) => void;
+}) {
+  const editor = useEntityEditor({ open, entity: null, onSaved, onClose });
+  const { requestClose, confirmDiscard } = editor;
+
+  // Esc fecha este painel antes da folha de baixo. Captura na janela, antes do
+  // Radix; menu ou confirmação aberta por cima ficam com o Esc.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || confirmDiscard) return;
+      if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
+      e.stopPropagation();
+      requestClose();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
+  }, [open, confirmDiscard, requestClose]);
+
+  if (!open) return null;
+  return (
+    <>
+      <aside
+        aria-label={title}
+        className="absolute inset-0 z-10 flex flex-col bg-background shadow-xl duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] animate-in fade-in-0 slide-in-from-right-8 lg:left-auto lg:right-full lg:w-[min(48rem,calc(100vw-100%-1.5rem))] lg:border-l"
+      >
+        <div className="flex shrink-0 items-center gap-1 border-b px-3 py-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 lg:hidden"
+            aria-label="Voltar ao lançamento"
+            onClick={requestClose}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0 flex-1 px-1">
+            <p className="truncate text-sm font-medium">{title}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              em {editor.companyName}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden h-8 w-8 lg:inline-flex"
+            title="Fechar (Esc)"
+            aria-label="Fechar cadastro"
+            onClick={requestClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-2">
+          <EntityForm
+            defaultValues={initial ?? {}}
+            onSubmit={editor.handleSubmit}
+            isLoading={editor.isSubmitting}
+            onCancel={requestClose}
+            onDirtyChange={editor.setIsDirty}
+            existing={editor.existing}
+          />
+        </div>
+      </aside>
+      {editor.discardDialog}
     </>
   );
 }

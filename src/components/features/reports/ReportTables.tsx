@@ -2,12 +2,13 @@
 
 import { useId } from "react";
 import { format } from "date-fns";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Paperclip } from "lucide-react";
 import currency from "currency.js";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn, formatCurrency } from "@/lib/utils";
 import {
   CashFlowReport,
+  PaymentsReport,
   FlowBucket,
   Granularity,
   STAGE_INFO,
@@ -19,6 +20,7 @@ import {
 import type { DreReport, DreRow } from "@/lib/chartOfAccounts";
 import type { Transaction } from "@/lib/types";
 import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
+import { receiptUrl } from "@/lib/services/reportService";
 
 // ─── Peças comuns ─────────────────────────────────────────────────────────────
 
@@ -744,6 +746,121 @@ export function DreView({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ─── Pagamentos ───────────────────────────────────────────────────────────────
+
+export function PaymentsView({
+  report,
+  payable,
+  showParty,
+  accountOf,
+}: {
+  report: PaymentsReport;
+  payable: boolean;
+  /** Sem entidade filtrada, cada linha diz a quem foi. */
+  showParty: boolean;
+  /** Conta da entidade que recebeu, quando ela tem mais de uma. */
+  accountOf?: (t: Transaction) => string;
+}) {
+  const { openTransaction } = useTransactionDetailStore();
+  const withReceipt = report.lines.filter((l) => receiptUrl(l.tx)).length;
+  return (
+    <div className="space-y-2">
+      <div className={SCROLL}>
+        <table className="w-full text-sm">
+          <thead className={HEAD}>
+            <tr className="text-left">
+              <th className={TH}>{payable ? "Pago em" : "Recebido em"}</th>
+              <th className={cn(TH, "w-full")}>Descrição</th>
+              <th className={TH}>Nº documento</th>
+              {accountOf && <th className={TH}>Conta</th>}
+              <th className={cn(TH, "text-right")}>
+                {payable ? "Valor pago" : "Valor recebido"}
+              </th>
+              <th className={cn(TH, "text-center")}>Comprovante</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.lines.map((l) => {
+              const receipt = receiptUrl(l.tx);
+              return (
+                <tr
+                  key={l.tx.id}
+                  className="border-b border-border/60 last:border-0"
+                >
+                  <td
+                    className={cn(TD, "font-financial text-muted-foreground")}
+                  >
+                    {format(l.date, "dd/MM/yyyy")}
+                  </td>
+                  <td className="max-w-0 px-3 py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openTransaction(l.tx)}
+                      className="group flex max-w-full items-center gap-1 text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="truncate">{l.tx.description}</span>
+                      <ArrowUpRight className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-60" />
+                    </button>
+                    {showParty && (
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {l.tx.supplierOrClient || "—"}
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className={cn(TD, "font-financial text-muted-foreground")}
+                  >
+                    {l.tx.documentNumber || "—"}
+                  </td>
+                  {accountOf && (
+                    <td className={cn(TD, "text-muted-foreground")}>
+                      {accountOf(l.tx)}
+                    </td>
+                  )}
+                  <td className={cn(TD, "text-right font-financial")}>
+                    {money(l.amount)}
+                  </td>
+                  <td className={cn(TD, "text-center")}>
+                    {receipt ? (
+                      <a
+                        href={receipt}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs underline-offset-2 hover:underline"
+                      >
+                        <Paperclip className="h-3.5 w-3.5" />
+                        Abrir
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/60">
+                        —
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot className={cn(FOOT, "font-financial")}>
+            <tr className="border-t font-semibold">
+              <td className={cn(TD, "font-sans")} colSpan={accountOf ? 4 : 3}>
+                Total · {report.lines.length}{" "}
+                {report.lines.length === 1 ? "lançamento" : "lançamentos"}
+              </td>
+              <td className={cn(TD, "text-right")}>{money(report.total)}</td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Pela data {payable ? "do pagamento" : "do recebimento"}. {withReceipt}{" "}
+        de {report.lines.length} com comprovante.
+      </p>
     </div>
   );
 }

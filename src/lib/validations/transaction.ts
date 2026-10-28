@@ -27,6 +27,8 @@ export const transactionSchema = z.object({
 
   supplierOrClient: z.string().trim().min(2, "Informe o fornecedor ou cliente"),
   entityId: z.string().optional(),
+  /** Conta da entidade que recebe, quando ela tem mais de uma. */
+  entityBankAccountId: z.string().optional(),
 
   /** Número da nota fiscal, fatura ou contrato. */
   documentNumber: z.string().trim().max(60).optional(),

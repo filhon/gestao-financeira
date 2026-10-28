@@ -120,6 +120,7 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
             accountId: data.accountId,
             supplierOrClient: data.supplierOrClient,
             entityId: data.entityId,
+            entityBankAccountId: data.entityBankAccountId,
             paymentMethod: data.paymentMethod,
             requestOrigin: data.requestOrigin,
             isReimbursement: data.isReimbursement ?? false,
@@ -201,7 +202,7 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
           // Clique fora não fecha: no painel lateral é fácil errar o alvo.
           onInteractOutside={(e) => e.preventDefault()}
           // Só o corpo rola: título e empresa ficam sempre à vista.
-          className="w-full gap-0 overflow-hidden p-0 sm:max-w-4xl"
+          className="w-full gap-0 overflow-visible p-0 sm:max-w-4xl"
         >
           <SheetHeader className="shrink-0 gap-0.5 border-b px-6 py-4">
             <SheetTitle className="text-lg">{copy.modalTitle}</SheetTitle>

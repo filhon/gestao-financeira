@@ -10,7 +10,9 @@ import type { DateRange } from "react-day-picker";
 import {
   AlertCircle,
   CalendarIcon,
+  Check,
   ChevronDown,
+  ChevronsUpDown,
   Download,
   RotateCcw,
 } from "lucide-react";
@@ -34,7 +36,9 @@ import {
   effectiveDate,
 } from "@/lib/chartOfAccounts";
 import {
+  belongsTo,
   buildCashFlow,
+  buildPayments,
   Comparison,
   comparisonRange,
   DEFAULT_FORECAST,
@@ -51,6 +55,20 @@ import {
   STAGE_INFO,
 } from "@/lib/reports";
 import { Transaction } from "@/lib/types";
+import {
+  MAIN_BANK_ACCOUNT,
+  bankAccountLabel,
+  bankAccountsOf,
+} from "@/lib/entityBankAccounts";
+import { entitiesQueryKey } from "@/components/features/entities/EntityFormSheet";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { cn, formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -82,12 +100,13 @@ import {
   DrillLine,
   DrillSheet,
   DreView,
+  PaymentsView,
   Segmented,
 } from "@/components/features/reports/ReportTables";
 
-type ReportKind = "cash_flow" | "dre";
+type ReportKind = "cash_flow" | "dre" | "payments";
 type FlowMode = "realized" | "forecast" | "both";
-type ExportFormat = "pdf" | "excel" | "csv";
+type ExportFormat = "pdf" | "pdf_receipts" | "excel" | "csv";
 
 const EXPORTS: Record<
   ReportKind,
@@ -110,6 +129,16 @@ const EXPORTS: Record<
       hint: "Mês a mês, com os lançamentos de cada linha",
     },
     { format: "csv", label: "CSV", hint: "A tabela da DRE, meses em colunas" },
+  ],
+  payments: [
+    {
+      format: "pdf_receipts",
+      label: "PDF com comprovantes",
+      hint: "A lista e cada comprovante anexado no fim",
+    },
+    { format: "pdf", label: "PDF", hint: "Só a lista" },
+    { format: "excel", label: "Excel", hint: "Uma linha por pagamento" },
+    { format: "csv", label: "CSV", hint: "Uma linha por pagamento" },
   ],
 };
 
@@ -170,8 +199,22 @@ function Reports() {
 
   const periods = quickPeriods();
   const [kind, setKind] = useState<ReportKind>(() =>
-    oneOf(searchParams.get("relatorio"), ["cash_flow", "dre"], "cash_flow"),
+    oneOf(
+      searchParams.get("relatorio"),
+      ["cash_flow", "dre", "payments"],
+      "cash_flow",
+    ),
   );
+  const [entityFilter, setEntityFilter] = useState(
+    () => searchParams.get("entidade") ?? "",
+  );
+  const [entityAccount, setEntityAccount] = useState(
+    () => searchParams.get("conta") ?? "",
+  );
+  const [direction, setDirection] = useState<Transaction["type"]>(() =>
+    oneOf(searchParams.get("tipo"), ["payable", "receivable"], "payable"),
+  );
+  const [entityPickerOpen, setEntityPickerOpen] = useState(false);
   const [range, setRange] = useState(() => rangeFromParams(searchParams));
   const [costCenterFilter, setCostCenterFilter] = useState(
     () => searchParams.get("cc") ?? "all",
@@ -214,11 +257,27 @@ function Reports() {
     if (comparison !== "none") params.set("comparar", comparison);
     if (kind === "cash_flow" && mode !== "both") params.set("situacao", mode);
     if (kind === "dre" && regime !== "competence") params.set("regime", regime);
+    if (entityFilter) params.set("entidade", entityFilter);
+    if (entityFilter && entityAccount) params.set("conta", entityAccount);
+    if (kind === "payments" && direction !== "payable") {
+      params.set("tipo", direction);
+    }
     const next = params.toString();
     if (next !== window.location.search.slice(1)) {
       router.replace(`/relatorios?${next}`, { scroll: false });
     }
-  }, [kind, range, costCenterFilter, comparison, mode, regime, router]);
+  }, [
+    kind,
+    range,
+    costCenterFilter,
+    comparison,
+    mode,
+    regime,
+    entityFilter,
+    entityAccount,
+    direction,
+    router,
+  ]);
 
   const companyId = selectedCompany?.id;
   const createdBy = onlyOwnPayables ? user?.uid : undefined;
@@ -234,6 +293,40 @@ function Reports() {
   );
   const ccName = costCenters.find((c) => c.id === costCenterFilter)?.name;
 
+  const { data: entities = [] } = useQuery({
+    queryKey: entitiesQueryKey(companyId),
+    queryFn: () => entityService.getAll(companyId!),
+    enabled: !!companyId && canViewReports,
+    staleTime: 5 * 60_000,
+  });
+  const entity = entities.find((e) => e.id === entityFilter);
+  const entityAccounts = entity ? bankAccountsOf(entity) : [];
+  const multiAccount = entityAccounts.length > 1;
+  const accountIndex = multiAccount
+    ? entityAccounts.findIndex((a) => a.id === entityAccount)
+    : -1;
+  const accountName =
+    accountIndex >= 0
+      ? bankAccountLabel(entityAccounts[accountIndex], accountIndex)
+      : undefined;
+  /** Recorte por entidade (e conta) sobre o que veio do banco. */
+  const scoped = (list: Transaction[]) =>
+    entity
+      ? list.filter((t) =>
+          belongsTo(t, entity, accountIndex >= 0 ? entityAccount : undefined),
+        )
+      : list;
+  /** Conta de cada lançamento, quando a entidade tem mais de uma. */
+  const accountOf =
+    multiAccount && accountIndex < 0
+      ? (t: Transaction) => {
+          const i = entityAccounts.findIndex(
+            (a) => a.id === (t.entityBankAccountId ?? MAIN_BANK_ACCOUNT),
+          );
+          return i >= 0 ? bankAccountLabel(entityAccounts[i], i) : "Removida";
+        }
+      : undefined;
+
   const stages = useMemo<FlowStage[]>(
     () =>
       mode === "realized"
@@ -247,10 +340,12 @@ function Reports() {
   const wantsRecurring = isFlow && stages.includes("recurring");
   // Saldo da empresa não vale para um recorte (centro de custo ou só os
   // próprios lançamentos): aí o fluxo mostra o acumulado do recorte.
-  const hasOpening = isFlow && !ccIds && !onlyOwnPayables;
+  const isPayments = kind === "payments";
+  const hasOpening = isFlow && !ccIds && !onlyOwnPayables && !entity;
   const compRange = useMemo(
-    () => comparisonRange(range.start, range.end, comparison),
-    [range, comparison],
+    () =>
+      isPayments ? null : comparisonRange(range.start, range.end, comparison),
+    [range, comparison, isPayments],
   );
   const competence = kind === "dre" && regime === "competence";
 
@@ -388,7 +483,7 @@ function Reports() {
     const projected = wantsRecurring
       ? projectRecurrences(templates, range.start, range.end)
       : [];
-    return buildCashFlow([...current.data.transactions, ...projected], {
+    return buildCashFlow(scoped([...current.data.transactions, ...projected]), {
       start: range.start,
       end: range.end,
       opening,
@@ -396,6 +491,7 @@ function Reports() {
       costCenterIds: ccIds,
       granularity: gran,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isFlow,
     current.data,
@@ -406,6 +502,8 @@ function Reports() {
     stages,
     ccIds,
     gran,
+    entity,
+    accountIndex,
   ]);
 
   const flowPrev = useMemo(() => {
@@ -413,13 +511,14 @@ function Reports() {
     const projected = wantsRecurring
       ? projectRecurrences(templates, compRange.start, compRange.end)
       : [];
-    return buildCashFlow([...prior.data.transactions, ...projected], {
+    return buildCashFlow(scoped([...prior.data.transactions, ...projected]), {
       start: compRange.start,
       end: compRange.end,
       stages,
       costCenterIds: ccIds,
       granularity: gran,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isFlow,
     prior.data,
@@ -429,31 +528,58 @@ function Reports() {
     stages,
     ccIds,
     gran,
+    entity,
+    accountIndex,
   ]);
 
   const dre = useMemo(
     () =>
       kind === "dre" && current.data
-        ? buildDre(current.data.transactions, accounts, {
+        ? buildDre(scoped(current.data.transactions), accounts, {
             start: range.start,
             end: range.end,
             costCenterIds: ccIds,
             regime,
           })
         : null,
-    [kind, current.data, accounts, range, ccIds, regime],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [kind, current.data, accounts, range, ccIds, regime, entity, accountIndex],
   );
   const drePrev = useMemo(
     () =>
       kind === "dre" && compRange && prior.data
-        ? buildDre(prior.data.transactions, accounts, {
+        ? buildDre(scoped(prior.data.transactions), accounts, {
             start: compRange.start,
             end: compRange.end,
             costCenterIds: ccIds,
             regime,
           })
         : null,
-    [kind, prior.data, accounts, compRange, ccIds, regime],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      kind,
+      prior.data,
+      accounts,
+      compRange,
+      ccIds,
+      regime,
+      entity,
+      accountIndex,
+    ],
+  );
+
+  const payments = useMemo(
+    () =>
+      isPayments && current.data
+        ? buildPayments(scoped(current.data.transactions), {
+            start: range.start,
+            end: range.end,
+            type: direction,
+            costCenterIds: ccIds,
+          })
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPayments, current.data, range, direction, ccIds, entity, accountIndex],
   );
 
   const dreLine = (t: Transaction): DrillLine => ({
@@ -465,19 +591,25 @@ function Reports() {
 
   const isEmpty = isFlow
     ? !!flow && flow.lines.length === 0
-    : !!dre && !dre.rows.some((r) => r.total !== 0);
+    : isPayments
+      ? !!payments && payments.lines.length === 0
+      : !!dre && !dre.rows.some((r) => r.total !== 0);
 
   // ── Ações ────────────────────────────────────────────────────────────────
   const filtersText = [
-    isFlow
-      ? MODE_LABEL[mode] +
-        (mode !== "realized" && forecast.length < FORECAST_STAGES.length
-          ? ` (previsto: ${forecast.map((s) => STAGE_INFO[s].label.toLowerCase()).join(", ")})`
-          : "")
-      : regime === "cash"
-        ? "Regime de caixa"
-        : "Regime de competência",
+    isPayments
+      ? null
+      : isFlow
+        ? MODE_LABEL[mode] +
+          (mode !== "realized" && forecast.length < FORECAST_STAGES.length
+            ? ` (previsto: ${forecast.map((s) => STAGE_INFO[s].label.toLowerCase()).join(", ")})`
+            : "")
+        : regime === "cash"
+          ? "Regime de caixa"
+          : "Regime de competência",
     ccName ? `Centro de custo: ${ccName} e subordinados` : null,
+    entity && !isPayments ? `Entidade: ${entity.name}` : null,
+    accountName ? `Conta: ${accountName}` : null,
   ]
     .filter(Boolean)
     .join("  ·  ");
@@ -496,7 +628,29 @@ function Reports() {
         costCenterIds: ccIds,
         entities: await entityService.getAll(companyId),
       };
-      if (isFlow && flow) {
+      if (isPayments && payments) {
+        const pctx = {
+          ...ctx,
+          type: direction,
+          entity,
+          accountOf,
+          withReceipts: fmt === "pdf_receipts",
+        };
+        if (fmt === "pdf" || fmt === "pdf_receipts") {
+          const { failed } = await reportService.generatePaymentsPDF(
+            payments,
+            pctx,
+          );
+          if (failed > 0) {
+            toast.warning(
+              `${failed} comprovante(s) ficaram fora do PDF (formato não suportado ou arquivo indisponível).`,
+            );
+          }
+        }
+        if (fmt === "excel")
+          await reportService.exportPaymentsExcel(payments, pctx);
+        if (fmt === "csv") reportService.exportPaymentsCSV(payments, pctx);
+      } else if (isFlow && flow) {
         if (fmt === "pdf") await reportService.generateCashFlowPDF(flow, ctx);
         if (fmt === "excel") await reportService.exportCashFlowExcel(flow, ctx);
         if (fmt === "csv") reportService.exportCashFlowCSV(flow, ctx);
@@ -532,7 +686,8 @@ function Reports() {
 
   // DRE em que o resultado das contas não representa o período: o arquivo só
   // sai depois de a pessoa confirmar que viu isso.
-  const lowCoverage = !isFlow && !!dre && dre.coverage < DRE_MIN_COVERAGE;
+  const lowCoverage =
+    kind === "dre" && !!dre && dre.coverage < DRE_MIN_COVERAGE;
   const requestExport = (fmt: ExportFormat) =>
     lowCoverage ? setConfirmExport(fmt) : handleExport(fmt);
 
@@ -544,8 +699,8 @@ function Reports() {
   const emptyHint =
     isFlow && mode === "realized"
       ? "Nada foi pago ou recebido no período. Para ver o que vem por aí, escolha Previsto em Situação."
-      : ccIds
-        ? "Retire o filtro de centro de custo ou escolha um período maior."
+      : ccIds || entity
+        ? "Retire algum filtro ou escolha um período maior."
         : "Escolha um período maior.";
 
   if (!canViewReports) return null;
@@ -568,6 +723,9 @@ function Reports() {
               </TabsTrigger>
               <TabsTrigger value="dre" className="px-3">
                 DRE gerencial
+              </TabsTrigger>
+              <TabsTrigger value="payments" className="px-3">
+                Pagamentos
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -695,7 +853,97 @@ function Reports() {
             </Select>
           </label>
 
-          {isFlow ? (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Entidade
+            <Popover open={entityPickerOpen} onOpenChange={setEntityPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  role="combobox"
+                  className="min-w-44 max-w-64 justify-between font-normal text-foreground"
+                >
+                  <span className="truncate">{entity?.name ?? "Todas"}</span>
+                  <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Nome ou documento…" />
+                  <CommandList>
+                    <CommandEmpty>Nenhuma entidade encontrada.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="__todas__"
+                        onSelect={() => {
+                          setEntityFilter("");
+                          setEntityAccount("");
+                          setEntityPickerOpen(false);
+                        }}
+                      >
+                        Todas
+                      </CommandItem>
+                      {entities.map((e) => (
+                        <CommandItem
+                          key={e.id}
+                          value={`${e.name} ${e.tradeName ?? ""} ${e.document ?? ""}`}
+                          onSelect={() => {
+                            setEntityFilter(e.id);
+                            setEntityAccount("");
+                            setEntityPickerOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "h-4 w-4",
+                              e.id === entityFilter
+                                ? "opacity-100"
+                                : "opacity-0",
+                            )}
+                          />
+                          <span className="truncate">{e.name}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </label>
+
+          {multiAccount && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              Conta
+              <Select
+                value={accountIndex >= 0 ? entityAccount : "all"}
+                onValueChange={(v) => setEntityAccount(v === "all" ? "" : v)}
+              >
+                <SelectTrigger size="sm" className="min-w-40 text-foreground">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {entityAccounts.map((a, i) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {bankAccountLabel(a, i)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          )}
+
+          {isPayments ? (
+            <Segmented
+              label="Mostrar"
+              value={direction}
+              onChange={setDirection}
+              options={[
+                { value: "payable", label: "Pagos" },
+                { value: "receivable", label: "Recebidos" },
+              ]}
+            />
+          ) : isFlow ? (
             <>
               <Segmented
                 label="Situação"
@@ -749,16 +997,18 @@ function Reports() {
             </>
           )}
 
-          <Segmented
-            label="Comparar com"
-            value={comparison}
-            onChange={setComparison}
-            options={[
-              { value: "none", label: "Sem comparação" },
-              { value: "previous", label: "Período anterior" },
-              { value: "year", label: "Mesmo período do ano anterior" },
-            ]}
-          />
+          {!isPayments && (
+            <Segmented
+              label="Comparar com"
+              value={comparison}
+              onChange={setComparison}
+              options={[
+                { value: "none", label: "Sem comparação" },
+                { value: "previous", label: "Período anterior" },
+                { value: "year", label: "Mesmo período do ano anterior" },
+              ]}
+            />
+          )}
         </div>
 
         {isFlow && mode !== "realized" && (
@@ -834,7 +1084,7 @@ function Reports() {
             Tentar de novo
           </Button>
         </div>
-      ) : loading || (!flow && !dre) ? (
+      ) : loading || (!flow && !dre && !payments) ? (
         <div className="space-y-3">
           <Skeleton className="h-20 w-full" />
           <Skeleton className="h-72 w-full" />
@@ -846,6 +1096,13 @@ function Reports() {
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{emptyHint}</p>
         </div>
+      ) : isPayments && payments ? (
+        <PaymentsView
+          report={payments}
+          payable={direction === "payable"}
+          showParty={!entity}
+          accountOf={accountOf}
+        />
       ) : isFlow && flow ? (
         <CashFlowView
           report={flow}

@@ -31,9 +31,14 @@ import {
   subYears,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import type { RecurringTransactionTemplate, Transaction } from "@/lib/types";
+import type {
+  Entity,
+  RecurringTransactionTemplate,
+  Transaction,
+} from "@/lib/types";
 // Relativo: o script de verificação roda fora do Next, sem o alias "@/".
 import { dreAmount, effectiveDate } from "./chartOfAccounts";
+import { MAIN_BANK_ACCOUNT } from "./entityBankAccounts";
 
 // ─── Estágios do fluxo ────────────────────────────────────────────────────────
 
@@ -515,6 +520,62 @@ export const periodText = (start: Date, end: Date) =>
 
 export const periodSlug = (start: Date, end: Date) =>
   `${format(start, "yyyyMMdd")}_${format(end, "yyyyMMdd")}`;
+
+// ─── Pagamentos de uma entidade (extrato para parceiro) ───────────────────────
+
+/**
+ * Lançamento da entidade — pelo cadastro ou, nos antigos sem cadastro, pelo
+ * nome — e, se pedida, da conta dela que recebeu (ausente = principal).
+ */
+export function belongsTo(
+  t: Transaction,
+  entity: Pick<Entity, "id" | "name">,
+  accountId?: string,
+) {
+  const own = t.entityId
+    ? t.entityId === entity.id
+    : t.supplierOrClient === entity.name;
+  return (
+    own &&
+    (!accountId || (t.entityBankAccountId ?? MAIN_BANK_ACCOUNT) === accountId)
+  );
+}
+
+export interface PaymentLine {
+  tx: Transaction;
+  /** Data da baixa (vencimento nas baixas antigas sem data). */
+  date: Date;
+  amount: number;
+}
+
+/** Pago (ou recebido) no período, pela data da baixa, do mais antigo ao mais novo. */
+export function buildPayments(
+  transactions: Transaction[],
+  opts: {
+    start: Date;
+    end: Date;
+    type: Transaction["type"];
+    costCenterIds?: readonly string[];
+  },
+) {
+  const from = startOfDay(opts.start);
+  const to = endOfDay(opts.end);
+  const lines: PaymentLine[] = transactions
+    .filter((t) => t.type === opts.type && stageOf(t) === "realized")
+    .map((t) => ({
+      tx: t,
+      date: t.paymentDate ?? t.dueDate,
+      amount: flowAmount(t, opts.costCenterIds),
+    }))
+    .filter((l) => l.date >= from && l.date <= to && l.amount !== 0)
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+  return {
+    lines,
+    total: lines.reduce((s, l) => s.add(l.amount), currency(0)).value,
+  };
+}
+
+export type PaymentsReport = ReturnType<typeof buildPayments>;
 
 // ─── CSV no padrão do Excel em português ──────────────────────────────────────
 

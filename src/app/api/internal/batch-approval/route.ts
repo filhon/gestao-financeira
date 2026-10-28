@@ -26,6 +26,7 @@ import {
   envelopeSnapshot,
 } from "@/components/features/finance/EnvelopeLine";
 import { CostCenter } from "@/lib/types";
+import { withPayeeAccount } from "@/lib/entityBankAccounts";
 import { splitDescription } from "@/lib/transactionTabs";
 import { formatCnpj } from "@/lib/validations/cnpj";
 
@@ -368,7 +369,10 @@ export async function GET(request: Request) {
       const entity = td.entityId ? entities.get(td.entityId) : undefined;
       const hist = td.entityId ? history.get(td.entityId) : undefined;
       const amount = effectiveAmount(td);
-      const destination = payTo(td, entity);
+      const destination = payTo(
+        td,
+        entity && withPayeeAccount(entity, td.entityBankAccountId),
+      );
       const average = hist ? comparableAverage(hist, td) : null;
       const supplier: string | null =
         entity?.name ?? td.supplierOrClient ?? null;

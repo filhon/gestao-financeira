@@ -1925,7 +1925,7 @@ export function ReconciliationDashboard() {
       <Sheet open={createModalOpen} onOpenChange={setCreateModalOpen}>
         <SheetContent
           onInteractOutside={(e) => e.preventDefault()}
-          className="w-full gap-0 overflow-hidden p-0 sm:max-w-4xl"
+          className="w-full gap-0 overflow-visible p-0 sm:max-w-4xl"
         >
           <SheetHeader className="shrink-0 gap-0.5 border-b px-6 py-4">
             <SheetTitle className="text-lg">Lançar e conciliar</SheetTitle>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useFieldArray, useForm, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { format } from "date-fns";
@@ -12,7 +12,9 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Loader2,
+  Plus,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +54,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSelect";
-import { Entity, ENTITY_BANK_FIELDS } from "@/lib/types";
+import { Entity, ENTITY_BANK_FIELDS, EntityBankDetails } from "@/lib/types";
 import { entityService } from "@/lib/services/entityService";
 import { cnpjService } from "@/lib/services/cnpjService";
 import { maskCpfCnpj, validateCnpj, validateCpf } from "@/lib/validations/cnpj";
@@ -97,6 +99,16 @@ function guessPixKeyType(key: string): Entity["pixKeyType"] | undefined {
 
 const percent = z.number().min(0).max(100).nullable().optional();
 
+const bankAccountShape = {
+  bankAccountName: z.string().optional(),
+  bankName: z.string().optional(),
+  agency: z.string().optional(),
+  account: z.string().optional(),
+  accountType: z.enum(["checking", "savings"]).optional(),
+  pixKeyType: z.enum(["cpf", "cnpj", "email", "phone", "random"]).optional(),
+  pixKey: z.string().optional(),
+};
+
 const entitySchema = z
   .object({
     document: z.string().optional(),
@@ -119,12 +131,14 @@ const entitySchema = z
     city: z.string().optional(),
     state: z.string().max(2).optional(),
 
-    bankName: z.string().optional(),
-    agency: z.string().optional(),
-    account: z.string().optional(),
-    accountType: z.enum(["checking", "savings"]).optional(),
-    pixKeyType: z.enum(["cpf", "cnpj", "email", "phone", "random"]).optional(),
-    pixKey: z.string().optional(),
+    ...bankAccountShape,
+    extraBankAccounts: z.array(
+      z.object({
+        ...bankAccountShape,
+        id: z.string(),
+        bankAccountName: z.string().trim().min(1, "Dê um nome à conta"),
+      }),
+    ),
 
     defaultAccountId: z.string().optional(),
     defaultCostCenterId: z.string().optional(),
@@ -179,6 +193,16 @@ const UF =
     " ",
   );
 
+const bankFormValues = (e: EntityBankDetails) => ({
+  bankAccountName: e.bankAccountName ?? "",
+  bankName: e.bankName ?? "",
+  agency: e.agency ?? "",
+  account: e.account ?? "",
+  accountType: e.accountType,
+  pixKeyType: e.pixKeyType,
+  pixKey: e.pixKey ?? "",
+});
+
 /** Valores do cadastro no formato do formulário ("" no lugar de ausente). */
 function toFormValues(e: Partial<Entity>): EntityFormData {
   return {
@@ -200,12 +224,12 @@ function toFormValues(e: Partial<Entity>): EntityFormData {
     district: e.district ?? "",
     city: e.city ?? "",
     state: e.state ?? "",
-    bankName: e.bankName ?? "",
-    agency: e.agency ?? "",
-    account: e.account ?? "",
-    accountType: e.accountType,
-    pixKeyType: e.pixKeyType,
-    pixKey: e.pixKey ?? "",
+    ...bankFormValues(e),
+    extraBankAccounts: (e.extraBankAccounts ?? []).map((a) => ({
+      ...bankFormValues(a),
+      id: a.id,
+      bankAccountName: a.bankAccountName ?? "",
+    })),
     defaultAccountId: e.defaultAccountId,
     defaultCostCenterId: e.defaultCostCenterId,
     defaultPaymentMethod: e.defaultPaymentMethod,
@@ -321,10 +345,14 @@ export function EntityForm({
   const isEdit = !!defaultValues?.id;
   const [isCheckingDocument, setIsCheckingDocument] = useState(false);
   const [isCheckingCep, setIsCheckingCep] = useState(false);
-  const [isBankPickerOpen, setIsBankPickerOpen] = useState(false);
+  const [initialValues] = useState(() => toFormValues(defaultValues ?? {}));
   const form = useForm<EntityFormData>({
     resolver: zodResolver(entitySchema),
-    defaultValues: toFormValues(defaultValues ?? {}),
+    defaultValues: initialValues,
+  });
+  const extraAccounts = useFieldArray({
+    control: form.control,
+    name: "extraBankAccounts",
   });
 
   const { isDirty } = form.formState;
@@ -472,11 +500,14 @@ export function EntityForm({
 
   const pending = defaultValues?.pendingBankChange;
   const values = form.watch();
+  const extraCount = values.extraBankAccounts.length;
   const bankSummary =
     [
       values.pixKey && `PIX ${values.pixKey}`,
       values.bankName?.split(" - ")[1],
       values.account && `c/c ${values.account}`,
+      extraCount > 0 &&
+        `+${extraCount} ${extraCount === 1 ? "conta" : "contas"}`,
     ]
       .filter(Boolean)
       .join(" · ") || "Nenhum dado bancário";
@@ -504,19 +535,21 @@ export function EntityForm({
 
   const bankChanged =
     isEdit &&
-    ENTITY_BANK_FIELDS.some(
+    (ENTITY_BANK_FIELDS.some(
       (f) => (values[f] ?? "") !== (defaultValues?.[f] ?? ""),
-    );
+    ) ||
+      JSON.stringify(values.extraBankAccounts) !==
+        JSON.stringify(initialValues.extraBankAccounts));
 
   return (
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit)}
-        className="flex min-h-full flex-col"
+        className="@container flex min-h-full flex-col"
       >
         <div className="grid grid-cols-12 gap-x-4 gap-y-4 pb-5">
           <SectionTitle>Identificação</SectionTitle>
-          <div className="col-span-12 sm:col-span-5">
+          <div className="col-span-12 @lg:col-span-5">
             <FormField
               control={form.control}
               name="document"
@@ -562,7 +595,7 @@ export function EntityForm({
             />
           </div>
 
-          <div className="col-span-12 sm:col-span-4">
+          <div className="col-span-12 @lg:col-span-4">
             <FormField
               control={form.control}
               name="category"
@@ -591,7 +624,7 @@ export function EntityForm({
 
           {/* Sem documento (estrangeiro, cadastro antigo) o tipo é escolhido à mão */}
           {documentDigits.length !== 11 && documentDigits.length !== 14 && (
-            <div className="col-span-12 sm:col-span-3">
+            <div className="col-span-12 @lg:col-span-3">
               <FormField
                 control={form.control}
                 name="type"
@@ -617,7 +650,7 @@ export function EntityForm({
             </div>
           )}
 
-          <div className={cn("col-span-12", isCompany && "sm:col-span-7")}>
+          <div className={cn("col-span-12", isCompany && "@lg:col-span-7")}>
             <FormField
               control={form.control}
               name="name"
@@ -645,7 +678,7 @@ export function EntityForm({
           </div>
 
           {isCompany && (
-            <div className="col-span-12 sm:col-span-5">
+            <div className="col-span-12 @lg:col-span-5">
               <FormField
                 control={form.control}
                 name="tradeName"
@@ -663,7 +696,7 @@ export function EntityForm({
 
           {isCompany && (
             <>
-              <div className="col-span-12 sm:col-span-4">
+              <div className="col-span-12 @lg:col-span-4">
                 <FormField
                   control={form.control}
                   name="taxRegime"
@@ -693,7 +726,7 @@ export function EntityForm({
                   )}
                 />
               </div>
-              <div className="col-span-6 sm:col-span-4">
+              <div className="col-span-6 @lg:col-span-4">
                 <FormField
                   control={form.control}
                   name="stateRegistration"
@@ -711,7 +744,7 @@ export function EntityForm({
                   )}
                 />
               </div>
-              <div className="col-span-6 sm:col-span-4">
+              <div className="col-span-6 @lg:col-span-4">
                 <FormField
                   control={form.control}
                   name="municipalRegistration"
@@ -729,7 +762,7 @@ export function EntityForm({
           )}
 
           <SectionTitle>Contato e endereço</SectionTitle>
-          <div className="col-span-12 sm:col-span-7">
+          <div className="col-span-12 @lg:col-span-7">
             <FormField
               control={form.control}
               name="email"
@@ -748,7 +781,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-12 sm:col-span-5">
+          <div className="col-span-12 @lg:col-span-5">
             <FormField
               control={form.control}
               name="phone"
@@ -768,7 +801,7 @@ export function EntityForm({
             />
           </div>
 
-          <div className="col-span-5 sm:col-span-3">
+          <div className="col-span-5 @lg:col-span-3">
             <FormField
               control={form.control}
               name="zipCode"
@@ -802,7 +835,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-7 sm:col-span-7">
+          <div className="col-span-7 @lg:col-span-7">
             <FormField
               control={form.control}
               name="street"
@@ -816,7 +849,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-4 sm:col-span-2">
+          <div className="col-span-4 @lg:col-span-2">
             <FormField
               control={form.control}
               name="number"
@@ -830,7 +863,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-8 sm:col-span-4">
+          <div className="col-span-8 @lg:col-span-4">
             <FormField
               control={form.control}
               name="complement"
@@ -844,7 +877,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-12 sm:col-span-3">
+          <div className="col-span-12 @lg:col-span-3">
             <FormField
               control={form.control}
               name="district"
@@ -858,7 +891,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-8 sm:col-span-3">
+          <div className="col-span-8 @lg:col-span-3">
             <FormField
               control={form.control}
               name="city"
@@ -872,7 +905,7 @@ export function EntityForm({
               )}
             />
           </div>
-          <div className="col-span-4 sm:col-span-2">
+          <div className="col-span-4 @lg:col-span-2">
             <FormField
               control={form.control}
               name="state"
@@ -933,211 +966,42 @@ export function EntityForm({
                 : "Trocar estes dados pede aprovação de outra pessoa."}
             </p>
           )}
-          <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-12 sm:col-span-5">
-              <FormField
-                control={form.control}
-                name="pixKey"
-                render={({ field }) => {
-                  const pixKeyType = form.watch("pixKeyType");
-                  return (
-                    <FormItem>
-                      <FormLabel>Chave PIX</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder={
-                            pixKeyType
-                              ? pixPlaceholders[pixKeyType]
-                              : "CPF, CNPJ, e-mail, telefone ou aleatória"
-                          }
-                          className="font-financial"
-                          {...field}
-                          onBlur={(e) => {
-                            field.onBlur();
-                            const guess = guessPixKeyType(e.target.value);
-                            if (guess && !form.getValues("pixKeyType")) {
-                              form.setValue("pixKeyType", guess, {
-                                shouldDirty: true,
-                              });
-                            }
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  );
-                }}
-              />
+          <BankAccountFields prefix="" />
+          {extraAccounts.fields.map((f, i) => (
+            <div key={f.id} className="mt-5 border-t border-dashed pt-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Conta {i + 2}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={() => extraAccounts.remove(i)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remover
+                </Button>
+              </div>
+              <BankAccountFields prefix={`extraBankAccounts.${i}.`} />
             </div>
-            <div className="col-span-12 sm:col-span-3">
-              <FormField
-                control={form.control}
-                name="pixKeyType"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tipo da chave</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value ?? ""}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Detectado ao digitar" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {Object.entries(PIX_KEY_TYPE_LABELS).map(
-                          ([v, label]) => (
-                            <SelectItem key={v} value={v}>
-                              {label}
-                            </SelectItem>
-                          ),
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </FormItem>
-                )}
-              />
-            </div>
-            <div className="col-span-12 sm:col-span-4" />
-
-            <div className="col-span-12 sm:col-span-6">
-              <FormField
-                control={form.control}
-                name="bankName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Banco</FormLabel>
-                    <Popover
-                      open={isBankPickerOpen}
-                      onOpenChange={setIsBankPickerOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            className={cn(
-                              "w-full justify-between font-normal",
-                              !field.value && "text-muted-foreground",
-                            )}
-                          >
-                            <span className="truncate">
-                              {field.value || "Selecione o banco"}
-                            </span>
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                        <Command filter={filterBank}>
-                          <CommandInput placeholder="Código ou nome do banco..." />
-                          <CommandList
-                            onWheel={(e) => {
-                              e.stopPropagation();
-                              e.currentTarget.scrollTop += e.deltaY;
-                            }}
-                          >
-                            <CommandEmpty>
-                              Nenhum banco encontrado.
-                            </CommandEmpty>
-                            <CommandGroup>
-                              {BRAZILIAN_BANKS.map((bank) => {
-                                const value = `${bank.code} - ${bank.name}`;
-                                return (
-                                  <CommandItem
-                                    key={bank.code}
-                                    value={value}
-                                    onSelect={() => {
-                                      field.onChange(value);
-                                      setIsBankPickerOpen(false);
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        field.value === value
-                                          ? "opacity-100"
-                                          : "opacity-0",
-                                      )}
-                                    />
-                                    <span className="mr-2 font-mono text-muted-foreground">
-                                      {bank.code}
-                                    </span>
-                                    {bank.name}
-                                  </CommandItem>
-                                );
-                              })}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </FormItem>
-                )}
-              />
-            </div>
-            <div className="col-span-4 sm:col-span-2">
-              <FormField
-                control={form.control}
-                name="agency"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Agência</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="0000"
-                        className="font-financial"
-                        {...field}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </div>
-            <div className="col-span-8 sm:col-span-4">
-              <FormField
-                control={form.control}
-                name="account"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Conta</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl>
-                        <Input
-                          placeholder="00000-0"
-                          className="font-financial"
-                          {...field}
-                        />
-                      </FormControl>
-                      <Select
-                        onValueChange={(v) =>
-                          form.setValue(
-                            "accountType",
-                            v as "checking" | "savings",
-                            { shouldDirty: true },
-                          )
-                        }
-                        value={form.watch("accountType") ?? ""}
-                      >
-                        <SelectTrigger
-                          className="w-32 shrink-0"
-                          aria-label="Tipo de conta"
-                        >
-                          <SelectValue placeholder="Tipo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="checking">Corrente</SelectItem>
-                          <SelectItem value="savings">Poupança</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </FormItem>
-                )}
-              />
-            </div>
-          </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() =>
+              extraAccounts.append({
+                id: crypto.randomUUID().slice(0, 8),
+                bankAccountName: "",
+                bankName: "",
+                agency: "",
+                account: "",
+                pixKey: "",
+              })
+            }
+          >
+            <Plus className="h-3.5 w-3.5" /> Adicionar outra conta
+          </Button>
         </Section>
 
         <Section
@@ -1151,7 +1015,7 @@ export function EntityForm({
           </p>
           <div className="grid grid-cols-12 gap-4">
             {hasAccounts && (
-              <div className="col-span-12 sm:col-span-6">
+              <div className="col-span-12 @lg:col-span-6">
                 <FormField
                   control={form.control}
                   name="defaultAccountId"
@@ -1174,7 +1038,7 @@ export function EntityForm({
               </div>
             )}
             {category !== "client" && leafCostCenters.length > 0 && (
-              <div className="col-span-12 sm:col-span-6">
+              <div className="col-span-12 @lg:col-span-6">
                 <FormField
                   control={form.control}
                   name="defaultCostCenterId"
@@ -1209,7 +1073,7 @@ export function EntityForm({
                 />
               </div>
             )}
-            <div className="col-span-7 sm:col-span-4">
+            <div className="col-span-7 @lg:col-span-4">
               <FormField
                 control={form.control}
                 name="defaultPaymentMethod"
@@ -1242,7 +1106,7 @@ export function EntityForm({
                 )}
               />
             </div>
-            <div className="col-span-5 sm:col-span-2">
+            <div className="col-span-5 @lg:col-span-2">
               <FormField
                 control={form.control}
                 name="paymentTermDays"
@@ -1263,7 +1127,7 @@ export function EntityForm({
                 )}
               />
             </div>
-            <div className="col-span-6 sm:col-span-3">
+            <div className="col-span-6 @lg:col-span-3">
               <FormField
                 control={form.control}
                 name="lateFeePercent"
@@ -1282,7 +1146,7 @@ export function EntityForm({
                 )}
               />
             </div>
-            <div className="col-span-6 sm:col-span-3">
+            <div className="col-span-6 @lg:col-span-3">
               <FormField
                 control={form.control}
                 name="monthlyInterestPercent"
@@ -1324,7 +1188,7 @@ export function EntityForm({
                   ["iss", "ISS (%)", "5"],
                 ] as const
               ).map(([key, label, placeholder]) => (
-                <div key={key} className="col-span-6 sm:col-span-3">
+                <div key={key} className="col-span-6 @lg:col-span-3">
                   <FormField
                     control={form.control}
                     name={`withholdings.${key}`}
@@ -1418,5 +1282,239 @@ export function EntityForm({
         </div>
       </form>
     </Form>
+  );
+}
+
+/**
+ * Campos de uma conta bancária. `prefix` "" é a principal (campos soltos no
+ * cadastro); "extraBankAccounts.N." é uma das outras.
+ */
+function BankAccountFields({ prefix }: { prefix: string }) {
+  const form = useFormContext<EntityFormData>();
+  const [isBankPickerOpen, setIsBankPickerOpen] = useState(false);
+  // O caminho muda com o prefixo; o tipo é o mesmo campo da principal.
+  const n = <F extends (typeof ENTITY_BANK_FIELDS)[number]>(f: F) =>
+    `${prefix}${f}` as F;
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <div className="col-span-12 @lg:col-span-4">
+        <FormField
+          control={form.control}
+          name={n("bankAccountName")}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Nome da conta</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder={
+                    prefix
+                      ? "Ex.: Filial, Conta salário"
+                      : "Ex.: Principal, Matriz"
+                  }
+                  {...field}
+                  value={field.value ?? ""}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      </div>
+      <div className="col-span-12 @lg:col-span-5">
+        <FormField
+          control={form.control}
+          name={n("pixKey")}
+          render={({ field }) => {
+            const pixKeyType = form.watch(n("pixKeyType"));
+            return (
+              <FormItem>
+                <FormLabel>Chave PIX</FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder={
+                      pixKeyType
+                        ? pixPlaceholders[pixKeyType]
+                        : "CPF, CNPJ, e-mail, telefone ou aleatória"
+                    }
+                    className="font-financial"
+                    {...field}
+                    onBlur={(e) => {
+                      field.onBlur();
+                      const guess = guessPixKeyType(e.target.value);
+                      if (guess && !form.getValues(n("pixKeyType"))) {
+                        form.setValue(n("pixKeyType"), guess, {
+                          shouldDirty: true,
+                        });
+                      }
+                    }}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            );
+          }}
+        />
+      </div>
+      <div className="col-span-12 @lg:col-span-3">
+        <FormField
+          control={form.control}
+          name={n("pixKeyType")}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tipo da chave</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                <FormControl>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Detectado ao digitar" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {Object.entries(PIX_KEY_TYPE_LABELS).map(([v, label]) => (
+                    <SelectItem key={v} value={v}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <div className="col-span-12 @lg:col-span-6">
+        <FormField
+          control={form.control}
+          name={n("bankName")}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Banco</FormLabel>
+              <Popover
+                open={isBankPickerOpen}
+                onOpenChange={setIsBankPickerOpen}
+              >
+                <PopoverTrigger asChild>
+                  <FormControl>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      className={cn(
+                        "w-full justify-between font-normal",
+                        !field.value && "text-muted-foreground",
+                      )}
+                    >
+                      <span className="truncate">
+                        {field.value || "Selecione o banco"}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </FormControl>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                  <Command filter={filterBank}>
+                    <CommandInput placeholder="Código ou nome do banco..." />
+                    <CommandList
+                      onWheel={(e) => {
+                        e.stopPropagation();
+                        e.currentTarget.scrollTop += e.deltaY;
+                      }}
+                    >
+                      <CommandEmpty>Nenhum banco encontrado.</CommandEmpty>
+                      <CommandGroup>
+                        {BRAZILIAN_BANKS.map((bank) => {
+                          const value = `${bank.code} - ${bank.name}`;
+                          return (
+                            <CommandItem
+                              key={bank.code}
+                              value={value}
+                              onSelect={() => {
+                                field.onChange(value);
+                                setIsBankPickerOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  field.value === value
+                                    ? "opacity-100"
+                                    : "opacity-0",
+                                )}
+                              />
+                              <span className="mr-2 font-mono text-muted-foreground">
+                                {bank.code}
+                              </span>
+                              {bank.name}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </FormItem>
+          )}
+        />
+      </div>
+      <div className="col-span-4 @lg:col-span-2">
+        <FormField
+          control={form.control}
+          name={n("agency")}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Agência</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="0000"
+                  className="font-financial"
+                  {...field}
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+      </div>
+      <div className="col-span-8 @lg:col-span-4">
+        <FormField
+          control={form.control}
+          name={n("account")}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Conta</FormLabel>
+              <div className="flex gap-2">
+                <FormControl>
+                  <Input
+                    placeholder="00000-0"
+                    className="font-financial"
+                    {...field}
+                  />
+                </FormControl>
+                <Select
+                  onValueChange={(v) =>
+                    form.setValue(
+                      n("accountType"),
+                      v as "checking" | "savings",
+                      { shouldDirty: true },
+                    )
+                  }
+                  value={form.watch(n("accountType")) ?? ""}
+                >
+                  <SelectTrigger
+                    className="w-32 shrink-0"
+                    aria-label="Tipo de conta"
+                  >
+                    <SelectValue placeholder="Tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="checking">Corrente</SelectItem>
+                    <SelectItem value="savings">Poupança</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </FormItem>
+          )}
+        />
+      </div>
+    </div>
   );
 }

@@ -78,6 +78,12 @@ import {
   PAYMENT_METHOD_LABELS,
   PIX_KEY_TYPE_LABELS,
 } from "@/components/features/entities/entityDisplay";
+import {
+  bankAccountLabel,
+  bankAccountsOf,
+  withPayeeAccount,
+} from "@/lib/entityBankAccounts";
+import Link from "next/link";
 
 const REQUEST_ORIGIN_LABELS = {
   director: "Diretoria",
@@ -98,6 +104,27 @@ interface ViewableDoc {
 }
 
 const sectionTitle = "mb-2 text-sm font-medium";
+
+/** Leva ao cadastro; fecha o painel para ele não cobrir a página nova. */
+function RecordLink({
+  href,
+  onNavigate,
+  children,
+}: {
+  href: string;
+  onNavigate: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className="underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground"
+    >
+      {children}
+    </Link>
+  );
+}
 
 function Field({
   label,
@@ -225,6 +252,18 @@ export function TransactionDetailsDialog({
     fetchedEntity && fetchedEntity.id === transaction?.entityId
       ? fetchedEntity
       : null;
+  // Dados bancários da conta escolhida no lançamento (a principal se nenhuma).
+  const payee = entity
+    ? withPayeeAccount(entity, transaction?.entityBankAccountId)
+    : null;
+  const payeeAccountName = (() => {
+    if (!entity?.extraBankAccounts?.length) return null;
+    const all = bankAccountsOf(entity);
+    const i = all.findIndex(
+      (a) => a.id === (transaction?.entityBankAccountId ?? all[0].id),
+    );
+    return i < 0 ? "Conta removida do cadastro" : bankAccountLabel(all[i], i);
+  })();
 
   // Bank/PIX details live on the entity, not on the transaction — read them fresh on open.
   useEffect(() => {
@@ -868,7 +907,19 @@ export function TransactionDetailsDialog({
           <Field
             label={`Conta de ${transaction.type === "payable" ? "saída" : "entrada"}`}
           >
-            {bankAccount.name}
+            <RecordLink href="/cadastros/contas-bancarias" onNavigate={onClose}>
+              {bankAccount.name}
+            </RecordLink>
+          </Field>
+        )}
+        {transaction.batchId && (
+          <Field label="Lote de pagamento">
+            <RecordLink
+              href={`/financeiro/lotes/${transaction.batchId}`}
+              onNavigate={onClose}
+            >
+              Abrir o lote
+            </RecordLink>
           </Field>
         )}
         {transaction.competence && (
@@ -905,7 +956,9 @@ export function TransactionDetailsDialog({
             <span className="font-mono text-xs text-muted-foreground mr-1.5">
               {account.code}
             </span>
-            {account.name}
+            <RecordLink href="/cadastros/plano-de-contas" onNavigate={onClose}>
+              {account.name}
+            </RecordLink>
             {account.archived && (
               <span className="text-xs text-muted-foreground">
                 {" "}
@@ -917,42 +970,48 @@ export function TransactionDetailsDialog({
       </dl>
 
       {(transaction.barcode ||
-        (entity &&
-          (entity.pixKey ||
-            entity.bankName ||
-            entity.agency ||
-            entity.account))) && (
+        payeeAccountName ||
+        (payee &&
+          (payee.pixKey ||
+            payee.bankName ||
+            payee.agency ||
+            payee.account))) && (
         <section>
           <h3 className={sectionTitle}>Dados para pagamento</h3>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border bg-muted/30 p-3">
-            {entity?.pixKey && (
+            {payeeAccountName && (
+              <Field label="Conta do favorecido" className="col-span-2">
+                {payeeAccountName}
+              </Field>
+            )}
+            {payee?.pixKey && (
               <Field
                 className="col-span-2"
-                label={`Chave PIX${entity.pixKeyType ? ` (${PIX_KEY_TYPE_LABELS[entity.pixKeyType]})` : ""}`}
+                label={`Chave PIX${payee.pixKeyType ? ` (${PIX_KEY_TYPE_LABELS[payee.pixKeyType]})` : ""}`}
               >
                 <span className="flex items-center gap-2">
                   <span className="font-mono break-all select-all">
-                    {entity.pixKey}
+                    {payee.pixKey}
                   </span>
-                  <CopyButton value={entity.pixKey} label="Chave PIX" />
+                  <CopyButton value={payee.pixKey} label="Chave PIX" />
                 </span>
               </Field>
             )}
-            {entity?.bankName && (
+            {payee?.bankName && (
               <Field label="Banco" className="col-span-2">
-                {entity.bankName}
+                {payee.bankName}
               </Field>
             )}
-            {entity?.agency && (
+            {payee?.agency && (
               <Field label="Agência">
-                <span className="font-mono select-all">{entity.agency}</span>
+                <span className="font-mono select-all">{payee.agency}</span>
               </Field>
             )}
-            {entity?.account && (
+            {payee?.account && (
               <Field
-                label={`Conta${entity.accountType ? (entity.accountType === "savings" ? " (poupança)" : " (corrente)") : ""}`}
+                label={`Conta${payee.accountType ? (payee.accountType === "savings" ? " (poupança)" : " (corrente)") : ""}`}
               >
-                <span className="font-mono select-all">{entity.account}</span>
+                <span className="font-mono select-all">{payee.account}</span>
               </Field>
             )}
             {transaction.barcode && (
@@ -983,7 +1042,12 @@ export function TransactionDetailsDialog({
                 className="flex items-baseline justify-between gap-4 px-3 py-2"
               >
                 <span className="min-w-0 truncate">
-                  {costCenterNames[alloc.costCenterId] || alloc.costCenterId}
+                  <RecordLink
+                    href={`/centros-custo/${alloc.costCenterId}`}
+                    onNavigate={onClose}
+                  >
+                    {costCenterNames[alloc.costCenterId] || alloc.costCenterId}
+                  </RecordLink>
                 </span>
                 <span className="flex shrink-0 gap-4 font-financial tabular-nums">
                   <span className="text-muted-foreground">
@@ -1185,9 +1249,18 @@ export function TransactionDetailsDialog({
                     {isEditing ? "Editar conta" : transaction.description}
                   </ResponsiveModalTitle>
                   <ResponsiveModalDescription className="mt-0.5 truncate text-sm">
-                    {isEditing
-                      ? transaction.description
-                      : transaction.supplierOrClient || "—"}
+                    {isEditing ? (
+                      transaction.description
+                    ) : transaction.entityId ? (
+                      <RecordLink
+                        href={`/cadastros/entidades/${transaction.entityId}`}
+                        onNavigate={onClose}
+                      >
+                        {transaction.supplierOrClient || entity?.name || "—"}
+                      </RecordLink>
+                    ) : (
+                      transaction.supplierOrClient || "—"
+                    )}
                   </ResponsiveModalDescription>
 
                   {!isEditing && (

@@ -30,6 +30,7 @@ import {
   toBarcode,
 } from "./brazilian";
 import type { ReceiptFacts } from "./receipt";
+import { withPayeeAccount } from "../entityBankAccounts";
 import {
   buildTokenIndex,
   createTokenWeights,
@@ -169,7 +170,10 @@ function prepare(
     entityById.set(entity.id, entity);
 
   const candidates: PreparedTransaction[] = transactions.map((tx) => {
-    const entity = tx.entityId ? entityById.get(tx.entityId) : undefined;
+    const registered = tx.entityId ? entityById.get(tx.entityId) : undefined;
+    // PIX e conta são os da conta que o lançamento escolheu.
+    const entity =
+      registered && withPayeeAccount(registered, tx.entityBankAccountId);
     const entityName = entity?.name ?? tx.supplierOrClient ?? "";
 
     const primaryAmount = tx.finalAmount ?? tx.amount;

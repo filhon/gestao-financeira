@@ -91,6 +91,14 @@ import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { formatBoletoLine, parseBoleto } from "@/lib/boleto";
 import { amountsFromPercent, evenPercentages } from "@/lib/allocation";
 import { Entity, Transaction } from "@/lib/types";
+import {
+  MAIN_BANK_ACCOUNT,
+  bankAccountLabel,
+  bankAccountSummary,
+  bankAccountsOf,
+  withPayeeAccount,
+} from "@/lib/entityBankAccounts";
+import { EntitySidePanel } from "@/components/features/entities/EntityFormSheet";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -408,7 +416,8 @@ export function TransactionForm({
   const counterpartLabel = isPayable ? "Fornecedor" : "Cliente";
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
-  const { onlyOwnPayables, canViewReconciliation } = usePermissions();
+  const { onlyOwnPayables, canViewReconciliation, canManageEntities } =
+    usePermissions();
   // O papel `user` só lê o que ele mesmo lançou: as consultas precisam dizer isso.
   const ownOnly = onlyOwnPayables ? user?.uid : undefined;
 
@@ -922,6 +931,35 @@ export function TransactionForm({
   // ── Entidade ────────────────────────────────────────────────────────────────
   const entityId = form.watch("entityId");
   const selectedEntity = entities.find((e) => e.id === entityId);
+  const payeeAccounts = selectedEntity ? bankAccountsOf(selectedEntity) : [];
+  const payee =
+    selectedEntity &&
+    withPayeeAccount(selectedEntity, form.watch("entityBankAccountId"));
+
+  // Trocou a entidade: a conta escolhida era da anterior.
+  const prevEntityId = useRef(entityId);
+  useEffect(() => {
+    if (prevEntityId.current === entityId) return;
+    prevEntityId.current = entityId;
+    // "main" explícito: undefined não apagaria a conta gravada na edição.
+    if (form.getValues("entityBankAccountId")) {
+      form.setValue("entityBankAccountId", MAIN_BANK_ACCOUNT);
+    }
+  }, [entityId, form]);
+
+  // Cadastro novo aberto a partir do lançamento, em folha sobre esta.
+  const [newEntityOpen, setNewEntityOpen] = useState(false);
+  const handleEntityCreated = (entity?: Entity) => {
+    if (!entity) return;
+    setEntities((prev) => [...prev, entity]);
+    setUseEntity(true);
+    form.setValue("entityId", entity.id);
+    form.setValue("supplierOrClient", entity.name, {
+      shouldDirty: true,
+      shouldValidate: submitCount > 0,
+    });
+    void applyEntityDefaults(entity);
+  };
 
   /**
    * Fornecedor escolhido: o último lançamento dele sugere forma de pagamento,
@@ -1842,6 +1880,23 @@ export function TransactionForm({
                               ))}
                           </CommandGroup>
                         </CommandList>
+                        {canManageEntities && (
+                          <div className="border-t p-1">
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                              onClick={() => {
+                                setOpenEntityCombobox(false);
+                                setNewEntityOpen(true);
+                              }}
+                            >
+                              <Plus className="h-4 w-4" />
+                              {entitySearch.trim()
+                                ? `Cadastrar “${entitySearch.trim()}”`
+                                : `Cadastrar ${isPayable ? "fornecedor" : "cliente"}`}
+                            </button>
+                          </div>
+                        )}
                       </Command>
                     </PopoverContent>
                   </Popover>
@@ -2094,22 +2149,59 @@ export function TransactionForm({
               , conforme o extrato.
             </p>
           )}
-          {paymentMethod === "pix" && selectedEntity?.pixKey && (
+          {payeeAccounts.length > 1 && (
+            <FormField
+              control={form.control}
+              name="entityBankAccountId"
+              render={({ field }) => (
+                <FormItem className="col-span-12 @2xl:col-span-6">
+                  <FormLabel>
+                    Conta {isPayable ? "do favorecido" : "do cliente"}
+                  </FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value ?? MAIN_BANK_ACCOUNT}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {payeeAccounts.map((a, i) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {bankAccountLabel(a, i)}
+                          {bankAccountSummary(a) && (
+                            <span className="text-muted-foreground font-financial">
+                              {" "}
+                              · {bankAccountSummary(a)}
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
+          {paymentMethod === "pix" && payee?.pixKey && (
             <p className="col-span-12 -mt-2 text-xs text-muted-foreground">
-              Chave PIX de {selectedEntity.name}:{" "}
+              Chave PIX de {payee.name}:{" "}
               <span className="font-financial text-foreground select-all">
-                {selectedEntity.pixKey}
+                {payee.pixKey}
               </span>
             </p>
           )}
-          {paymentMethod === "transfer" && selectedEntity?.bankName && (
+          {paymentMethod === "transfer" && payee?.bankName && (
             <p className="col-span-12 -mt-2 text-xs text-muted-foreground">
-              Dados bancários de {selectedEntity.name}:{" "}
+              Dados bancários de {payee.name}:{" "}
               <span className="font-financial text-foreground select-all">
                 {[
-                  selectedEntity.bankName,
-                  selectedEntity.agency && `ag. ${selectedEntity.agency}`,
-                  selectedEntity.account && `conta ${selectedEntity.account}`,
+                  payee.bankName,
+                  payee.agency && `ag. ${payee.agency}`,
+                  payee.account && `conta ${payee.account}`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -2913,6 +3005,18 @@ export function TransactionForm({
           </div>
         </div>
       </form>
+      {/* Segunda folha ao lado desta. Fora do <form>: o envio do cadastro
+          subiria até o do lançamento. */}
+      <EntitySidePanel
+        open={newEntityOpen}
+        onClose={() => setNewEntityOpen(false)}
+        title={isPayable ? "Novo fornecedor" : "Novo cliente"}
+        initial={{
+          name: entitySearch.trim(),
+          category: isPayable ? "supplier" : "client",
+        }}
+        onSaved={handleEntityCreated}
+      />
     </Form>
   );
 }
