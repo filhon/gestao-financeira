@@ -4,6 +4,26 @@
 
 ---
 
+## Atualização de 28 de outubro de 2026
+
+### Centros de custo: uma árvore só, com o disponível de cada centro
+
+A tela de centros de custo e a de distribuição viraram uma só. Cada linha mostra o envelope, a saída (o que foi distribuído aos filhos ou, nas folhas, as despesas lançadas e quanto disso já foi pago), o percentual usado e o disponível, com "sem folga" ou "estourado" escrito ao lado do número. Clique no nome de uma coluna para ver o que ela significa. Para mudar envelopes, clique em "Distribuir recursos": os valores viram campos e o saldo de cada pai se ajusta enquanto você digita.
+
+A distribuição é gravada de uma vez: ou todos os envelopes mudam, ou nenhum. Antes de aplicar, "Ver alterações" mostra o valor antigo e o novo de cada centro. No aviso de centros sem folga, clicar no nome leva direto ao campo do envelope. Ctrl+Enter aplica e Esc desfaz o campo em edição. Pedidos de suplementação mostram de qual centro o dinheiro sai e quanto ele tem a distribuir.
+
+Editar, arquivar e excluir ficam no menu de cada linha, sempre visível. O formulário do centro ficou só com identidade e responsáveis: aprovador e liberador agora são escolhidos entre os usuários com o papel certo, em vez de digitados. O campo "Limite de orçamento mensal", que não tinha efeito, saiu.
+
+No detalhe do centro há o link para o centro pai, o botão de editar, o disponível de cada filho e uma projeção: no ritmo de gasto do ano, se o envelope acaba antes de dezembro e em que mês. O percentual comprometido passou a ser calculado do mesmo jeito em todas as telas.
+
+### Pedido de suplementação
+
+Quando um centro fica sem saldo, quem lança despesa pode pedir mais recurso pelo botão "Pedir suplementação", no detalhe do centro ou no aviso de saldo do formulário de despesa. O gestor financeiro recebe uma notificação e decide no topo da tela de centros de custo. Ao aprovar, o valor sai do envelope do centro pai na mesma hora; se o pai não tiver folga, a aprovação é recusada com o motivo. Quem pediu é avisado da decisão.
+
+### Alçada pelo consumo do envelope
+
+Quando um centro já tem 85% ou mais do envelope comprometido, a aprovação de novas despesas nele passa a ser do gestor financeiro ou do administrador, que podem redistribuir recurso se for preciso. O aprovador do centro e o link de aprovação por e-mail recebem uma mensagem explicando o motivo. Na tela de centros de custo, esses centros aparecem marcados como "acima da alçada".
+
 ## Atualização de 23 de outubro de 2026
 
 ### Dashboard começa pelo que precisa ser resolvido hoje

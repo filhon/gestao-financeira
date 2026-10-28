@@ -177,6 +177,55 @@ async function assertCanWriteTransaction(
       "Você só pode alterar lançamentos criados por você.",
     );
   }
+  return role;
+}
+
+/**
+ * Alçada pelo consumo do envelope: com o centro já 85% comprometido, aprovar
+ * mais uma despesa ali deixa de ser decisão do aprovador do centro e passa a
+ * ser do gestor financeiro ou do administrador — quem pode redistribuir.
+ *
+ * A despesa reserva envelope desde o rascunho, então o comprometido lido aqui
+ * já inclui ela. `role` nulo é o magic link, que não tem papel.
+ */
+const ALCADA_RATIO = 0.85;
+
+async function assertWithinAlcada(current: TxShape, role: Role | null) {
+  if (role === "admin" || role === "financial_manager") return;
+  if (current.type !== "payable" || !current.companyId) return;
+  const year = effectiveYear(current);
+  const allocs = allocationsOf(current);
+  if (year === null || allocs.length === 0) return;
+
+  const companyId = current.companyId;
+  const snaps = await db().getAll(
+    ...allocs.map((a) =>
+      db()
+        .collection(LEDGER)
+        .doc(ledgerDocId(companyId, a.id, year)),
+    ),
+  );
+
+  for (const [i, snap] of snaps.entries()) {
+    // ponytail: ignora o carry-over, que só existe no raiz e raiz não tem
+    // despesa direta; ler o carry aqui custaria 10 leituras por aprovação.
+    const received = toCents(snap.get("received"));
+    const committed =
+      toCents(snap.get("allocatedToChildren")) +
+      toCents(snap.get("spentDirect"));
+    if (committed < received * ALCADA_RATIO) continue;
+
+    const cc = await db().collection("cost_centers").doc(allocs[i].id).get();
+    const pct =
+      received > 0
+        ? `${Math.round((committed / received) * 100)}% do envelope comprometido`
+        : "envelope zerado";
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      `${cc.get("name") || "O centro de custo"} está com ${pct}. ` +
+        `Acima de ${ALCADA_RATIO * 100}%, a aprovação é do gestor financeiro ou do administrador.`,
+    );
+  }
 }
 
 /**
@@ -1470,6 +1519,7 @@ export async function notifyBudgetExceeded(
   companyId: string,
   title: string,
   message: string,
+  link = "/centros-custo/distribuicao",
 ) {
   try {
     const usersSnap = await db()
@@ -1487,7 +1537,7 @@ export async function notifyBudgetExceeded(
         title,
         message,
         type: "warning",
-        link: "/centros-custo/distribuicao",
+        link,
         read: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -1798,6 +1848,7 @@ export const approveTransactionByToken = functions.https.onCall(
     }
 
     const { ref, id, current } = await resolveApprovalToken(token);
+    await assertWithinAlcada(current, null);
 
     const patch: Record<string, unknown> = {
       status: "approved",
@@ -1962,7 +2013,10 @@ export const setTransactionStatus = functions
       );
     }
 
-    await assertCanWriteTransaction(context.auth, current, status);
+    const role = await assertCanWriteTransaction(context.auth, current, status);
+    if (status === "approved" && current.status !== "approved") {
+      await assertWithinAlcada(current, role);
+    }
 
     const uid = context.auth.uid;
     const now = admin.firestore.FieldValue.serverTimestamp();

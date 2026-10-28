@@ -88,6 +88,15 @@ const compactBRL = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 1,
 });
 
+/** 0.094 → "9,4%". `toFixed` escreveria "9.4%", com ponto. */
+export function formatPercent(ratio: number, digits = 1) {
+  return ratio.toLocaleString("pt-BR", {
+    style: "percent",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
 /** "R$ 1,2 mi", "R$ 400,0 mil", "-R$ 47,6 mil". Abaixo de mil, valor cheio. */
 export function formatCurrencyAbbr(value: number) {
   return Math.abs(value) >= 1_000

@@ -64,6 +64,29 @@ const emptyLedger = (
   updatedAt: new Date(),
 });
 
+/**
+ * A única definição de "% comprometido" do sistema: o que saiu do envelope,
+ * distribuído aos filhos ou gasto direto, sobre o que entrou. O gasto da
+ * subárvore não entra — ele já está dentro do que foi distribuído.
+ */
+export function committedOf(
+  b:
+    | Pick<
+        CostCenterBalance,
+        "received" | "carryIn" | "allocatedToChildren" | "spentDirect"
+      >
+    | undefined,
+) {
+  const envelope = b ? sum(b.received, b.carryIn) : 0;
+  const committed = b ? sum(b.allocatedToChildren, b.spentDirect) : 0;
+  return {
+    envelope,
+    committed,
+    /** Razão 0–1+ (passa de 1 no estouro). Sem envelope e com gasto, 1. */
+    ratio: envelope > 0 ? committed / envelope : committed > 0 ? 1 : 0,
+  };
+}
+
 const fromDoc = (id: string, data: Record<string, unknown>): CostCenterLedger =>
   ({
     id,
@@ -187,32 +210,28 @@ export const costCenterLedgerService = {
   // qualquer cliente e toda mutação passa pela Cloud Function.
 
   /**
-   * Define o envelope anual de um centro de custo, movendo recurso do pai.
+   * Define os envelopes anuais de vários centros de custo num commit só,
+   * movendo recurso de cada pai: ou todos mudam, ou nenhum.
    *
-   * A validação vive no servidor: o erro devolvido já vem com a mensagem
-   * pronta para o usuário (saldo insuficiente no pai, ou envelope abaixo do
-   * que o filho já comprometeu).
+   * A validação vive no servidor e olha o resultado do lote inteiro: o erro
+   * devolvido já vem com a mensagem pronta para o usuário (saldo insuficiente
+   * no pai, ou envelope abaixo do que o filho já comprometeu).
    */
-  setEnvelope: async (
+  setEnvelopes: async (
     companyId: string,
-    costCenterId: string,
     year: number,
-    amount: number,
-  ): Promise<{ previous: number; parentAvailableAfter?: number }> => {
+    changes: Array<{ costCenterId: string; amount: number }>,
+  ): Promise<{ changed: number }> => {
     const call = httpsCallable<
       {
         companyId: string;
-        costCenterId: string;
         year: number;
-        amount: number;
+        changes: Array<{ costCenterId: string; amount: number }>;
       },
-      { success: boolean; previous: number; parentAvailableAfter?: number }
-    >(fbFunctions, "setCostCenterEnvelope");
+      { success: boolean; changed: number }
+    >(fbFunctions, "setCostCenterEnvelopes");
 
-    const { data } = await call({ companyId, costCenterId, year, amount });
-    return {
-      previous: data.previous,
-      parentAvailableAfter: data.parentAvailableAfter,
-    };
+    const { data } = await call({ companyId, year, changes });
+    return { changed: data.changed };
   },
 };

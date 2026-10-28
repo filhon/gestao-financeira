@@ -24,6 +24,7 @@ import {
 import {
   costCenterLedgerService,
   buildCostCenterTree,
+  committedOf,
   type CostCenterTree,
 } from "@/lib/services/costCenterLedgerService";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -217,11 +218,8 @@ function CostCenterCard({
 
   // Envelope do exercício e quanto dele já saiu — distribuído a filhos ou gasto
   // direto. A barra antes era decorativa: `usagePercent` estava fixo em zero.
-  const envelope = (balance?.received ?? 0) + (balance?.carryIn ?? 0);
-  const committed =
-    (balance?.allocatedToChildren ?? 0) + (balance?.spentDirect ?? 0);
-  const usagePercent =
-    envelope > 0 ? Math.min((committed / envelope) * 100, 100) : 0;
+  const { envelope, ratio } = committedOf(balance);
+  const usagePercent = Math.min(ratio * 100, 100);
 
   return (
     <Card className="overflow-hidden transition-shadow hover:shadow-md">

@@ -15,8 +15,12 @@ const db = admin.firestore();
 
 // Orçamento por envelope — mutação do razão, isolada em módulo próprio porque
 // é o único caminho de escrita permitido em `cost_center_ledger`.
-export { setCostCenterEnvelope } from "./costCenterLedger";
-import { assertCanManageBudget } from "./costCenterLedger";
+export {
+  setCostCenterEnvelope,
+  setCostCenterEnvelopes,
+  decideBudgetRequest,
+} from "./costCenterLedger";
+import { assertCanManageBudget, formatBRL, toCents } from "./costCenterLedger";
 export {
   syncCostCenterLedger,
   createPayableTransaction,
@@ -32,6 +36,29 @@ import {
   notifyBudgetExceeded,
   scaleAllocation,
 } from "./transactionLedger";
+
+/**
+ * Pedido de suplementação novo: avisa quem decide. O cliente não grava
+ * notificação para outro usuário (rules), então o aviso nasce aqui.
+ */
+export const onBudgetRequestCreated = functions.firestore
+  .document("budget_requests/{requestId}")
+  .onCreate(async (snap) => {
+    const req = snap.data() as {
+      companyId: string;
+      costCenterId: string;
+      amount: number;
+      requestedByName?: string;
+    };
+    const cc = await db.collection("cost_centers").doc(req.costCenterId).get();
+    await notifyBudgetExceeded(
+      req.companyId,
+      "Pedido de suplementação",
+      `${req.requestedByName || "Alguém"} pediu ${formatBRL(toCents(req.amount))} ` +
+        `a mais para ${cc.get("name") || "um centro de custo"}.`,
+      "/centros-custo",
+    );
+  });
 
 /**
  * Trigger que atualiza o saldo da empresa (company_stats)

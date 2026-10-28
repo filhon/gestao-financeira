@@ -10,21 +10,40 @@ import {
   AlertCircle,
   ArrowLeft,
   FolderTree,
+  HandCoins,
+  Pencil,
   Receipt,
   TrendingDown,
+  TriangleAlert,
+  Wallet,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
-import { costCenterLedgerService } from "@/lib/services/costCenterLedgerService";
+import {
+  committedOf,
+  costCenterLedgerService,
+} from "@/lib/services/costCenterLedgerService";
 import { costCenterService } from "@/lib/services/costCenterService";
+import { budgetRequestService } from "@/lib/services/budgetRequestService";
 import { transactionService } from "@/lib/services/transactionService";
-import { CostCenter, CostCenterBalance, Transaction } from "@/lib/types";
+import {
+  BudgetRequest,
+  CostCenter,
+  CostCenterBalance,
+  Transaction,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { CostCenterFormDialog } from "@/components/features/finance/CostCenterFormDialog";
 import {
   Select,
   SelectContent,
@@ -40,11 +59,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency } from "@/lib/utils";
-import type {
-  CompositionSlice,
-  MonthlyPoint,
-} from "@/components/features/finance/CostCenterCharts";
+import { formatCurrency, formatPercent } from "@/lib/utils";
+import { friendlyError } from "@/lib/errors";
+import type { MonthlyPoint } from "@/components/features/finance/CostCenterCharts";
 
 // recharts entra num chunk separado: o envelope e os números do topo renderizam
 // sem esperar a biblioteca de gráficos.
@@ -52,17 +69,6 @@ const SpendingTrendChart = dynamic(
   () =>
     import("@/components/features/finance/CostCenterCharts").then(
       (m) => m.SpendingTrendChart,
-    ),
-  {
-    ssr: false,
-    loading: () => <Skeleton className="h-[220px] w-full sm:h-[300px]" />,
-  },
-);
-
-const EnvelopeCompositionChart = dynamic(
-  () =>
-    import("@/components/features/finance/CostCenterCharts").then(
-      (m) => m.EnvelopeCompositionChart,
     ),
   {
     ssr: false,
@@ -105,10 +111,7 @@ function DataSkeleton() {
           <Skeleton className="h-3 w-full max-w-md" />
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <Skeleton className="h-[300px] w-full rounded-xl lg:col-span-4" />
-        <Skeleton className="h-[300px] w-full rounded-xl lg:col-span-3" />
-      </div>
+      <Skeleton className="h-[300px] w-full rounded-xl" />
       <div className="grid gap-6 sm:grid-cols-2">
         {[0, 1].map((i) => (
           <div key={i} className="space-y-3">
@@ -128,9 +131,22 @@ export default function CostCenterDashboard() {
   const router = useRouter();
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
-  const { onlyOwnPayables } = usePermissions();
+  const { onlyOwnPayables, canManageCostCenters, canCreatePayables } =
+    usePermissions();
 
   const id = params.id as string;
+
+  // Recarrega estrutura e exercício: depois de editar o centro, ou no "Tentar
+  // novamente" quando o razão falha.
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = () => setReloadKey((k) => k + 1);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const [requests, setRequests] = useState<BudgetRequest[]>([]);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestAmount, setRequestAmount] = useState(0);
+  const [requestReason, setRequestReason] = useState("");
 
   // Estrutura do centro: não depende do exercício, então não recarrega quando o
   // ano muda.
@@ -176,7 +192,15 @@ export default function CostCenterDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCompany, id, user]);
+  }, [selectedCompany, id, user, reloadKey]);
+
+  useEffect(() => {
+    if (!selectedCompany || !id) return;
+    budgetRequestService
+      .getByCostCenter(selectedCompany.id, id)
+      .then(setRequests)
+      .catch((error) => console.error("Error loading budget requests:", error));
+  }, [selectedCompany, id, reloadKey]);
 
   useEffect(() => {
     if (!selectedCompany || !id || !user || isLoadingStructure) return;
@@ -228,14 +252,22 @@ export default function CostCenterDashboard() {
         ]);
       if (cancelled) return;
 
+      // Falha do razão vira erro na tela: mostrar "sem envelope" e R$ 0 seria
+      // afirmar um saldo que ninguém leu.
       if (ledgerResult.status === "fulfilled") {
         setBalances(ledgerResult.value);
+        setLedgerError(null);
       } else {
         console.error(
           "Error loading cost center balances:",
           ledgerResult.reason,
         );
         setBalances({});
+        setLedgerError(
+          ledgerResult.reason instanceof Error
+            ? ledgerResult.reason.message
+            : "Não foi possível ler o saldo deste centro.",
+        );
       }
 
       const unique = new Map<string, Transaction>();
@@ -265,6 +297,7 @@ export default function CostCenterDashboard() {
     allCostCenters,
     onlyOwnPayables,
     isLoadingStructure,
+    reloadKey,
   ]);
 
   const now = new Date();
@@ -289,7 +322,7 @@ export default function CostCenterDashboard() {
   // distribuição, tenha o filho gasto ou não — é essa a regra do envelope.
   const hasChildren = children.length > 0;
   const allocatedToChildren = balance?.allocatedToChildren ?? 0;
-  const totalConsumed = allocatedToChildren + directCommitted;
+  const committedRatio = committedOf(balance).ratio;
 
   // Gasto de toda a subárvore, só informativo: não entra na conta do saldo.
   const subtreeSpent = balance?.subtreeSpent ?? 0;
@@ -361,44 +394,72 @@ export default function CostCenterDashboard() {
     }));
   }, [yearPayables, selectedYear, currentYear, allocatedAmount]);
 
-  const compositionData: CompositionSlice[] = useMemo(() => {
-    const slices: CompositionSlice[] = [];
-    if (hasChildren && allocatedToChildren > 0) {
-      slices.push({
-        name: "Distribuído aos filhos",
-        value: allocatedToChildren,
-        color: "var(--state-allocated)",
-      });
-    }
-    if (directRealized > 0) {
-      slices.push({
-        name: "Realizado",
-        value: directRealized,
-        color: "var(--state-spent)",
-      });
-    }
-    if (directPending > 0) {
-      slices.push({
-        name: "Pendente",
-        value: directPending,
-        color: "var(--state-committed)",
-      });
-    }
-    if (remainingBalance > 0) {
-      slices.push({
-        name: "Disponível",
-        value: remainingBalance,
-        color: "var(--state-positive)",
-      });
-    }
-    return slices;
+  /**
+   * Projeção até dezembro pelo ritmo do ano: média mensal do gasto lançado
+   * até o mês corrente. Só em folha (é onde há gasto direto) e no exercício
+   * corrente, que é o único que ainda pode mudar.
+   *
+   * ponytail: ritmo linear, ignora sazonalidade (13º, férias, obra por fase).
+   * Trocar por orçamento mensal quando o envelope ganhar distribuição por mês.
+   */
+  const projection = useMemo(() => {
+    if (hasChildren || selectedYear !== currentYear || totalBudget <= 0)
+      return null;
+    if (monthlyTrendData.length === 0) return null;
+    const spentSoFar = monthlyTrendData.reduce((acc, p) => acc + p.amount, 0);
+    const perMonth = spentSoFar / monthlyTrendData.length;
+    if (perMonth <= 0) return null;
+
+    // O comprometido já inclui despesas futuras lançadas; o ritmo nunca
+    // projeta menos do que isso.
+    const yearEnd = Math.max(directCommitted, perMonth * 12);
+    const exhaustMonth = Math.ceil(totalBudget / perMonth) - 1;
+    return {
+      perMonth,
+      leftover: totalBudget - yearEnd,
+      exhaustsIn:
+        yearEnd > totalBudget && exhaustMonth <= 11
+          ? format(
+              new Date(currentYear, Math.max(exhaustMonth, 0), 1),
+              "MMMM",
+              {
+                locale: ptBR,
+              },
+            )
+          : null,
+    };
   }, [
     hasChildren,
-    allocatedToChildren,
-    directRealized,
-    directPending,
-    remainingBalance,
+    selectedYear,
+    currentYear,
+    totalBudget,
+    monthlyTrendData,
+    directCommitted,
   ]);
+
+  const pendingRequest = requests.find((r) => r.status === "pending");
+
+  const submitRequest = async () => {
+    if (!selectedCompany || !user) return;
+    try {
+      await budgetRequestService.create({
+        companyId: selectedCompany.id,
+        costCenterId: id,
+        year: selectedYear,
+        amount: requestAmount,
+        reason: requestReason,
+        requestedBy: user.uid,
+        requestedByName: user.displayName || user.email,
+      });
+      toast.success("Pedido enviado. O gestor financeiro foi avisado.");
+      setRequestAmount(0);
+      setRequestReason("");
+      reload();
+    } catch (error) {
+      toast.error(friendlyError(error, "Não foi possível enviar o pedido."));
+      throw error;
+    }
+  };
 
   // Mesma fonte da série mensal: a lista não pode discordar do gráfico, e a
   // consulta já vem filtrada por centro de custo no servidor.
@@ -502,6 +563,12 @@ export default function CostCenterDashboard() {
     );
   }
 
+  const parentCc = allCostCenters.find((cc) => cc.id === costCenter.parentId);
+  // Pedido só faz sentido onde a despesa é lançada: folha, e por quem lança
+  // mas não distribui (o gestor ajusta o envelope direto na árvore).
+  const canRequest =
+    !hasChildren && canCreatePayables && !canManageCostCenters && !!parentCc;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -510,47 +577,160 @@ export default function CostCenterDashboard() {
             variant="outline"
             size="icon"
             className="hidden shrink-0 md:inline-flex"
-            onClick={() => router.back()}
+            asChild
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">Voltar</span>
+            <Link href="/centros-custo">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only">Centros de custo</span>
+            </Link>
           </Button>
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold tracking-tight md:text-2xl">
+            <h1 className="flex items-center gap-2 truncate text-xl font-bold tracking-tight md:text-2xl">
               {costCenter.name}
+              {costCenter.archived && (
+                <Badge variant="secondary">Arquivado</Badge>
+              )}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
               <span className="font-mono">{costCenter.code}</span>
+              {parentCc && (
+                <>
+                  <span aria-hidden="true" className="mx-1.5">
+                    ·
+                  </span>
+                  abaixo de{" "}
+                  <Link
+                    href={`/centros-custo/${parentCc.id}`}
+                    className="text-foreground hover:underline"
+                  >
+                    {parentCc.name}
+                  </Link>
+                </>
+              )}
               {costCenter.approverEmail && (
                 <>
                   <span aria-hidden="true" className="mx-1.5">
                     ·
                   </span>
-                  Responsável: {costCenter.approverEmail}
+                  Aprovador: {costCenter.approverEmail}
                 </>
               )}
             </p>
           </div>
         </div>
-        <Select
-          value={selectedYear.toString()}
-          onValueChange={(value) => setSelectedYear(parseInt(value))}
-        >
-          <SelectTrigger className="w-[110px]" aria-label="Exercício">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {years.map((year) => (
-              <SelectItem key={year} value={year.toString()}>
-                {year}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          {canRequest && (
+            <Button
+              variant="outline"
+              onClick={() => setRequestOpen(true)}
+              disabled={!!pendingRequest}
+              title={
+                pendingRequest
+                  ? "Já existe um pedido aguardando decisão"
+                  : undefined
+              }
+            >
+              <HandCoins className="mr-2 h-4 w-4" />
+              Pedir suplementação
+            </Button>
+          )}
+          {canManageCostCenters && (
+            <>
+              <Button variant="outline" asChild>
+                <Link href="/centros-custo/distribuicao">
+                  <Wallet className="mr-2 h-4 w-4" />
+                  Distribuir
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={() => setEditOpen(true)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Editar
+              </Button>
+            </>
+          )}
+          <Select
+            value={selectedYear.toString()}
+            onValueChange={(value) => setSelectedYear(parseInt(value))}
+          >
+            <SelectTrigger className="w-[110px]" aria-label="Exercício">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {years.map((year) => (
+                <SelectItem key={year} value={year.toString()}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+
+      {canManageCostCenters && (
+        <CostCenterFormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          editing={costCenter}
+          costCenters={allCostCenters}
+          onSaved={reload}
+        />
+      )}
+
+      <ConfirmDialog
+        open={requestOpen}
+        onOpenChange={setRequestOpen}
+        title={`Pedir suplementação para ${costCenter.name}`}
+        description={`O valor sai do envelope de ${parentCc?.name ?? "do centro pai"} se o gestor financeiro aprovar. Exercício ${selectedYear}.`}
+        confirmText="Enviar pedido"
+        confirmDisabled={!(requestAmount > 0) || !requestReason.trim()}
+        onConfirm={submitRequest}
+      >
+        <div className="space-y-3">
+          <CurrencyInput
+            value={requestAmount}
+            onChange={setRequestAmount}
+            aria-label="Valor pedido"
+            placeholder="0,00"
+          />
+          <Textarea
+            value={requestReason}
+            onChange={(e) => setRequestReason(e.target.value)}
+            placeholder="Para que é o recurso"
+            aria-label="Motivo do pedido"
+          />
+        </div>
+      </ConfirmDialog>
+
+      {pendingRequest && (
+        <p className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm">
+          <HandCoins className="h-4 w-4 shrink-0 text-amber-600" />
+          Pedido de {formatCurrency(pendingRequest.amount)} de{" "}
+          {pendingRequest.requestedByName} aguardando o gestor financeiro.
+        </p>
+      )}
 
       {isLoadingYear ? (
         <DataSkeleton />
+      ) : ledgerError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-6">
+          <div className="flex items-start gap-3">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <p className="font-medium">Não foi possível ler o saldo</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {ledgerError}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={reload}
+              >
+                Tentar novamente
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           <section
@@ -591,7 +771,7 @@ export default function CostCenterDashboard() {
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {totalBudget > 0
-                    ? `${((remainingBalance / totalBudget) * 100).toFixed(1)}% do envelope`
+                    ? `${formatPercent(remainingBalance / totalBudget)} do envelope`
                     : "Sem envelope neste exercício"}
                   {monthsRemaining > 0 && remainingBalance > 0 && (
                     <>
@@ -613,8 +793,7 @@ export default function CostCenterDashboard() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">Uso do envelope</span>
                   <span className="font-financial text-muted-foreground">
-                    {((totalConsumed / totalBudget) * 100).toFixed(1)}%
-                    comprometido
+                    {formatPercent(committedRatio)} comprometido
                   </span>
                 </div>
 
@@ -672,50 +851,51 @@ export default function CostCenterDashboard() {
                     </li>
                   )}
                 </ul>
+
+                {projection && (
+                  <p
+                    className={`flex items-start gap-2 border-t pt-3 text-sm ${
+                      projection.exhaustsIn
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    <TrendingDown
+                      aria-hidden="true"
+                      className="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>
+                      No ritmo do ano ({formatCurrency(projection.perMonth)} por
+                      mês),{" "}
+                      {projection.exhaustsIn
+                        ? `o envelope acaba em ${projection.exhaustsIn}. Faltariam ${formatCurrency(-projection.leftover)} até dezembro.`
+                        : `sobram ${formatCurrency(projection.leftover)} em dezembro.`}
+                    </span>
+                  </p>
+                )}
               </div>
             )}
           </section>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-            <Card className="lg:col-span-4">
-              <CardHeader>
-                <SectionHeading>
-                  Tendência de gastos em {selectedYear}
-                </SectionHeading>
-              </CardHeader>
-              <CardContent className="pl-2">
-                {monthlyTrendData.length > 0 ? (
-                  <SpendingTrendChart
-                    data={monthlyTrendData}
-                    year={selectedYear}
-                  />
-                ) : (
-                  <div className="flex h-[220px] items-center justify-center px-4 text-center text-sm text-muted-foreground sm:h-[300px]">
-                    Nenhuma despesa lançada neste centro em {selectedYear}.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-3">
-              <CardHeader>
-                <SectionHeading>Composição do envelope</SectionHeading>
-              </CardHeader>
-              <CardContent>
-                {compositionData.length > 0 ? (
-                  <EnvelopeCompositionChart
-                    data={compositionData}
-                    year={selectedYear}
-                  />
-                ) : (
-                  <div className="flex h-[220px] items-center justify-center px-4 text-center text-sm text-muted-foreground sm:h-[300px]">
-                    Este centro não recebeu envelope em {selectedYear}.
-                    Distribua recurso do centro pai para ver a composição.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader>
+              <SectionHeading>
+                Tendência de gastos em {selectedYear}
+              </SectionHeading>
+            </CardHeader>
+            <CardContent className="pl-2">
+              {monthlyTrendData.length > 0 ? (
+                <SpendingTrendChart
+                  data={monthlyTrendData}
+                  year={selectedYear}
+                />
+              ) : (
+                <div className="flex h-[220px] items-center justify-center px-4 text-center text-sm text-muted-foreground sm:h-[300px]">
+                  Nenhuma despesa lançada neste centro em {selectedYear}.
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2">
             <section aria-labelledby="filhos-title">
@@ -730,6 +910,7 @@ export default function CostCenterDashboard() {
                       <TableHead className="text-right">
                         Envelope {selectedYear}
                       </TableHead>
+                      <TableHead className="text-right">Disponível</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -751,8 +932,17 @@ export default function CostCenterDashboard() {
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right font-financial">
+                        <TableCell className="text-right font-financial tabular-nums">
                           {formatCurrency(balances[child.id]?.received ?? 0)}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right font-financial tabular-nums ${
+                            (balances[child.id]?.available ?? 0) < 0
+                              ? "text-destructive"
+                              : ""
+                          }`}
+                        >
+                          {formatCurrency(balances[child.id]?.available ?? 0)}
                         </TableCell>
                       </TableRow>
                     ))}

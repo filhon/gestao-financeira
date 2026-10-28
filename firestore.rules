@@ -485,6 +485,28 @@ service cloud.firestore {
        allow write: if false;
     }
 
+    // 12c. Pedidos de suplementação de envelope
+    // Quem lança pode pedir; ninguém decide pelo cliente. A aprovação move
+    // recurso do pai no razão, então passa pelo callable `decideBudgetRequest`,
+    // que grava pedido e razão no mesmo commit.
+    match /budget_requests/{requestId} {
+       function getCompanyId() { return resource != null ? resource.data.companyId : request.resource.data.companyId; }
+
+       allow read: if isAuthenticated() && hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
+
+       allow create: if isAuthenticated() &&
+         hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'user']) &&
+         request.resource.data.status == 'pending' &&
+         request.resource.data.requestedBy == request.auth.uid &&
+         request.resource.data.amount is number &&
+         request.resource.data.amount > 0 &&
+         request.resource.data.reason is string &&
+         request.resource.data.reason.size() > 0 &&
+         !request.resource.data.keys().hasAny(['decidedBy', 'decidedAt', 'decisionNote']);
+
+       allow update, delete: if false;
+    }
+
     // 13. Company Stats (Current Balance)
     match /company_stats/{companyId} {
        // Read: All roles in the company

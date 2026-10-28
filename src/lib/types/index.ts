@@ -110,7 +110,6 @@ export interface CostCenter {
   allowedUserIds?: string[]; // Users allowed to create expenses
   approverEmail?: string; // Email of the person responsible for approval
   releaserEmail?: string; // Email of the person responsible for releasing payment
-  budgetLimit?: number; // Monthly budget limit
 
   // Balance from projected receivables
   allocatedToChildren?: number; // Amount allocated to child cost centers
@@ -191,6 +190,30 @@ export interface CostCenterBalance {
   subtreeSpentPaid: number;
   /** received + carryIn − allocatedToChildren − spentDirect. Pode ser negativo. */
   available: number;
+}
+
+export type BudgetRequestStatus = "pending" | "approved" | "rejected";
+
+/**
+ * Pedido de suplementação: quem esbarrou no saldo de um centro pede mais
+ * envelope, e o gestor decide. Criado pelo cliente; a decisão só passa pelo
+ * callable `decideBudgetRequest`, que move o recurso do pai no mesmo commit.
+ */
+export interface BudgetRequest {
+  id: string;
+  companyId: string;
+  costCenterId: string;
+  year: number;
+  amount: number;
+  reason: string;
+  status: BudgetRequestStatus;
+  requestedBy: string;
+  requestedByName: string;
+  createdAt: Date;
+  decidedBy?: string;
+  decidedByName?: string;
+  decidedAt?: Date;
+  decisionNote?: string;
 }
 
 /** Sintética agrupa e totaliza; só a analítica recebe lançamento. */

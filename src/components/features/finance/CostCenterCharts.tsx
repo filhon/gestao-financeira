@@ -4,9 +4,6 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -30,14 +27,6 @@ export interface MonthlyPoint {
   name: string;
   amount: number;
   monthIndex: number;
-  [key: string]: string | number;
-}
-
-export interface CompositionSlice {
-  name: string;
-  value: number;
-  /** Referência de token, ex.: "var(--state-spent)". */
-  color: string;
   [key: string]: string | number;
 }
 
@@ -174,77 +163,6 @@ export function SpendingTrendChart({
           </AreaChart>
         </ResponsiveContainer>
       </div>
-    </div>
-  );
-}
-
-export function EnvelopeCompositionChart({
-  data,
-  year,
-}: {
-  data: CompositionSlice[];
-  year: number;
-}) {
-  return (
-    <div className="flex h-[220px] flex-col sm:h-[300px]">
-      <ChartDataTable
-        caption={`Composição do envelope de ${year}`}
-        labelHeader="Parcela"
-        rows={data.map((slice) => ({ label: slice.name, value: slice.value }))}
-      />
-      <div
-        className="min-h-0 flex-1"
-        role="img"
-        aria-label={`Gráfico da composição do envelope de ${year}. Os valores estão na tabela acima.`}
-      >
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={50}
-              outerRadius={70}
-              paddingAngle={4}
-              dataKey="value"
-              stroke="var(--card)"
-              strokeWidth={2}
-            >
-              {data.map((slice) => (
-                <Cell key={slice.name} fill={slice.color} />
-              ))}
-            </Pie>
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null;
-                const slice = payload[0];
-                return (
-                  <div className="rounded-md border bg-popover px-3 py-2 shadow-md">
-                    <p className="text-xs text-muted-foreground">
-                      {slice.name}
-                    </p>
-                    <p className="font-financial text-sm font-semibold text-popover-foreground">
-                      {formatCurrency(Number(slice.value) || 0)}
-                    </p>
-                  </div>
-                );
-              }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-      <ul className="flex shrink-0 flex-wrap justify-center gap-x-4 gap-y-1.5 pt-2">
-        {data.map((slice) => (
-          <li key={slice.name} className="flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="size-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: slice.color }}
-            />
-            <span className="text-xs text-muted-foreground">{slice.name}</span>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

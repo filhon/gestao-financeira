@@ -438,7 +438,10 @@ export function TransactionForm({
   const [openCostCenterCombobox, setOpenCostCenterCombobox] = useState<
     number | null
   >(null);
-  const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
+  const [balanceWarning, setBalanceWarning] = useState<{
+    text: string;
+    costCenterId: string;
+  } | null>(null);
   const [autoFilled, setAutoFilled] = useState<Record<string, FillSource>>({});
   const [suggestions, setSuggestions] = useState<Record<string, Suggestion>>(
     {},
@@ -759,7 +762,7 @@ export function TransactionForm({
       setBalanceWarning(null);
       return;
     }
-    let warning = null;
+    let warning: { text: string; costCenterId: string } | null = null;
     for (const alloc of allocations) {
       if (!alloc.costCenterId || !(alloc.amount > 0)) continue;
       const available = costCenterBalances[alloc.costCenterId];
@@ -769,7 +772,10 @@ export function TransactionForm({
         const ccName =
           costCenters.find((cc) => cc.id === alloc.costCenterId)?.name ||
           "Centro de custo";
-        warning = `Saldo insuficiente em "${ccName}": disponível ${formatCurrency(available)}, necessário ${formatCurrency(alloc.amount)}.`;
+        warning = {
+          text: `Saldo insuficiente em "${ccName}": disponível ${formatCurrency(available)}, necessário ${formatCurrency(alloc.amount)}.`,
+          costCenterId: alloc.costCenterId,
+        };
         break;
       }
     }
@@ -2490,8 +2496,14 @@ export function TransactionForm({
                 <p className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                   <span>
-                    {balanceWarning} O lançamento será recusado; peça ao gestor
-                    financeiro a distribuição de recursos.
+                    {balanceWarning.text} O lançamento será recusado.{" "}
+                    <Link
+                      href={`/centros-custo/${balanceWarning.costCenterId}`}
+                      target="_blank"
+                      className="font-medium underline underline-offset-2"
+                    >
+                      Pedir suplementação
+                    </Link>
                   </span>
                 </p>
               )}

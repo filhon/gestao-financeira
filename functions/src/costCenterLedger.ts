@@ -135,6 +135,244 @@ export async function readCarryIn(
   return carry;
 }
 
+/** Hierarquia de uma empresa, lida fora de transação: não muda na operação. */
+async function loadHierarchy(companyId: string) {
+  const ccSnap = await db()
+    .collection("cost_centers")
+    .where("companyId", "==", companyId)
+    .get();
+  const ccs = ccSnap.docs.map((d) => ({
+    id: d.id,
+    ...d.data(),
+  })) as CostCenterDoc[];
+  return indexHierarchy(ccs);
+}
+
+type Hierarchy = ReturnType<typeof indexHierarchy>;
+
+interface EnvelopeResult {
+  changed: boolean;
+  previous: number;
+  next: number;
+  parentId: string;
+  parentAvailableAfter?: number;
+}
+
+/** Teto de envelopes por lote: 2 documentos cada, longe das 500 escritas. */
+const MAX_ENVELOPES_PER_BATCH = 200;
+
+/**
+ * Núcleo do envelope: lê todos os centros envolvidos e seus pais numa leitura
+ * só, aplica as mudanças em memória, valida o estado final e grava tudo. Faz
+ * só leituras antes das escritas, então quem chama pode ler os próprios
+ * documentos antes e gravar depois na mesma transação.
+ *
+ * O lote é validado pelo resultado, não passo a passo: tirar R$ 10 mil de A e
+ * dar a B, irmãos, é válido em conjunto mesmo que o pai não tenha folga para
+ * B sozinho. Cada nó tocado precisa terminar com disponível ≥ 0, ou ao menos
+ * não piorar (um nó que já estava negativo pode ser corrigido aos poucos).
+ *
+ * `nextEnvelope` recebe o envelope atual em centavos: definir um valor e
+ * somar a ele (suplementação) passam pelo mesmo caminho.
+ */
+async function applyEnvelopesInTx(
+  tx: admin.firestore.Transaction,
+  h: Hierarchy,
+  companyId: string,
+  year: number,
+  changes: Array<{
+    costCenterId: string;
+    nextEnvelope: (previousCents: number) => number;
+  }>,
+): Promise<EnvelopeResult[]> {
+  const { byId, parentIdOf, rootId } = h;
+
+  const parentOf = new Map<string, string>();
+  for (const { costCenterId } of changes) {
+    if (parentOf.has(costCenterId)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "O mesmo centro de custo aparece duas vezes no lote.",
+      );
+    }
+    if (!byId.has(costCenterId)) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "Centro de custo não encontrado nesta empresa.",
+      );
+    }
+    const parentId = parentIdOf(costCenterId);
+    if (!parentId) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "O centro de custo raiz é financiado pelas receitas, não por alocação.",
+      );
+    }
+    parentOf.set(costCenterId, parentId);
+  }
+
+  const touched = [
+    ...new Set(
+      changes.flatMap((c) => [c.costCenterId, parentOf.get(c.costCenterId)!]),
+    ),
+  ];
+  const refOf = (id: string) =>
+    db()
+      .collection(LEDGER_COLLECTION)
+      .doc(ledgerDocId(companyId, id, year));
+
+  // Todas as leituras antes de qualquer escrita.
+  const carryIn = touched.includes(rootId)
+    ? await readCarryIn(tx, companyId, rootId, year)
+    : 0;
+  const snaps = await tx.getAll(...touched.map(refOf));
+
+  const blank = (id: string): LedgerDoc => ({
+    companyId,
+    costCenterId: id,
+    year,
+    parentId: parentIdOf(id),
+    isRoot: id === rootId,
+    received: 0,
+    allocatedToChildren: 0,
+    spentDirect: 0,
+    spentDirectPaid: 0,
+    subtreeSpent: 0,
+    subtreeSpentPaid: 0,
+  });
+
+  const docs = new Map<string, Record<string, unknown>>();
+  const state = new Map<
+    string,
+    { received: number; allocated: number; spent: number }
+  >();
+  touched.forEach((id, i) => {
+    const data = snaps[i].exists
+      ? (snaps[i].data() as Record<string, unknown>)
+      : (blank(id) as unknown as Record<string, unknown>);
+    docs.set(id, data);
+    state.set(id, {
+      received: toCents(data.received),
+      allocated: toCents(data.allocatedToChildren),
+      spent: toCents(data.spentDirect),
+    });
+  });
+
+  const availableOf = (id: string) => {
+    const s = state.get(id)!;
+    return s.received + (id === rootId ? carryIn : 0) - s.allocated - s.spent;
+  };
+  const before = new Map(touched.map((id) => [id, availableOf(id)]));
+
+  const results: EnvelopeResult[] = [];
+  for (const { costCenterId, nextEnvelope } of changes) {
+    const parentId = parentOf.get(costCenterId)!;
+    const child = state.get(costCenterId)!;
+    const previous = child.received;
+    const next = nextEnvelope(previous);
+    if (!Number.isFinite(next) || next < 0) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "O envelope não pode ser negativo.",
+      );
+    }
+    child.received = next;
+    state.get(parentId)!.allocated += next - previous;
+    results.push({
+      changed: next !== previous,
+      previous: toReais(previous),
+      next: toReais(next),
+      parentId,
+    });
+  }
+
+  const ownEnvelopeChanged = new Set(
+    changes.filter((_, i) => results[i].changed).map((c) => c.costCenterId),
+  );
+  for (const id of touched) {
+    const after = availableOf(id);
+    const was = before.get(id)!;
+    if (after >= 0 || after >= was) continue;
+
+    const name = byId.get(id)?.name || "Centro de custo";
+    const s = state.get(id)!;
+    // O filho não pode devolver recurso que já comprometeu.
+    if (ownEnvelopeChanged.has(id) && s.received < s.allocated + s.spent) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `${name} já comprometeu ${formatBRL(s.allocated + s.spent)}; ` +
+          `o envelope não pode ficar abaixo disso.`,
+      );
+    }
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Saldo insuficiente em ${name}: disponível ${formatBRL(was)}, ` +
+        `necessário ${formatBRL(was - after)}.`,
+    );
+  }
+
+  for (const id of touched) {
+    const s = state.get(id)!;
+    const data = docs.get(id)!;
+    if (
+      s.received === toCents(data.received) &&
+      s.allocated === toCents(data.allocatedToChildren)
+    ) {
+      continue;
+    }
+    tx.set(
+      refOf(id),
+      {
+        ...data,
+        received: toReais(s.received),
+        allocatedToChildren: toReais(s.allocated),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
+  return results.map((r) => ({
+    ...r,
+    parentAvailableAfter: r.changed
+      ? toReais(availableOf(r.parentId))
+      : undefined,
+  }));
+}
+
+async function auditEnvelope(
+  auth: NonNullable<functions.https.CallableContext["auth"]>,
+  h: Hierarchy,
+  companyId: string,
+  costCenterId: string,
+  year: number,
+  result: EnvelopeResult,
+  extra: Record<string, unknown> = {},
+) {
+  const target = h.byId.get(costCenterId);
+  await db()
+    .collection("audit_logs")
+    .add({
+      companyId,
+      userId: auth.uid,
+      userEmail: auth.token.email || "",
+      action: "update",
+      entity: "budget",
+      entityId: ledgerDocId(companyId, costCenterId, year),
+      details: {
+        costCenterId,
+        costCenterName: target?.name || null,
+        costCenterCode: target?.code || null,
+        year,
+        previousAmount: result.previous,
+        newAmount: result.next,
+        parentId: result.parentId,
+        ...extra,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+}
+
 /**
  * Define o envelope anual de um centro de custo, movendo recurso do pai.
  *
@@ -172,155 +410,246 @@ export const setCostCenterEnvelope = functions.https.onCall(
 
     await assertCanManageBudget(context.auth.uid, companyId);
 
-    // Hierarquia lida fora da transação: não muda durante a operação.
-    const ccSnap = await db()
-      .collection("cost_centers")
-      .where("companyId", "==", companyId)
-      .get();
-    const ccs = ccSnap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    })) as CostCenterDoc[];
-
-    const { byId, parentIdOf, rootId } = indexHierarchy(ccs);
-
-    const target = byId.get(costCenterId);
-    if (!target) {
-      throw new functions.https.HttpsError(
-        "not-found",
-        "Centro de custo não encontrado nesta empresa.",
-      );
-    }
-
-    const parentId = parentIdOf(costCenterId);
-    if (!parentId) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "O centro de custo raiz é financiado pelas receitas, não por alocação.",
-      );
-    }
-
-    const newEnvelope = toCents(amount);
-    const parentRef = db()
-      .collection(LEDGER_COLLECTION)
-      .doc(ledgerDocId(companyId, parentId, year));
-    const childRef = db()
-      .collection(LEDGER_COLLECTION)
-      .doc(ledgerDocId(companyId, costCenterId, year));
-
-    const result = await db().runTransaction(async (tx) => {
-      // Todas as leituras antes de qualquer escrita.
-      const carryIn =
-        parentId === rootId
-          ? await readCarryIn(tx, companyId, rootId, year)
-          : 0;
-      const [parentSnap, childSnap] = await tx.getAll(parentRef, childRef);
-
-      const blank = (id: string): LedgerDoc => ({
-        companyId,
-        costCenterId: id,
-        year,
-        parentId: parentIdOf(id),
-        isRoot: id === rootId,
-        received: 0,
-        allocatedToChildren: 0,
-        spentDirect: 0,
-        spentDirectPaid: 0,
-        subtreeSpent: 0,
-        subtreeSpentPaid: 0,
-      });
-
-      const parent = parentSnap.exists
-        ? (parentSnap.data() as Record<string, unknown>)
-        : (blank(parentId) as unknown as Record<string, unknown>);
-      const child = childSnap.exists
-        ? (childSnap.data() as Record<string, unknown>)
-        : (blank(costCenterId) as unknown as Record<string, unknown>);
-
-      const previous = toCents(child.received);
-      const delta = newEnvelope - previous;
-      if (delta === 0) {
-        return { changed: false, previous: toReais(previous) };
-      }
-
-      // O pai precisa ter folga para o aumento.
-      const parentAvailable =
-        toCents(parent.received) +
-        carryIn -
-        toCents(parent.allocatedToChildren) -
-        toCents(parent.spentDirect);
-
-      if (delta > parentAvailable) {
-        const parentName = byId.get(parentId)?.name || "centro de custo pai";
-        throw new functions.https.HttpsError(
-          "failed-precondition",
-          `Saldo insuficiente em ${parentName}: disponível ${formatBRL(parentAvailable)}, ` +
-            `necessário ${formatBRL(delta)}.`,
-        );
-      }
-
-      // O filho não pode devolver recurso que já comprometeu.
-      const childCommitted =
-        toCents(child.allocatedToChildren) + toCents(child.spentDirect);
-      if (newEnvelope < childCommitted) {
-        throw new functions.https.HttpsError(
-          "failed-precondition",
-          `${target.name || "Centro de custo"} já comprometeu ${formatBRL(childCommitted)}; ` +
-            `o envelope não pode ficar abaixo disso.`,
-        );
-      }
-
-      tx.set(
-        parentRef,
-        {
-          ...parent,
-          allocatedToChildren: toReais(
-            toCents(parent.allocatedToChildren) + delta,
-          ),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-      tx.set(
-        childRef,
-        {
-          ...child,
-          received: toReais(newEnvelope),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-
-      return {
-        changed: true,
-        previous: toReais(previous),
-        parentAvailableAfter: toReais(parentAvailable - delta),
-      };
-    });
+    const h = await loadHierarchy(companyId);
+    const [result] = await db().runTransaction((tx) =>
+      applyEnvelopesInTx(tx, h, companyId, year, [
+        { costCenterId, nextEnvelope: () => toCents(amount) },
+      ]),
+    );
 
     if (result.changed) {
-      await db()
-        .collection("audit_logs")
-        .add({
-          companyId,
-          userId: context.auth.uid,
-          userEmail: context.auth.token.email || "",
-          action: "update",
-          entity: "budget",
-          entityId: ledgerDocId(companyId, costCenterId, year),
-          details: {
-            costCenterId,
-            costCenterName: target.name || null,
-            costCenterCode: target.code || null,
-            year,
-            previousAmount: result.previous,
-            newAmount: toReais(newEnvelope),
-            parentId,
-          },
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+      await auditEnvelope(
+        context.auth,
+        h,
+        companyId,
+        costCenterId,
+        year,
+        result,
+      );
     }
 
-    return { success: true, ...result };
+    return {
+      success: true,
+      changed: result.changed,
+      previous: result.previous,
+      parentAvailableAfter: result.parentAvailableAfter,
+    };
+  },
+);
+
+/**
+ * Aplica uma distribuição inteira num commit só: ou todos os envelopes mudam,
+ * ou nenhum. Gravar um a um deixava a árvore pela metade quando o terceiro de
+ * cinco falhava, e o gestor tinha de reconciliar à mão o que já tinha descido.
+ */
+export const setCostCenterEnvelopes = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "O usuário precisa estar autenticado.",
+      );
+    }
+    const auth = context.auth;
+
+    const { companyId, year, changes } = data as {
+      companyId?: string;
+      year?: number;
+      changes?: Array<{ costCenterId?: string; amount?: number }>;
+    };
+
+    if (
+      !companyId ||
+      !year ||
+      !Array.isArray(changes) ||
+      changes.length === 0
+    ) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "companyId, year e changes são obrigatórios.",
+      );
+    }
+    if (changes.length > MAX_ENVELOPES_PER_BATCH) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        `No máximo ${MAX_ENVELOPES_PER_BATCH} envelopes por vez.`,
+      );
+    }
+    for (const c of changes) {
+      if (
+        !c?.costCenterId ||
+        typeof c.amount !== "number" ||
+        !Number.isFinite(c.amount) ||
+        c.amount < 0
+      ) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Cada envelope precisa de centro de custo e valor não negativo.",
+        );
+      }
+    }
+
+    await assertCanManageBudget(auth.uid, companyId);
+
+    const h = await loadHierarchy(companyId);
+    const results = await db().runTransaction((tx) =>
+      applyEnvelopesInTx(
+        tx,
+        h,
+        companyId,
+        year,
+        changes.map((c) => ({
+          costCenterId: c.costCenterId!,
+          nextEnvelope: () => toCents(c.amount),
+        })),
+      ),
+    );
+
+    await Promise.all(
+      results.map((result, i) =>
+        result.changed
+          ? auditEnvelope(
+              auth,
+              h,
+              companyId,
+              changes[i].costCenterId!,
+              year,
+              result,
+            )
+          : null,
+      ),
+    );
+
+    return {
+      success: true,
+      changed: results.filter((r) => r.changed).length,
+    };
+  },
+);
+
+/**
+ * Decide um pedido de suplementação. Aprovar soma o valor pedido ao envelope
+ * do centro, tirando do pai, no mesmo commit que fecha o pedido: não há como
+ * o pedido ficar aprovado sem o recurso ter descido, nem o contrário. Se o pai
+ * não tem folga, a aprovação é recusada com a mesma mensagem da distribuição.
+ */
+export const decideBudgetRequest = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "O usuário precisa estar autenticado.",
+      );
+    }
+    const auth = context.auth;
+
+    const { requestId, approve, note } = data as {
+      requestId?: string;
+      approve?: boolean;
+      note?: string;
+    };
+    if (!requestId || typeof approve !== "boolean") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "requestId e approve são obrigatórios.",
+      );
+    }
+    const decisionNote = note?.trim() || null;
+    if (!approve && !decisionNote) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Informe o motivo da recusa.",
+      );
+    }
+
+    const requestRef = db().collection("budget_requests").doc(requestId);
+    const initial = await requestRef.get();
+    if (!initial.exists) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "Pedido não encontrado.",
+      );
+    }
+    const req = initial.data() as {
+      companyId: string;
+      costCenterId: string;
+      year: number;
+      amount: number;
+      requestedBy: string;
+    };
+
+    await assertCanManageBudget(
+      auth.uid,
+      req.companyId,
+      "Apenas administradores e gestores financeiros decidem pedidos de suplementação.",
+    );
+
+    const h = await loadHierarchy(req.companyId);
+    const deciderName = (auth.token.name as string) || auth.token.email || "";
+
+    const result = await db().runTransaction(async (tx) => {
+      const snap = await tx.get(requestRef);
+      if (snap.get("status") !== "pending") {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Este pedido já foi decidido.",
+        );
+      }
+
+      const envelope = approve
+        ? (
+            await applyEnvelopesInTx(tx, h, req.companyId, req.year, [
+              {
+                costCenterId: req.costCenterId,
+                nextEnvelope: (previous) => previous + toCents(req.amount),
+              },
+            ])
+          )[0]
+        : null;
+
+      tx.update(requestRef, {
+        status: approve ? "approved" : "rejected",
+        decidedBy: auth.uid,
+        decidedByName: deciderName,
+        decidedAt: admin.firestore.FieldValue.serverTimestamp(),
+        decisionNote,
+      });
+      return envelope;
+    });
+
+    if (result?.changed) {
+      await auditEnvelope(
+        auth,
+        h,
+        req.companyId,
+        req.costCenterId,
+        req.year,
+        result,
+        { budgetRequestId: requestId },
+      );
+    }
+
+    const ccName = h.byId.get(req.costCenterId)?.name || "centro de custo";
+    try {
+      await db()
+        .collection("notifications")
+        .add({
+          userId: req.requestedBy,
+          companyId: req.companyId,
+          title: approve ? "Suplementação aprovada" : "Suplementação recusada",
+          message: approve
+            ? `${formatBRL(toCents(req.amount))} a mais no envelope de ${ccName}.`
+            : `O pedido para ${ccName} foi recusado: ${decisionNote}`,
+          type: approve ? "success" : "warning",
+          link: `/centros-custo/${req.costCenterId}`,
+          read: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    } catch (err) {
+      // O aviso não pode desfazer a decisão já gravada.
+      console.error("Falha ao notificar decisão de suplementação:", err);
+    }
+
+    return { success: true };
   },
 );

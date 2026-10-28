@@ -1,7 +1,9 @@
 "use client";
 
-import { EnvelopeDistribution } from "@/components/features/finance/EnvelopeDistribution";
+import { CostCentersScreen } from "@/components/features/finance/CostCentersScreen";
 
+// Mantida porque as notificações de estouro apontam para cá: abre a mesma
+// árvore já no modo distribuição.
 export default function DistribuicaoPage() {
-  return <EnvelopeDistribution />;
+  return <CostCentersScreen initialEditing />;
 }
