@@ -25,7 +25,11 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCostCenterBalances, useCostCenters } from "@/hooks/useCostCenters";
 import { transactionService } from "@/lib/services/transactionService";
-import { recurrenceService } from "@/lib/services/recurrenceService";
+import {
+  findSimilar,
+  recurrenceService,
+} from "@/lib/services/recurrenceService";
+import { RecurringTransactionTemplate } from "@/lib/types";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { friendlyError } from "@/lib/errors";
 
@@ -102,7 +106,7 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
     try {
       setIsSubmitting(true);
       if (data.recurrence?.isRecurring) {
-        await recurrenceService.createTemplate({
+        const template = {
           companyId: selectedCompany.id,
           description: data.description,
           amount: data.amount,
@@ -127,8 +131,33 @@ export function TransactionsPage({ type }: { type: "payable" | "receivable" }) {
             details: data.details || "",
             notes: data.notes || "",
           },
-        });
-        toast.success("Recorrência criada.");
+        };
+        // Antes de gravar: duas recorrências iguais geram o mesmo lançamento
+        // todo mês, e só se descobre quando a segunda conta é paga.
+        const existing = await recurrenceService
+          .getTemplates(selectedCompany.id, { active: true })
+          .then((all) =>
+            findSimilar(all, template as RecurringTransactionTemplate),
+          )
+          .catch(() => undefined);
+        await recurrenceService.createTemplate(template);
+        if (existing) {
+          toast.warning(
+            `Recorrência criada, mas já existe uma igual: "${existing.description}".`,
+            {
+              description: "Confira para não gerar a mesma conta em dobro.",
+              action: {
+                label: "Ver",
+                onClick: () =>
+                  window.location.assign(
+                    "/financeiro/recorrencias?filtro=duplicadas",
+                  ),
+              },
+            },
+          );
+        } else {
+          toast.success("Recorrência criada.");
+        }
       } else {
         await transactionService.create(
           data,

@@ -20,7 +20,12 @@ export {
   setCostCenterEnvelopes,
   decideBudgetRequest,
 } from "./costCenterLedger";
-import { assertCanManageBudget, formatBRL, toCents } from "./costCenterLedger";
+import {
+  assertCanManageBudget,
+  formatBRL,
+  toCents,
+  toReais,
+} from "./costCenterLedger";
 export {
   syncCostCenterLedger,
   createPayableTransaction,
@@ -604,6 +609,47 @@ export const suggestPaymentBatches = functions
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const BCB_SERIES = { IPCA: 433, IGPM: 189 } as const;
+
+/** Acumulado de 12 meses do índice (%), ou null se o Banco Central não responder. */
+async function fetchIndexPct(type: "IPCA" | "IGPM"): Promise<number | null> {
+  try {
+    const res = await fetch(
+      `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${BCB_SERIES[type]}/dados/ultimos/12?formato=json`,
+    );
+    if (!res.ok) return null;
+    const rows = (await res.json()) as { valor: string }[];
+    if (rows.length !== 12) return null;
+    const acc = rows.reduce((p, r) => p * (1 + Number(r.valor) / 100), 1);
+    return Number.isFinite(acc) ? Math.round((acc - 1) * 10000) / 100 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** O reajuste anual cai nesta ocorrência e ainda não foi aplicado neste ano? */
+function adjustmentDue(t: any, due: Date): boolean {
+  return (
+    !!t.adjustmentRule &&
+    t.adjustmentRule.monthToApply === due.getMonth() + 1 &&
+    t.lastAdjustment?.year !== due.getFullYear()
+  );
+}
+
+/** `{mes}` e `{ano}` na descrição viram o mês e o ano do vencimento gerado. */
+function renderDescription(description: string, due: Date): string {
+  return description
+    .replace(
+      /\{mes\}/gi,
+      due.toLocaleDateString("pt-BR", {
+        month: "long",
+        timeZone: "America/Sao_Paulo",
+      }),
+    )
+    .replace(/\{ano\}/gi, String(due.getFullYear()));
+}
+
 export const processRecurringTemplates = functions
   .runWith({ timeoutSeconds: 300, memory: "512MB" })
   .pubsub.schedule("0 2 * * *")
@@ -622,6 +668,7 @@ export const processRecurringTemplates = functions
     let generatedCount = 0;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const indexCache = new Map<string, Promise<number | null>>();
 
     for (const docSnap of snapshot.docs) {
       const templateRef = docSnap.ref;
@@ -632,6 +679,35 @@ export const processRecurringTemplates = functions
         // 02:00 para ler uma recusa. Ela nasce marcada e o gestor é avisado.
         // A leitura fica fora da transação porque informa, não bloqueia.
         const preData = docSnap.data() as any;
+
+        // Reajuste anual: o percentual vem do modelo ou, para IPCA/IGP-M sem
+        // percentual, do acumulado de 12 meses do Banco Central. A consulta de
+        // rede fica fora da transação (que pode reexecutar).
+        const preDue: Date | null = preData.nextDueDate?.toDate() ?? null;
+        let adjustPct: number | null = null;
+        if (preDue && adjustmentDue(preData, preDue)) {
+          const r = preData.adjustmentRule;
+          if (r.percentage == null && r.type !== "FIXED") {
+            if (!indexCache.has(r.type))
+              indexCache.set(r.type, fetchIndexPct(r.type));
+            adjustPct = await indexCache.get(r.type)!;
+          } else {
+            adjustPct = r.percentage ?? null;
+          }
+        }
+        const adjustPending =
+          !!preDue && adjustmentDue(preData, preDue) && adjustPct === null;
+        const preAmount =
+          adjustPct === null
+            ? preData.amount
+            : toReais(
+                Math.round(
+                  (toCents(preData.amount) *
+                    (10000 + Math.round(adjustPct * 100))) /
+                    10000,
+                ),
+              );
+
         let budgetFit: { fits: boolean; message: string | null } = {
           fits: true,
           message: null,
@@ -646,11 +722,11 @@ export const processRecurringTemplates = functions
               companyId: preData.companyId,
               type: "payable",
               status: "draft",
-              amount: preData.amount,
+              amount: preAmount,
               dueDate: preData.nextDueDate,
               costCenterAllocation: scaleAllocation(
                 preData.baseTransactionData?.costCenterAllocation,
-                preData.amount,
+                preAmount,
               ),
             });
           } catch (err) {
@@ -673,8 +749,10 @@ export const processRecurringTemplates = functions
 
           if (!nextDueDate) return false;
 
-          const thresholdDate =
-            data.type === "payable" ? addDays(today, 7) : today;
+          const thresholdDate = addDays(
+            today,
+            data.advanceDays ?? (data.type === "payable" ? 7 : 0),
+          );
 
           // 2) Verifique se a data ainda está dentro da janela
           if (
@@ -682,9 +760,19 @@ export const processRecurringTemplates = functions
             isSameDay(nextDueDate, thresholdDate)
           ) {
             if (endDate && isBefore(endDate, today)) {
-              t.update(templateRef, { active: false });
+              t.update(templateRef, {
+                active: false,
+                endedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
               return false;
             }
+
+            const adjusts =
+              adjustPct !== null && adjustmentDue(data, nextDueDate);
+            const amount = adjusts ? preAmount : data.amount;
+            const needsConfirm =
+              !!data.amountIsEstimate ||
+              (adjustPending && adjustmentDue(data, nextDueDate));
 
             const costCenterIds =
               data.baseTransactionData?.costCenterAllocation?.map(
@@ -694,15 +782,17 @@ export const processRecurringTemplates = functions
 
             const costCenterAllocation = scaleAllocation(
               data.baseTransactionData?.costCenterAllocation,
-              data.amount,
+              amount,
             );
 
             const newTransactionData = {
               ...data.baseTransactionData,
               ...(costCenterAllocation ? { costCenterAllocation } : {}),
-              description: `${data.description} (Recorrência)`,
-              amount: data.amount,
+              description: `${renderDescription(data.description, nextDueDate)} (Recorrência)`,
+              amount,
               type: data.type,
+              recurringTemplateId: templateRef.id,
+              ...(needsConfirm ? { amountToConfirm: true } : {}),
               dueDate: admin.firestore.Timestamp.fromDate(nextDueDate),
               status: "draft",
               recurrence: {
@@ -751,6 +841,18 @@ export const processRecurringTemplates = functions
             t.update(templateRef, {
               nextDueDate: admin.firestore.Timestamp.fromDate(nextDate),
               lastGeneratedAt: admin.firestore.FieldValue.serverTimestamp(),
+              lastError: admin.firestore.FieldValue.delete(),
+              ...(adjusts
+                ? {
+                    amount,
+                    lastAdjustment: {
+                      year: nextDueDate.getFullYear(),
+                      from: data.amount,
+                      to: amount,
+                      percentage: adjustPct,
+                    },
+                  }
+                : {}),
             });
 
             return true;
@@ -761,6 +863,23 @@ export const processRecurringTemplates = functions
 
         if (objGenerated) {
           generatedCount++;
+          const label = preData.description || "Recorrência";
+          const recLink = "/financeiro/recorrencias";
+          if (adjustPct !== null && preAmount !== preData.amount) {
+            await notifyBudgetExceeded(
+              preData.companyId,
+              "Reajuste aplicado",
+              `${label}: ${adjustPct}% (${preData.adjustmentRule.type}), de ${formatBRL(toCents(preData.amount))} para ${formatBRL(toCents(preAmount))}.`,
+              recLink,
+            );
+          } else if (adjustPending) {
+            await notifyBudgetExceeded(
+              preData.companyId,
+              "Reajuste pendente",
+              `${label}: não foi possível obter o índice. O lançamento saiu com o valor anterior e marcado para confirmar.`,
+              recLink,
+            );
+          }
           if (!budgetFit.fits) {
             await notifyBudgetExceeded(
               preData.companyId,
@@ -772,6 +891,29 @@ export const processRecurringTemplates = functions
         }
       } catch (error) {
         console.error(`Erro processando template ${templateRef.id}:`, error);
+        // Sem isto a recorrência falhava todo dia sem ninguém saber. Avisa uma
+        // vez por mensagem de erro, não a cada execução.
+        try {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          const cur = (await templateRef.get()).data() as any;
+          if (cur?.lastError?.message !== message) {
+            await templateRef.update({
+              lastError: {
+                message,
+                at: admin.firestore.FieldValue.serverTimestamp(),
+              },
+            });
+            await notifyBudgetExceeded(
+              cur.companyId,
+              "Recorrência não gerada",
+              `${cur.description || "Recorrência"}: ${message}`,
+              "/financeiro/recorrencias",
+            );
+          }
+        } catch (err) {
+          console.error("Falha ao registrar erro da recorrência:", err);
+        }
       }
     }
 

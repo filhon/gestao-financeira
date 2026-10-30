@@ -1,9 +1,15 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import Papa from "papaparse";
+import currency from "currency.js";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { recurrenceService } from "@/lib/services/recurrenceService";
+import {
+  findDuplicateIds,
+  monthlyAmount,
+  recurrenceService,
+} from "@/lib/services/recurrenceService";
 import { RecurringTransactionTemplate } from "@/lib/types";
 import {
   Table,
@@ -21,23 +27,24 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   PauseCircle,
   PlayCircle,
   Pencil,
   Search,
-  TrendingUp,
-  TrendingDown,
-  CalendarClock,
   RefreshCw,
   AlertTriangle,
-  RepeatIcon,
   MoreHorizontal,
   SlidersHorizontal,
+  Download,
   X,
 } from "lucide-react";
-import { format, differenceInDays, isAfter, startOfDay } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { format, differenceInDays, isBefore, startOfDay } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -59,58 +66,205 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pagination } from "@/components/ui/pagination";
 import { toast } from "sonner";
-import {
-  cn,
-  formatCurrency,
-  formatCurrencyAbbr,
-  normalizeText,
-} from "@/lib/utils";
+import { cn, formatCurrency, normalizeText } from "@/lib/utils";
 import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurrenceDialog";
+import {
+  RecurrenceDetailSheet,
+  frequencyLabel,
+} from "@/components/features/finance/RecurrenceDetailSheet";
 import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
-import { AnimatedCounter } from "@/components/ui/animated-counter";
-
+import { useCostCenters } from "@/hooks/useCostCenters";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter, useSearchParams } from "next/navigation";
 
-function getFrequencyLabel(freq: string, interval: number) {
-  const intervalLabel = interval > 1 ? `A cada ${interval} ` : "";
-  switch (freq) {
-    case "daily":
-      return `${intervalLabel}${interval > 1 ? "dias" : "Diário"}`;
-    case "weekly":
-      return `${intervalLabel}${interval > 1 ? "semanas" : "Semanal"}`;
-    case "monthly":
-      return `${intervalLabel}${interval > 1 ? "meses" : "Mensal"}`;
-    case "yearly":
-      return `${intervalLabel}${interval > 1 ? "anos" : "Anual"}`;
-    default:
-      return freq;
-  }
-}
+const STATUS_OPTIONS = [
+  { value: "all", label: "Todas" },
+  { value: "active", label: "Ativas" },
+  { value: "paused", label: "Pausadas" },
+  { value: "ended", label: "Encerradas" },
+  { value: "overdue", label: "Atrasadas" },
+  { value: "error", label: "Com erro" },
+  { value: "duplicates", label: "Duplicadas" },
+  { value: "no_account", label: "Sem conta" },
+];
 
-function getFrequencyIcon(freq: string) {
-  switch (freq) {
-    case "daily":
-      return "D";
-    case "weekly":
-      return "S";
-    case "monthly":
-      return "M";
-    case "yearly":
-      return "A";
-    default:
-      return "?";
-  }
-}
+const FILTER_FROM_URL: Record<string, string> = {
+  "sem-conta": "no_account",
+  duplicadas: "duplicates",
+};
+
+type SortKey = "due" | "amount" | "description";
+type GroupBy = "none" | "cc" | "supplier";
+
+/** Borda mais forte que a padrão: sobre linhas claras o checkbox sumia. */
+const CHECKBOX_CLASS = "border-muted-foreground/60";
+
+const NO_CC = "Sem centro de custo";
+const NO_SUPPLIER = "Sem fornecedor";
 
 function getDueDateUrgency(nextDueDate: Date, active: boolean) {
   if (!active) return null;
   const today = startOfDay(new Date());
+  if (isBefore(nextDueDate, today)) return "overdue";
   const diff = differenceInDays(nextDueDate, today);
-  if (!isAfter(nextDueDate, today)) return "overdue";
   if (diff <= 3) return "critical";
   if (diff <= 7) return "warning";
   return null;
+}
+
+function statusOf(t: RecurringTransactionTemplate) {
+  return t.endedAt ? "ended" : t.active ? "active" : "paused";
+}
+
+const STATUS_LABEL = { active: "Ativa", paused: "Pausada", ended: "Encerrada" };
+
+function StatusBadge({ t }: { t: RecurringTransactionTemplate }) {
+  const s = statusOf(t);
+  return (
+    <Badge
+      variant={s === "active" ? "default" : "secondary"}
+      className={cn(
+        s === "active" &&
+          "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400",
+      )}
+    >
+      {STATUS_LABEL[s]}
+    </Badge>
+  );
+}
+
+const FLAG_STYLE =
+  "h-5 px-1.5 text-[10px] font-medium border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400";
+
+function Flags({
+  t,
+  missingAccount,
+  duplicate,
+}: {
+  t: RecurringTransactionTemplate;
+  missingAccount: boolean;
+  duplicate: boolean;
+}) {
+  const adjustedThisYear = t.lastAdjustment?.year === new Date().getFullYear();
+  return (
+    <>
+      {/* Ativa é o normal: só quem foge do normal ganha selo. */}
+      {!t.active && <StatusBadge t={t} />}
+      {t.lastError && (
+        <Badge
+          variant="outline"
+          className="h-5 px-1.5 text-[10px] font-medium border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400"
+          title={t.lastError.message}
+        >
+          falhou
+        </Badge>
+      )}
+      {duplicate && (
+        <Badge
+          variant="outline"
+          className={FLAG_STYLE}
+          title="Outra recorrência ativa tem mesmo fornecedor, valor e periodicidade"
+        >
+          possível duplicata
+        </Badge>
+      )}
+      {missingAccount && (
+        <Badge
+          variant="outline"
+          className={FLAG_STYLE}
+          title="Os lançamentos gerados chegam sem conta do plano de contas"
+        >
+          sem conta
+        </Badge>
+      )}
+      {t.amountIsEstimate && (
+        <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-medium">
+          valor varia
+        </Badge>
+      )}
+      {t.adjustmentRule && (
+        <Badge
+          variant="outline"
+          className="h-5 px-1.5 text-[10px] font-medium"
+          title={
+            adjustedThisYear
+              ? `Reajustada em ${t.lastAdjustment!.year}: de ${formatCurrency(t.lastAdjustment!.from)} para ${formatCurrency(t.lastAdjustment!.to)}`
+              : "Tem reajuste anual configurado"
+          }
+        >
+          {adjustedThisYear
+            ? `reajustada ${t.lastAdjustment!.percentage}%`
+            : "reajuste"}
+        </Badge>
+      )}
+    </>
+  );
+}
+
+/** Valor com o equivalente mensal embaixo quando a periodicidade não é mensal. */
+function AmountCell({ t }: { t: RecurringTransactionTemplate }) {
+  const notMonthly = t.frequency !== "monthly" || (t.interval || 1) > 1;
+  return (
+    <div className="text-right">
+      <Amount t={t} />
+      {notMonthly && (
+        <p className="text-xs font-normal text-muted-foreground tabular-nums">
+          ≈ {formatCurrency(monthlyAmount(t))}/mês
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Amount({ t }: { t: RecurringTransactionTemplate }) {
+  return (
+    <span
+      className={cn(
+        "font-financial font-medium tabular-nums",
+        t.type === "receivable" &&
+          t.active &&
+          "text-emerald-700 dark:text-emerald-400",
+      )}
+    >
+      {t.type === "receivable" && "+ "}
+      {formatCurrency(t.amount)}
+    </span>
+  );
+}
+
+function DueDate({ t }: { t: RecurringTransactionTemplate }) {
+  const urgency = getDueDateUrgency(t.nextDueDate, t.active);
+  return (
+    <div className="flex items-center gap-1.5">
+      {urgency === "overdue" && (
+        <AlertTriangle className="h-3.5 w-3.5 text-red-600" aria-hidden />
+      )}
+      <span
+        className={cn(
+          "text-sm tabular-nums",
+          urgency === "overdue" &&
+            "font-semibold text-red-700 dark:text-red-400",
+          urgency === "critical" &&
+            "font-semibold text-orange-700 dark:text-orange-400",
+          urgency === "warning" &&
+            "font-medium text-yellow-700 dark:text-yellow-500",
+        )}
+      >
+        {format(t.nextDueDate, "dd/MM/yyyy")}
+      </span>
+      {urgency === "overdue" && (
+        <Badge variant="destructive" className="h-4 px-1 text-[10px]">
+          Atrasada
+        </Badge>
+      )}
+      {urgency === "critical" && (
+        <Badge className="h-4 bg-orange-100 px-1 text-[10px] text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
+          {Math.max(0, differenceInDays(t.nextDueDate, startOfDay(new Date())))}{" "}
+          d
+        </Badge>
+      )}
+    </div>
+  );
 }
 
 function TableSkeleton() {
@@ -118,9 +272,9 @@ function TableSkeleton() {
     <div className="space-y-0">
       {Array.from({ length: 8 }).map((_, i) => (
         <div key={i} className="flex items-center gap-4 px-6 py-3 border-b">
-          <Skeleton className="h-6 w-6 rounded" />
+          <Skeleton className="h-4 w-4" />
           <Skeleton className="h-4 flex-1" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-4 w-28" />
           <Skeleton className="h-4 w-24" />
           <Skeleton className="h-4 w-20" />
           <Skeleton className="h-4 w-24" />
@@ -137,7 +291,6 @@ function MobileCardSkeleton() {
     <div className="divide-y">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="flex items-start gap-3 px-4 py-3.5">
-          <Skeleton className="h-8 w-8 rounded mt-0.5 shrink-0" />
           <div className="flex-1 space-y-2 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <Skeleton className="h-4 flex-1 max-w-[180px]" />
@@ -158,104 +311,53 @@ function MobileCardSkeleton() {
 
 interface MobileRecurrenceCardProps {
   template: RecurringTransactionTemplate;
-  urgency: string | null;
   canManage: boolean;
   missingAccount: boolean;
+  duplicate: boolean;
+  onOpen: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }
 
-/** Ativa e sem conta do plano: os lançamentos que ela gerar chegam sem classificação. */
-function MissingAccountBadge() {
-  return (
-    <Badge
-      variant="outline"
-      className="h-5 px-1.5 text-[10px] font-medium border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400"
-      title="Os lançamentos gerados chegam sem conta do plano de contas"
-    >
-      sem conta
-    </Badge>
-  );
-}
-
 function MobileRecurrenceCard({
   template: t,
-  urgency,
   canManage,
   missingAccount,
+  duplicate,
+  onOpen,
   onEdit,
   onToggleActive,
 }: MobileRecurrenceCardProps) {
+  const overdue = getDueDateUrgency(t.nextDueDate, t.active) === "overdue";
   return (
     <div
       className={cn(
         "flex items-start gap-3 px-4 py-3.5 transition-colors select-none",
-        urgency === "overdue" && "bg-red-50 dark:bg-red-900/10",
-        !t.active && "opacity-60",
+        overdue && "bg-red-50 dark:bg-red-900/10",
+        !t.active && "text-muted-foreground",
       )}
     >
-      {/* Frequency icon badge */}
-      <span
-        className={cn(
-          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-xs font-bold mt-0.5",
-          t.type === "payable"
-            ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
-            : "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
-        )}
-        title={t.frequency}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="min-w-0 flex-1 text-left"
       >
-        {getFrequencyIcon(t.frequency)}
-      </span>
-
-      {/* Main content */}
-      <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-medium leading-snug truncate flex-1">
+          <p className="flex-1 truncate text-sm font-medium leading-snug">
             {t.description}
           </p>
-          <span className="text-sm font-bold font-financial shrink-0">
-            {formatCurrency(t.amount)}
-          </span>
+          <Amount t={t} />
         </div>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {getFrequencyLabel(t.frequency, t.interval)} ·{" "}
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {frequencyLabel(t.frequency, t.interval)} ·{" "}
           {t.type === "payable" ? "Despesa" : "Receita"}
         </p>
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <span
-            className={cn(
-              "text-xs flex items-center gap-0.5",
-              urgency === "overdue" &&
-                "text-red-500 dark:text-red-400 font-medium",
-              urgency === "critical" &&
-                "text-orange-600 dark:text-orange-400 font-medium",
-              urgency === "warning" &&
-                "text-yellow-600 dark:text-yellow-500 font-medium",
-              !urgency && "text-muted-foreground",
-            )}
-          >
-            {urgency === "overdue" && (
-              <AlertTriangle className="h-3 w-3 mr-0.5 shrink-0" />
-            )}
-            {format(t.nextDueDate, "dd MMM yyyy", { locale: ptBR })}
-            {urgency === "overdue" && " · Vencida"}
-          </span>
-          <Badge
-            variant={t.active ? "default" : "secondary"}
-            className={cn(
-              "h-5 text-[10px] px-1.5",
-              t.active
-                ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400"
-                : "",
-            )}
-          >
-            {t.active ? "Ativo" : "Pausado"}
-          </Badge>
-          {missingAccount && <MissingAccountBadge />}
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <DueDate t={t} />
+          <Flags t={t} missingAccount={missingAccount} duplicate={duplicate} />
         </div>
-      </div>
+      </button>
 
-      {/* Actions menu */}
       {canManage ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -269,24 +371,90 @@ function MobileRecurrenceCard({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Ações</DropdownMenuLabel>
+            <DropdownMenuItem onClick={onOpen}>Detalhes</DropdownMenuItem>
             <DropdownMenuItem onClick={onEdit}>
               <Pencil className="mr-2 h-4 w-4" /> Editar
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onToggleActive}>
-              {t.active ? (
-                <PauseCircle className="mr-2 h-4 w-4" />
-              ) : (
-                <PlayCircle className="mr-2 h-4 w-4" />
-              )}
-              {t.active ? "Pausar" : "Ativar"}
-            </DropdownMenuItem>
+            {!t.endedAt && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onToggleActive}>
+                  {t.active ? (
+                    <PauseCircle className="mr-2 h-4 w-4" />
+                  ) : (
+                    <PlayCircle className="mr-2 h-4 w-4" />
+                  )}
+                  {t.active ? "Pausar" : "Retomar"}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
         <div className="w-11 h-11 shrink-0" />
       )}
     </div>
+  );
+}
+
+function Kpi({
+  label,
+  loading,
+  children,
+  hint,
+}: {
+  label: string;
+  loading: boolean;
+  children: React.ReactNode;
+  hint?: React.ReactNode;
+}) {
+  return (
+    <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      {loading ? (
+        <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
+      ) : (
+        <div className="mt-1 text-xl font-bold tabular-nums md:text-2xl">
+          {children}
+        </div>
+      )}
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
+function SortHead({
+  label,
+  k,
+  sort,
+  onSort,
+  right,
+}: {
+  label: string;
+  k: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (k: SortKey) => void;
+  /** Coluna numérica: título à direita, como o valor. */
+  right?: boolean;
+}) {
+  const active = sort.key === k;
+  const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead
+      className={right ? "text-right" : undefined}
+      aria-sort={
+        active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
+      }
+    >
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className="inline-flex items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {label}
+        <Icon className={cn("h-3 w-3", !active && "opacity-40")} aria-hidden />
+      </button>
+    </TableHead>
   );
 }
 
@@ -303,19 +471,28 @@ function Recorrencias() {
   const router = useRouter();
   const { canViewRecurrences, canManageRecurrences } = usePermissions();
   const { accounts } = useChartOfAccounts(selectedCompany?.id);
+  const { costCenters } = useCostCenters(selectedCompany?.id);
   const missingAccount = (t: RecurringTransactionTemplate) =>
     accounts.length > 0 && t.active && !t.baseTransactionData?.accountId;
 
   const [searchTerm, setSearchTermState] = useState("");
-  // `?filtro=sem-conta`: vem do aviso do plano de contas.
+  // `?filtro=sem-conta` vem do aviso do plano de contas; `duplicadas`, do
+  // aviso ao criar uma recorrência igual a outra.
   const searchParams = useSearchParams();
   const [statusFilter, setStatusFilterState] = useState<string>(
-    searchParams.get("filtro") === "sem-conta" ? "no_account" : "all",
+    FILTER_FROM_URL[searchParams.get("filtro") ?? ""] ?? "all",
   );
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "due",
+    dir: "asc",
+  });
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [confirmBulkPause, setConfirmBulkPause] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [openId, setOpenId] = useState<string | null>(null);
   const [editTemplate, setEditTemplate] =
     useState<RecurringTransactionTemplate | null>(null);
 
@@ -339,21 +516,111 @@ function Recorrencias() {
     enabled: !!selectedCompany && canViewRecurrences,
   });
 
+  const duplicateIds = useMemo(
+    () => findDuplicateIds(allTemplates),
+    [allTemplates],
+  );
+
+  const ccNames = useMemo(
+    () => new Map(costCenters.map((c) => [c.id, c.name])),
+    [costCenters],
+  );
+  const ccLabel = (t: RecurringTransactionTemplate) => {
+    const alloc = t.baseTransactionData?.costCenterAllocation ?? [];
+    if (alloc.length === 0) return "";
+    if (alloc.length > 1) return `Rateado (${alloc.length})`;
+    return ccNames.get(alloc[0].costCenterId) ?? "";
+  };
+
+  const supplierOf = (t: RecurringTransactionTemplate) =>
+    t.baseTransactionData?.supplierOrClient ?? "";
+  /** Nome do grupo da linha ("" quando não há agrupamento). */
+  const groupName = (t: RecurringTransactionTemplate) =>
+    groupBy === "cc"
+      ? ccLabel(t) || NO_CC
+      : groupBy === "supplier"
+        ? supplierOf(t) || NO_SUPPLIER
+        : "";
+
+  const matchesFilter = (t: RecurringTransactionTemplate, filter: string) => {
+    switch (filter) {
+      case "active":
+      case "paused":
+      case "ended":
+        return statusOf(t) === filter;
+      case "overdue":
+        return getDueDateUrgency(t.nextDueDate, t.active) === "overdue";
+      case "error":
+        return !!t.lastError;
+      case "duplicates":
+        return duplicateIds.has(t.id);
+      case "no_account":
+        return missingAccount(t);
+      default:
+        return true;
+    }
+  };
+
   const filteredTemplates = useMemo(() => {
     const term = normalizeText(searchTerm.trim());
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const byKey = (
+      a: RecurringTransactionTemplate,
+      b: RecurringTransactionTemplate,
+    ) => {
+      if (sort.key === "amount") return (a.amount - b.amount) * dir;
+      if (sort.key === "description")
+        return a.description.localeCompare(b.description, "pt-BR") * dir;
+      return (a.nextDueDate.getTime() - b.nextDueDate.getTime()) * dir;
+    };
     return allTemplates
       .filter(
         (t) =>
-          (statusFilter === "all" ||
-            (statusFilter === "no_account"
-              ? accounts.length > 0 &&
-                t.active &&
-                !t.baseTransactionData?.accountId
-              : t.active === (statusFilter === "active"))) &&
-          (!term || normalizeText(t.description ?? "").includes(term)),
+          matchesFilter(t, statusFilter) &&
+          (!term ||
+            normalizeText(
+              `${t.description ?? ""} ${t.baseTransactionData?.supplierOrClient ?? ""}`,
+            ).includes(term)),
       )
-      .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
-  }, [allTemplates, statusFilter, searchTerm, accounts]);
+      .sort((a, b) => {
+        // O grupo vem primeiro: com a situação antes, o mesmo centro de custo
+        // aparecia duas vezes (ativas e pausadas), cada uma com seu cabeçalho.
+        if (groupBy !== "none") {
+          const g = groupName(a).localeCompare(groupName(b), "pt-BR");
+          if (g !== 0) return g;
+        }
+        // Pausada e encerrada descem: a data delas parou no passado e
+        // empurrava as ativas para baixo.
+        if (a.active !== b.active) return a.active ? -1 : 1;
+        return byKey(a, b);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    allTemplates,
+    statusFilter,
+    searchTerm,
+    accounts,
+    sort,
+    groupBy,
+    ccNames,
+    duplicateIds,
+  ]);
+
+  // Subtotal mensal de despesas ativas por grupo, sobre o filtro inteiro
+  // (não só a página).
+  const groupTotals = useMemo(() => {
+    const m = new Map<string, { count: number; monthly: currency }>();
+    for (const t of filteredTemplates) {
+      const k = groupName(t);
+      const g = m.get(k) ?? { count: 0, monthly: currency(0) };
+      g.count++;
+      if (t.active && t.type === "payable")
+        g.monthly = g.monthly.add(monthlyAmount(t));
+      m.set(k, g);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredTemplates, ccNames, groupBy]);
 
   const totalPages = Math.max(
     1,
@@ -373,69 +640,149 @@ function Recorrencias() {
     setStatusFilterState(value);
     setPage(1);
   };
+  const toggleSort = (key: SortKey) => {
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" },
+    );
+    setPage(1);
+  };
 
-  // KPIs derived from all active templates
   const kpis = useMemo(() => {
     const active = allTemplates.filter((t) => t.active);
     const today = startOfDay(new Date());
+    const sumMonthly = (type: "payable" | "receivable") =>
+      active
+        .filter((t) => t.type === type)
+        .reduce((s, t) => s.add(monthlyAmount(t)), currency(0)).value;
 
-    const toMonthlyAmount = (t: RecurringTransactionTemplate): number => {
-      switch (t.frequency) {
-        case "daily":
-          return (t.amount * 30) / t.interval;
-        case "weekly":
-          return (t.amount * (52 / 12)) / t.interval;
-        case "monthly":
-          return t.amount / t.interval;
-        case "yearly":
-          return t.amount / 12 / t.interval;
-        default:
-          return 0;
-      }
+    const next30 = active.filter(
+      (t) =>
+        t.type === "payable" && differenceInDays(t.nextDueDate, today) <= 30,
+    );
+    return {
+      fixedCost: sumMonthly("payable"),
+      revenue: sumMonthly("receivable"),
+      next30Count: next30.length,
+      next30Total: next30.reduce((s, t) => s.add(t.amount), currency(0)).value,
+      totalActive: active.length,
+      paused: allTemplates.filter((t) => statusOf(t) === "paused").length,
+      ended: allTemplates.filter((t) => statusOf(t) === "ended").length,
+      overdue: active.filter(
+        (t) => getDueDateUrgency(t.nextDueDate, true) === "overdue",
+      ).length,
+      errors: active.filter((t) => t.lastError).length,
+      duplicates: duplicateIds.size,
     };
+  }, [allTemplates, duplicateIds]);
 
-    const mrr = active
-      .filter((t) => t.type === "receivable")
-      .reduce((sum, t) => sum + toMonthlyAmount(t), 0);
-
-    const fixedCost = active
-      .filter((t) => t.type === "payable")
-      .reduce((sum, t) => sum + toMonthlyAmount(t), 0);
-
-    const dueIn7 = active.filter((t) => {
-      const diff = differenceInDays(t.nextDueDate, today);
-      return diff >= 0 && diff <= 7;
-    });
-
-    const overdue = active.filter((t) => !isAfter(t.nextDueDate, today));
-
-    return { mrr, fixedCost, totalActive: active.length, dueIn7, overdue };
-  }, [allTemplates]);
+  const openTemplate = allTemplates.find((t) => t.id === openId) ?? null;
 
   if (!canViewRecurrences) return null;
 
-  const handleToggleActive = async (template: RecurringTransactionTemplate) => {
-    try {
-      await recurrenceService.updateTemplate(template.id, template.companyId, {
-        active: !template.active,
-      });
+  const setActive = (template: RecurringTransactionTemplate, active: boolean) =>
+    recurrenceService.updateTemplate(template.id, template.companyId, {
+      active,
+    });
+
+  /** Aplica a situação e oferece desfazer: pausar errado só aparece quando um boleto deixa de nascer. */
+  const applyActive = async (
+    targets: RecurringTransactionTemplate[],
+    active: boolean,
+  ) => {
+    if (targets.length === 0) return;
+    const results = await Promise.allSettled(
+      targets.map((t) => setActive(t, active)),
+    );
+    const done = targets.filter((_, i) => results[i].status === "fulfilled");
+    const failed = targets.length - done.length;
+    if (failed > 0) toast.error(`${failed} não puderam ser atualizadas.`);
+    if (done.length > 0) {
+      const what =
+        done.length === 1 ? "Recorrência" : `${done.length} recorrências`;
       toast.success(
-        `Recorrência ${template.active ? "pausada" : "ativada"} com sucesso!`,
+        `${what} ${active ? "retomada" : "pausada"}${done.length > 1 ? "s" : ""}.`,
+        {
+          action: {
+            label: "Desfazer",
+            onClick: async () => {
+              const undo = await Promise.allSettled(
+                done.map((t) => setActive(t, !active)),
+              );
+              if (undo.some((r) => r.status === "rejected"))
+                toast.error("Não foi possível desfazer tudo.");
+              fetchTemplates();
+            },
+          },
+        },
       );
-      fetchTemplates();
-    } catch {
-      toast.error("Erro ao atualizar recorrência.");
     }
+    fetchTemplates();
   };
 
-  const activeFilterCount = statusFilter !== "all" ? 1 : 0;
-  const hasActiveFilters = activeFilterCount > 0;
+  const handleToggleActive = (template: RecurringTransactionTemplate) =>
+    applyActive([template], !template.active);
 
-  const statusLabels: Record<string, string> = {
-    active: "Ativos",
-    paused: "Pausados",
-    no_account: "Sem conta",
+  const selectedTargets = (active: boolean) =>
+    allTemplates.filter(
+      (t) => selected.has(t.id) && !t.endedAt && t.active !== active,
+    );
+  const bulkSetActive = async (active: boolean) => {
+    await applyActive(selectedTargets(active), active);
+    setSelected(new Set());
   };
+
+  const exportCsv = () => {
+    const money = (n: number) => n.toFixed(2).replace(".", ",");
+    const csv = Papa.unparse(
+      filteredTemplates.map((t) => ({
+        Descrição: t.description,
+        Tipo: t.type === "payable" ? "Despesa" : "Receita",
+        "Fornecedor/cliente": t.baseTransactionData?.supplierOrClient ?? "",
+        "Centro de custo": ccLabel(t),
+        Valor: money(t.amount),
+        "Valor mensalizado": money(monthlyAmount(t)),
+        Frequência: frequencyLabel(t.frequency, t.interval),
+        "Próximo vencimento": format(t.nextDueDate, "dd/MM/yyyy"),
+        Situação: STATUS_LABEL[statusOf(t)],
+      })),
+      { delimiter: ";" },
+    );
+    const url = URL.createObjectURL(
+      new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `recorrencias-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Agrupado por centro de custo, a coluna repetiria o nome do cabeçalho.
+  const showCcColumn = groupBy !== "cc";
+  const colCount = 4 + (showCcColumn ? 1 : 0) + (canManageRecurrences ? 2 : 0);
+
+  const hasActiveFilters = statusFilter !== "all";
+  const filterLabel =
+    STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label ?? statusFilter;
+
+  const pageIds = templates.map((t) => t.id);
+  const allPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const togglePage = (on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      pageIds.forEach((id) => (on ? next.add(id) : next.delete(id)));
+      return next;
+    });
+  const toggleOne = (id: string, on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const pagination = (
     <Pagination
@@ -450,199 +797,178 @@ function Recorrencias() {
     />
   );
 
+  const emptyState = (
+    <div className="flex flex-col items-center gap-3">
+      <div className="rounded-full bg-muted p-4">
+        <RefreshCw className="h-8 w-8 text-muted-foreground" />
+      </div>
+      <div className="text-center">
+        <p className="font-medium">
+          {searchTerm || hasActiveFilters
+            ? "Nenhuma recorrência encontrada"
+            : "Nenhuma recorrência cadastrada"}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {searchTerm
+            ? `Sem resultados para "${searchTerm}"`
+            : hasActiveFilters
+              ? "Tente mudar o filtro de status"
+              : "Marque “repetir” ao criar uma conta a pagar ou a receber."}
+        </p>
+      </div>
+    </div>
+  );
+
+  const attentionItems = [
+    { filter: "overdue", n: kpis.overdue, text: "atrasada(s)" },
+    { filter: "error", n: kpis.errors, text: "com erro" },
+    { filter: "duplicates", n: kpis.duplicates, text: "duplicada(s)" },
+  ].filter((i) => i.n > 0);
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Recorrências
           </h1>
           <p className="text-sm text-muted-foreground">
-            Gerencie suas assinaturas e transações recorrentes.
+            Contas que se repetem e geram lançamentos sozinhas.
           </p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={exportCsv}
+          disabled={filteredTemplates.length === 0}
+        >
+          <Download className="mr-2 h-4 w-4" /> Exportar
+        </Button>
       </div>
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border md:grid-cols-4">
-        {/* MRR */}
-        <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <TrendingUp className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-            MRR
-          </div>
-          {isLoading ? (
-            <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
-          ) : (
-            <div
-              className="mt-1 text-xl font-bold text-green-600 dark:text-green-400 md:text-2xl"
-              title={formatCurrency(kpis.mrr)}
-            >
-              <span className="md:hidden">
-                <AnimatedCounter
-                  value={kpis.mrr}
-                  formatter={formatCurrencyAbbr}
-                  duration={700}
-                />
-              </span>
-              <span className="hidden md:inline">
-                <AnimatedCounter
-                  value={kpis.mrr}
-                  formatter={formatCurrency}
-                  duration={700}
-                />
-              </span>
-            </div>
-          )}
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Receitas ativas mensalizadas
-          </p>
-        </div>
-
-        {/* Compromisso fixo */}
-        <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <TrendingDown className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
-            Compromisso Fixo
-          </div>
-          {isLoading ? (
-            <div className="mt-2 h-7 w-24 animate-pulse rounded bg-muted" />
-          ) : (
-            <div
-              className="mt-1 text-xl font-bold text-red-600 dark:text-red-400 md:text-2xl"
-              title={formatCurrency(kpis.fixedCost)}
-            >
-              <span className="md:hidden">
-                <AnimatedCounter
-                  value={kpis.fixedCost}
-                  formatter={formatCurrencyAbbr}
-                  duration={700}
-                />
-              </span>
-              <span className="hidden md:inline">
-                <AnimatedCounter
-                  value={kpis.fixedCost}
-                  formatter={formatCurrency}
-                  duration={700}
-                />
-              </span>
-            </div>
-          )}
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Despesas ativas mensalizadas
-          </p>
-        </div>
-
-        {/* Total ativo */}
-        <div className="bg-card px-4 py-3.5 md:px-5 md:py-4">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <RepeatIcon className="h-3.5 w-3.5" />
-            Recorrências Ativas
-          </div>
-          {isLoading ? (
-            <div className="mt-2 h-7 w-10 animate-pulse rounded bg-muted" />
-          ) : (
-            <div className="mt-1 text-xl font-bold md:text-2xl">
-              <AnimatedCounter
-                value={kpis.totalActive}
-                formatter={(v) => Math.round(v).toString()}
-                duration={500}
-              />
-            </div>
-          )}
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Templates em execução
-          </p>
-        </div>
-
-        {/* Vencendo em breve / vencidas */}
+        <Kpi
+          label="Compromisso mensal"
+          loading={isLoading}
+          hint={
+            kpis.revenue > 0
+              ? `Receitas recorrentes: ${formatCurrency(kpis.revenue)}`
+              : "Despesas ativas, mensalizadas"
+          }
+        >
+          {formatCurrency(kpis.fixedCost)}
+        </Kpi>
+        <Kpi
+          label="Nos próximos 30 dias"
+          loading={isLoading}
+          hint={`${kpis.next30Count} despesa(s) a gerar`}
+        >
+          {formatCurrency(kpis.next30Total)}
+        </Kpi>
+        <Kpi
+          label="Recorrências ativas"
+          loading={isLoading}
+          hint={`${kpis.paused} pausada(s) · ${kpis.ended} encerrada(s)`}
+        >
+          {kpis.totalActive}
+        </Kpi>
         <div
           className={cn(
             "px-4 py-3.5 md:px-5 md:py-4",
-            kpis.overdue.length > 0
-              ? "bg-red-50 dark:bg-red-950/30"
-              : kpis.dueIn7.length > 0
-                ? "bg-yellow-50 dark:bg-yellow-950/20"
-                : "bg-card",
+            attentionItems.length > 0
+              ? "bg-amber-50 dark:bg-amber-950/20"
+              : "bg-card",
           )}
         >
-          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            {kpis.overdue.length > 0 ? (
-              <AlertTriangle className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
-            ) : (
-              <CalendarClock className="h-3.5 w-3.5" />
-            )}
-            Atenção Necessária
+          <div className="text-xs font-medium text-muted-foreground">
+            Atenção
           </div>
           {isLoading ? (
             <div className="mt-2 h-7 w-16 animate-pulse rounded bg-muted" />
+          ) : attentionItems.length === 0 ? (
+            <div className="mt-1 text-xl font-bold text-muted-foreground md:text-2xl">
+              Em dia
+            </div>
           ) : (
-            <>
-              {kpis.overdue.length > 0 && (
-                <div className="mt-1 text-xl font-bold text-red-600 dark:text-red-400 md:text-2xl">
-                  {kpis.overdue.length} vencida
-                  {kpis.overdue.length > 1 ? "s" : ""}
-                </div>
-              )}
-              {kpis.overdue.length === 0 && kpis.dueIn7.length > 0 && (
-                <div className="mt-1 text-xl font-bold text-yellow-600 dark:text-yellow-400 md:text-2xl">
-                  {kpis.dueIn7.length} em 7 dias
-                </div>
-              )}
-              {kpis.overdue.length === 0 && kpis.dueIn7.length === 0 && (
-                <div className="mt-1 text-xl font-bold text-muted-foreground md:text-2xl">
-                  —
-                </div>
-              )}
-            </>
+            <ul className="mt-1 space-y-0.5">
+              {attentionItems.map((i) => (
+                <li key={i.filter}>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(i.filter)}
+                    className="rounded-sm text-sm font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {i.n} {i.text}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {kpis.overdue.length > 0
-              ? "Verifique as recorrências vencidas"
-              : kpis.dueIn7.length > 0
-                ? `${kpis.dueIn7.length} vencem nos próximos 7 dias`
-                : "Nenhum vencimento próximo"}
-          </p>
         </div>
       </div>
 
       {/* Table card */}
       <Card>
         <CardHeader>
-          {/* ── Desktop: título + descrição + filtros em uma linha ── */}
+          {/* ── Desktop ── */}
           <div className="hidden md:flex flex-col gap-4 md:flex-row md:items-center justify-between">
             <div className="space-y-1">
               <CardTitle>Modelos de Recorrência</CardTitle>
               <CardDescription>
-                Lista de transações que são geradas automaticamente.
+                {isLoading || isError
+                  ? "Cada modelo gera um lançamento a cada vencimento."
+                  : `${filteredTemplates.length} de ${allTemplates.length} modelos`}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por descrição..."
+                  placeholder="Descrição ou fornecedor"
+                  aria-label="Buscar recorrências"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8 w-[250px]"
+                  className="pl-8 w-[260px]"
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Status" />
+                <SelectTrigger
+                  className="w-40"
+                  aria-label="Filtrar por situação"
+                >
+                  <SelectValue placeholder="Situação" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="active">Ativos</SelectItem>
-                  <SelectItem value="paused">Pausados</SelectItem>
-                  <SelectItem value="no_account">Sem conta</SelectItem>
+                  {STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={groupBy}
+                onValueChange={(v) => setGroupBy(v as GroupBy)}
+              >
+                <SelectTrigger className="w-52" aria-label="Agrupar por">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem agrupamento</SelectItem>
+                  <SelectItem value="cc">
+                    Agrupar por centro de custo
+                  </SelectItem>
+                  <SelectItem value="supplier">
+                    Agrupar por fornecedor
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* ── Mobile: título ─────────────────────────────────────── */}
+          {/* ── Mobile: título ── */}
           <div className="flex md:hidden items-center justify-between gap-2">
             <CardTitle>Modelos de Recorrência</CardTitle>
             {!isLoading && !isError && (
@@ -653,12 +979,13 @@ function Recorrencias() {
             )}
           </div>
 
-          {/* ── Mobile: busca + botão de filtros numa linha ───────── */}
+          {/* ── Mobile: busca + filtros ── */}
           <div className="flex items-center gap-2 md:hidden">
             <div className="relative flex-1 min-w-0">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar recorrências..."
+                aria-label="Buscar recorrências"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 pr-8 h-10"
@@ -679,48 +1006,69 @@ function Recorrencias() {
               type="button"
               onClick={() => setMobileFiltersOpen(true)}
               aria-label="Abrir filtros"
-              className={[
+              className={cn(
                 "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors",
-                activeFilterCount > 0
+                hasActiveFilters
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              ].join(" ")}
+              )}
             >
               <SlidersHorizontal className="h-4 w-4" />
-              {activeFilterCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground leading-none">
-                  {activeFilterCount}
-                </span>
-              )}
             </button>
           </div>
 
-          {/* ── Mobile: chips de filtros ativos (scroll horizontal) ── */}
           {hasActiveFilters && (
-            <div className="flex md:hidden items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              {statusFilter !== "all" && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
-                  {statusLabels[statusFilter] ?? statusFilter}
-                  <button
-                    onClick={() => setStatusFilter("all")}
-                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                    aria-label="Remover filtro de status"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              )}
-              <button
-                onClick={() => setStatusFilter("all")}
-                className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline hover:text-foreground transition-colors ml-1"
-              >
-                Limpar tudo
-              </button>
+            <div className="flex md:hidden items-center gap-2">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-2.5 pr-1 py-0.5 text-xs font-medium text-primary">
+                {filterLabel}
+                <button
+                  onClick={() => setStatusFilter("all")}
+                  className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                  aria-label="Remover filtro"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
             </div>
           )}
         </CardHeader>
 
         <CardContent className="p-0">
+          {canManageRecurrences && selected.size > 0 && (
+            <div className="flex items-center gap-2 border-y bg-muted/40 px-6 py-2 text-sm">
+              <span className="font-medium tabular-nums">
+                {selected.size} selecionada(s)
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={selectedTargets(false).length === 0}
+                onClick={() =>
+                  selectedTargets(false).length > 1
+                    ? setConfirmBulkPause(true)
+                    : bulkSetActive(false)
+                }
+              >
+                <PauseCircle className="mr-2 h-4 w-4" /> Pausar
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={selectedTargets(true).length === 0}
+                onClick={() => bulkSetActive(true)}
+              >
+                <PlayCircle className="mr-2 h-4 w-4" /> Retomar
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelected(new Set())}
+              >
+                Limpar seleção
+              </Button>
+            </div>
+          )}
+
           {isError ? (
             <div className="flex flex-col items-center gap-3 py-16 px-4 text-center">
               <div className="rounded-full bg-red-100 p-4 dark:bg-red-900/30">
@@ -752,17 +1100,42 @@ function Recorrencias() {
             </>
           ) : (
             <>
-              {/* ── Desktop: Table ───────────────────────────────────── */}
+              {/* ── Desktop: Table ── */}
               <div className="hidden md:block">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="pl-6">Descrição</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Valor</TableHead>
+                      {canManageRecurrences && (
+                        <TableHead className="w-10 pl-6">
+                          <Checkbox
+                            checked={allPageSelected}
+                            onCheckedChange={(v) => togglePage(v === true)}
+                            aria-label="Selecionar todas desta página"
+                            className={CHECKBOX_CLASS}
+                          />
+                        </TableHead>
+                      )}
+                      <SortHead
+                        label="Descrição"
+                        k="description"
+                        sort={sort}
+                        onSort={toggleSort}
+                      />
+                      {showCcColumn && <TableHead>Centro de custo</TableHead>}
+                      <SortHead
+                        label="Valor"
+                        k="amount"
+                        sort={sort}
+                        onSort={toggleSort}
+                        right
+                      />
                       <TableHead>Frequência</TableHead>
-                      <TableHead>Próx. Vencimento</TableHead>
-                      <TableHead>Status</TableHead>
+                      <SortHead
+                        label="Próx. vencimento"
+                        k="due"
+                        sort={sort}
+                        onSort={toggleSort}
+                      />
                       {canManageRecurrences && (
                         <TableHead className="pr-6 text-right">Ações</TableHead>
                       )}
@@ -771,170 +1144,144 @@ function Recorrencias() {
                   <TableBody>
                     {templates.length === 0 ? (
                       <TableRow>
-                        <TableCell
-                          colSpan={canManageRecurrences ? 7 : 6}
-                          className="py-16 text-center"
-                        >
-                          <div className="flex flex-col items-center gap-3">
-                            <div className="rounded-full bg-muted p-4">
-                              <RefreshCw className="h-8 w-8 text-muted-foreground" />
-                            </div>
-                            <div>
-                              <p className="font-medium">
-                                {searchTerm || statusFilter !== "all"
-                                  ? "Nenhuma recorrência encontrada"
-                                  : "Nenhuma recorrência cadastrada"}
-                              </p>
-                              <p className="mt-1 text-sm text-muted-foreground">
-                                {searchTerm
-                                  ? `Sem resultados para "${searchTerm}"`
-                                  : statusFilter !== "all"
-                                    ? "Tente mudar o filtro de status"
-                                    : "As recorrências gerarão transações automaticamente"}
-                              </p>
-                            </div>
-                          </div>
+                        <TableCell colSpan={colCount} className="py-16">
+                          {emptyState}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      templates.map((t) => {
-                        const urgency = getDueDateUrgency(
-                          t.nextDueDate,
-                          t.active,
-                        );
+                      templates.map((t, i) => {
+                        const group = groupName(t);
+                        const showGroup =
+                          groupBy !== "none" &&
+                          (i === 0 || group !== groupName(templates[i - 1]));
+                        const totals = groupTotals.get(group);
                         return (
-                          <TableRow
-                            key={t.id}
-                            className={cn(
-                              "transition-colors",
-                              !t.active && "opacity-50",
+                          <Fragment key={t.id}>
+                            {showGroup && totals && (
+                              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                                <TableCell
+                                  colSpan={colCount}
+                                  className="px-6 py-2 text-xs font-semibold"
+                                >
+                                  {group}
+                                  <span className="ml-2 font-normal text-muted-foreground tabular-nums">
+                                    {totals.count} recorrência(s)
+                                    {totals.monthly.value > 0 &&
+                                      ` · ${formatCurrency(totals.monthly.value)} por mês`}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
                             )}
-                          >
-                            {/* Descrição */}
-                            <TableCell className="pl-6 font-medium">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={cn(
-                                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-[10px] font-bold",
-                                    t.type === "payable"
-                                      ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
-                                      : "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
-                                  )}
-                                  title={t.frequency}
-                                >
-                                  {getFrequencyIcon(t.frequency)}
-                                </span>
-                                {t.description}
-                                {missingAccount(t) && <MissingAccountBadge />}
-                              </div>
-                            </TableCell>
-
-                            {/* Tipo */}
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "font-medium",
-                                  t.type === "payable"
-                                    ? "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400"
-                                    : "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400",
-                                )}
-                              >
-                                {t.type === "payable" ? "Despesa" : "Receita"}
-                              </Badge>
-                            </TableCell>
-
-                            {/* Valor */}
-                            <TableCell className="font-financial font-medium">
-                              {formatCurrency(t.amount)}
-                            </TableCell>
-
-                            {/* Frequência */}
-                            <TableCell className="text-sm text-muted-foreground">
-                              {getFrequencyLabel(t.frequency, t.interval)}
-                            </TableCell>
-
-                            {/* Próx. Vencimento */}
-                            <TableCell>
-                              <div className="flex items-center gap-1.5">
-                                {urgency === "overdue" && (
-                                  <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                                )}
-                                <span
-                                  className={cn(
-                                    "text-sm tabular-nums",
-                                    urgency === "overdue" &&
-                                      "font-semibold text-red-600 dark:text-red-400",
-                                    urgency === "critical" &&
-                                      "font-semibold text-orange-600 dark:text-orange-400",
-                                    urgency === "warning" &&
-                                      "font-medium text-yellow-600 dark:text-yellow-500",
-                                  )}
-                                >
-                                  {format(t.nextDueDate, "dd/MM/yyyy", {
-                                    locale: ptBR,
-                                  })}
-                                </span>
-                                {urgency === "overdue" && (
-                                  <Badge
-                                    variant="destructive"
-                                    className="h-4 px-1 text-[10px]"
+                            <TableRow
+                              className={cn(
+                                "transition-colors",
+                                !t.active && "text-muted-foreground",
+                              )}
+                              data-state={
+                                selected.has(t.id) ? "selected" : undefined
+                              }
+                            >
+                              {canManageRecurrences && (
+                                <TableCell className="pl-6">
+                                  <Checkbox
+                                    checked={selected.has(t.id)}
+                                    onCheckedChange={(v) =>
+                                      toggleOne(t.id, v === true)
+                                    }
+                                    aria-label={`Selecionar ${t.description}`}
+                                    className={CHECKBOX_CLASS}
+                                  />
+                                </TableCell>
+                              )}
+                              <TableCell className="font-medium">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenId(t.id)}
+                                    className="rounded-sm text-left hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                   >
-                                    Vencida
-                                  </Badge>
-                                )}
-                                {urgency === "critical" && (
-                                  <Badge className="h-4 bg-orange-100 px-1 text-[10px] text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-                                    3 dias
-                                  </Badge>
-                                )}
-                              </div>
-                            </TableCell>
-
-                            {/* Status */}
-                            <TableCell>
-                              <Badge
-                                variant={t.active ? "default" : "secondary"}
-                                className={cn(
-                                  t.active
-                                    ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                    : "",
-                                )}
-                              >
-                                {t.active ? "Ativo" : "Pausado"}
-                              </Badge>
-                            </TableCell>
-
-                            {/* Ações */}
-                            {canManageRecurrences && (
-                              <TableCell className="pr-6 text-right">
-                                <div className="flex justify-end gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => setEditTemplate(t)}
-                                    title="Editar"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => handleToggleActive(t)}
-                                    title={t.active ? "Pausar" : "Ativar"}
-                                  >
-                                    {t.active ? (
-                                      <PauseCircle className="h-3.5 w-3.5" />
-                                    ) : (
-                                      <PlayCircle className="h-3.5 w-3.5" />
-                                    )}
-                                  </Button>
+                                    {t.description}
+                                  </button>
+                                  <Flags
+                                    t={t}
+                                    missingAccount={missingAccount(t)}
+                                    duplicate={duplicateIds.has(t.id)}
+                                  />
                                 </div>
+                                {groupBy !== "supplier" && supplierOf(t) && (
+                                  <p className="text-xs font-normal text-muted-foreground">
+                                    {supplierOf(t)}
+                                  </p>
+                                )}
                               </TableCell>
-                            )}
-                          </TableRow>
+                              {showCcColumn && (
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {ccLabel(t) || NO_CC}
+                                </TableCell>
+                              )}
+                              <TableCell>
+                                <AmountCell t={t} />
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {frequencyLabel(t.frequency, t.interval)}
+                              </TableCell>
+                              <TableCell>
+                                <DueDate t={t} />
+                                {t.lastGeneratedAt && (
+                                  <p className="text-xs font-normal text-muted-foreground tabular-nums">
+                                    gerada em{" "}
+                                    {format(t.lastGeneratedAt, "dd/MM/yyyy")}
+                                  </p>
+                                )}
+                              </TableCell>
+                              {canManageRecurrences && (
+                                <TableCell className="pr-6 text-right">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        aria-label={`Ações de ${t.description}`}
+                                      >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem
+                                        onClick={() => setOpenId(t.id)}
+                                      >
+                                        Detalhes
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => setEditTemplate(t)}
+                                      >
+                                        <Pencil className="mr-2 h-4 w-4" />{" "}
+                                        Editar
+                                      </DropdownMenuItem>
+                                      {!t.endedAt && (
+                                        <>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            onClick={() =>
+                                              handleToggleActive(t)
+                                            }
+                                          >
+                                            {t.active ? (
+                                              <PauseCircle className="mr-2 h-4 w-4" />
+                                            ) : (
+                                              <PlayCircle className="mr-2 h-4 w-4" />
+                                            )}
+                                            {t.active ? "Pausar" : "Retomar"}
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          </Fragment>
                         );
                       })
                     )}
@@ -944,48 +1291,25 @@ function Recorrencias() {
                 <div className="border-t px-6 py-4">{pagination}</div>
               </div>
 
-              {/* ── Mobile: Card list ────────────────────────────────── */}
+              {/* ── Mobile: Card list ── */}
               <div className="md:hidden">
                 {templates.length === 0 ? (
-                  <div className="flex flex-col items-center gap-3 py-10 px-4 text-muted-foreground">
-                    <div className="rounded-full bg-muted p-4">
-                      <RefreshCw className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                    <div className="text-center">
-                      <p className="font-medium">
-                        {searchTerm || statusFilter !== "all"
-                          ? "Nenhuma recorrência encontrada"
-                          : "Nenhuma recorrência cadastrada"}
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {searchTerm
-                          ? `Sem resultados para "${searchTerm}"`
-                          : statusFilter !== "all"
-                            ? "Tente mudar o filtro de status"
-                            : "As recorrências gerarão transações automaticamente"}
-                      </p>
-                    </div>
-                  </div>
+                  <div className="py-10 px-4">{emptyState}</div>
                 ) : (
                   <>
                     <div className="divide-y">
-                      {templates.map((t) => {
-                        const urgency = getDueDateUrgency(
-                          t.nextDueDate,
-                          t.active,
-                        );
-                        return (
-                          <MobileRecurrenceCard
-                            key={t.id}
-                            template={t}
-                            urgency={urgency}
-                            canManage={canManageRecurrences}
-                            missingAccount={missingAccount(t)}
-                            onEdit={() => setEditTemplate(t)}
-                            onToggleActive={() => handleToggleActive(t)}
-                          />
-                        );
-                      })}
+                      {templates.map((t) => (
+                        <MobileRecurrenceCard
+                          key={t.id}
+                          template={t}
+                          canManage={canManageRecurrences}
+                          missingAccount={missingAccount(t)}
+                          duplicate={duplicateIds.has(t.id)}
+                          onOpen={() => setOpenId(t.id)}
+                          onEdit={() => setEditTemplate(t)}
+                          onToggleActive={() => handleToggleActive(t)}
+                        />
+                      ))}
                     </div>
 
                     <div className="border-t px-4 py-3">{pagination}</div>
@@ -997,7 +1321,7 @@ function Recorrencias() {
         </CardContent>
       </Card>
 
-      {/* ── Mobile filter sheet ──────────────────────────────────── */}
+      {/* ── Mobile filter sheet ── */}
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
         <SheetContent
           side="bottom"
@@ -1010,17 +1334,18 @@ function Recorrencias() {
           <div className="space-y-5">
             <div className="space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Status
+                Situação
               </p>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder="Situação" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="active">Ativos</SelectItem>
-                  <SelectItem value="paused">Pausados</SelectItem>
-                  <SelectItem value="no_account">Sem conta</SelectItem>
+                  {STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -1038,10 +1363,7 @@ function Recorrencias() {
               </Button>
               <Button
                 className="flex-1"
-                onClick={() => {
-                  setMobileFiltersOpen(false);
-                  if (activeFilterCount > 0) toast.success("Filtros aplicados");
-                }}
+                onClick={() => setMobileFiltersOpen(false)}
               >
                 Aplicar
               </Button>
@@ -1049,6 +1371,31 @@ function Recorrencias() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDialog
+        open={confirmBulkPause}
+        onOpenChange={setConfirmBulkPause}
+        title={`Pausar ${selectedTargets(false).length} recorrências?`}
+        description="Elas param de gerar lançamentos até serem retomadas. Dá para desfazer logo depois."
+        confirmText="Pausar"
+        onConfirm={() => bulkSetActive(false)}
+      />
+
+      <RecurrenceDetailSheet
+        template={openTemplate}
+        onClose={() => setOpenId(null)}
+        canManage={canManageRecurrences}
+        costCenterName={openTemplate ? ccLabel(openTemplate) : undefined}
+        accountLabel={(() => {
+          const a = accounts.find(
+            (x) => x.id === openTemplate?.baseTransactionData?.accountId,
+          );
+          return a ? `${a.code} ${a.name}` : undefined;
+        })()}
+        onEdit={() => setEditTemplate(openTemplate)}
+        onToggleActive={() => openTemplate && handleToggleActive(openTemplate)}
+        onChanged={() => fetchTemplates()}
+      />
 
       <EditRecurrenceDialog
         open={!!editTemplate}

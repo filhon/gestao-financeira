@@ -467,6 +467,11 @@ export interface Transaction {
   budgetExceeded?: boolean;
   budgetExceededReason?: string;
 
+  /** Recorrência (modelo) que gerou este lançamento. */
+  recurringTemplateId?: string;
+  /** Valor estimado pelo modelo: confirmar antes de aprovar. */
+  amountToConfirm?: boolean;
+
   // Attachments
   attachments?: Attachment[];
 
@@ -681,11 +686,30 @@ export interface RecurringTransactionTemplate {
   endDate?: Date;
   active: boolean;
   lastGeneratedAt?: Date;
+  /** Quando foi encerrada de vez (distinto de pausada). */
+  endedAt?: Date;
+  /** Dias de antecedência com que o lançamento é criado. Padrão: 7 despesa, 0 receita. */
+  advanceDays?: number;
+  /** Conta variável (energia, DARF): o lançamento nasce marcado para confirmar o valor. */
+  amountIsEstimate?: boolean;
+  /**
+   * Reajuste anual. Sem `percentage`, IPCA/IGPM usam o acumulado de 12 meses do
+   * Banco Central; se a consulta falhar, o valor segue igual e o gestor é avisado.
+   */
   adjustmentRule?: {
     type: "IPCA" | "IGPM" | "FIXED";
     percentage?: number;
     monthToApply: number; // 1-12
   };
+  /** Último reajuste aplicado: evita aplicar duas vezes no mesmo ano. */
+  lastAdjustment?: {
+    year: number;
+    from: number;
+    to: number;
+    percentage: number;
+  };
+  /** Última falha do gerador; some quando uma geração dá certo. */
+  lastError?: { message: string; at: Date };
   baseTransactionData: Partial<Transaction>; // Stores cost centers, category, etc.
   createdAt: Date;
   updatedAt: Date;

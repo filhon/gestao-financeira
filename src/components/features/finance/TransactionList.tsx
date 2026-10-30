@@ -1246,6 +1246,15 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             sem saldo
           </Flag>
         )}
+        {t.amountToConfirm && (
+          <Flag
+            icon={AlertTriangle}
+            tone="warn"
+            title="Valor estimado pela recorrência: confira com a fatura antes de aprovar"
+          >
+            confirmar valor
+          </Flag>
+        )}
         {isPayable && t.status === "paid" && !hasComprovante(t) && (
           <Flag>sem comprovante</Flag>
         )}

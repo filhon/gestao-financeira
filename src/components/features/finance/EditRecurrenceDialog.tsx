@@ -48,7 +48,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn, formatCurrency } from "@/lib/utils";
 import { ptBR } from "date-fns/locale";
 
 const recurrenceSchema = z.object({
@@ -65,11 +66,28 @@ const recurrenceSchema = z.object({
       monthToApply: z.number(),
     })
     .optional(),
+  advanceDays: z.number().int().min(0).max(90).optional(),
+  amountIsEstimate: z.boolean().optional(),
   costCenterId: z.string().optional(),
   accountId: z.string().optional(),
 });
 
 type RecurrenceFormData = z.infer<typeof recurrenceSchema>;
+
+const MONTHS = [
+  "Janeiro",
+  "Fevereiro",
+  "Março",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro",
+];
 
 interface EditRecurrenceDialogProps {
   open: boolean;
@@ -137,6 +155,8 @@ export function EditRecurrenceDialog({
         nextDueDate: template.nextDueDate,
         endDate: template.endDate || null,
         adjustmentRule: template.adjustmentRule,
+        advanceDays: template.advanceDays,
+        amountIsEstimate: template.amountIsEstimate ?? false,
         costCenterId:
           template.baseTransactionData?.costCenterAllocation?.[0]?.costCenterId,
         accountId: template.baseTransactionData?.accountId,
@@ -163,6 +183,16 @@ export function EditRecurrenceDialog({
       return;
     }
 
+    if (
+      data.adjustmentRule?.type === "FIXED" &&
+      !data.adjustmentRule.percentage
+    ) {
+      form.setError("adjustmentRule", {
+        message: "Informe o percentual do reajuste.",
+      });
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const accountChanged =
@@ -176,6 +206,8 @@ export function EditRecurrenceDialog({
         nextDueDate: data.nextDueDate,
         endDate: data.endDate || undefined,
         adjustmentRule: data.adjustmentRule,
+        advanceDays: data.advanceDays,
+        amountIsEstimate: data.amountIsEstimate ?? false,
         // A alocação é regravada com o valor atual mesmo sem trocar o centro:
         // antes a edição mudava só `amount` e a alocação antiga ficava para
         // trás.
@@ -440,6 +472,178 @@ export function EditRecurrenceDialog({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="amountIsEstimate"
+              render={({ field }) => (
+                <FormItem className="flex items-start gap-2 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={!!field.value}
+                      onCheckedChange={(v) => field.onChange(v === true)}
+                      className="mt-0.5"
+                    />
+                  </FormControl>
+                  <div className="space-y-0.5">
+                    <FormLabel className="font-normal">
+                      O valor muda todo mês
+                    </FormLabel>
+                    <p className="text-xs text-muted-foreground">
+                      O lançamento sai marcado para você confirmar o valor da
+                      fatura antes de aprovar.
+                    </p>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="advanceDays"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Criar o lançamento com antecedência de</FormLabel>
+                  <div className="flex items-center gap-2">
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={90}
+                        className="w-24"
+                        placeholder={template?.type === "payable" ? "7" : "0"}
+                        value={field.value ?? ""}
+                        onChange={(e) =>
+                          field.onChange(
+                            e.target.value === ""
+                              ? undefined
+                              : parseInt(e.target.value),
+                          )
+                        }
+                      />
+                    </FormControl>
+                    <span className="text-sm text-muted-foreground">
+                      dias antes do vencimento
+                    </span>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="adjustmentRule"
+              render={({ field }) => {
+                const rule = field.value;
+                return (
+                  <FormItem className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start gap-2">
+                      <Checkbox
+                        checked={!!rule}
+                        onCheckedChange={(on) =>
+                          field.onChange(
+                            on === true
+                              ? {
+                                  type: "IPCA",
+                                  monthToApply:
+                                    form.getValues("nextDueDate").getMonth() +
+                                    1,
+                                }
+                              : undefined,
+                          )
+                        }
+                        className="mt-0.5"
+                      />
+                      <div className="space-y-0.5">
+                        <FormLabel className="font-normal">
+                          Reajuste anual
+                        </FormLabel>
+                        <p className="text-xs text-muted-foreground">
+                          Aluguel, mensalidade, contrato. O valor sobe sozinho
+                          no mês escolhido e o gestor é avisado.
+                        </p>
+                      </div>
+                    </div>
+                    {rule && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <Select
+                          value={rule.type}
+                          onValueChange={(type) =>
+                            field.onChange({
+                              ...rule,
+                              type,
+                              percentage:
+                                type === "FIXED" ? rule.percentage : undefined,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="IPCA">IPCA</SelectItem>
+                            <SelectItem value="IGPM">IGP-M</SelectItem>
+                            <SelectItem value="FIXED">% fixo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={String(rule.monthToApply)}
+                          onValueChange={(m) =>
+                            field.onChange({ ...rule, monthToApply: Number(m) })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {MONTHS.map((name, i) => (
+                              <SelectItem key={name} value={String(i + 1)}>
+                                {name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          placeholder={
+                            rule.type === "FIXED" ? "% ao ano" : "Automático"
+                          }
+                          value={rule.percentage ?? ""}
+                          onChange={(e) =>
+                            field.onChange({
+                              ...rule,
+                              percentage:
+                                e.target.value === ""
+                                  ? undefined
+                                  : Number(e.target.value),
+                            })
+                          }
+                        />
+                      </div>
+                    )}
+                    {rule && rule.type !== "FIXED" && (
+                      <p className="text-xs text-muted-foreground">
+                        Em branco, usa o acumulado de 12 meses divulgado pelo
+                        Banco Central. Se a consulta falhar, o valor segue igual
+                        e o lançamento fica marcado para confirmar.
+                      </p>
+                    )}
+                    {template?.lastAdjustment && (
+                      <p className="text-xs text-muted-foreground">
+                        Último reajuste ({template.lastAdjustment.year}):{" "}
+                        {template.lastAdjustment.percentage}%, de{" "}
+                        {formatCurrency(template.lastAdjustment.from)} para{" "}
+                        {formatCurrency(template.lastAdjustment.to)}.
+                      </p>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                );
+              }}
+            />
 
             <ResponsiveModalFooter>
               <Button
