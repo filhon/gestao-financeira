@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronsUpDown, Building2, Plus, Check } from "lucide-react";
+import { ChevronsUpDown, Plus, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -12,7 +12,17 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
-export function CompanySwitcher() {
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+
+/** `compact`: só a sigla da empresa (sidebar recolhida), lista abre ao lado. */
+export function CompanySwitcher({ compact = false }: { compact?: boolean }) {
   const { companies, selectedCompany, selectCompany } = useCompany();
   const [open, setOpen] = useState(false);
 
@@ -21,24 +31,38 @@ export function CompanySwitcher() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="w-full justify-between px-2 mb-4">
+        <Button
+          variant="outline"
+          title={compact ? selectedCompany.name : undefined}
+          aria-label={`Empresa: ${selectedCompany.name}. Trocar empresa`}
+          className={
+            compact ? "h-9 w-9 p-0" : "w-full justify-between px-2 mb-4"
+          }
+        >
           <div className="flex items-center gap-2 min-w-0">
-            <Avatar className="h-6 w-6 shrink-0">
+            <Avatar className={compact ? "h-7 w-7" : "h-6 w-6 shrink-0"}>
               <AvatarImage src={selectedCompany.logoUrl} />
-              <AvatarFallback>
-                <Building2 className="h-4 w-4" />
+              <AvatarFallback className="text-[11px] font-semibold">
+                {initials(selectedCompany.name)}
               </AvatarFallback>
             </Avatar>
-            <span className="truncate">{selectedCompany.name}</span>
+            {!compact && (
+              <span className="truncate">{selectedCompany.name}</span>
+            )}
           </div>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          {!compact && (
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        side="bottom"
+        side={compact ? "right" : "bottom"}
         align="start"
-        sideOffset={4}
-        className="w-(--radix-popover-trigger-width) p-1"
+        sideOffset={compact ? 8 : 4}
+        className={cn(
+          "p-1",
+          compact ? "w-60" : "w-(--radix-popover-trigger-width)",
+        )}
       >
         <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
           Empresas

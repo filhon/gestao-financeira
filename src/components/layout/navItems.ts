@@ -3,7 +3,7 @@ import {
   LayoutDashboard,
   Inbox,
   Wallet,
-  Receipt,
+  HandCoins,
   RefreshCw,
   Scale,
   Layers,
@@ -13,12 +13,13 @@ import {
   PieChart,
   ListTree,
   Landmark,
-  FileText,
+  ChartColumn,
+  Gavel,
   Settings,
   CalendarClock,
   Database,
   UserCog,
-  Building2,
+  Briefcase,
   MessageSquare,
   ShieldCheck,
   Key,
@@ -55,6 +56,8 @@ export interface NavGroup {
   title: string;
   icon: LucideIcon;
   items: NavItem[];
+  /** Fora da lista principal: a sidebar põe o grupo num menu no rodapé. */
+  footer?: boolean;
 }
 
 export type NavEntry = NavItem | NavGroup;
@@ -90,7 +93,7 @@ export const NAV: NavEntry[] = [
   {
     title: "Contas a Receber",
     href: "/financeiro/contas-receber",
-    icon: Receipt,
+    icon: HandCoins,
     visible: (p) => p.canViewReceivables,
     shortcut: "r",
   },
@@ -168,12 +171,13 @@ export const NAV: NavEntry[] = [
   {
     title: "Relatórios",
     href: "/relatorios",
-    icon: FileText,
+    icon: ChartColumn,
     visible: (p) => p.canViewReports,
   },
   {
     title: "Configurações",
     icon: Settings,
+    footer: true,
     items: [
       {
         title: "Usuários",
@@ -184,7 +188,7 @@ export const NAV: NavEntry[] = [
       {
         title: "Empresas",
         href: "/configuracoes/empresas",
-        icon: Building2,
+        icon: Briefcase,
         visible: (p) => p.canManageCompanies,
       },
       {
@@ -209,7 +213,7 @@ export const NAV: NavEntry[] = [
       {
         title: "Documentos Legais",
         href: "/configuracoes/documentos-legais",
-        icon: FileText,
+        icon: Gavel,
         visible: (p) => p.canAccessSettings,
       },
       {

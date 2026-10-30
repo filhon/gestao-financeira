@@ -7,7 +7,6 @@ import {
   TrendingUp,
   ChevronRight,
   Star,
-  Building2,
   PanelLeftClose,
   PanelLeftOpen,
   Megaphone,
@@ -26,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -38,6 +38,7 @@ import {
   useNavBadges,
   visibleNav,
   type NavBadge,
+  type NavGroup,
   type NavItem,
 } from "@/components/layout/navItems";
 
@@ -69,12 +70,37 @@ const BADGE_TONE: Record<NavBadge, string> = {
   feedbacks: "bg-muted text-muted-foreground",
 };
 
+// Ponto do rail e do grupo: só vencidas e fila pedem ação agora; o resto é aviso quieto.
+const DOT_TONE: Record<NavBadge, string> = {
+  overdue: "bg-destructive",
+  queue: "bg-primary",
+  comprovantes: "bg-muted-foreground",
+  feedbacks: "bg-muted-foreground",
+};
+const DOT_ORDER: NavBadge[] = ["overdue", "queue", "comprovantes", "feedbacks"];
+
+const ACTIVE = "bg-primary/12 text-foreground";
+const IDLE = "text-muted-foreground hover:bg-muted hover:text-foreground";
+
 const BADGE_LABEL: Record<NavBadge, string> = {
   overdue: "vencidas",
   queue: "na sua fila",
   comprovantes: "para revisar",
   feedbacks: "não lidos",
 };
+
+/** Ponto de pendência; no rail fica sobre o ícone, com anel para destacar. */
+function Dot({ tone, inline }: { tone: string; inline?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "h-2 w-2 rounded-full ring-2 ring-card",
+        tone,
+        !inline && "absolute right-1 top-1",
+      )}
+    />
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -92,8 +118,15 @@ export function Sidebar() {
 
   const nav = useMemo(() => visibleNav(permissions), [permissions]);
   const flat = useMemo(() => flatNav(nav), [nav]);
+  const settings = nav.find((e): e is NavGroup => isGroup(e) && !!e.footer);
+  const main = useMemo(
+    () => nav.filter((e) => e !== settings),
+    [nav, settings],
+  );
   const current = activeHref(pathname, flat);
   const badges = useNavBadges(permissions);
+  const groupDot = (items: NavItem[]) =>
+    DOT_ORDER.find((b) => items.some((i) => i.badge === b && badges[b]));
   const pinned = pins
     .map((href) => flat.find((i) => i.href === href))
     .filter((i): i is NavItem => !!i);
@@ -114,7 +147,7 @@ export function Sidebar() {
     });
 
   // Grupo da rota atual abre sozinho (inclusive em sub-rotas).
-  const activeGroup = nav.find(
+  const activeGroup = main.find(
     (e) => isGroup(e) && e.items.some((i) => i.href === current),
   )?.title;
   const [seenGroup, setSeenGroup] = useState<string | undefined>();
@@ -187,20 +220,11 @@ export function Sidebar() {
           aria-current={isActive ? "page" : undefined}
           className={cn(
             "relative flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-            isActive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            isActive ? ACTIVE : IDLE,
           )}
         >
           <item.icon className="h-4 w-4" />
-          {!!count && (
-            <span
-              className={cn(
-                "absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full",
-                item.badge === "overdue" ? "bg-destructive" : "bg-primary",
-              )}
-            />
-          )}
+          {!!count && <Dot tone={DOT_TONE[item.badge!]} />}
         </Link>
       );
     }
@@ -214,9 +238,7 @@ export function Sidebar() {
           aria-current={isActive ? "page" : undefined}
           className={cn(
             "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
-            isActive
-              ? "bg-primary/10 font-medium text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            isActive ? cn(ACTIVE, "font-medium") : IDLE,
           )}
         >
           <item.icon className="h-4 w-4 shrink-0" />
@@ -252,6 +274,76 @@ export function Sidebar() {
       </div>
     );
   };
+
+  // Itens de um grupo em menu (flyout do rail e Configurações): rótulo, selo e atalho.
+  const menuItems = (items: NavItem[]) =>
+    items.map((item) => {
+      const count = item.badge ? badges[item.badge] : undefined;
+      return (
+        <DropdownMenuItem key={item.href} asChild>
+          <Link
+            href={item.href}
+            aria-current={item.href === current ? "page" : undefined}
+            className={cn(item.href === current && "bg-muted font-medium")}
+          >
+            <item.icon className="mr-2 h-3.5 w-3.5" />
+            <span className="flex-1">{item.title}</span>
+            {!!count && (
+              <span
+                aria-label={`${count} ${BADGE_LABEL[item.badge!]}`}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums",
+                  BADGE_TONE[item.badge!],
+                )}
+              >
+                {count > 99 ? "99+" : count}
+              </span>
+            )}
+            {item.shortcut && (
+              <kbd className="ml-2 font-sans text-xs text-muted-foreground">
+                g {item.shortcut}
+              </kbd>
+            )}
+          </Link>
+        </DropdownMenuItem>
+      );
+    });
+
+  const groupFlyout = (g: NavGroup) => {
+    const dot = groupDot(g.items);
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title={g.title}
+            aria-label={g.title}
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              g.items.some((i) => i.href === current) ? ACTIVE : IDLE,
+            )}
+          >
+            <g.icon className="h-4 w-4" />
+            {dot && <Dot tone={DOT_TONE[dot]} />}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          side="right"
+          align="start"
+          sideOffset={8}
+          className="w-64"
+        >
+          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+            {g.title}
+          </DropdownMenuLabel>
+          {menuItems(g.items)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
+  const footerButton =
+    "relative flex items-center rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
   return (
     <div
@@ -292,23 +384,11 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Empresa: recolhido, o ícone abre o menu para trocar */}
+      {/* Empresa: recolhido, a sigla abre a lista ao lado (sem expandir o menu) */}
       <div
         className={cn("pt-3 pb-1", collapsed ? "flex justify-center" : "px-3")}
       >
-        {collapsed ? (
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            title="Trocar empresa"
-            aria-label="Trocar empresa"
-            className="flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Building2 className="h-4 w-4" />
-          </button>
-        ) : (
-          <CompanySwitcher />
-        )}
+        <CompanySwitcher compact={collapsed} />
       </div>
 
       <nav
@@ -319,21 +399,18 @@ export function Sidebar() {
         )}
       >
         {collapsed ? (
-          nav.map((e, i) =>
-            isGroup(e) ? (
+          main.map((e, i) => {
+            // Divisor entre seções: grupo, ou item solto logo depois de grupo.
+            const divided = i > 0 && (isGroup(e) || isGroup(main[i - 1]));
+            return (
               <div
-                key={e.title}
-                className={cn(
-                  "flex flex-col items-center gap-0.5",
-                  i > 0 && "mt-1 border-t pt-1",
-                )}
+                key={isGroup(e) ? e.title : e.href}
+                className={cn(divided && "mt-1 border-t pt-1")}
               >
-                {e.items.map((item) => link(item))}
+                {isGroup(e) ? groupFlyout(e) : link(e)}
               </div>
-            ) : (
-              link(e)
-            ),
-          )
+            );
+          })
         ) : (
           <>
             {pinned.length > 0 && (
@@ -347,12 +424,10 @@ export function Sidebar() {
               </div>
             )}
             <div className="space-y-0.5">
-              {nav.map((e) => {
+              {main.map((e) => {
                 if (!isGroup(e)) return link(e, { pinnable: true });
                 const isOpen = openGroups.includes(e.title);
-                const hasPending = e.items.some(
-                  (i) => i.badge && badges[i.badge],
-                );
+                const dot = groupDot(e.items);
                 return (
                   <Collapsible
                     key={e.title}
@@ -373,8 +448,13 @@ export function Sidebar() {
                         <e.icon className="h-4 w-4 shrink-0" />
                         <span className="flex-1 text-left">{e.title}</span>
                         {/* Fechado, o grupo avisa que tem pendência dentro. */}
-                        {!isOpen && hasPending && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                        {!isOpen && dot && (
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              DOT_TONE[dot],
+                            )}
+                          />
                         )}
                         <ChevronRight
                           className={cn(
@@ -397,13 +477,53 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Novidades, roadmap e documentos: um item só, fora do caminho do trabalho */}
+      {/* Configurações, novidades, roadmap e documentos: fora do caminho do trabalho */}
       <div
         className={cn(
-          "border-t py-2",
-          collapsed ? "flex justify-center px-2" : "px-3",
+          "space-y-0.5 border-t py-2",
+          collapsed ? "flex flex-col items-center px-2" : "px-3",
         )}
       >
+        {settings && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                title={collapsed ? settings.title : undefined}
+                aria-label={settings.title}
+                className={cn(
+                  footerButton,
+                  settings.items.some((i) => i.href === current)
+                    ? ACTIVE
+                    : IDLE,
+                  collapsed
+                    ? "h-9 w-9 justify-center"
+                    : "w-full gap-2.5 px-2.5 py-1.5",
+                )}
+              >
+                <settings.icon className="h-4 w-4 shrink-0" />
+                {!collapsed && (
+                  <span className="flex-1 text-left">{settings.title}</span>
+                )}
+                {groupDot(settings.items) && (
+                  <Dot
+                    tone={DOT_TONE[groupDot(settings.items)!]}
+                    inline={!collapsed}
+                  />
+                )}
+                {!collapsed && <ChevronsUpDown className="h-3.5 w-3.5" />}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side={collapsed ? "right" : "top"}
+              align={collapsed ? "end" : "start"}
+              sideOffset={8}
+              className="w-60"
+            >
+              {menuItems(settings.items)}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -411,7 +531,8 @@ export function Sidebar() {
               title={collapsed ? "Novidades e roadmap" : undefined}
               aria-label="Novidades e roadmap"
               className={cn(
-                "relative flex items-center rounded-md text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                footerButton,
+                IDLE,
                 collapsed
                   ? "h-9 w-9 justify-center"
                   : "w-full gap-2.5 px-2.5 py-1.5",
@@ -422,12 +543,7 @@ export function Sidebar() {
                 <span className="flex-1 text-left">Novidades e roadmap</span>
               )}
               {novidadesNew && (
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full bg-primary",
-                    collapsed && "absolute right-1.5 top-1.5",
-                  )}
-                />
+                <Dot tone="bg-muted-foreground" inline={!collapsed} />
               )}
               {!collapsed && <ChevronsUpDown className="h-3.5 w-3.5" />}
             </button>
