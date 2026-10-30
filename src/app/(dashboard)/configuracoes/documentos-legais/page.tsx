@@ -27,7 +27,6 @@ import {
   Heading1,
   Heading2,
   Heading3,
-  FileText,
   Eye,
   Code2,
 } from "lucide-react";
@@ -125,9 +124,6 @@ export default function LegalDocumentsSettingsPage() {
         className="flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300"
         style={{ animationFillMode: "both" }}
       >
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800/60 shrink-0">
-          <FileText className="h-5 w-5 text-slate-600 dark:text-slate-400" />
-        </div>
         <div>
           <h1 className="text-xl font-bold tracking-tight md:text-2xl">
             Documentos Legais

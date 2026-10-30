@@ -17,6 +17,12 @@ import {
   Settings,
   CalendarClock,
   Database,
+  UserCog,
+  Building2,
+  MessageSquare,
+  ShieldCheck,
+  Key,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -25,6 +31,7 @@ import type { Permissions } from "@/hooks/usePermissions";
 import { queueStatuses, tabFilter } from "@/lib/transactionTabs";
 import { transactionService } from "@/lib/services/transactionService";
 import { comprovanteService } from "@/lib/services/comprovanteService";
+import { feedbackService } from "@/lib/services/feedbackService";
 import { startOfDay } from "date-fns";
 
 /**
@@ -32,7 +39,7 @@ import { startOfDay } from "date-fns";
  * daqui. Duas listas paralelas já divergiram uma vez (mobile sem Reembolsos).
  */
 
-export type NavBadge = "queue" | "overdue" | "comprovantes";
+export type NavBadge = "queue" | "overdue" | "comprovantes" | "feedbacks";
 
 export interface NavItem {
   title: string;
@@ -166,9 +173,52 @@ export const NAV: NavEntry[] = [
   },
   {
     title: "Configurações",
-    href: "/configuracoes",
     icon: Settings,
-    visible: (p) => p.canAccessSettings,
+    items: [
+      {
+        title: "Usuários",
+        href: "/configuracoes/usuarios",
+        icon: UserCog,
+        visible: (p) => p.canManageUsers,
+      },
+      {
+        title: "Empresas",
+        href: "/configuracoes/empresas",
+        icon: Building2,
+        visible: (p) => p.canManageCompanies,
+      },
+      {
+        title: "Feedbacks",
+        href: "/configuracoes/feedbacks",
+        icon: MessageSquare,
+        visible: (p) => p.canManageFeedback,
+        badge: "feedbacks",
+      },
+      {
+        title: "Auditoria",
+        href: "/configuracoes/auditoria",
+        icon: ShieldCheck,
+        visible: (p) => p.canViewAuditLogs,
+      },
+      {
+        title: "Chaves de API",
+        href: "/configuracoes/api-keys",
+        icon: Key,
+        visible: (p) => p.canManageCompanies,
+      },
+      {
+        title: "Documentos Legais",
+        href: "/configuracoes/documentos-legais",
+        icon: FileText,
+        visible: (p) => p.canAccessSettings,
+      },
+      {
+        title: "Sistema",
+        href: "/configuracoes/sistema",
+        icon: Wrench,
+        visible: (p) => p.canManageCompanies,
+      },
+    ],
   },
 ];
 
@@ -240,9 +290,17 @@ export function useNavBadges(
     staleTime: 60_000,
   });
 
+  const feedbacks = useQuery({
+    queryKey: ["feedbacks-unread-count"],
+    queryFn: () => feedbackService.getUnreadCount(),
+    enabled: !!user && p.canManageFeedback,
+    staleTime: 60_000,
+  });
+
   return {
     queue: queue.length ? tx.data?.queue : undefined,
     overdue: canPay ? tx.data?.overdue : undefined,
     comprovantes: canPay ? comprovantes.data : undefined,
+    feedbacks: p.canManageFeedback ? feedbacks.data : undefined,
   };
 }

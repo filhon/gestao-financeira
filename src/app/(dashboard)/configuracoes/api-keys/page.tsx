@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useRouter } from "next/navigation";
@@ -39,7 +38,6 @@ import { TableSkeleton } from "@/components/ui/table-skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import {
-  ChevronLeft,
   Plus,
   Copy,
   Eye,
@@ -378,11 +376,6 @@ export default function ApiKeysPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start md:items-center justify-between gap-2">
         <div className="flex items-center gap-4">
-          <Link href="/configuracoes">
-            <Button variant="ghost" size="icon">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          </Link>
           <div>
             <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Chaves de API
@@ -404,24 +397,24 @@ export default function ApiKeysPage() {
           icon={Key}
           label="Total de chaves"
           value={isLoading ? "—" : keys.length}
-          iconClassName="text-rose-600 dark:text-rose-400"
-          iconBgClassName="bg-rose-50 dark:bg-rose-950/60"
+          iconClassName="text-muted-foreground"
+          iconBgClassName="bg-muted"
           delay={0}
         />
         <StatCard
           icon={CheckCircle2}
           label="Chaves ativas"
           value={isLoading ? "—" : activeKeys.length}
-          iconClassName="text-emerald-600 dark:text-emerald-400"
-          iconBgClassName="bg-emerald-50 dark:bg-emerald-950/60"
+          iconClassName="text-muted-foreground"
+          iconBgClassName="bg-muted"
           delay={60}
         />
         <StatCard
           icon={Activity}
           label="Último uso"
           value={isLoading ? "—" : formatDate(lastUsedKey?.lastUsedAt)}
-          iconClassName="text-blue-600 dark:text-blue-400"
-          iconBgClassName="bg-blue-50 dark:bg-blue-950/60"
+          iconClassName="text-muted-foreground"
+          iconBgClassName="bg-muted"
           delay={120}
         />
       </div>

@@ -18,12 +18,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Database,
-  Wrench,
   Info,
 } from "lucide-react";
 import { toast } from "sonner";
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
 
 export default function SystemSettingsPage() {
   const { selectedCompany } = useCompany();
@@ -102,41 +99,29 @@ export default function SystemSettingsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link href="/configuracoes">
-          <Button variant="ghost" size="icon">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-50 dark:bg-orange-950/60 shrink-0">
-            <Wrench className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight md:text-2xl">
-              Sistema e Ferramentas
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Manutenção, recalibração e correção de dados.
-            </p>
-          </div>
-        </div>
+      <div>
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+          Sistema e Ferramentas
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Manutenção, recalibração e correção de dados.
+        </p>
       </div>
 
       {/* Section label */}
-      <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         Ferramentas de Manutenção
       </h2>
 
       <div className="grid gap-4">
         {/* Card 1 — Recalibração de Saldo */}
         <Card
-          className="border-l-4 border-l-amber-400 animate-in fade-in slide-in-from-bottom-2 duration-300"
+          className="animate-in fade-in slide-in-from-bottom-2 duration-300"
           style={{ animationFillMode: "both" }}
         >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <RefreshCw className="h-4 w-4 text-amber-500" />
+              <RefreshCw className="h-4 w-4 text-muted-foreground" />
               Recalibração de Saldo
             </CardTitle>
             <CardDescription>
@@ -205,12 +190,12 @@ export default function SystemSettingsPage() {
 
         {/* Card 2 — Corrigir Índices */}
         <Card
-          className="border-l-4 border-l-blue-400 animate-in fade-in slide-in-from-bottom-2 duration-300"
+          className="animate-in fade-in slide-in-from-bottom-2 duration-300"
           style={{ animationDelay: "60ms", animationFillMode: "both" }}
         >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Database className="h-4 w-4 text-blue-500" />
+              <Database className="h-4 w-4 text-muted-foreground" />
               Corrigir Filtro por Centro de Custo
             </CardTitle>
             <CardDescription>
@@ -220,10 +205,10 @@ export default function SystemSettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/40 p-3.5 border border-blue-100 dark:border-blue-900/50">
+            <div className="rounded-md bg-muted p-3.5 border">
               <div className="flex gap-2.5">
-                <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-blue-800 dark:text-blue-300">
+                <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <p className="text-sm text-foreground">
                   Analisa todas as transações e corrige os índices de centro de
                   custo para que o filtro funcione corretamente. É seguro
                   executar várias vezes.

@@ -512,9 +512,6 @@ function AuditLogsContent() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950/60">
-            <ShieldCheck className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-          </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Logs de Auditoria
@@ -715,7 +712,7 @@ function AuditLogsContent() {
             <col className="w-24" />
           </colgroup>
           <thead>
-            <tr className="border-b text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+            <tr className="border-b text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <th className="py-3 pl-4 pr-3 font-semibold">Hora</th>
               <th className="py-3 pr-3 font-semibold">Quem</th>
               <th className="py-3 pr-3 font-semibold">Ação</th>

@@ -66,12 +66,14 @@ const BADGE_TONE: Record<NavBadge, string> = {
   overdue: "bg-destructive/10 text-destructive",
   queue: "bg-primary/10 text-primary",
   comprovantes: "bg-muted text-muted-foreground",
+  feedbacks: "bg-muted text-muted-foreground",
 };
 
 const BADGE_LABEL: Record<NavBadge, string> = {
   overdue: "vencidas",
   queue: "na sua fila",
   comprovantes: "para revisar",
+  feedbacks: "não lidos",
 };
 
 export function Sidebar() {

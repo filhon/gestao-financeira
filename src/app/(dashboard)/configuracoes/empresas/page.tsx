@@ -146,9 +146,6 @@ export default function CompaniesPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-50 dark:bg-violet-950/60">
-            <Building2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
-          </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight md:text-2xl">
               Gerenciamento de Empresas
@@ -238,30 +235,24 @@ export default function CompaniesPage() {
                             />
                           </div>
                         ) : (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-50 dark:bg-violet-950/60">
-                            <Building2 className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
                           </div>
                         )}
                         <span className="font-medium">{company.name}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground font-mono text-sm">
-                      {company.cnpj || (
-                        <span className="text-muted-foreground/50">—</span>
-                      )}
+                      {company.cnpj || <span>—</span>}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {company.phone || (
-                        <span className="text-muted-foreground/50">—</span>
-                      )}
+                      {company.phone || <span>—</span>}
                     </TableCell>
                     <TableCell
                       className="text-muted-foreground max-w-[200px] truncate"
                       title={company.address}
                     >
-                      {company.address || (
-                        <span className="text-muted-foreground/50">—</span>
-                      )}
+                      {company.address || <span>—</span>}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
