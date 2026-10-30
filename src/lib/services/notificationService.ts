@@ -138,7 +138,7 @@ export const notificationService = {
       userId: managerId,
       companyId,
       title: "Novo lote de pagamento criado",
-      message: `Lote "${batchName}" criado automaticamente, pronto para revisão.`,
+      message: `"${batchName}" criado automaticamente, pronto para revisão.`,
       type: "info",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -155,7 +155,7 @@ export const notificationService = {
       userId: approverId,
       companyId,
       title: "Lote aguardando sua aprovação",
-      message: `Lote "${batchName}" enviado por ${senderName} para sua aprovação.`,
+      message: `"${batchName}" enviado por ${senderName} para sua aprovação.`,
       type: "warning",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -172,7 +172,7 @@ export const notificationService = {
       userId: managerId,
       companyId,
       title: "Lote aprovado",
-      message: `Lote "${batchName}" aprovado por ${approverName}. Pronto para exportação bancária.`,
+      message: `"${batchName}" aprovado por ${approverName}. Pronto para exportação bancária.`,
       type: "success",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -189,7 +189,7 @@ export const notificationService = {
       userId: authorizerId,
       companyId,
       title: "Lote aguardando autorização bancária",
-      message: `Lote "${batchName}" enviado por ${senderName} para autorização no banco.`,
+      message: `"${batchName}" enviado por ${senderName} para autorização no banco.`,
       type: "warning",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -206,7 +206,7 @@ export const notificationService = {
       userId: managerId,
       companyId,
       title: "Lote autorizado",
-      message: `Lote "${batchName}" autorizado por ${authorizerName} no banco. Confirme os pagamentos quando concluídos.`,
+      message: `"${batchName}" autorizado por ${authorizerName} no banco. Confirme os pagamentos quando concluídos.`,
       type: "success",
       link: `/financeiro/lotes/${batchId}`,
     });

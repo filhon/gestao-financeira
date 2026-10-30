@@ -1,15 +1,25 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { notificationService } from "@/lib/services/notificationService";
 import { Notification } from "@/lib/types";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDistanceToNow, isToday, isYesterday } from "date-fns";
+import {
+  differenceInCalendarDays,
+  format,
+  formatDistanceToNow,
+  isToday,
+  isYesterday,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import {
@@ -19,80 +29,93 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
-  ExternalLink,
+  ChevronDown,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // ─── Notification type metadata ──────────────────────────────────────────────
 
 const TYPE_CONFIG = {
-  info: {
-    icon: Info,
-    iconClass: "text-blue-500",
-    bgClass: "bg-blue-50 dark:bg-blue-950/40",
-    dotClass: "bg-blue-500",
-    stripClass: "bg-blue-500",
-  },
+  info: { icon: Info, iconClass: "text-blue-500", dotClass: "bg-blue-500" },
   warning: {
     icon: AlertTriangle,
     iconClass: "text-amber-500",
-    bgClass: "bg-amber-50 dark:bg-amber-950/40",
     dotClass: "bg-amber-500",
-    stripClass: "bg-amber-500",
   },
   success: {
     icon: CheckCircle2,
     iconClass: "text-emerald-500",
-    bgClass: "bg-emerald-50 dark:bg-emerald-950/40",
     dotClass: "bg-emerald-500",
-    stripClass: "bg-emerald-500",
   },
   error: {
     icon: XCircle,
     iconClass: "text-destructive",
-    bgClass: "bg-destructive/5",
     dotClass: "bg-destructive",
-    stripClass: "bg-destructive",
   },
 } as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 50;
+
 function getDateGroup(date: Date): string {
   if (isToday(date)) return "Hoje";
   if (isYesterday(date)) return "Ontem";
-  return "Anteriores";
+  if (differenceInCalendarDays(new Date(), date) < 7) return "Esta semana";
+  const month = format(date, "MMMM 'de' yyyy", { locale: ptBR });
+  return month.charAt(0).toUpperCase() + month.slice(1);
 }
 
-function groupNotifications(notifications: Notification[]) {
-  const order = ["Hoje", "Ontem", "Anteriores"];
-  const map: Record<string, Notification[]> = {};
+// Relativo só enquanto recente; depois disso o operador precisa da data.
+function formatWhen(date: Date): string {
+  return differenceInCalendarDays(new Date(), date) < 7
+    ? formatDistanceToNow(date, { addSuffix: true, locale: ptBR })
+    : format(date, "dd/MM/yyyy");
+}
 
+interface Thread {
+  key: string;
+  name?: string; // nome do lote, quando a linha agrupa eventos de um lote
+  events: Notification[]; // do mais recente para o mais antigo
+}
+
+// Eventos do mesmo lote viram uma linha só; os demais ficam avulsos.
+function groupByThread(notifications: Notification[]): Thread[] {
+  const map = new Map<string, Thread>();
   for (const n of notifications) {
-    const group = getDateGroup(n.createdAt);
-    if (!map[group]) map[group] = [];
-    map[group].push(n);
+    // Pelo nome do lote entre aspas na mensagem: vale para o histórico, cujo
+    // link nem sempre é o mesmo entre os eventos do lote.
+    const name = n.title.startsWith("Lote")
+      ? n.message.match(/"([^"]+)"/)?.[1]
+      : undefined;
+    const key = name ? `lote:${name}` : n.id;
+    const thread = map.get(key);
+    if (thread) thread.events.push(n);
+    else map.set(key, { key, name, events: [n] });
   }
+  return [...map.values()];
+}
 
-  return order
-    .filter((g) => map[g]?.length)
-    .map((g) => ({ label: g, items: map[g] }));
+function groupByPeriod(threads: Thread[]) {
+  const map = new Map<string, Thread[]>();
+  for (const t of threads) {
+    const label = getDateGroup(t.events[0].createdAt);
+    map.set(label, [...(map.get(label) ?? []), t]);
+  }
+  return [...map].map(([label, items]) => ({ label, items }));
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function NotificationSkeleton() {
   return (
-    <Card>
-      <CardContent className="flex items-start gap-4 p-4">
-        <Skeleton className="h-8 w-8 rounded-lg shrink-0" />
-        <div className="flex-1 space-y-2">
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="h-3 w-full" />
-          <Skeleton className="h-3 w-24" />
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex items-start gap-3 px-3 py-3">
+      <Skeleton className="h-4 w-4 shrink-0" />
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-3 w-full max-w-xl" />
+      </div>
+    </div>
   );
 }
 
@@ -104,51 +127,82 @@ export default function NotificationsPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [limitCount, setLimitCount] = useState(PAGE_SIZE);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // Em cache: voltar à tela mostra a lista na hora e revalida em segundo plano.
   const queryClient = useQueryClient();
-  const notificationsKey = ["notifications", user?.uid];
-  const { data: notifications = NO_NOTIFICATIONS, isPending: loading } =
-    useQuery({
-      queryKey: notificationsKey,
-      queryFn: () => notificationService.getUserNotifications(user!.uid, 50),
-      enabled: !!user,
-      staleTime: 0,
-    });
+  const notificationsKey = ["notifications", user?.uid, limitCount];
+  const {
+    data: notifications = NO_NOTIFICATIONS,
+    isPending: loading,
+    isError,
+    isFetching,
+    refetch,
+  } = useQuery({
+    queryKey: notificationsKey,
+    queryFn: () =>
+      notificationService.getUserNotifications(user!.uid, limitCount),
+    enabled: !!user,
+    staleTime: 0,
+    placeholderData: keepPreviousData,
+  });
   const setNotifications = (update: (prev: Notification[]) => Notification[]) =>
     queryClient.setQueryData<Notification[]>(notificationsKey, (prev) =>
       update(prev ?? []),
     );
 
-  const handleMarkAsRead = async (id: string) => {
-    await notificationService.markAsRead(id);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
-    );
+  const markRead = async (ids: string[]) => {
+    try {
+      await Promise.all(ids.map((id) => notificationService.markAsRead(id)));
+      setNotifications((prev) =>
+        prev.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)),
+      );
+    } catch (e) {
+      console.error("Error marking notification as read:", e);
+      toast.error("Não foi possível marcar como lida.");
+    }
   };
 
   const handleMarkAllAsRead = async () => {
     if (!user) return;
-    await notificationService.markAllAsRead(user.uid);
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      await notificationService.markAllAsRead(user.uid);
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch (e) {
+      console.error("Error marking notifications as read:", e);
+      toast.error("Não foi possível marcar como lidas.");
+    }
   };
 
-  const handleNotificationClick = async (notification: Notification) => {
-    if (!notification.read) await handleMarkAsRead(notification.id);
-    if (notification.link) router.push(notification.link);
+  const handleThreadClick = async (thread: Thread) => {
+    const unreadIds = thread.events.filter((n) => !n.read).map((n) => n.id);
+    if (unreadIds.length > 0) await markRead(unreadIds);
+    const link = thread.events[0].link;
+    if (link) router.push(link);
   };
+
+  const toggleExpanded = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+  const hasMore = notifications.length >= limitCount;
 
-  const filtered = useMemo(
+  const groups = useMemo(
     () =>
-      filter === "unread"
-        ? notifications.filter((n) => !n.read)
-        : notifications,
+      groupByPeriod(
+        groupByThread(
+          filter === "unread"
+            ? notifications.filter((n) => !n.read)
+            : notifications,
+        ),
+      ),
     [notifications, filter],
   );
-
-  const groups = useMemo(() => groupNotifications(filtered), [filtered]);
 
   return (
     <div className="space-y-6">
@@ -159,7 +213,8 @@ export default function NotificationsPage() {
             Notificações
           </h1>
           <p className="text-muted-foreground">
-            Fique por dentro das atualizações do sistema.
+            Histórico de eventos. O que precisa de você agora está em Minha
+            fila.
           </p>
         </div>
         {unreadCount > 0 && (
@@ -175,167 +230,213 @@ export default function NotificationsPage() {
       </div>
 
       {/* Filter tabs */}
-      <div
-        className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-        style={{ animationDelay: "0ms", animationFillMode: "both" }}
-      >
-        <div className="flex items-center gap-1 border-b pb-0">
-          {(["all", "unread"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilter(tab)}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
-                filter === tab
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab === "all" ? "Todas" : "Não lidas"}
-              {tab === "unread" && unreadCount > 0 && (
-                <Badge
-                  variant="secondary"
-                  className="h-5 min-w-5 px-1.5 text-[10px] font-semibold"
-                >
-                  {unreadCount}
-                </Badge>
-              )}
-            </button>
-          ))}
-        </div>
+      <div role="tablist" className="flex items-center gap-1 border-b">
+        {(["all", "unread"] as const).map((tab) => (
+          <button
+            key={tab}
+            role="tab"
+            aria-selected={filter === tab}
+            onClick={() => setFilter(tab)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              filter === tab
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tab === "all" ? "Todas" : "Não lidas"}
+            {tab === "unread" && unreadCount > 0 && (
+              <Badge
+                variant="secondary"
+                className="h-5 min-w-5 px-1.5 text-[10px] font-semibold"
+              >
+                {unreadCount}
+              </Badge>
+            )}
+          </button>
+        ))}
       </div>
 
       {/* Content */}
-      <div
-        className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-        style={{ animationDelay: "60ms", animationFillMode: "both" }}
-      >
-        {loading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <NotificationSkeleton key={i} />
-            ))}
+      {loading ? (
+        <div className="divide-y rounded-lg border">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <NotificationSkeleton key={i} />
+          ))}
+        </div>
+      ) : isError && notifications.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border py-16 text-sm text-muted-foreground">
+          <p>Não foi possível carregar as notificações.</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            Tentar de novo
+          </Button>
+        </div>
+      ) : groups.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border py-16 text-muted-foreground">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+            <Bell className="h-6 w-6 opacity-40" />
           </div>
-        ) : filtered.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted mb-4">
-                <Bell className="h-6 w-6 opacity-40" />
-              </div>
-              <p className="text-sm font-medium text-foreground">
-                {filter === "unread"
-                  ? "Nenhuma notificação não lida"
-                  : "Você não tem notificações"}
-              </p>
-              <p className="text-xs mt-1">
-                {filter === "unread"
-                  ? "Você está em dia com tudo."
-                  : "Novidades do sistema aparecerão aqui."}
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-6">
-            {groups.map(({ label, items }) => (
-              <div key={label} className="space-y-2">
-                {/* Group label */}
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-                  {label}
-                </p>
+          <p className="text-sm font-medium text-foreground">
+            {filter === "unread"
+              ? "Nenhuma notificação não lida"
+              : "Você não tem notificações"}
+          </p>
+          <p className="mt-1 text-xs">
+            {filter === "unread"
+              ? "Você está em dia com tudo."
+              : "Novidades do sistema aparecerão aqui."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {groups.map(({ label, items }) => (
+            <section key={label} className="space-y-1">
+              <h2 className="px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {label}
+              </h2>
+              <ul className="divide-y rounded-lg border">
+                {items.map((thread) => {
+                  const latest = thread.events[0];
+                  const config = TYPE_CONFIG[latest.type] ?? TYPE_CONFIG.info;
+                  const Icon = config.icon;
+                  const unreadIds = thread.events
+                    .filter((n) => !n.read)
+                    .map((n) => n.id);
+                  const isUnread = unreadIds.length > 0;
+                  const older = thread.events.slice(1);
+                  const isOpen = expanded.has(thread.key);
 
-                {/* Notification cards */}
-                <div className="space-y-2">
-                  {items.map((notification) => {
-                    const config =
-                      TYPE_CONFIG[notification.type] ?? TYPE_CONFIG.info;
-                    const Icon = config.icon;
-                    const isUnread = !notification.read;
-
-                    return (
-                      <Card
-                        key={notification.id}
-                        className={cn(
-                          "relative overflow-hidden cursor-pointer transition-colors hover:bg-muted/50",
-                          isUnread && "border-l-4 border-l-primary",
-                        )}
-                        onClick={() => handleNotificationClick(notification)}
-                      >
-                        <CardContent className="flex items-start gap-4 p-4">
-                          {/* Icon */}
-                          <div
+                  return (
+                    <li
+                      key={thread.key}
+                      className={cn(isUnread && "bg-muted/30")}
+                    >
+                      <div className="flex items-start">
+                        <button
+                          type="button"
+                          onClick={() => handleThreadClick(thread)}
+                          className="flex min-w-0 flex-1 items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <span
+                            aria-hidden
                             className={cn(
-                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-                              config.bgClass,
+                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                              isUnread ? config.dotClass : "bg-transparent",
                             )}
-                          >
-                            <Icon className={cn("h-4 w-4", config.iconClass)} />
-                          </div>
-
-                          {/* Body */}
-                          <div className="flex-1 min-w-0 space-y-0.5">
-                            <p
+                          />
+                          <Icon
+                            aria-hidden
+                            className={cn(
+                              "mt-0.5 h-4 w-4 shrink-0",
+                              isUnread
+                                ? config.iconClass
+                                : "text-muted-foreground",
+                            )}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span
                               className={cn(
-                                "text-sm font-semibold leading-tight",
+                                "block truncate text-sm",
                                 isUnread
-                                  ? "text-foreground"
-                                  : "text-muted-foreground",
+                                  ? "font-semibold text-foreground"
+                                  : "font-medium text-foreground/80",
                               )}
                             >
-                              {notification.title}
-                            </p>
-                            <p className="text-sm text-muted-foreground leading-snug">
-                              {notification.message}
-                            </p>
-                            <div className="flex items-center gap-3 pt-1">
-                              <span className="text-xs text-muted-foreground/70">
-                                {formatDistanceToNow(notification.createdAt, {
-                                  addSuffix: true,
-                                  locale: ptBR,
-                                })}
-                              </span>
-                              {notification.link && (
-                                <span className="flex items-center gap-1 text-xs text-primary">
-                                  <ExternalLink className="h-3 w-3" />
-                                  Ver detalhes
-                                </span>
+                              {thread.name ?? latest.title}
+                              {isUnread && (
+                                <span className="sr-only"> (não lida)</span>
                               )}
-                            </div>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="flex items-center gap-2 shrink-0">
-                            {isUnread && (
-                              <>
-                                <div
-                                  className={cn(
-                                    "h-2 w-2 rounded-full",
-                                    config.dotClass,
-                                  )}
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMarkAsRead(notification.id);
-                                  }}
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                </Button>
-                              </>
+                            </span>
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {thread.name ? latest.title : latest.message}
+                            </span>
+                          </span>
+                          <time
+                            dateTime={latest.createdAt.toISOString()}
+                            title={format(
+                              latest.createdAt,
+                              "dd/MM/yyyy 'às' HH:mm",
                             )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                            className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground"
+                          >
+                            {formatWhen(latest.createdAt)}
+                          </time>
+                        </button>
+                        {isUnread && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Marcar como lida"
+                            title="Marcar como lida"
+                            className="mr-1 mt-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                            onClick={() => markRead(unreadIds)}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+
+                      {older.length > 0 && (
+                        <div className="pb-2 pl-11 pr-3">
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            onClick={() => toggleExpanded(thread.key)}
+                            className="flex items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          >
+                            <ChevronDown
+                              className={cn(
+                                "h-3.5 w-3.5 transition-transform",
+                                isOpen && "rotate-180",
+                              )}
+                            />
+                            {isOpen
+                              ? "Ocultar histórico do lote"
+                              : `Mais ${older.length} ${older.length === 1 ? "evento" : "eventos"} neste lote`}
+                          </button>
+                          {isOpen && (
+                            <ul className="mt-1.5 space-y-1">
+                              {older.map((n) => (
+                                <li
+                                  key={n.id}
+                                  className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground"
+                                >
+                                  <span className="min-w-0 truncate">
+                                    {n.title}
+                                  </span>
+                                  <time
+                                    dateTime={n.createdAt.toISOString()}
+                                    className="shrink-0 tabular-nums"
+                                  >
+                                    {format(n.createdAt, "dd/MM/yyyy HH:mm")}
+                                  </time>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+
+          {hasMore && (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isFetching}
+                onClick={() => setLimitCount((n) => n + PAGE_SIZE)}
+              >
+                {isFetching ? "Carregando…" : "Carregar mais"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
