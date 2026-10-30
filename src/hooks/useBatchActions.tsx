@@ -202,15 +202,17 @@ export function useBatchActions({
         toast.success(
           `Lote autorizado: ${plural(batch.transactionIds.length, "transação", "transações")} · ${formatCurrency(batch.totalAmount)}`,
         );
-        notificationService
-          .notifyBatchAuthorized(
-            batch.createdBy,
-            batch.name,
-            batch.id,
-            user.displayName,
-            selectedCompany.id,
-          )
-          .catch((e) => console.error("Error notifying authorization:", e));
+        // Quem criou o lote e o autorizou não precisa de aviso do próprio ato.
+        if (batch.createdBy !== user.uid)
+          notificationService
+            .notifyBatchAuthorized(
+              batch.createdBy,
+              batch.name,
+              batch.id,
+              user.displayName,
+              selectedCompany.id,
+            )
+            .catch((e) => console.error("Error notifying authorization:", e));
       } else {
         const result = await paymentBatchService.confirmPayments(
           batch.id,

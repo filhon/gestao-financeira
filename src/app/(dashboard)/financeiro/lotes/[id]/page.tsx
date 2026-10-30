@@ -357,7 +357,8 @@ export default function PaymentBatchPage() {
 
   const handleApproved = () => {
     refresh();
-    if (!user || !selectedCompany) return;
+    // Quem criou o lote e o aprovou não precisa de aviso do próprio ato.
+    if (!user || !selectedCompany || batch.createdBy === user.uid) return;
     notificationService
       .notifyBatchApproved(
         batch.createdBy,

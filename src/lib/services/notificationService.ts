@@ -138,7 +138,7 @@ export const notificationService = {
       userId: managerId,
       companyId,
       title: "Novo lote de pagamento criado",
-      message: `O lote "${batchName}" foi criado automaticamente e está pronto para revisão.`,
+      message: `Lote "${batchName}" criado automaticamente, pronto para revisão.`,
       type: "info",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -155,7 +155,7 @@ export const notificationService = {
       userId: approverId,
       companyId,
       title: "Lote aguardando sua aprovação",
-      message: `${senderName} enviou o lote "${batchName}" para sua aprovação.`,
+      message: `Lote "${batchName}" enviado por ${senderName} para sua aprovação.`,
       type: "warning",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -172,7 +172,7 @@ export const notificationService = {
       userId: managerId,
       companyId,
       title: "Lote aprovado",
-      message: `${approverName} aprovou o lote "${batchName}". Pronto para exportação bancária.`,
+      message: `Lote "${batchName}" aprovado por ${approverName}. Pronto para exportação bancária.`,
       type: "success",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -189,7 +189,7 @@ export const notificationService = {
       userId: authorizerId,
       companyId,
       title: "Lote aguardando autorização bancária",
-      message: `${senderName} enviou o lote "${batchName}" para autorização no banco.`,
+      message: `Lote "${batchName}" enviado por ${senderName} para autorização no banco.`,
       type: "warning",
       link: `/financeiro/lotes/${batchId}`,
     });
@@ -206,7 +206,7 @@ export const notificationService = {
       userId: managerId,
       companyId,
       title: "Lote autorizado",
-      message: `${authorizerName} autorizou o lote "${batchName}" no banco. Confirme os pagamentos quando concluídos.`,
+      message: `Lote "${batchName}" autorizado por ${authorizerName} no banco. Confirme os pagamentos quando concluídos.`,
       type: "success",
       link: `/financeiro/lotes/${batchId}`,
     });

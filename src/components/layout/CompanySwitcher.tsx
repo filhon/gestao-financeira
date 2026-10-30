@@ -38,7 +38,7 @@ export function CompanySwitcher() {
         side="bottom"
         align="start"
         sideOffset={4}
-        className="w-[var(--radix-popover-trigger-width)] p-1"
+        className="w-(--radix-popover-trigger-width) p-1"
       >
         <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
           Empresas
