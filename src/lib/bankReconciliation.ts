@@ -249,6 +249,47 @@ export function pickStatementBalance(
   return fromFile;
 }
 
+const lineKey = (tx: BankTransaction) =>
+  [
+    tx.bankAccountId ?? "",
+    day(tx.date),
+    currency(tx.amount).intValue,
+    normalizeText(tx.description.trim()),
+  ].join("|");
+
+/**
+ * Linhas do arquivo que ainda não estão na sessão. Duplicata é o mesmo
+ * movimento (conta, dia, valor, histórico), não o mesmo FITID: o Itaú numera o
+ * FITID pela posição no arquivo, e outro recorte do mesmo dia repete o número
+ * para outro movimento. Id já usado por outra linha ganha sufixo. Movimentos
+ * iguais no mesmo dia (duas tarifas de R$ 12) contam pela quantidade.
+ */
+export function newStatementLines(
+  existing: BankTransaction[],
+  incoming: BankTransaction[],
+): BankTransaction[] {
+  const ids = new Set(existing.map((tx) => tx.id));
+  const left = new Map<string, number>();
+  for (const tx of existing) {
+    const k = lineKey(tx);
+    left.set(k, (left.get(k) ?? 0) + 1);
+  }
+  const added: BankTransaction[] = [];
+  for (const tx of incoming) {
+    const k = lineKey(tx);
+    const n = left.get(k) ?? 0;
+    if (n > 0) {
+      left.set(k, n - 1);
+      continue;
+    }
+    let id = tx.id;
+    for (let i = 2; ids.has(id); i++) id = `${tx.id}~${i}`;
+    ids.add(id);
+    added.push({ ...tx, id });
+  }
+  return added;
+}
+
 // ─── Aplicações e transferências ──────────────────────────────────────────────
 
 export const isInvestment = (account?: Pick<BankAccount, "kind">) =>

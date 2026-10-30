@@ -107,19 +107,19 @@ export function UploadStatement({
         bankAccountId: target.id,
       }));
 
-      const { added, skipped } = await reconciliationSessionService.mergeItems(
-        selectedCompany.id,
-        transactions,
-      );
+      const { added, skipped, items } =
+        await reconciliationSessionService.mergeItems(
+          selectedCompany.id,
+          transactions,
+        );
 
       // Linhas da conta depois da importação: as que já estavam e as novas.
       const known = useReconciliationStore
         .getState()
         .transactions.filter((t) => t.bankAccountId === target.id);
-      const knownIds = new Set(known.map((t) => t.id));
       const picked = pickStatementBalance(
         target,
-        [...known, ...transactions.filter((t) => !knownIds.has(t.id))],
+        [...known, ...items],
         meta?.balance !== undefined
           ? {
               balance: meta.balance,

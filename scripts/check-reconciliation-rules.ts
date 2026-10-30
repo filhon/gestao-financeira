@@ -11,6 +11,7 @@ import {
   groupByDay,
   isBalanceLine,
   isBeforeBase,
+  newStatementLines,
   pickStatementBalance,
   rulePattern,
   summarizeAccount,
@@ -184,6 +185,38 @@ assert.deepEqual(pickStatementBalance(checking, itau, fromFile), {
 assert.equal(pickStatementBalance(account, itau, fromFile), fromFile);
 // CSV sem saldo final também ganha o saldo pela linha que confere.
 assert.equal(pickStatementBalance(checking, itau, null)?.balance, 1);
+
+// Reimportação (caso real de 29/10/2026): o Itaú numera o FITID pela posição
+// no arquivo. O 2º recorte trouxe a aplicação automática como 001 e o TED como
+// 002, números que o 1º recorte já usara para o TED e o saldo. Pelo id, a
+// aplicação de −681.000 sumia e o TED duplicava.
+const fit = (n: string, description: string, amount: number) => ({
+  ...at(29, description, amount),
+  id: `a1_2026102900${n}`,
+});
+const first = [
+  fit("1", "TED RECEBIDA HEBRON", 681000),
+  fit("2", "SALDO TOTAL DISPONÍVEL DIA", 700958.56),
+];
+const second = [
+  fit("1", "APL APLIC AUT MAIS AP", -681000),
+  fit("2", "TED RECEBIDA HEBRON", 681000),
+  fit("3", "SALDO TOTAL DISPONÍVEL DIA", 700958.56),
+  fit("4", "SALDO MOVIMENTAÇÃO CONTA", 1),
+];
+const merged = newStatementLines(first, second);
+assert.deepEqual(
+  merged.map((t) => [t.id, t.amount]),
+  [
+    ["a1_20261029001~2", -681000],
+    ["a1_20261029004", 1],
+  ],
+);
+// Mesmo arquivo de novo: nada entra. Duas tarifas iguais no dia: as duas entram.
+assert.equal(newStatementLines([...first, ...merged], second).length, 0);
+const fee = fit("9", "TARIFA", -12);
+assert.equal(newStatementLines([], [fee, { ...fee, id: "x" }]).length, 2);
+assert.equal(newStatementLines([fee], [fee, { ...fee, id: "x" }]).length, 1);
 
 assert.ok(isBeforeBase(statement[0], account));
 assert.ok(!isBeforeBase(statement[1], account));

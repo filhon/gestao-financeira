@@ -12,6 +12,7 @@ import {
   deleteField,
 } from "firebase/firestore";
 import { BankTransaction } from "@/lib/types";
+import { newStatementLines } from "@/lib/bankReconciliation";
 
 // Firestore write batches are capped at 500 operations; keep headroom.
 const BATCH_SIZE = 400;
@@ -81,12 +82,15 @@ export const reconciliationSessionService = {
   async mergeItems(
     companyId: string,
     transactions: BankTransaction[],
-  ): Promise<{ added: number; skipped: number }> {
+  ): Promise<{ added: number; skipped: number; items: BankTransaction[] }> {
     const colRef = this.getItemsCollection(companyId);
     const existingSnap = await getDocs(colRef);
-    const existingIds = new Set(existingSnap.docs.map((d) => d.id));
-
-    const newItems = transactions.filter((tx) => !existingIds.has(tx.id));
+    const newItems = newStatementLines(
+      existingSnap.docs.map(
+        (d) => ({ id: d.id, ...d.data() }) as BankTransaction,
+      ),
+      transactions,
+    );
 
     await runBatched(newItems, (batch, tx) => {
       batch.set(doc(colRef, tx.id), serializeItem(tx));
@@ -95,6 +99,7 @@ export const reconciliationSessionService = {
     return {
       added: newItems.length,
       skipped: transactions.length - newItems.length,
+      items: newItems,
     };
   },
 
