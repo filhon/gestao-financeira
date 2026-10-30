@@ -447,8 +447,15 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     !searching &&
     (tab === "today" || tab === "week" || tab === "future");
   const projectionQuery = useQuery({
-    queryKey: ["list-projection", companyId],
-    queryFn: () => dashboardService.getProjectedCashFlow(companyId!, "30days"),
+    queryKey: ["list-projection", companyId, perms.canViewReconciliation],
+    // Mesma base do dashboard: contas correntes para quem as lê.
+    queryFn: () =>
+      dashboardService.getProjectedCashFlow(
+        companyId!,
+        "30days",
+        undefined,
+        perms.canViewReconciliation,
+      ),
     enabled: !!companyId && showProjection,
     staleTime: 5 * 60 * 1000,
   });

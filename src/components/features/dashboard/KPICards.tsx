@@ -149,6 +149,12 @@ export function KPICards({
           )
         }
       >
+        {projection?.bankBase && (
+          <p>
+            Contas correntes desde o extrato de{" "}
+            {format(projection.bankBase.asOf, "dd/MM")} · sem aplicações
+          </p>
+        )}
         {lowest && lowest.balance < last!.balance && (
           <p className={negative(lowest.balance)}>
             Menor: {formatCurrencyAbbr(lowest.balance)} em {lowest.date}

@@ -21,6 +21,8 @@ import {
   negativeRuns,
   type NegativeRun,
 } from "@/lib/dashboardRules";
+import { planRedemption, type Position } from "@/lib/investment";
+import type { BankAccount } from "@/lib/types";
 import { formatCurrencyAbbr } from "@/lib/utils";
 
 const link =
@@ -48,7 +50,9 @@ const days = (n: number) => `${n} ${n === 1 ? "dia" : "dias"}`;
  * O alerta de saldo diz quando, quanto e o que resolve, em três linhas:
  * os trechos negativos; o pior saldo e a entrada de que ele depende; quem em
  * atraso cobre o buraco (mais recentes primeiro) e a saída que o abre.
- * Fica junto da fila porque a resposta dele está nela.
+ * Com o saldo das contas correntes, uma linha a mais: quanto resgatar das
+ * aplicações, de onde e com que imposto. Fica junto da fila porque a resposta
+ * dele está nela.
  */
 export function CashAlert({
   projection,
@@ -56,12 +60,15 @@ export function CashAlert({
   onRetry,
   receivables,
   relatedPartyIds,
+  reserve,
 }: {
   projection: ProjectedCashFlowResult | null | undefined;
   projectionFailed: boolean;
   onRetry: () => void;
   receivables?: QueueSection;
   relatedPartyIds: Set<string>;
+  /** Aplicações de liquidez diária; só valem com `projection.bankBase`. */
+  reserve?: { account: BankAccount; position: Position }[];
 }) {
   const points = projection?.data ?? [];
 
@@ -126,6 +133,19 @@ export function CashAlert({
   const partial = !!receivables && receivables.items.length < receivables.count;
   const today = startOfDay(new Date());
 
+  // Resgatar o pior déficit até o primeiro dia negativo cobre todos os trechos.
+  // Partindo das baixas, as aplicações já estão no saldo: resgatar não muda nada.
+  const redeemBy = runs[0].start.isoDate;
+  const plan =
+    projection.bankBase && reserve?.length
+      ? planRedemption(reserve, deficit, new Date(`${redeemBy}T00:00:00`))
+      : [];
+  const planNet = plan.reduce((s, r) => s.add(r.net), currency(0)).value;
+  const planTax = plan.reduce(
+    (s, r) => s.add(r.ir).add(r.iof),
+    currency(0),
+  ).value;
+
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 sm:flex-row sm:items-start sm:justify-between dark:border-red-900 dark:bg-red-950/30">
       <div className="flex min-w-0 gap-3">
@@ -142,6 +162,19 @@ export function CashAlert({
               withoutInflow !== undefined &&
               ` · depende de ${formatCurrencyAbbr(inflow.income)} previstos para ${inflow.date} (sem eles, ${formatCurrencyAbbr(withoutInflow)})`}
           </p>
+          {plan.length > 0 && (
+            <p>
+              {planNet < deficit ? "Resgatando tudo" : "Resgate"} até{" "}
+              {dayWord(redeemBy)}:{" "}
+              {plan
+                .map((r) => `${formatCurrencyAbbr(r.net)} de ${r.account.name}`)
+                .join(", ")}
+              {planTax > 0 &&
+                ` (IR/IOF retido ≈ ${formatCurrencyAbbr(planTax)})`}
+              {planNet < deficit &&
+                ` · cobre ${formatCurrencyAbbr(planNet)} dos ${formatCurrencyAbbr(deficit)}`}
+            </p>
+          )}
           {(cover || trigger || (receivables && receivables.total > 0)) && (
             <p className="flex min-w-0 flex-wrap gap-x-1">
               {cover ? (
@@ -186,6 +219,11 @@ export function CashAlert({
         {receivables && receivables.total > 0 && (
           <Link href={receivables.href} className={link}>
             Ver em atraso
+          </Link>
+        )}
+        {plan.length > 0 && (
+          <Link href="/financeiro/conciliacao" className={link}>
+            Ver aplicações
           </Link>
         )}
         <Link href="#fluxo-caixa" className={link}>

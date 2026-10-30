@@ -45,6 +45,8 @@ import {
   addYears,
 } from "date-fns";
 import { recurrenceService } from "./recurrenceService";
+import { bankAccountService } from "./bankAccountService";
+import { balanceBase, dayKey, isInvestment } from "@/lib/bankReconciliation";
 import {
   envelopePace,
   envelopeRank,
@@ -105,7 +107,13 @@ export interface ProjectedCashFlowData {
 
 export interface ProjectedCashFlowResult {
   data: ProjectedCashFlowData[];
+  /** Há saldo de partida: o das contas correntes ou o de company_stats. */
   hasCompanyStats: boolean;
+  /**
+   * Partiu das contas correntes (extrato mais antigo em `asOf`): aplicações
+   * ficam fora do saldo. Ausente = partiu das baixas (company_stats).
+   */
+  bankBase?: { asOf: Date };
   /** A receber vencido em aberto: fora de `balance`. */
   overdueIncome: number;
   /** A pagar vencido em aberto: lançado no dia de hoje. */
@@ -164,6 +172,67 @@ async function readCompanyBalance(companyId: string) {
     console.error("Error fetching company stats for balance:", error);
   }
   return { balance: 0, hasCompanyStats: false };
+}
+
+/**
+ * Caixa disponível hoje: o último saldo do extrato de cada conta corrente
+ * (sem extrato, o do último fechamento ou da abertura) mais as baixas depois
+ * dele. Aplicação fica fora: é reserva, e o alerta diz quanto resgatar.
+ * null = sem conta corrente; a projeção volta a partir das baixas.
+ */
+// ponytail: baixa sem conta conta só depois do extrato mais recente; com extratos de contas em dias diferentes, o que caiu entre eles pode faltar. Conta obrigatória na baixa resolve.
+async function readBankCash(companyId: string, today: Date) {
+  try {
+    const accounts = (await bankAccountService.getAll(companyId)).filter(
+      (a) => a.active,
+    );
+    const checking = accounts.filter((a) => !isInvestment(a));
+    if (checking.length === 0) return null;
+    const investments = new Set(accounts.filter(isInvestment).map((a) => a.id));
+    const bases = new Map(
+      checking.map((a) => [
+        a.id,
+        a.statementBalance !== undefined && a.statementBalanceDate
+          ? { date: a.statementBalanceDate, balance: a.statementBalance }
+          : balanceBase(a),
+      ]),
+    );
+    const times = [...bases.values()].map((b) => b.date.getTime());
+    const oldest = new Date(Math.min(...times));
+    const newest = dayKey(new Date(Math.max(...times)));
+    const todayKey = dayKey(today);
+
+    const snap = await getDocs(
+      query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where("companyId", "==", companyId),
+        where("status", "==", "paid"),
+        where("paymentDate", ">", Timestamp.fromDate(endOfDay(oldest))),
+      ),
+    );
+    let balance = [...bases.values()].reduce(
+      (s, b) => s.add(b.balance),
+      currency(0),
+    );
+    snap.docs.forEach((d) => {
+      const t = d.data();
+      const paid = dayKey((t.paymentDate as Timestamp).toDate());
+      // Baixa com data futura entra no próprio dia, pela projeção.
+      if (paid > todayKey || investments.has(t.bankAccountId)) return;
+      const base = bases.get(t.bankAccountId);
+      if (paid <= (base ? dayKey(base.date) : newest)) return;
+      const amount = Number(t.finalAmount ?? t.amount) || 0;
+      balance =
+        t.type === "receivable"
+          ? balance.add(amount)
+          : balance.subtract(amount);
+    });
+    return { balance: balance.value, asOf: oldest };
+  } catch (error) {
+    // Sem leitura das contas (perfil ou claims velhas): fica nas baixas.
+    console.error("Error reading bank cash:", error);
+    return null;
+  }
 }
 
 /**
@@ -523,10 +592,16 @@ export const dashboardService = {
 
   // getUpcomingTransactions and getCashFlowData removed (dead code)
 
+  /**
+   * `bankBase`: nos 30 dias, partir do caixa das contas correntes em vez das
+   * baixas. Só para quem lê as contas bancárias. O exercício fica nas baixas:
+   * refazer o passado só pela conta corrente ignoraria aplicações e resgates.
+   */
   getProjectedCashFlow: async (
     companyId: string,
     mode: "30days" | "year" = "30days",
     year?: number,
+    bankBase = false,
   ): Promise<ProjectedCashFlowResult> => {
     const targetYear = year || new Date().getFullYear();
     const today = new Date();
@@ -636,14 +711,16 @@ export const dashboardService = {
       status: "all",
       queue: [],
     });
-    const [{ balance: startingBalance, hasCompanyStats }, overdueTotals] =
-      await Promise.all([
-        readCompanyBalance(companyId),
-        transactionService.getTabTotals(companyId, [
-          tabFilter("overdue", overdueCtx("receivable")),
-          tabFilter("overdue", overdueCtx("payable")),
-        ]),
-      ]);
+    const [stats, bank, overdueTotals] = await Promise.all([
+      readCompanyBalance(companyId),
+      mode === "30days" && bankBase ? readBankCash(companyId, today) : null,
+      transactionService.getTabTotals(companyId, [
+        tabFilter("overdue", overdueCtx("receivable")),
+        tabFilter("overdue", overdueCtx("payable")),
+      ]),
+    ]);
+    const startingBalance = bank ? bank.balance : stats.balance;
+    const hasCompanyStats = !!bank || stats.hasCompanyStats;
     const overdueIncome = overdueTotals[0].total;
     const overdueExpense = overdueTotals[1].total;
 
@@ -773,7 +850,13 @@ export const dashboardService = {
       currentDate = nextDate;
     }
 
-    return { data: result, hasCompanyStats, overdueIncome, overdueExpense };
+    return {
+      data: result,
+      hasCompanyStats,
+      bankBase: bank ? { asOf: bank.asOf } : undefined,
+      overdueIncome,
+      overdueExpense,
+    };
   },
 
   getExpensesByCostCenter: async (

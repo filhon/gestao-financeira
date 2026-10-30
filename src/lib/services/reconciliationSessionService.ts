@@ -6,6 +6,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  where,
   limit,
   writeBatch,
   deleteField,
@@ -149,6 +150,20 @@ export const reconciliationSessionService = {
       (d) => (d.data().bankAccountId ?? null) === bankAccountId,
     );
     await runBatched(docs, (batch, d) => batch.delete(d.ref));
+  },
+
+  /** Linhas de uma conta só: a posição de uma aplicação fora da conciliação. */
+  async getAccountItems(
+    companyId: string,
+    bankAccountId: string,
+  ): Promise<BankTransaction[]> {
+    const snap = await getDocs(
+      query(
+        this.getItemsCollection(companyId),
+        where("bankAccountId", "==", bankAccountId),
+      ),
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as BankTransaction);
   },
 
   subscribeToSession(

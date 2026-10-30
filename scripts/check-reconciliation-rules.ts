@@ -25,6 +25,7 @@ import {
   iofRate,
   irRate,
   parseSgs,
+  planRedemption,
   taxWithheld,
 } from "../src/lib/investment";
 import currency from "currency.js";
@@ -419,5 +420,45 @@ assert.equal(p2.curve, 10015.01);
 assert.equal(curveGap(p0, 10015.5)?.off, false);
 assert.deepEqual(curveGap(p0, 10030), { gap: 14.99, off: true });
 assert.equal(curveGap(p0, null), null);
+
+// ── Sugestão de resgate ───────────────────────────────────────────────────────
+// Lote de 3 dias: o resgate paga IOF; bruto = líquido + imposto.
+const [s1] = planRedemption([{ account: cdbCdi, position: p0 }], 500, oct(23));
+assert.equal(s1.net, 500);
+assert.ok(s1.iof > 0);
+assert.equal(s1.gross, currency(500).add(s1.ir).add(s1.iof).value);
+// Passados 30 dias o IOF zera.
+assert.equal(
+  planRedemption(
+    [{ account: cdbCdi, position: p0 }],
+    500,
+    new Date(2026, 10, 25),
+  )[0].iof,
+  0,
+);
+// Pedindo mais do que há, resgata tudo: o líquido do dia.
+assert.equal(
+  planRedemption([{ account: cdbCdi, position: p0 }], 20000, oct(23))[0].net,
+  p0.net,
+);
+// A aplicação sem imposto vai primeiro; a outra só completa.
+const exemptCdb = { ...cdbCdi, id: "isento", taxExempt: true };
+const pExempt = investmentPosition(exemptCdb, [], cdi, oct(23));
+const both = planRedemption(
+  [
+    { account: cdbCdi, position: p0 },
+    { account: exemptCdb, position: pExempt },
+  ],
+  10500,
+  oct(23),
+);
+assert.deepEqual(
+  both.map((r) => [r.account.id, r.net]),
+  [
+    ["isento", 10015.01],
+    ["cdb", 484.99],
+  ],
+);
+assert.equal(both[0].ir + both[0].iof, 0);
 
 console.log("check:reconciliation-rules ok");

@@ -139,6 +139,16 @@ function redeem(
   return { ir, iof };
 }
 
+/** Bruto que precisa sair dos lotes para cair `net` na conta: converge em poucas voltas. */
+function grossFor(lots: Lot[], net: number, at: Date, exempt: boolean) {
+  let gross = net;
+  for (let i = 0; i < 6; i++) {
+    const t = redeem(lots, gross, at, exempt, false);
+    gross = net + t.ir + t.iof;
+  }
+  return gross;
+}
+
 const total = (lots: Lot[]) => lots.reduce((s, l) => s + l.value, 0);
 
 const scaleTo = (lots: Lot[], balance: number) => {
@@ -231,13 +241,13 @@ export function investmentPosition(
       }
       const net = -tx.amount;
       const when = new Date(tx.date);
-      // Bruto = líquido + imposto do próprio bruto: converge em poucas voltas.
-      let gross = net;
-      for (let i = 0; i < 6; i++) {
-        const t = redeem(lots, gross, when, exempt, false);
-        gross = net + t.ir + t.iof;
-      }
-      const t = redeem(lots, gross, when, exempt, true);
+      const t = redeem(
+        lots,
+        grossFor(lots, net, when, exempt),
+        when,
+        exempt,
+        true,
+      );
       const ir = money(t.ir);
       const iof = money(t.iof);
       redemptions.push({
@@ -309,6 +319,70 @@ export function curveGap(p: Position, bankGross: number | null) {
   const gap = currency(bankGross).subtract(p.curve).value;
   const tolerance = Math.max(1, Math.abs(p.curve) * 0.0005);
   return { gap, off: Math.abs(gap) > tolerance };
+}
+
+/** Aplicação que vira caixa no dia: liquidez diária e saldo do banco informado. */
+export const isLiquidReserve = (a: BankAccount) =>
+  isInvestment(a) &&
+  a.active &&
+  a.liquidity !== "maturity" &&
+  a.statementBalance !== undefined;
+
+export interface RedemptionPlan {
+  account: BankAccount;
+  /** O que cai na conta corrente. */
+  net: number;
+  gross: number;
+  ir: number;
+  iof: number;
+}
+
+/**
+ * Resgate que põe `need` líquido na conta corrente no dia `at`. Primeiro a
+ * aplicação de menor imposto proporcional; dentro dela, os lotes mais antigos
+ * (PEPS, como o banco resgata), que já passaram dos 30 dias do IOF e estão na
+ * faixa menor de IR. Se as aplicações não bastam, o plano resgata tudo.
+ */
+export function planRedemption(
+  reserves: { account: BankAccount; position: Position }[],
+  need: number,
+  at: Date,
+): RedemptionPlan[] {
+  const cost = (p: Position) => (p.gross > 0 ? (p.ir + p.iof) / p.gross : 1);
+  const plan: RedemptionPlan[] = [];
+  let left = currency(need);
+  for (const { account, position } of [...reserves].sort(
+    (a, b) => cost(a.position) - cost(b.position),
+  )) {
+    if (left.value <= 0) break;
+    if (position.net <= 0) continue;
+    const exempt = isTaxExempt(account);
+    const want = Math.min(left.value, position.net);
+    // Em `at` o imposto pode passar do estimado no dia do saldo: aí sai tudo.
+    const gross = grossFor(position.lots, want, at, exempt);
+    const all = gross >= position.gross;
+    const t = redeem(
+      position.lots,
+      all ? position.gross : gross,
+      at,
+      exempt,
+      false,
+    );
+    const ir = money(t.ir);
+    const iof = money(t.iof);
+    const net = all
+      ? currency(position.gross).subtract(ir).subtract(iof).value
+      : want;
+    plan.push({
+      account,
+      net,
+      gross: currency(net).add(ir).add(iof).value,
+      ir,
+      iof,
+    });
+    left = left.subtract(net);
+  }
+  return plan;
 }
 
 /** Lê a resposta da SGS (`[{ data: "dd/MM/yyyy", valor: "0.055131" }]`). */

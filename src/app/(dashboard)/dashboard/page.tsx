@@ -21,6 +21,7 @@ import { ptBR } from "date-fns/locale";
 import {
   DASHBOARD_QUERY_KEYS,
   useActionQueue,
+  useCashReserve,
   useDashboardMetrics,
   useRelatedPartyIds,
   useProjectedCashFlow,
@@ -104,6 +105,7 @@ export default function DashboardPage() {
   // KPI, alerta e gráfico leem a mesma série.
   const projection = useProjectedCashFlow("30days");
   const relatedPartyIds = useRelatedPartyIds();
+  const reserve = useCashReserve();
 
   const queryClient = useQueryClient();
   const isDashboardQuery = (key: unknown) =>
@@ -193,6 +195,7 @@ export default function DashboardPage() {
           onRetry={() => projection.refetch()}
           receivables={queue.data?.find((s) => s.id === "receivable-overdue")}
           relatedPartyIds={relatedPartyIds}
+          reserve={reserve.data}
         />
         {queue.isLoading ? (
           // Uma faixa só: o número de seções só se sabe depois de carregar.
