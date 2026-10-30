@@ -21,10 +21,8 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
-import {
-  BankAccountForm,
-  investmentLabel,
-} from "@/components/features/bank-accounts/BankAccountForm";
+import { BankAccountForm } from "@/components/features/bank-accounts/BankAccountForm";
+import { investmentLabel } from "@/lib/investment";
 import {
   bankAccountService,
   BankAccountDraft,

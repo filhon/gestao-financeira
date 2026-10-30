@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import currency from "currency.js";
-import { CheckCircle2, Lock, Pencil } from "lucide-react";
+import { CheckCircle2, FileUp, Loader2, Lock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,12 +14,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { toast } from "sonner";
 import { BankAccount } from "@/lib/types";
 import {
   isInvestment,
   lastClosing,
   summarizeAccount,
 } from "@/lib/bankReconciliation";
+import { curveGap, Position } from "@/lib/investment";
 import { cn, formatCurrency, plural } from "@/lib/utils";
 
 type Summary = ReturnType<typeof summarizeAccount>;
@@ -32,8 +34,13 @@ interface BalanceStripProps {
   account: BankAccount;
   summary: Summary;
   canManage: boolean;
-  /** Aplicação: rendimento que entra como receita ao fechar (0 = nenhum). */
+  companyId: string;
+  /** Aplicação: rendimento bruto que entra como receita ao fechar (0 = nenhum). */
   yieldAmount: number;
+  /** Aplicação: IR/IOF estimado dos resgates do período, já dentro do rendimento. */
+  taxAmount: number;
+  /** Aplicação: posição pela curva, para conferir o saldo do banco. */
+  position: Position | null;
   /** Lançar o rendimento cria receita: só quem pode criar receitas. */
   canRecognizeYield: boolean;
   onSetStatementBalance: (balance: number, date: Date) => Promise<void>;
@@ -50,7 +57,10 @@ export function BalanceStrip({
   account,
   summary,
   canManage,
+  companyId,
   yieldAmount,
+  taxAmount,
+  position,
   canRecognizeYield,
   onSetStatementBalance,
   onClose,
@@ -58,6 +68,7 @@ export function BalanceStrip({
 }: BalanceStripProps) {
   const closing = lastClosing(account);
   const investment = isInvestment(account);
+  const gap = position ? curveGap(position, summary.statementBalance) : null;
   // Fechada e sem extrato novo: o trabalho acabou, não há o que fechar.
   const done = !!closing && !summary.hasMovement;
   const projected = summary.projectedDifference;
@@ -125,6 +136,7 @@ export function BalanceStrip({
             summary.statementBalance !== null && (
               <StatementBalanceEditor
                 account={account}
+                companyId={companyId}
                 onSave={onSetStatementBalance}
               />
             )
@@ -134,6 +146,7 @@ export function BalanceStrip({
             canManage ? (
               <StatementBalanceEditor
                 account={account}
+                companyId={companyId}
                 onSave={onSetStatementBalance}
                 asText
               />
@@ -152,6 +165,27 @@ export function BalanceStrip({
                 ? "o que o app do banco mostra, antes do IR"
                 : "o OFX traz este valor"}
           </Hint>
+          {/* Curva: o que a taxa contratada diz que o saldo deveria ser. Longe
+              dela, a taxa cadastrada, algum movimento ou o banco está errado. */}
+          {position?.curve != null && (
+            <span
+              className={cn(
+                "text-xs",
+                gap?.off
+                  ? "font-medium text-amber-700 dark:text-amber-400"
+                  : "text-muted-foreground",
+              )}
+            >
+              curva {account.cdiPercent}% CDI:{" "}
+              <span className="font-financial tabular-nums">
+                {formatCurrency(position.curve)}
+              </span>
+              {gap?.off &&
+                ` · banco ${formatCurrency(Math.abs(gap.gap))} ${gap.gap > 0 ? "acima" : "abaixo"}`}
+              {position.cdiThrough &&
+                ` · CDI até ${d(new Date(`${position.cdiThrough}T12:00`))}`}
+            </span>
+          )}
         </Figure>
 
         {/* Projetada: tratar soma a linha como ela está, então o número final já
@@ -176,7 +210,7 @@ export function BalanceStrip({
               )}
             >
               {withYield && "+"}
-              {formatCurrency(projected)}
+              {formatCurrency(withYield ? yieldAmount : projected)}
             </span>
           )}
           {summary.pending > 0 && (
@@ -199,7 +233,9 @@ export function BalanceStrip({
           {projected !== null && (
             <Hint>
               {withYield
-                ? "entra como receita ao fechar"
+                ? taxAmount > 0
+                  ? `bruto, com ${formatCurrency(taxAmount)} de IR/IOF retido nos resgates; entra ao fechar`
+                  : "entra como receita ao fechar"
                 : investment && projected < 0
                   ? "o banco tem menos que o sistema: confira resgates e IR retido"
                   : projected !== 0
@@ -291,10 +327,12 @@ function Hint({ children }: { children: React.ReactNode }) {
 /** Para CSV, que não traz saldo; também corrige um OFX sem LEDGERBAL. */
 function StatementBalanceEditor({
   account,
+  companyId,
   onSave,
   asText,
 }: {
   account: BankAccount;
+  companyId: string;
   onSave: (balance: number, date: Date) => Promise<void>;
   /** Saldo ainda não informado: o gatilho vira o próprio valor da célula. */
   asText?: boolean;
@@ -310,6 +348,40 @@ function StatementBalanceEditor({
     ),
   );
   const [saving, setSaving] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [bankNet, setBankNet] = useState<number | null>(null);
+
+  // Extrato da aplicação (PDF ou print): a IA só preenche, quem salva é o usuário.
+  const readStatement = async (file: File) => {
+    setReading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("companyId", companyId);
+      const res = await fetch("/api/internal/investment-statement", {
+        method: "POST",
+        body,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setValue(data.grossBalance);
+      if (data.date) setDate(data.date);
+      setBankNet(data.netBalance);
+      toast.success("Saldo lido do extrato", {
+        description: data.date
+          ? "Confira o valor e a data antes de salvar."
+          : "Sem data no arquivo: confira a data antes de salvar.",
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : "Não consegui ler o extrato.",
+      );
+    } finally {
+      setReading(false);
+    }
+  };
 
   const save = async () => {
     const [y, m, dd] = date.split("-").map(Number);
@@ -360,9 +432,37 @@ function StatementBalanceEditor({
             : "Saldo final do extrato"}
         </p>
         {isInvestment(account) && (
-          <p className="text-xs text-muted-foreground">
-            Atualize quando quiser. O rendimento só é lançado ao fechar.
-          </p>
+          <>
+            <p className="text-xs text-muted-foreground">
+              Atualize quando quiser. O rendimento só é lançado ao fechar.
+            </p>
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="w-full has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
+            >
+              <label aria-disabled={reading}>
+                {reading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileUp className="h-4 w-4" />
+                )}
+                {reading ? "Lendo…" : "Ler do extrato (PDF ou print)"}
+                <input
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg,image/webp"
+                  className="sr-only"
+                  disabled={reading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) readStatement(file);
+                  }}
+                />
+              </label>
+            </Button>
+          </>
         )}
         <div className="space-y-1.5">
           <Label htmlFor="stmt-balance">Saldo</Label>
@@ -372,6 +472,14 @@ function StatementBalanceEditor({
             onChange={setValue}
             className="font-financial tabular-nums"
           />
+          {bankNet !== null && (
+            <p className="text-xs text-muted-foreground">
+              Líquido no extrato:{" "}
+              <span className="font-financial tabular-nums">
+                {formatCurrency(bankNet)}
+              </span>
+            </p>
+          )}
         </div>
         {!isInvestment(account) && (
           <label className="flex items-center gap-2 text-sm">

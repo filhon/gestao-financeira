@@ -14,10 +14,20 @@ import {
   pickStatementBalance,
   rulePattern,
   summarizeAccount,
+  taxLine,
   transferPair,
   yieldLine,
   yieldToRecognize,
 } from "../src/lib/bankReconciliation";
+import {
+  curveGap,
+  investmentPosition,
+  iofRate,
+  irRate,
+  parseSgs,
+  taxWithheld,
+} from "../src/lib/investment";
+import currency from "currency.js";
 import type {
   BankAccount,
   BankTransaction,
@@ -283,5 +293,131 @@ assert.ok(!isBalanceLine(y));
 const afterYield = summarizeAccount(cdbAt(11012.34), [mirror, y]);
 assert.equal(afterYield.difference, 0);
 assert.ok(afterYield.canClose);
+
+// Resgate líquido: o IR retido completa o rendimento bruto, mesmo com o banco
+// abaixo do sistema.
+assert.equal(yieldToRecognize(cdbAt(11012.34), cdbSummary, 3), 15.34);
+assert.equal(
+  yieldToRecognize(cdbAt(10998), summarizeAccount(cdbAt(10998), [mirror]), 3),
+  1,
+);
+assert.equal(taxLine(cdb, 3, new Date(2026, 9, 31)).amount, -3);
+
+// ── Aplicação: curva CDI, lotes PEPS, IR/IOF ──────────────────────────────────
+assert.equal(irRate(180), 0.225);
+assert.equal(irRate(181), 0.2);
+assert.equal(irRate(721), 0.15);
+assert.equal(iofRate(1), 0.96);
+assert.equal(iofRate(29), 0.03);
+assert.equal(iofRate(30), 0);
+assert.deepEqual(parseSgs([{ data: "21/10/2026", valor: "0.05" }]), {
+  "2026-10-21": 0.05,
+});
+
+// 20/10 é terça; sábado e domingo não têm CDI.
+const cdi = parseSgs(
+  ["20", "21", "22", "23", "26"].map((d) => ({
+    data: `${d}/10/2026`,
+    valor: "0.05",
+  })),
+);
+const cdbCdi: BankAccount = { ...cdb, cdiPercent: 100 };
+const oct = (d: number) => new Date(2026, 9, d);
+
+// O rendimento do dia entra no dia seguinte: no fim do dia 23, três dias.
+const p0 = investmentPosition(cdbCdi, [], cdi, oct(23));
+assert.equal(p0.curve, 10015.01);
+assert.equal(p0.cdiThrough, "2026-10-22");
+// Fim de semana não rende: 26 só soma a taxa do dia 23.
+assert.equal(investmentPosition(cdbCdi, [], cdi, oct(26)).curve, 10020.02);
+// 110% do CDI rende mais; sem taxa não há curva.
+assert.ok(
+  investmentPosition({ ...cdbCdi, cdiPercent: 110 }, [], cdi, oct(23)).curve! >
+    10015.01,
+);
+assert.equal(investmentPosition(cdb, [], cdi, oct(23)).curve, null);
+// Fundo não acompanha o CDI, mesmo com taxa.
+assert.equal(
+  investmentPosition({ ...cdbCdi, product: "fund" }, [], cdi, oct(23)).curve,
+  null,
+);
+
+// Aplicação do dia 21 rende a partir da noite do 21; a taxa da linha vence a da conta.
+const apl = { ...mirror, date: oct(21), status: "matched" as const };
+assert.equal(
+  investmentPosition(cdbCdi, [apl], cdi, oct(23)).curve,
+  11016.01, // 10015,0075 + 1001,00025
+);
+assert.ok(
+  investmentPosition(cdbCdi, [{ ...apl, cdiPercent: 120 }], cdi, oct(23))
+    .curve! > 11016.01,
+);
+// Rendimento e IR lançados pelo sistema não mexem na curva.
+assert.equal(
+  investmentPosition(
+    cdbCdi,
+    [
+      apl,
+      { ...y, date: oct(22) },
+      { ...taxLine(cdb, 5, oct(22)), status: "matched" },
+    ],
+    cdi,
+    oct(23),
+  ).curve,
+  11016.01,
+);
+
+// IR e IOF no fim do dia 23: lote de abertura com 3 dias (IOF 90%, IR 22,5%).
+assert.equal(p0.iof, 13.51); // 15,0075 × 90%
+assert.equal(p0.ir, 0.34); // (15,0075 − 13,50675) × 22,5%
+assert.equal(p0.net, 10001.16);
+assert.equal(
+  investmentPosition({ ...cdbCdi, taxExempt: true }, [], cdi, oct(23)).ir,
+  0,
+);
+// Custo de abertura menor que o saldo: o rendimento antigo também paga IR.
+assert.ok(
+  investmentPosition({ ...cdbCdi, openingPrincipal: 9000 }, [], cdi, oct(23))
+    .iof > 900, // 90% de 1.015,01
+);
+
+// Resgate consome o lote mais antigo primeiro; bruto = líquido + IR + IOF.
+const resg = {
+  ...mirror,
+  id: "resg",
+  date: oct(22),
+  amount: -500,
+  status: "matched" as const,
+};
+const p1 = investmentPosition(cdbCdi, [apl, resg], cdi, oct(23));
+const [r] = p1.redemptions;
+assert.equal(r.net, 500);
+assert.ok(r.gross > 500 && r.ir + r.iof > 0);
+assert.equal(currency(r.net).add(r.ir).add(r.iof).value, r.gross);
+assert.equal(p1.lots.length, 2);
+assert.ok(p1.lots[0].principal < 10000);
+assert.equal(p1.lots[1].principal, 1000);
+assert.equal(
+  taxWithheld(p1, oct(20), oct(23)),
+  currency(r.ir).add(r.iof).value,
+);
+assert.equal(taxWithheld(p1, oct(22), oct(23)), 0);
+
+// Fechamento acerta a curva ao saldo do banco: o erro não se acumula.
+const closedCdb: BankAccount = {
+  ...cdbCdi,
+  closings: [
+    { through: oct(22), balance: 10100, closedBy: "u1", closedAt: oct(22) },
+  ],
+};
+assert.equal(investmentPosition(closedCdb, [], cdi, oct(23)).curve, 10105.05);
+
+// Saldo do banco informado: IR e líquido partem dele, a curva fica para comparar.
+const p2 = investmentPosition(cdbCdi, [], cdi, oct(23), 10020);
+assert.equal(p2.gross, 10020);
+assert.equal(p2.curve, 10015.01);
+assert.equal(curveGap(p0, 10015.5)?.off, false);
+assert.deepEqual(curveGap(p0, 10030), { gap: 14.99, off: true });
+assert.equal(curveGap(p0, null), null);
 
 console.log("check:reconciliation-rules ok");

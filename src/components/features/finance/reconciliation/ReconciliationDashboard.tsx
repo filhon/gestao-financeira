@@ -101,11 +101,21 @@ import {
   lineTransaction,
   rulePattern,
   summarizeAccount,
+  taxLine,
   transferPair,
   yieldLine,
   reconciliationAccountKey,
   yieldToRecognize,
 } from "@/lib/bankReconciliation";
+import {
+  type CdiSeries,
+  investmentPosition,
+  taxWithheld,
+  tracksCdi,
+} from "@/lib/investment";
+import { InvestmentLots } from "@/components/features/finance/reconciliation/InvestmentLots";
+import { CurrencyInput } from "@/components/ui/currency-input";
+import { Label } from "@/components/ui/label";
 import { useCostCenters } from "@/hooks/useCostCenters";
 
 const ACCOUNT_KEY = reconciliationAccountKey;
@@ -362,6 +372,55 @@ export function ReconciliationDashboard() {
   );
   const summary = (account && summaries.get(account.id)) || null;
   const closing = account ? lastClosing(account) : undefined;
+
+  // ── Aplicação: curva do CDI, lotes e IR ────────────────────────────────────
+  const cdiFrom =
+    account && tracksCdi(account) && account.cdiPercent
+      ? format(account.openingBalanceDate, "yyyy-MM-dd")
+      : null;
+  const { data: cdi } = useQuery({
+    queryKey: ["cdi", companyId, cdiFrom],
+    queryFn: async (): Promise<CdiSeries> => {
+      const res = await fetch(
+        `/api/internal/cdi?companyId=${companyId}&from=${cdiFrom}`,
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      return data.cdi;
+    },
+    enabled: !!companyId && !!cdiFrom,
+    staleTime: 6 * 60 * 60 * 1000,
+    retry: 1,
+  });
+  // Posição no dia do saldo informado (ou hoje), acertada a ele: IR e líquido
+  // partem do banco, e a curva fica ao lado para comparar.
+  const position = useMemo(() => {
+    if (!investment || !account || !summary) return null;
+    const p = investmentPosition(
+      account,
+      allItems,
+      cdi ?? {},
+      summary.statementDate ?? new Date(),
+      summary.statementBalance ?? undefined,
+    );
+    // Sem o CDI carregado a curva ficaria parada no valor aplicado.
+    return cdiFrom && !cdi ? { ...p, curve: null } : p;
+  }, [investment, account, summary, allItems, cdi, cdiFrom]);
+  // IR/IOF que o banco reteve nos resgates do período: os resgates entram
+  // líquidos, então ele completa o rendimento bruto e vira despesa ao fechar.
+  const periodTax =
+    position && summary?.statementDate
+      ? taxWithheld(position, summary.base.date, summary.statementDate)
+      : 0;
+  const periodRedemptions =
+    position && summary?.statementDate
+      ? position.redemptions.filter(
+          (r) =>
+            dayKey(r.date) > dayKey(summary.base.date) &&
+            dayKey(r.date) <= dayKey(summary.statementDate!),
+        ).length
+      : 0;
+  const [closeTax, setCloseTax] = useState(0);
   // Fechada e sem extrato novo: o próximo passo é importar.
   const periodDone = !!closing && !!summary && !summary.hasMovement;
   // Para onde o saldo inicial volta ao reabrir: o fechamento anterior ou a abertura.
@@ -627,6 +686,7 @@ export function ReconciliationDashboard() {
       ruleId,
       resolution: "launched",
     });
+    return ref.id;
   };
 
   /**
@@ -1010,14 +1070,18 @@ export function ReconciliationDashboard() {
           actor,
           companyId,
         );
-        // Rendimento não veio do extrato: sem o lançamento, a linha não existe.
-        if (tx.origin === "yield") {
+        // Rendimento e IR não vieram do extrato: sem o lançamento, a linha não existe.
+        if (tx.origin === "yield" || tx.origin === "tax") {
           await reconciliationSessionService.commitItems(
             companyId,
             [],
             [tx.id],
           );
-          toast.success("Rendimento excluído");
+          toast.success(
+            tx.origin === "yield"
+              ? "Rendimento excluído"
+              : "IR retido excluído",
+          );
           return;
         }
       } else {
@@ -1360,12 +1424,31 @@ export function ReconciliationDashboard() {
     }
   };
 
+  /** Linha criada pelo sistema, lançada e conciliada; sem o lançamento, some. */
+  const launchSystemLine = async (
+    line: BankTransaction,
+    template: LaunchTemplate,
+  ) => {
+    await reconciliationSessionService.commitItems(companyId!, [line]);
+    try {
+      return await launchAndReconcile(line, template);
+    } catch (error) {
+      // Sem o lançamento a linha só travaria o fechamento como pendente.
+      await reconciliationSessionService
+        .commitItems(companyId!, [], [line.id])
+        .catch(() => {});
+      throw error;
+    }
+  };
+
   /**
    * Aplicação: a diferença para o saldo bruto vira receita de rendimento,
    * lançada e conciliada numa linha própria no dia do saldo, e a prova zera.
+   * Com resgates no período, o rendimento é bruto e o IR/IOF retido sai como
+   * despesa na mesma data: os dois juntos dão a diferença.
    */
-  const recognizeYield = async (amount: number, date: Date) => {
-    if (!account || !companyId) return;
+  const recognizeYield = async (amount: number, date: Date, tax: number) => {
+    if (!account || !companyId || !actor) return;
     const root = costCenters.find(
       (cc) => !cc.parentId || cc.parentId === "none",
     );
@@ -1377,29 +1460,55 @@ export function ReconciliationDashboard() {
         `Receitas de ${date.getFullYear()} precisam de conta contábil. Escolha a conta do rendimento no cadastro de ${account.name}.`,
       );
     }
-    await reconciliationSessionService.commitItems(companyId, [line]);
+    const tLine = tax > 0 ? taxLine(account, tax, date) : null;
+    if (tLine && !account.taxCostCenterId) {
+      throw new Error(
+        `Escolha o centro de custo do IR retido no cadastro de ${account.name}.`,
+      );
+    }
+    if (tLine && missingAccount(tLine, account.taxAccountId)) {
+      throw new Error(
+        `Despesas de ${date.getFullYear()} precisam de conta contábil. Escolha a conta do IR retido no cadastro de ${account.name}.`,
+      );
+    }
+    const label = `${account.name} até ${format(date, "dd/MM/yyyy")}`;
+    const supplier = account.bankName || account.name;
+    const taxId = tLine
+      ? await launchSystemLine(tLine, {
+          description: `IR/IOF retido ${label}`,
+          supplierOrClient: supplier,
+          costCenterId: account.taxCostCenterId!,
+          accountId: account.taxAccountId,
+        })
+      : null;
     try {
-      await launchAndReconcile(line, {
-        description: `Rendimento ${account.name} até ${format(date, "dd/MM/yyyy")}`,
-        supplierOrClient: account.bankName || account.name,
+      await launchSystemLine(line, {
+        description: `Rendimento ${label}`,
+        supplierOrClient: supplier,
         costCenterId: root.id,
         accountId: account.yieldAccountId,
       });
     } catch (error) {
-      // Sem o lançamento a linha só travaria o fechamento como pendente.
-      await reconciliationSessionService
-        .commitItems(companyId, [], [line.id])
-        .catch(() => {});
+      // IR sem o rendimento deixaria a prova torta: volta os dois.
+      if (taxId && tLine) {
+        await transactionService
+          .delete(taxId, actor, companyId)
+          .catch(() => {});
+        await reconciliationSessionService
+          .commitItems(companyId, [], [tLine.id])
+          .catch(() => {});
+      }
       throw error;
     }
   };
 
   const handleClosePeriod = async () => {
     if (!account || !summary?.statementDate || !actor) return;
-    const amount = yieldToRecognize(account, summary);
+    const amount = yieldToRecognize(account, summary, closeTax);
     if (!amount && !summary.canClose) return;
     try {
-      if (amount > 0) await recognizeYield(amount, summary.statementDate);
+      if (amount > 0)
+        await recognizeYield(amount, summary.statementDate, closeTax);
       await bankAccountService.close(
         account,
         summary.statementDate,
@@ -1690,7 +1799,17 @@ export function ReconciliationDashboard() {
     );
   }
 
-  const pendingYield = summary ? yieldToRecognize(account, summary) : 0;
+  const stripYield = summary
+    ? yieldToRecognize(account, summary, periodTax)
+    : 0;
+  // No diálogo vale o IR que o usuário confirmou.
+  const pendingYield = summary
+    ? yieldToRecognize(account, summary, closeTax)
+    : 0;
+  const closeTaxBlocker =
+    closeTax > 0 && pendingYield > 0 && !account.taxCostCenterId
+      ? `Escolha o centro de custo do IR retido no cadastro de ${account.name} para lançar o imposto.`
+      : null;
   const yieldChart = chartAccounts.find((a) => a.id === account.yieldAccountId);
   const yieldAccountName = yieldChart
     ? `${yieldChart.code} · ${yieldChart.name}`
@@ -1727,11 +1846,38 @@ export function ReconciliationDashboard() {
           account={account}
           summary={summary}
           canManage={canManageReconciliation}
-          yieldAmount={pendingYield}
-          canRecognizeYield={canCreateReceivables}
+          companyId={companyId!}
+          yieldAmount={stripYield}
+          taxAmount={periodTax}
+          position={position}
+          // Com IR no período também nasce despesa: precisa poder lançar as duas.
+          canRecognizeYield={
+            canCreateReceivables && (periodTax === 0 || canCreatePayables)
+          }
           onSetStatementBalance={handleStatementBalance}
-          onClose={() => setCloseConfirmOpen(true)}
+          onClose={() => {
+            setCloseTax(periodTax);
+            setCloseConfirmOpen(true);
+          }}
           onShowPending={() => setTab("pending")}
+        />
+      )}
+
+      {position && position.lots.length > 0 && (
+        <InvestmentLots
+          account={account}
+          position={position}
+          canEditRate={canManageReconciliation}
+          onRateChange={async (lotId, rate) => {
+            try {
+              await reconciliationSessionService.updateItem(companyId!, lotId, {
+                cdiPercent: rate,
+              });
+            } catch (error) {
+              toast.error(friendlyError(error, "Erro ao salvar a taxa"));
+              throw error;
+            }
+          }}
         />
       )}
 
@@ -2070,12 +2216,35 @@ export function ReconciliationDashboard() {
         title={`${pendingYield > 0 ? "Lançar rendimento e fechar" : "Fechar"} ${account.name} até ${summary?.statementDate ? format(summary.statementDate, "dd/MM/yyyy") : ""}?`}
         description={
           pendingYield > 0
-            ? `${formatCurrency(pendingYield)} entram como receita de rendimento${yieldAccountName ? ` em ${yieldAccountName}` : ""}, e o saldo bruto de ${formatCurrency(summary?.statementBalance ?? 0)} vira o saldo inicial do próximo período. Para desfazer, reabra o período e desfaça a linha do rendimento.`
+            ? `${formatCurrency(pendingYield)} entram como receita de rendimento${yieldAccountName ? ` em ${yieldAccountName}` : ""}${closeTax > 0 ? ` e ${formatCurrency(closeTax)} de IR/IOF retido como despesa` : ""}, e o saldo bruto de ${formatCurrency(summary?.statementBalance ?? 0)} vira o saldo inicial do próximo período. Para desfazer, reabra o período e desfaça as linhas lançadas.`
             : `O saldo conciliado de ${formatCurrency(summary?.bookBalance ?? 0)} vira o saldo inicial do próximo período. As linhas até essa data ficam somente leitura; só o gestor financeiro pode reabrir.`
         }
         confirmText={pendingYield > 0 ? "Lançar e fechar" : "Fechar período"}
+        confirmDisabled={!!closeTaxBlocker}
         onConfirm={handleClosePeriod}
-      />
+      >
+        {investment && periodRedemptions > 0 && !account.taxExempt && (
+          <div className="space-y-1.5">
+            <Label htmlFor="close-tax">IR/IOF retido nos resgates</Label>
+            <CurrencyInput
+              id="close-tax"
+              value={closeTax}
+              onChange={setCloseTax}
+              className="font-financial tabular-nums sm:w-1/2"
+            />
+            <p className="text-xs text-muted-foreground">
+              {plural(periodRedemptions, "resgate", "resgates")} no período.
+              Estimativa pelos lotes: {formatCurrency(periodTax)}. Corrija pela
+              nota de resgate do banco; o rendimento bruto acompanha.
+            </p>
+            {closeTaxBlocker && (
+              <p className="text-xs font-medium text-destructive">
+                {closeTaxBlocker}
+              </p>
+            )}
+          </div>
+        )}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={reopenConfirmOpen}

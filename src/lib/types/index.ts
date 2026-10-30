@@ -877,9 +877,12 @@ export interface BankTransaction {
   transferAccountId?: string;
   /**
    * Linha criada pelo sistema, não importada: a ponta espelho de uma
-   * transferência ou o rendimento reconhecido de uma aplicação. Desfazer apaga.
+   * transferência, o rendimento reconhecido de uma aplicação ou o IR retido
+   * nos resgates dela. Desfazer apaga.
    */
-  origin?: "transfer" | "yield";
+  origin?: "transfer" | "yield" | "tax";
+  /** Aplicação com taxa diferente da cadastrada na conta (% do CDI). */
+  cdiPercent?: number;
 }
 
 /** Fechamento de conciliação: até `through` o saldo do sistema bateu com `balance`. */
@@ -915,6 +918,15 @@ export interface BankAccount {
   linkedAccountId?: string;
   /** Conta contábil do rendimento lançado ao fechar. */
   yieldAccountId?: string;
+  /** Taxa contratada em % do CDI (100 = 100% do CDI); cada aplicação pode ter a sua. */
+  cdiPercent?: number;
+  /** Quanto foi aplicado do saldo de abertura (custo); ausente = o próprio saldo. */
+  openingPrincipal?: number;
+  /** Entidade imune ou isenta: o banco não retém IR nos resgates. */
+  taxExempt?: boolean;
+  /** Onde vai o IR/IOF retido nos resgates, lançado ao fechar. */
+  taxAccountId?: string;
+  taxCostCenterId?: string;
   bankName?: string;
   /** Código do banco (BANKID do OFX), usado para reconhecer o extrato. */
   bankCode?: string;

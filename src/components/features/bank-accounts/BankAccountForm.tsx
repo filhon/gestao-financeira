@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import currency from "currency.js";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
@@ -28,37 +29,17 @@ import {
 } from "@/components/ui/form";
 import { AccountSelect } from "@/components/features/chart-of-accounts/AccountSelect";
 import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
+import { useCostCenters } from "@/hooks/useCostCenters";
+import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
+import { PRODUCT_LABEL, tracksCdi } from "@/lib/investment";
 import {
   BankAccountFormData,
   bankAccountSchema,
 } from "@/lib/validations/bankAccount";
 import { BankAccountDraft } from "@/lib/services/bankAccountService";
-import { BankAccount, InvestmentProduct } from "@/lib/types";
+import { BankAccount } from "@/lib/types";
 import { isInvestment } from "@/lib/bankReconciliation";
-import { cn } from "@/lib/utils";
-
-export const PRODUCT_LABEL: Record<InvestmentProduct, string> = {
-  cdb: "CDB",
-  lci_lca: "LCI / LCA",
-  fund: "Fundo de investimento",
-  treasury: "Tesouro Direto",
-  savings: "Poupança",
-  auto: "Aplicação automática",
-  other: "Outro",
-};
-
-/** "CDB · liquidez diária", para as listas e a conciliação. */
-export const investmentLabel = (a: BankAccount) =>
-  [
-    a.product && PRODUCT_LABEL[a.product],
-    a.liquidity === "daily"
-      ? "liquidez diária"
-      : a.liquidity === "maturity"
-        ? "no vencimento"
-        : null,
-  ]
-    .filter(Boolean)
-    .join(" · ") || "Aplicação";
+import { cn, formatCurrency } from "@/lib/utils";
 
 interface BankAccountFormProps {
   companyId: string;
@@ -104,6 +85,11 @@ export function BankAccountForm({
         editing?.linkedAccountId ??
         (checking.length === 1 ? checking[0].id : undefined),
       yieldAccountId: editing?.yieldAccountId,
+      cdiPercent: editing?.cdiPercent ?? (editing ? undefined : 100),
+      taxExempt: editing?.taxExempt ?? false,
+      taxAccountId: editing?.taxAccountId,
+      taxCostCenterId: editing?.taxCostCenterId,
+      openingPrincipal: editing?.openingPrincipal,
       openingBalance: Math.abs(editing?.openingBalance ?? 0),
       overdrawn: (editing?.openingBalance ?? 0) < 0,
       // Conta nova começa sem data: hoje quase nunca é o dia certo, e a data
@@ -114,10 +100,67 @@ export function BankAccountForm({
       active: editing?.active ?? true,
     },
   });
-  const investment =
-    useWatch({ control: form.control, name: "kind" }) === "investment";
+  const [
+    kind,
+    product,
+    taxExempt,
+    linkedAccountId,
+    openingBalance,
+    openingPrincipal,
+    openingBalanceDate,
+  ] = useWatch({
+    control: form.control,
+    name: [
+      "kind",
+      "product",
+      "taxExempt",
+      "linkedAccountId",
+      "openingBalance",
+      "openingPrincipal",
+      "openingBalanceDate",
+    ],
+  });
+  const investment = kind === "investment";
+  const withCdi = tracksCdi({ kind, product });
+  const linked = checking.find((a) => a.id === linkedAccountId);
+  const linkedDate = linked
+    ? format(linked.openingBalanceDate, "yyyy-MM-dd")
+    : "";
 
-  const { isDirty } = form.formState;
+  const { isDirty, dirtyFields } = form.formState;
+
+  // Aplicação nova começa na data da conta corrente, até a pessoa digitar outra.
+  useEffect(() => {
+    if (editing || !investment || !linkedDate) return;
+    if (dirtyFields.openingBalanceDate) return;
+    form.setValue("openingBalanceDate", linkedDate);
+  }, [editing, investment, linkedDate, dirtyFields.openingBalanceDate, form]);
+
+  // Plano com uma só conta possível: já vem escolhida, a pessoa só confere.
+  useEffect(() => {
+    if (editing || !investment) return;
+    for (const [field, nature] of [
+      ["yieldAccountId", "revenue"],
+      ["taxAccountId", "expense"],
+    ] as const) {
+      const options = chartAccounts.filter(
+        (a) => a.type === "analytic" && a.nature === nature && !a.archived,
+      );
+      if (options.length === 1 && !dirtyFields[field]) {
+        form.setValue(field, options[0].id);
+      }
+    }
+  }, [editing, investment, chartAccounts, dirtyFields, form]);
+
+  const { costCenters } = useCostCenters(companyId);
+  // IR retido é despesa: só centro de último grau.
+  const leaves = useMemo(() => {
+    const parents = new Set(costCenters.map((cc) => cc.parentId));
+    return getHierarchicalCostCenters(costCenters).filter(
+      (cc) => !cc.archived && !parents.has(cc.id),
+    );
+  }, [costCenters]);
+
   useEffect(() => onDirtyChange?.(isDirty), [isDirty, onDirtyChange]);
 
   const submit = (data: BankAccountFormData) => {
@@ -134,6 +177,12 @@ export function BankAccountForm({
       liquidity: inv ? data.liquidity : undefined,
       linkedAccountId: inv ? data.linkedAccountId : undefined,
       yieldAccountId: inv ? data.yieldAccountId : undefined,
+      cdiPercent: inv && tracksCdi(data) ? data.cdiPercent : undefined,
+      taxExempt: inv ? data.taxExempt : undefined,
+      taxAccountId: inv && !data.taxExempt ? data.taxAccountId : undefined,
+      taxCostCenterId:
+        inv && !data.taxExempt ? data.taxCostCenterId : undefined,
+      openingPrincipal: inv ? data.openingPrincipal : undefined,
       openingBalance:
         data.overdrawn && !inv ? -data.openingBalance : data.openingBalance,
       openingBalanceDate: new Date(y, m - 1, d),
@@ -171,11 +220,7 @@ export function BankAccountForm({
                           "Conta corrente",
                           "Extrato importado e conciliado",
                         ],
-                        [
-                          "investment",
-                          "Aplicação",
-                          "CDB, fundo, Tesouro: saldo bruto conferido",
-                        ],
+                        ["investment", "Aplicação", "CDB, fundo, Tesouro"],
                       ] as const
                     ).map(([value, label, hint]) => (
                       <label
@@ -223,7 +268,12 @@ export function BankAccountForm({
               )}
             />
 
-            <div className="grid gap-4 sm:grid-cols-[1fr_110px]">
+            <div
+              className={cn(
+                "grid gap-4",
+                !investment && "sm:grid-cols-[1fr_110px]",
+              )}
+            >
               <FormField
                 control={form.control}
                 name="bankName"
@@ -237,19 +287,25 @@ export function BankAccountForm({
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="bankCode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cód. banco</FormLabel>
-                    <FormControl>
-                      <Input placeholder="341" inputMode="numeric" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {!investment && (
+                <FormField
+                  control={form.control}
+                  name="bankCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cód. banco</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="341"
+                          inputMode="numeric"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </div>
 
             {investment ? (
@@ -277,6 +333,7 @@ export function BankAccountForm({
                           ))}
                         </SelectContent>
                       </Select>
+                      <FormMessage />
                     </FormItem>
                   )}
                 />
@@ -302,6 +359,7 @@ export function BankAccountForm({
                           </SelectItem>
                         </SelectContent>
                       </Select>
+                      <FormMessage />
                     </FormItem>
                   )}
                 />
@@ -379,6 +437,51 @@ export function BankAccountForm({
                   </FormItem>
                 )}
               />
+            </section>
+          )}
+
+          {investment && (
+            <section className={section}>
+              <h3 className={sectionTitle}>Rendimento</h3>
+              {withCdi && (
+                <FormField
+                  control={form.control}
+                  name="cdiPercent"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Taxa contratada</FormLabel>
+                      <div className="flex items-center gap-2">
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min={0}
+                            placeholder="100"
+                            className="w-28 font-financial tabular-nums"
+                            value={field.value ?? ""}
+                            onChange={(e) =>
+                              field.onChange(
+                                e.target.value === ""
+                                  ? undefined
+                                  : e.target.valueAsNumber,
+                              )
+                            }
+                          />
+                        </FormControl>
+                        <span className="text-sm text-muted-foreground">
+                          % do CDI
+                        </span>
+                      </div>
+                      <FormDescription>
+                        Estima o saldo diário para conferir com o banco. Vazio:
+                        sem estimativa.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}
@@ -396,9 +499,7 @@ export function BankAccountForm({
                           allowClear
                         />
                         <FormDescription>
-                          O rendimento é lançado nela ao fechar o período. Sem
-                          ela, o fechamento de exercício com plano de contas
-                          obrigatório é bloqueado.
+                          Obrigatória para fechar o exercício.
                         </FormDescription>
                       </>
                     ) : (
@@ -417,6 +518,91 @@ export function BankAccountForm({
                   </FormItem>
                 )}
               />
+            </section>
+          )}
+
+          {investment && (
+            <section className={section}>
+              <h3 className={sectionTitle}>IR retido</h3>
+              <FormField
+                control={form.control}
+                name="taxExempt"
+                render={({ field }) => (
+                  <FormItem className="flex-row flex-wrap items-center gap-x-2">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={(v) => field.onChange(!!v)}
+                      />
+                    </FormControl>
+                    <FormLabel className="font-normal">
+                      Sem IR retido (entidade imune ou isenta)
+                    </FormLabel>
+                    {(product === "lci_lca" || product === "savings") && (
+                      <FormDescription className="basis-full pl-6">
+                        Na empresa,{" "}
+                        {product === "savings" ? "poupança" : "LCI/LCA"} também
+                        tem IR.
+                      </FormDescription>
+                    )}
+                  </FormItem>
+                )}
+              />
+
+              {!taxExempt && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="taxCostCenterId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Centro de custo</FormLabel>
+                        <Select
+                          value={field.value ?? ""}
+                          onValueChange={(v) => field.onChange(v || undefined)}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Selecione o centro de custo" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {leaves.map((cc) => (
+                              <SelectItem key={cc.id} value={cc.id}>
+                                {cc.code ? `${cc.code} · ${cc.name}` : cc.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          IR e IOF retidos no resgate entram como despesa aqui,
+                          ao fechar o período.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  {chartAccounts.length > 0 && (
+                    <FormField
+                      control={form.control}
+                      name="taxAccountId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Conta contábil</FormLabel>
+                          <AccountSelect
+                            accounts={chartAccounts}
+                            nature="expense"
+                            value={field.value}
+                            onChange={field.onChange}
+                            allowClear
+                          />
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </>
+              )}
             </section>
           )}
 
@@ -447,6 +633,35 @@ export function BankAccountForm({
                     </FormItem>
                   )}
                 />
+                {investment && !taxExempt && (
+                  <FormField
+                    control={form.control}
+                    name="openingPrincipal"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Valor aplicado (custo)</FormLabel>
+                        <FormControl>
+                          <CurrencyInput
+                            value={field.value}
+                            onChange={(v) => field.onChange(v || undefined)}
+                            placeholder={formatCurrency(openingBalance ?? 0)}
+                            className="font-financial tabular-nums"
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {openingPrincipal && openingPrincipal < openingBalance
+                            ? `Rendimento já acumulado: ${formatCurrency(
+                                currency(openingBalance).subtract(
+                                  openingPrincipal,
+                                ).value,
+                              )}. Paga IR no resgate.`
+                            : "Vazio: todo o saldo é dinheiro aplicado."}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
                   name="openingBalanceDate"
@@ -460,6 +675,13 @@ export function BankAccountForm({
                           {...field}
                         />
                       </FormControl>
+                      {investment &&
+                        linked &&
+                        openingBalanceDate === linkedDate && (
+                          <FormDescription>
+                            Mesma data de {linked.name}.
+                          </FormDescription>
+                        )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -488,8 +710,8 @@ export function BankAccountForm({
                 {openingLocked
                   ? "Travado: a conta já tem período conciliado. Reabra os fechamentos para alterar."
                   : investment
-                    ? "O saldo bruto (antes de IR) que o banco mostra para o fim desse dia. Use a mesma data da conta corrente para começar junto."
-                    : "Copie do extrato o saldo do dia anterior ao primeiro lançamento que você vai conciliar. Depois do primeiro fechamento a data não muda."}
+                    ? "Saldo bruto, antes do IR, como o banco mostra ao fim desse dia."
+                    : "Saldo do extrato no dia anterior ao primeiro lançamento a conciliar. A data trava no primeiro fechamento."}
               </FormDescription>
             </fieldset>
           </section>

@@ -19,6 +19,15 @@ export const bankAccountSchema = z
     liquidity: z.enum(["daily", "maturity"]).optional(),
     linkedAccountId: z.string().optional(),
     yieldAccountId: z.string().optional(),
+    cdiPercent: z
+      .number({ message: "Informe a taxa em % do CDI" })
+      .positive("A taxa precisa ser maior que zero")
+      .max(300, "Confira a taxa: acima de 300% do CDI")
+      .optional(),
+    taxExempt: z.boolean(),
+    taxAccountId: z.string().optional(),
+    taxCostCenterId: z.string().optional(),
+    openingPrincipal: z.number().min(0).optional(),
     openingBalance: z.number().min(0),
     overdrawn: z.boolean(),
     openingBalanceDate: z
@@ -37,6 +46,15 @@ export const bankAccountSchema = z
   .refine((d) => d.kind !== "investment" || !!d.linkedAccountId, {
     path: ["linkedAccountId"],
     message: "Escolha a conta corrente da aplicação",
-  });
+  })
+  .refine(
+    (d) =>
+      d.openingPrincipal === undefined ||
+      d.openingPrincipal <= d.openingBalance,
+    {
+      path: ["openingPrincipal"],
+      message: "O valor aplicado não passa do saldo bruto",
+    },
+  );
 
 export type BankAccountFormData = z.infer<typeof bankAccountSchema>;

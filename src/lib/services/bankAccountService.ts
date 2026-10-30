@@ -34,6 +34,11 @@ export type BankAccountDraft = Pick<
   | "liquidity"
   | "linkedAccountId"
   | "yieldAccountId"
+  | "cdiPercent"
+  | "openingPrincipal"
+  | "taxExempt"
+  | "taxAccountId"
+  | "taxCostCenterId"
 >;
 
 const toDate = (v: unknown) =>

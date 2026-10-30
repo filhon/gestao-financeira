@@ -326,17 +326,19 @@ export function transferPair(
  * Aplicação: com tudo tratado, o que o saldo bruto do banco tem a mais que o
  * sistema é o rendimento do período. Entra como receita ao fechar; conferir o
  * saldo todo dia só mostra quanto já rendeu.
+ *
+ * Os resgates entram líquidos (o que caiu na conta corrente), então o banco
+ * mostra `tax` a menos do que rendeu: o rendimento bruto é a diferença mais o
+ * IR/IOF retido, e o imposto vira despesa ao lado dele.
  */
 export function yieldToRecognize(
   account: BankAccount,
   s: ReturnType<typeof summarizeAccount>,
+  tax = 0,
 ) {
-  return isInvestment(account) &&
-    s.pending === 0 &&
-    s.hasMovement &&
-    (s.projectedDifference ?? 0) > 0
-    ? s.projectedDifference!
-    : 0;
+  if (!isInvestment(account) || s.pending !== 0 || !s.hasMovement) return 0;
+  const gross = currency(s.projectedDifference ?? 0).add(tax).value;
+  return gross > 0 ? gross : 0;
 }
 
 /** Linha do rendimento reconhecido, no dia do saldo informado. */
@@ -353,6 +355,22 @@ export const yieldLine = (
   bankAccountId: account.id,
   status: "unmatched",
   origin: "yield",
+});
+
+/** Linha do IR/IOF retido nos resgates do período, no mesmo dia do rendimento. */
+export const taxLine = (
+  account: BankAccount,
+  amount: number,
+  date: Date,
+): BankTransaction => ({
+  id: `${account.id}~tax~${day(date)}`,
+  date,
+  amount: -amount,
+  description: `IR/IOF retido nos resgates até ${format(date, "dd/MM/yyyy")}`,
+  type: "debit",
+  bankAccountId: account.id,
+  status: "unmatched",
+  origin: "tax",
 });
 
 // ─── Regras ───────────────────────────────────────────────────────────────────
