@@ -35,6 +35,7 @@ import {
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
+import { isInvestment } from "@/lib/bankReconciliation";
 
 export interface PaymentConfirmation {
   paymentDate: Date;
@@ -75,8 +76,9 @@ export function PaymentDialog({
   const { accounts } = useBankAccounts(
     canViewReconciliation ? selectedCompany?.id : undefined,
   );
+  // Aplicação não paga nem recebe título: o dinheiro passa pela conta corrente.
   const activeAccounts = accounts.filter(
-    (a) => a.active || a.id === transaction.bankAccountId,
+    (a) => (a.active && !isInvestment(a)) || a.id === transaction.bankAccountId,
   );
   const [bankAccountId, setBankAccountId] = useState<string | undefined>();
   const defaultAccountId =

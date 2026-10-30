@@ -15,7 +15,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { BankAccount } from "@/lib/types";
-import { lastClosing, summarizeAccount } from "@/lib/bankReconciliation";
+import {
+  isInvestment,
+  lastClosing,
+  summarizeAccount,
+} from "@/lib/bankReconciliation";
 import { cn, formatCurrency, plural } from "@/lib/utils";
 
 type Summary = ReturnType<typeof summarizeAccount>;
@@ -28,6 +32,10 @@ interface BalanceStripProps {
   account: BankAccount;
   summary: Summary;
   canManage: boolean;
+  /** Aplicação: rendimento que entra como receita ao fechar (0 = nenhum). */
+  yieldAmount: number;
+  /** Lançar o rendimento cria receita: só quem pode criar receitas. */
+  canRecognizeYield: boolean;
   onSetStatementBalance: (balance: number, date: Date) => Promise<void>;
   onClose: () => void;
   onShowPending: () => void;
@@ -42,26 +50,35 @@ export function BalanceStrip({
   account,
   summary,
   canManage,
+  yieldAmount,
+  canRecognizeYield,
   onSetStatementBalance,
   onClose,
   onShowPending,
 }: BalanceStripProps) {
   const closing = lastClosing(account);
+  const investment = isInvestment(account);
   // Fechada e sem extrato novo: o trabalho acabou, não há o que fechar.
   const done = !!closing && !summary.hasMovement;
   const projected = summary.projectedDifference;
   const movement = currency(summary.bookBalance).subtract(
     summary.base.balance,
   ).value;
-  const closeBlocker = summary.canClose
+  const withYield = yieldAmount > 0;
+  const canClose = withYield ? canRecognizeYield : summary.canClose;
+  const closeBlocker = canClose
     ? null
-    : summary.pending > 0
-      ? `Faltam ${plural(summary.pending, "linha", "linhas")}`
-      : summary.difference !== null && summary.difference !== 0
-        ? `Diferença de ${formatCurrency(summary.difference)}`
-        : !summary.hasMovement
-          ? `Extrato sem movimento depois de ${d(summary.base.date)}`
-          : null;
+    : withYield
+      ? "Só quem lança receitas reconhece o rendimento"
+      : summary.pending > 0
+        ? `Faltam ${plural(summary.pending, "linha", "linhas")}`
+        : summary.difference !== null && summary.difference < 0 && investment
+          ? "Banco abaixo do sistema: falta um resgate?"
+          : summary.difference !== null && summary.difference !== 0
+            ? `Diferença de ${formatCurrency(summary.difference)}`
+            : !summary.hasMovement
+              ? `${investment ? "Saldo" : "Extrato"} sem movimento depois de ${d(summary.base.date)}`
+              : null;
 
   // Ordem da prova: o lado do sistema (inicial → conciliado), depois o banco
   // (extrato) e a diferença entre os dois.
@@ -81,7 +98,7 @@ export function BalanceStrip({
           </Hint>
         </Figure>
 
-        <Figure label="Saldo conciliado">
+        <Figure label={investment ? "No sistema" : "Saldo conciliado"}>
           <span className="font-financial tabular-nums">
             {formatCurrency(summary.bookBalance)}
           </span>
@@ -102,7 +119,7 @@ export function BalanceStrip({
         </Figure>
 
         <Figure
-          label="Saldo do extrato"
+          label={investment ? "Saldo bruto no banco" : "Saldo do extrato"}
           action={
             canManage &&
             summary.statementBalance !== null && (
@@ -131,26 +148,34 @@ export function BalanceStrip({
           <Hint>
             {summary.statementDate
               ? `em ${d(summary.statementDate)}`
-              : "o OFX traz este valor"}
+              : investment
+                ? "o que o app do banco mostra, antes do IR"
+                : "o OFX traz este valor"}
           </Hint>
         </Figure>
 
         {/* Projetada: tratar soma a linha como ela está, então o número final já
-            é conhecido. Uma diferença parcial fazia caçar centavos que não existem. */}
-        <Figure label="Diferença">
+            é conhecido. Uma diferença parcial fazia caçar centavos que não existem.
+            Na aplicação, a diferença positiva é o rendimento do período. */}
+        <Figure label={investment ? "Rendimento a reconhecer" : "Diferença"}>
           {projected === null ? (
-            <span className="text-muted-foreground">Sem saldo do extrato</span>
+            <span className="text-muted-foreground">
+              {investment ? "Sem saldo informado" : "Sem saldo do extrato"}
+            </span>
           ) : (
             <span
               className={cn(
                 "font-financial tabular-nums text-lg font-semibold",
-                projected !== 0
-                  ? "text-amber-700 dark:text-amber-400"
-                  : summary.pending === 0 &&
+                withYield
+                  ? "text-foreground"
+                  : projected !== 0
+                    ? "text-amber-700 dark:text-amber-400"
+                    : summary.pending === 0 &&
                       summary.hasMovement &&
                       "text-emerald-700 dark:text-emerald-400",
               )}
             >
+              {withYield && "+"}
               {formatCurrency(projected)}
             </span>
           )}
@@ -173,13 +198,17 @@ export function BalanceStrip({
           )}
           {projected !== null && (
             <Hint>
-              {projected !== 0
-                ? summary.pending > 0
-                  ? "não zera tratando tudo: confira o saldo inicial e se faltam linhas"
-                  : "confira o saldo inicial e se faltam linhas no arquivo"
-                : summary.pending > 0
-                  ? "zera quando as pendentes forem tratadas"
-                  : "extrato e sistema batem"}
+              {withYield
+                ? "entra como receita ao fechar"
+                : investment && projected < 0
+                  ? "o banco tem menos que o sistema: confira resgates e IR retido"
+                  : projected !== 0
+                    ? summary.pending > 0
+                      ? "não zera tratando tudo: confira o saldo inicial e se faltam linhas"
+                      : "confira o saldo inicial e se faltam linhas no arquivo"
+                    : summary.pending > 0
+                      ? "zera quando as pendentes forem tratadas"
+                      : "extrato e sistema batem"}
             </Hint>
           )}
         </Figure>
@@ -210,12 +239,14 @@ export function BalanceStrip({
               <Button
                 size="sm"
                 className="h-9"
-                disabled={!summary.canClose}
+                disabled={!canClose}
                 onClick={onClose}
                 aria-describedby={closeBlocker ? "close-blocker" : undefined}
               >
                 <CheckCircle2 className="h-4 w-4" />
-                Fechar até {d(summary.statementDate)}
+                {withYield
+                  ? `Lançar rendimento e fechar até ${d(summary.statementDate)}`
+                  : `Fechar até ${d(summary.statementDate)}`}
               </Button>
               {closeBlocker && (
                 <span
@@ -271,8 +302,12 @@ function StatementBalanceEditor({
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(Math.abs(account.statementBalance ?? 0));
   const [negative, setNegative] = useState((account.statementBalance ?? 0) < 0);
+  // Aplicação é conferida no dia a dia: o padrão é hoje.
   const [date, setDate] = useState(
-    format(account.statementBalanceDate ?? new Date(), "yyyy-MM-dd"),
+    format(
+      (!isInvestment(account) && account.statementBalanceDate) || new Date(),
+      "yyyy-MM-dd",
+    ),
   );
   const [saving, setSaving] = useState(false);
 
@@ -299,7 +334,7 @@ function StatementBalanceEditor({
               focusRing,
             )}
           >
-            Informar saldo
+            {isInvestment(account) ? "Informar saldo bruto" : "Informar saldo"}
           </button>
         ) : (
           <button
@@ -308,14 +343,27 @@ function StatementBalanceEditor({
               "-my-1 flex h-6 w-6 items-center justify-center hover:bg-muted hover:text-foreground",
               focusRing,
             )}
-            aria-label="Corrigir saldo do extrato"
+            aria-label={
+              isInvestment(account)
+                ? "Atualizar saldo bruto"
+                : "Corrigir saldo do extrato"
+            }
           >
             <Pencil className="h-3 w-3" />
           </button>
         )}
       </PopoverTrigger>
       <PopoverContent className="w-72 space-y-3" align="start">
-        <p className="text-sm font-medium">Saldo final do extrato</p>
+        <p className="text-sm font-medium">
+          {isInvestment(account)
+            ? "Saldo bruto no banco"
+            : "Saldo final do extrato"}
+        </p>
+        {isInvestment(account) && (
+          <p className="text-xs text-muted-foreground">
+            Atualize quando quiser. O rendimento só é lançado ao fechar.
+          </p>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="stmt-balance">Saldo</Label>
           <CurrencyInput
@@ -325,13 +373,15 @@ function StatementBalanceEditor({
             className="font-financial tabular-nums"
           />
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={negative}
-            onCheckedChange={(v) => setNegative(!!v)}
-          />
-          Saldo devedor (negativo)
-        </label>
+        {!isInvestment(account) && (
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={negative}
+              onCheckedChange={(v) => setNegative(!!v)}
+            />
+            Saldo devedor (negativo)
+          </label>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="stmt-date">Ao fim do dia</Label>
           <Input

@@ -866,11 +866,20 @@ export interface BankTransaction {
   ignoreReason?: "transfer" | "investment" | "other";
   /**
    * Como a linha foi conciliada, para o desfazer saber o que reverter:
-   * "launched" criou o lançamento, "settled" deu baixa num título aberto.
+   * "launched" criou o lançamento, "settled" deu baixa num título aberto,
+   * "transfer" casou com a outra ponta de uma transferência entre contas.
    */
-  resolution?: "launched" | "settled";
+  resolution?: "launched" | "settled" | "transfer";
   /** Status do título antes da baixa pelo extrato; o desfazer volta para ele. */
   previousStatus?: TransactionStatus;
+  /** Transferência: id da linha da outra ponta e a conta dela. */
+  transferId?: string;
+  transferAccountId?: string;
+  /**
+   * Linha criada pelo sistema, não importada: a ponta espelho de uma
+   * transferência ou o rendimento reconhecido de uma aplicação. Desfazer apaga.
+   */
+  origin?: "transfer" | "yield";
 }
 
 /** Fechamento de conciliação: até `through` o saldo do sistema bateu com `balance`. */
@@ -881,11 +890,31 @@ export interface BankAccountClosing {
   closedAt: Date;
 }
 
+export type InvestmentProduct =
+  | "cdb"
+  | "lci_lca"
+  | "fund"
+  | "treasury"
+  | "savings"
+  | "auto"
+  | "other";
+
 export interface BankAccount {
   id: string;
   companyId: string;
   /** Apelido exibido nas telas ("Itaú movimento"). */
   name: string;
+  /**
+   * Aplicação: o saldo informado é o bruto do banco, e a diferença para o
+   * sistema é o rendimento, reconhecido ao fechar. Ausente = conta corrente.
+   */
+  kind?: "checking" | "investment";
+  product?: InvestmentProduct;
+  liquidity?: "daily" | "maturity";
+  /** Conta corrente de onde vêm as aplicações; aparece primeiro ao transferir. */
+  linkedAccountId?: string;
+  /** Conta contábil do rendimento lançado ao fechar. */
+  yieldAccountId?: string;
   bankName?: string;
   /** Código do banco (BANKID do OFX), usado para reconhecer o extrato. */
   bankCode?: string;
@@ -916,7 +945,9 @@ export interface ReconciliationRule {
   /** Normalizado (minúsculo, sem acento nem dígitos); procurado no histórico. */
   pattern: string;
   direction: "debit" | "credit";
-  action: "ignore" | "create";
+  action: "ignore" | "create" | "transfer";
+  /** Ação "transfer": a outra conta. */
+  transferAccountId?: string;
   /** Modelo do lançamento; valor e data vêm da linha do extrato. */
   template?: {
     description: string;

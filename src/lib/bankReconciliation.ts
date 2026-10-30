@@ -14,6 +14,10 @@ import { normalizeText } from "./utils";
 // "ao fim do dia", e uma linha do extrato daquele mesmo dia já está dentro dele.
 const day = (d: Date) => format(new Date(d), "yyyy-MM-dd");
 
+/** Conta escolhida na conciliação, lembrada por empresa neste navegador. */
+export const reconciliationAccountKey = (companyId: string) =>
+  `reconciliation-account-${companyId}`;
+
 export const lastClosing = (
   account: Pick<BankAccount, "closings">,
 ): BankAccountClosing | undefined => account.closings?.at(-1);
@@ -244,6 +248,112 @@ export function pickStatementBalance(
   }
   return fromFile;
 }
+
+// ─── Aplicações e transferências ──────────────────────────────────────────────
+
+export const isInvestment = (account?: Pick<BankAccount, "kind">) =>
+  account?.kind === "investment";
+
+const DAY_MS = 86_400_000;
+
+/** Como a ponta criada pelo sistema aparece na conta dela. */
+function mirrorDescription(amount: number, from: BankAccount, to: BankAccount) {
+  const what = isInvestment(to)
+    ? amount > 0
+      ? "Aplicação"
+      : "Resgate"
+    : isInvestment(from)
+      ? amount > 0
+        ? "Resgate"
+        : "Aplicação"
+      : "Transferência";
+  return `${what} ${amount > 0 ? "de" : "para"} ${from.name}`;
+}
+
+/**
+ * As duas pontas de uma transferência entre contas da empresa: não é receita
+ * nem despesa, o dinheiro só muda de conta. Se a outra conta já tem a linha
+ * (extrato das duas importado), casa com ela; senão nasce a ponta espelho,
+ * com id derivado da origem, então transferir de novo sobrescreve em vez de
+ * duplicar. Devolve o que gravar em cada ponta.
+ */
+export function transferPair(
+  tx: BankTransaction,
+  from: BankAccount,
+  to: BankAccount,
+  candidates: BankTransaction[],
+): {
+  origin: Partial<BankTransaction>;
+  other: Partial<BankTransaction> & { id: string };
+} {
+  const amount = currency(tx.amount).multiply(-1).value;
+  const existing = candidates.find(
+    (c) =>
+      c.bankAccountId === to.id &&
+      (c.status === "unmatched" || c.status === "potential_match") &&
+      !isBalanceLine(c) &&
+      !isLocked(c, to) &&
+      currency(c.amount).value === amount &&
+      Math.abs(new Date(c.date).getTime() - new Date(tx.date).getTime()) <=
+        3 * DAY_MS,
+  );
+  const link = (id: string, accountId: string) => ({
+    status: "matched" as const,
+    resolution: "transfer" as const,
+    transferId: id,
+    transferAccountId: accountId,
+    confidence: 100,
+  });
+  const other = existing
+    ? { id: existing.id, ...link(tx.id, from.id), ruleId: undefined }
+    : {
+        id: `${tx.id}~t`,
+        date: tx.date,
+        amount,
+        description: mirrorDescription(amount, from, to),
+        type: amount < 0 ? ("debit" as const) : ("credit" as const),
+        bankAccountId: to.id,
+        origin: "transfer" as const,
+        ...link(tx.id, from.id),
+      };
+  return {
+    origin: { ...link(other.id, to.id), ignoreReason: undefined },
+    other,
+  };
+}
+
+/**
+ * Aplicação: com tudo tratado, o que o saldo bruto do banco tem a mais que o
+ * sistema é o rendimento do período. Entra como receita ao fechar; conferir o
+ * saldo todo dia só mostra quanto já rendeu.
+ */
+export function yieldToRecognize(
+  account: BankAccount,
+  s: ReturnType<typeof summarizeAccount>,
+) {
+  return isInvestment(account) &&
+    s.pending === 0 &&
+    s.hasMovement &&
+    (s.projectedDifference ?? 0) > 0
+    ? s.projectedDifference!
+    : 0;
+}
+
+/** Linha do rendimento reconhecido, no dia do saldo informado. */
+export const yieldLine = (
+  account: BankAccount,
+  amount: number,
+  date: Date,
+): BankTransaction => ({
+  id: `${account.id}~yield~${day(date)}`,
+  date,
+  amount,
+  description: `Rendimento até ${format(date, "dd/MM/yyyy")}`,
+  type: "credit",
+  bankAccountId: account.id,
+  status: "unmatched",
+  origin: "yield",
+});
 
 // ─── Regras ───────────────────────────────────────────────────────────────────
 

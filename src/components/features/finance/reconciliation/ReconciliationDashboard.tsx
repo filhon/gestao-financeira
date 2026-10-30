@@ -12,7 +12,9 @@ import {
   RowState,
   SystemCell,
   ActionHandler,
+  AccountNameFn,
   IGNORE_REASONS,
+  TransferTarget,
 } from "@/components/features/finance/reconciliation/ReconciliationTable";
 import {
   QuickLaunchSheet,
@@ -93,15 +95,20 @@ import {
   type DayGroup,
   isBalanceLine,
   isBeforeBase,
+  isInvestment,
   isLocked,
   lastClosing,
   lineTransaction,
   rulePattern,
   summarizeAccount,
+  transferPair,
+  yieldLine,
+  reconciliationAccountKey,
+  yieldToRecognize,
 } from "@/lib/bankReconciliation";
+import { useCostCenters } from "@/hooks/useCostCenters";
 
-const ACCOUNT_KEY = (companyId: string) =>
-  `reconciliation-account-${companyId}`;
+const ACCOUNT_KEY = reconciliationAccountKey;
 
 // Sugestão é pendente com palpite: fica em Pendentes, marcada pelo badge.
 type Tab = "all" | "pending" | "matched" | "ignored";
@@ -121,6 +128,8 @@ function MobileBankTxCard({
   canLaunch,
   canRule,
   rule,
+  accountName,
+  transferTargets,
   onAction,
 }: {
   tx: BankTransaction;
@@ -129,6 +138,8 @@ function MobileBankTxCard({
   canLaunch: boolean;
   canRule: boolean;
   rule?: ReconciliationRule;
+  accountName: AccountNameFn;
+  transferTargets: TransferTarget[];
   onAction: ActionHandler;
 }) {
   return (
@@ -160,6 +171,7 @@ function MobileBankTxCard({
         <SystemCell
           tx={tx}
           rule={rule}
+          accountName={accountName}
           editable={state === "editable"}
           onAction={onAction}
         />
@@ -172,6 +184,7 @@ function MobileBankTxCard({
           canSettle={canSettle}
           canLaunch={canLaunch}
           canRule={canRule}
+          transferTargets={transferTargets}
           onAction={onAction}
         />
       </div>
@@ -273,11 +286,14 @@ export function ReconciliationDashboard() {
       new Map(activeAccounts.map((a) => [a.id, summarizeAccount(a, allItems)])),
     [activeAccounts, allItems],
   );
-  // Mais atrasada primeiro: a que nunca fechou, depois a de fechamento mais antigo.
+  // Contas correntes antes das aplicações (a faixa agrupa assim); em cada
+  // grupo, a mais atrasada primeiro: a que nunca fechou, depois a de
+  // fechamento mais antigo.
   const orderedAccounts = useMemo(
     () =>
       [...activeAccounts].sort(
         (a, b) =>
+          Number(isInvestment(a)) - Number(isInvestment(b)) ||
           (lastClosing(a)?.through.getTime() ?? -Infinity) -
             (lastClosing(b)?.through.getTime() ?? -Infinity) ||
           a.name.localeCompare(b.name),
@@ -286,6 +302,26 @@ export function ReconciliationDashboard() {
   );
   const account =
     activeAccounts.find((a) => a.id === pickedAccountId) ?? orderedAccounts[0];
+  const investment = isInvestment(account);
+  const accountName: AccountNameFn = (id) =>
+    accounts.find((a) => a.id === id)?.name;
+  // Para onde a linha pode ir: as vinculadas a esta conta primeiro.
+  const transferTargets: TransferTarget[] = account
+    ? orderedAccounts
+        .filter((a) => a.id !== account.id)
+        .sort(
+          (a, b) =>
+            Number(
+              b.linkedAccountId === account.id ||
+                account.linkedAccountId === b.id,
+            ) -
+            Number(
+              a.linkedAccountId === account.id ||
+                account.linkedAccountId === a.id,
+            ),
+        )
+        .map((a) => ({ id: a.id, name: a.name }))
+    : [];
   const selectAccount = (id: string) => {
     setPickedAccountId(id);
     try {
@@ -371,6 +407,11 @@ export function ReconciliationDashboard() {
   const ruleFor = (tx: BankTransaction) =>
     rules.find((r) => r.id === tx.ruleId);
 
+  // Rendimento de aplicação é receita: entra no centro de custo raiz.
+  const { costCenters } = useCostCenters(
+    canViewReconciliation ? companyId : undefined,
+  );
+
   // Plano de contas: obrigatório a partir do exercício configurado.
   const { accounts: chartAccounts, requiredFrom } =
     useChartOfAccounts(companyId);
@@ -394,7 +435,10 @@ export function ReconciliationDashboard() {
       return false;
     if (!tx.ruleId) return true;
     const rule = ruleFor(tx);
-    return !!rule && (rule.action === "ignore" || canLaunchFor(tx));
+    if (!rule) return false;
+    if (rule.action === "transfer")
+      return activeAccounts.some((a) => a.id === rule.transferAccountId);
+    return rule.action === "ignore" || canLaunchFor(tx);
   };
   /** Qualquer linha a tratar entra no lote: confirmar as sugestões, ignorar o resto. */
   const selectableFor = (tx: BankTransaction) =>
@@ -585,11 +629,44 @@ export function ReconciliationDashboard() {
     });
   };
 
+  /**
+   * Transferência entre contas da empresa: as duas pontas numa gravação só.
+   * A outra ponta casa com a linha do extrato dela, se houver, ou nasce.
+   */
+  const transferLine = async (
+    tx: BankTransaction,
+    targetId: string,
+    ruleId?: string,
+  ) => {
+    const from = accounts.find((a) => a.id === tx.bankAccountId);
+    const to = activeAccounts.find((a) => a.id === targetId);
+    if (!from || !to) throw new Error("A outra conta não está ativa.");
+    if (from.id === to.id) throw new Error("A linha já é desta conta.");
+    const toClosing = lastClosing(to);
+    if (toClosing && isLocked(tx, to)) {
+      throw new Error(
+        `${to.name} está fechada até ${format(toClosing.through, "dd/MM/yyyy")}. Reabra o período para transferir nesse dia.`,
+      );
+    }
+    const { origin, other } = transferPair(tx, from, to, allItems);
+    await reconciliationSessionService.commitItems(companyId!, [
+      { id: tx.id, ...origin, ruleId },
+      other,
+    ]);
+    return to;
+  };
+
   /** Confirma uma sugestão — de título (`candidateId` escolhe outro) ou de regra. */
   const confirmLine = async (tx: BankTransaction, candidateId?: string) => {
     if (tx.ruleId && !candidateId) {
       const rule = ruleFor(tx);
       if (!rule) throw new Error("A regra desta sugestão foi excluída.");
+      if (rule.action === "transfer") {
+        if (!rule.transferAccountId)
+          throw new Error("A regra não diz para qual conta transferir.");
+        await transferLine(tx, rule.transferAccountId, rule.id);
+        return;
+      }
       if (rule.action === "ignore" || !rule.template) {
         await updateStatusAndSync(tx.id, "ignored");
       } else {
@@ -772,6 +849,28 @@ export function ReconciliationDashboard() {
     }
   };
 
+  /** Cria a regra que sugere a mesma transferência para as próximas linhas iguais. */
+  const transferAlways = async (tx: BankTransaction, toId: string) => {
+    const pattern = rulePattern(tx.description);
+    try {
+      const { hits } = await createRuleAndApply(
+        {
+          pattern,
+          direction: tx.amount < 0 ? "debit" : "credit",
+          action: "transfer",
+          transferAccountId: toId,
+        },
+        tx.id,
+      );
+      toast.success(`Regra criada: transferir “${pattern}”`, {
+        description: hitsNote(hits),
+      });
+    } catch (error) {
+      console.error(error);
+      toast.error(friendlyError(error, "Erro ao criar a regra"));
+    }
+  };
+
   const handleQuickLaunch = async (
     template: LaunchTemplate,
     pattern: string | null,
@@ -868,6 +967,42 @@ export function ReconciliationDashboard() {
           : [];
     const resolution = tx.status === "matched" ? tx.resolution : undefined;
 
+    // Transferência: as duas pontas voltam juntas. A criada pelo sistema some;
+    // a que veio do extrato volta para pendente.
+    if (resolution === "transfer") {
+      const other = allItems.find((t) => t.id === tx.transferId);
+      const otherAccount = accounts.find((a) => a.id === other?.bankAccountId);
+      if (other && isLocked(other, otherAccount)) {
+        toast.error(
+          `A outra ponta está no período fechado de ${otherAccount?.name}. Reabra o período antes.`,
+        );
+        return;
+      }
+      const sides = other ? [tx, other] : [tx];
+      try {
+        await reconciliationSessionService.commitItems(
+          companyId,
+          sides
+            .filter((s) => s.origin !== "transfer")
+            .map((s) => ({
+              id: s.id,
+              status: "unmatched" as const,
+              resolution: undefined,
+              transferId: undefined,
+              transferAccountId: undefined,
+              confidence: undefined,
+              ruleId: undefined,
+            })),
+          sides.filter((s) => s.origin === "transfer").map((s) => s.id),
+        );
+        toast.success("Transferência desfeita");
+      } catch (error) {
+        console.error(error);
+        toast.error(friendlyError(error, "Erro ao desfazer a transferência"));
+      }
+      return;
+    }
+
     try {
       if (resolution === "launched" && tx.matchedTransactionId) {
         await transactionService.delete(
@@ -875,6 +1010,16 @@ export function ReconciliationDashboard() {
           actor,
           companyId,
         );
+        // Rendimento não veio do extrato: sem o lançamento, a linha não existe.
+        if (tx.origin === "yield") {
+          await reconciliationSessionService.commitItems(
+            companyId,
+            [],
+            [tx.id],
+          );
+          toast.success("Rendimento excluído");
+          return;
+        }
       } else {
         // Estorna antes de soltar: se o estorno falhar, nada mudou.
         if (
@@ -955,6 +1100,30 @@ export function ReconciliationDashboard() {
       }
     } else if (action === "ignoreAlways") {
       await ignoreAlways(tx);
+    } else if (action === "transfer" && arg) {
+      try {
+        const to = await transferLine(tx, arg);
+        const canRule =
+          canManageReconciliationRules &&
+          rulePattern(tx.description).length >= 3;
+        toast.success(
+          `Transferência ${tx.amount < 0 ? "para" : "de"} ${to.name}`,
+          {
+            description: canRule
+              ? "Quer a mesma sugestão nas próximas linhas iguais?"
+              : undefined,
+            action: canRule
+              ? {
+                  label: "Sempre sugerir",
+                  onClick: () => transferAlways(tx, to.id),
+                }
+              : undefined,
+          },
+        );
+      } catch (error) {
+        console.error(error);
+        toast.error(friendlyError(error, "Erro ao transferir"));
+      }
     } else if (action === "create") {
       setLaunchingTx(tx);
     } else if (action === "settle") {
@@ -1191,14 +1360,51 @@ export function ReconciliationDashboard() {
     }
   };
 
-  const handleClosePeriod = async () => {
-    if (!account || !summary?.canClose || !summary.statementDate || !actor)
-      return;
+  /**
+   * Aplicação: a diferença para o saldo bruto vira receita de rendimento,
+   * lançada e conciliada numa linha própria no dia do saldo, e a prova zera.
+   */
+  const recognizeYield = async (amount: number, date: Date) => {
+    if (!account || !companyId) return;
+    const root = costCenters.find(
+      (cc) => !cc.parentId || cc.parentId === "none",
+    );
+    if (!root)
+      throw new Error("Cadastre o centro de custo raiz para lançar receitas.");
+    const line = yieldLine(account, amount, date);
+    if (missingAccount(line, account.yieldAccountId)) {
+      throw new Error(
+        `Receitas de ${date.getFullYear()} precisam de conta contábil. Escolha a conta do rendimento no cadastro de ${account.name}.`,
+      );
+    }
+    await reconciliationSessionService.commitItems(companyId, [line]);
     try {
+      await launchAndReconcile(line, {
+        description: `Rendimento ${account.name} até ${format(date, "dd/MM/yyyy")}`,
+        supplierOrClient: account.bankName || account.name,
+        costCenterId: root.id,
+        accountId: account.yieldAccountId,
+      });
+    } catch (error) {
+      // Sem o lançamento a linha só travaria o fechamento como pendente.
+      await reconciliationSessionService
+        .commitItems(companyId, [], [line.id])
+        .catch(() => {});
+      throw error;
+    }
+  };
+
+  const handleClosePeriod = async () => {
+    if (!account || !summary?.statementDate || !actor) return;
+    const amount = yieldToRecognize(account, summary);
+    if (!amount && !summary.canClose) return;
+    try {
+      if (amount > 0) await recognizeYield(amount, summary.statementDate);
       await bankAccountService.close(
         account,
         summary.statementDate,
-        summary.bookBalance,
+        // Com o rendimento lançado, o sistema chega ao saldo do banco.
+        amount > 0 ? summary.statementBalance! : summary.bookBalance,
         actor,
       );
       await refreshAccounts();
@@ -1349,35 +1555,38 @@ export function ReconciliationDashboard() {
       </h1>
       {account && (
         <div className="flex flex-wrap items-center gap-2">
-          {canManageReconciliation && transactions.length > 0 && (
-            <>
-              <UploadStatement
-                account={account}
-                accounts={accounts}
-                onAccountDetected={selectAccount}
-                variant="button"
-                primary={periodDone}
-              />
-              {/* Secundário: o primário da tela é fechar o período. */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9"
-                onClick={triggerAutoMatch}
-                disabled={isMatching}
-                aria-label="Buscar correspondências"
-              >
-                {isMatching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-                <span className="hidden sm:inline">
-                  Buscar correspondências
-                </span>
-              </Button>
-            </>
-          )}
+          {/* Aplicação não tem extrato nem título: o movimento vem da conta corrente. */}
+          {canManageReconciliation &&
+            transactions.length > 0 &&
+            !investment && (
+              <>
+                <UploadStatement
+                  account={account}
+                  accounts={accounts}
+                  onAccountDetected={selectAccount}
+                  variant="button"
+                  primary={periodDone}
+                />
+                {/* Secundário: o primário da tela é fechar o período. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={triggerAutoMatch}
+                  disabled={isMatching}
+                  aria-label="Buscar correspondências"
+                >
+                  {isMatching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  <span className="hidden sm:inline">
+                    Buscar correspondências
+                  </span>
+                </Button>
+              </>
+            )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -1401,18 +1610,20 @@ export function ReconciliationDashboard() {
                   Reabrir período até {format(closing.through, "dd/MM/yyyy")}
                 </DropdownMenuItem>
               )}
-              {canManageReconciliation && transactions.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() => setClearConfirmOpen(true)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Limpar extrato desta conta
-                  </DropdownMenuItem>
-                </>
-              )}
+              {canManageReconciliation &&
+                transactions.length > 0 &&
+                !investment && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => setClearConfirmOpen(true)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Limpar extrato desta conta
+                    </DropdownMenuItem>
+                  </>
+                )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1479,6 +1690,12 @@ export function ReconciliationDashboard() {
     );
   }
 
+  const pendingYield = summary ? yieldToRecognize(account, summary) : 0;
+  const yieldChart = chartAccounts.find((a) => a.id === account.yieldAccountId);
+  const yieldAccountName = yieldChart
+    ? `${yieldChart.code} · ${yieldChart.name}`
+    : undefined;
+
   const legacyBanner = canManageReconciliation && legacyItems.length > 0 && (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900 dark:bg-amber-950/30">
       <p className="flex-1 min-w-[16rem] text-amber-900 dark:text-amber-200">
@@ -1510,6 +1727,8 @@ export function ReconciliationDashboard() {
           account={account}
           summary={summary}
           canManage={canManageReconciliation}
+          yieldAmount={pendingYield}
+          canRecognizeYield={canCreateReceivables}
           onSetStatementBalance={handleStatementBalance}
           onClose={() => setCloseConfirmOpen(true)}
           onShowPending={() => setTab("pending")}
@@ -1517,7 +1736,16 @@ export function ReconciliationDashboard() {
       )}
 
       {transactions.length === 0 ? (
-        canManageReconciliation ? (
+        investment ? (
+          <div className="rounded-lg border px-6 py-10 text-center">
+            <p className="font-medium">Nenhuma aplicação ou resgate ainda</p>
+            <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">
+              O movimento chega pela conta corrente: na linha do extrato, abra o
+              menu de ações e escolha &ldquo;Para {account.name}&rdquo;. O
+              rendimento aparece ao informar o saldo bruto acima.
+            </p>
+          </div>
+        ) : canManageReconciliation ? (
           <UploadStatement
             account={account}
             accounts={accounts}
@@ -1753,6 +1981,8 @@ export function ReconciliationDashboard() {
                 canLaunch={canLaunchFor}
                 canRule={canManageReconciliationRules}
                 ruleFor={ruleFor}
+                accountName={accountName}
+                transferTargets={transferTargets}
                 isSelectable={selectableFor}
                 selected={selected}
                 onSelectedChange={
@@ -1812,6 +2042,8 @@ export function ReconciliationDashboard() {
                       canLaunch={canLaunchFor(tx)}
                       canRule={canManageReconciliationRules}
                       rule={ruleFor(tx)}
+                      accountName={accountName}
+                      transferTargets={transferTargets}
                       onAction={handleAction}
                     />
                   ))}
@@ -1835,9 +2067,13 @@ export function ReconciliationDashboard() {
       <ConfirmDialog
         open={closeConfirmOpen}
         onOpenChange={setCloseConfirmOpen}
-        title={`Fechar ${account.name} até ${summary?.statementDate ? format(summary.statementDate, "dd/MM/yyyy") : ""}?`}
-        description={`O saldo conciliado de ${formatCurrency(summary?.bookBalance ?? 0)} vira o saldo inicial do próximo período. As linhas até essa data ficam somente leitura; só o gestor financeiro pode reabrir.`}
-        confirmText="Fechar período"
+        title={`${pendingYield > 0 ? "Lançar rendimento e fechar" : "Fechar"} ${account.name} até ${summary?.statementDate ? format(summary.statementDate, "dd/MM/yyyy") : ""}?`}
+        description={
+          pendingYield > 0
+            ? `${formatCurrency(pendingYield)} entram como receita de rendimento${yieldAccountName ? ` em ${yieldAccountName}` : ""}, e o saldo bruto de ${formatCurrency(summary?.statementBalance ?? 0)} vira o saldo inicial do próximo período. Para desfazer, reabra o período e desfaça a linha do rendimento.`
+            : `O saldo conciliado de ${formatCurrency(summary?.bookBalance ?? 0)} vira o saldo inicial do próximo período. As linhas até essa data ficam somente leitura; só o gestor financeiro pode reabrir.`
+        }
+        confirmText={pendingYield > 0 ? "Lançar e fechar" : "Fechar período"}
         onConfirm={handleClosePeriod}
       />
 
@@ -1906,9 +2142,11 @@ export function ReconciliationDashboard() {
             : "Desfazer e estornar a baixa?"
         }
         description={
-          undoTx?.resolution === "launched"
-            ? `“${undoTx.matchedDetails?.description ?? "O lançamento"}” foi criado a partir desta linha e será excluído. A linha volta para pendente.`
-            : `A baixa de “${undoTx?.matchedDetails?.description ?? "o título"}” é estornada e ele volta a ficar em aberto. A linha volta para pendente.`
+          undoTx?.origin === "yield"
+            ? `“${undoTx.matchedDetails?.description ?? "O rendimento"}” é excluído das receitas e a diferença volta a aparecer como rendimento a reconhecer.`
+            : undoTx?.resolution === "launched"
+              ? `“${undoTx.matchedDetails?.description ?? "O lançamento"}” foi criado a partir desta linha e será excluído. A linha volta para pendente.`
+              : `A baixa de “${undoTx?.matchedDetails?.description ?? "o título"}” é estornada e ele volta a ficar em aberto. A linha volta para pendente.`
         }
         confirmText={
           undoTx?.resolution === "launched"

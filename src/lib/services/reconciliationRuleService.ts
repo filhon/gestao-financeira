@@ -21,7 +21,7 @@ type Actor = { uid: string; email: string };
 
 export type ReconciliationRuleDraft = Pick<
   ReconciliationRule,
-  "pattern" | "direction" | "action" | "template"
+  "pattern" | "direction" | "action" | "template" | "transferAccountId"
 >;
 
 export const reconciliationRuleService = {

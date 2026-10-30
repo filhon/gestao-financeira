@@ -29,6 +29,11 @@ export type BankAccountDraft = Pick<
   | "openingBalance"
   | "openingBalanceDate"
   | "active"
+  | "kind"
+  | "product"
+  | "liquidity"
+  | "linkedAccountId"
+  | "yieldAccountId"
 >;
 
 const toDate = (v: unknown) =>

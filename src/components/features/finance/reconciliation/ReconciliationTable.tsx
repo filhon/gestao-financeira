@@ -35,6 +35,7 @@ import {
   MoreHorizontal,
   ChevronRight,
   AlertTriangle,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
@@ -46,9 +47,16 @@ export type ReconciliationAction =
   | "settle"
   | "ignore"
   | "ignoreAlways"
+  | "transfer"
   | "unreconcile";
 
-/** `arg`: o candidato escolhido em "confirm", o motivo em "ignore". */
+/** Contas para onde a linha pode ser transferida; a vinculada vem primeiro. */
+export type TransferTarget = { id: string; name: string };
+
+/** Nome de uma conta bancária pelo id, para transferências e regras. */
+export type AccountNameFn = (id?: string) => string | undefined;
+
+/** `arg`: o candidato em "confirm", o motivo em "ignore", a conta em "transfer". */
 export type ActionHandler = (
   id: string,
   action: ReconciliationAction,
@@ -73,7 +81,13 @@ const signed = (amount: number) =>
 const dmy = (d: Date) => format(new Date(d), "dd/MM/yyyy");
 
 /** Como a regra resolve a linha, para a coluna "No sistema" e o card mobile. */
-export function RuleNote({ rule }: { rule?: ReconciliationRule }) {
+export function RuleNote({
+  rule,
+  accountName,
+}: {
+  rule?: ReconciliationRule;
+  accountName?: AccountNameFn;
+}) {
   return (
     <div className="flex min-w-0 items-start gap-1.5 text-sm">
       <ListChecks className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -81,9 +95,11 @@ export function RuleNote({ rule }: { rule?: ReconciliationRule }) {
         <span className="block truncate font-medium">
           {!rule
             ? "Regra excluída"
-            : rule.action === "ignore" || !rule.template
-              ? "Ignorar"
-              : `Lançar “${rule.template.description}”`}
+            : rule.action === "transfer"
+              ? `Transferir ${rule.direction === "debit" ? "para" : "de"} ${accountName?.(rule.transferAccountId) ?? "conta inativa"}`
+              : rule.action === "ignore" || !rule.template
+                ? "Ignorar"
+                : `Lançar “${rule.template.description}”`}
         </span>
         {rule && (
           <span className="block truncate text-xs text-muted-foreground">
@@ -173,20 +189,41 @@ const RESOLUTION_NOTE: Record<
 > = {
   launched: "Lançado a partir desta linha",
   settled: "Título baixado por esta linha",
+  transfer: "Transferência entre contas",
 };
 
 /** Coluna "No sistema": o que a linha casou, sugeriu ou por que foi ignorada. */
 export function SystemCell({
   tx,
   rule,
+  accountName,
   editable,
   onAction,
 }: {
   tx: BankTransaction;
   rule?: ReconciliationRule;
+  accountName?: AccountNameFn;
   editable: boolean;
   onAction: ActionHandler;
 }) {
+  if (tx.status === "matched" && tx.resolution === "transfer") {
+    return (
+      <div className="flex min-w-0 items-start gap-1.5 text-sm">
+        <ArrowLeftRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <span className="block truncate font-medium">
+            {tx.amount < 0 ? "Para" : "De"}{" "}
+            {accountName?.(tx.transferAccountId) ?? "conta inativa"}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {tx.origin === "transfer"
+              ? "Criada pela transferência"
+              : "Transferência entre contas"}
+          </span>
+        </div>
+      </div>
+    );
+  }
   if (tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0) {
     return (
       <div className="flex min-w-0 flex-col gap-0.5">
@@ -216,7 +253,7 @@ export function SystemCell({
         : tx.resolution && RESOLUTION_NOTE[tx.resolution];
     return <SystemLine t={tx.matchedDetails} note={note} />;
   }
-  if (tx.ruleId) return <RuleNote rule={rule} />;
+  if (tx.ruleId) return <RuleNote rule={rule} accountName={accountName} />;
   if (tx.status === "ignored") {
     return (
       <span className="text-sm text-muted-foreground">
@@ -278,6 +315,7 @@ export function RowActions({
   canSettle,
   canLaunch,
   canRule,
+  transferTargets = [],
   onAction,
   menuOpen,
   onMenuOpenChange,
@@ -287,6 +325,7 @@ export function RowActions({
   canSettle: boolean;
   canLaunch: boolean;
   canRule: boolean;
+  transferTargets?: TransferTarget[];
   onAction: ActionHandler;
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
@@ -377,6 +416,25 @@ export function RowActions({
                 <Plus className="h-4 w-4" />
                 Lançar direto, já pago
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          {transferTargets.length > 0 && (
+            <>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Transferência entre contas
+              </DropdownMenuLabel>
+              {transferTargets.map((a) => (
+                <DropdownMenuItem
+                  key={a.id}
+                  onSelect={() => onAction(tx.id, "transfer", a.id)}
+                >
+                  <ArrowLeftRight className="h-4 w-4" />
+                  <span className="truncate">
+                    {tx.amount < 0 ? "Para" : "De"} {a.name}
+                  </span>
+                </DropdownMenuItem>
+              ))}
               <DropdownMenuSeparator />
             </>
           )}
@@ -556,6 +614,8 @@ interface ReconciliationTableProps {
   canLaunch: (tx: BankTransaction) => boolean;
   canRule: boolean;
   ruleFor: (tx: BankTransaction) => ReconciliationRule | undefined;
+  accountName: AccountNameFn;
+  transferTargets: TransferTarget[];
   isSelectable: (tx: BankTransaction) => boolean;
   selected: Set<string>;
   onSelectedChange?: (ids: Set<string>) => void;
@@ -580,6 +640,8 @@ export function ReconciliationTable({
   canLaunch,
   canRule,
   ruleFor,
+  accountName,
+  transferTargets,
   isSelectable,
   selected,
   onSelectedChange,
@@ -743,6 +805,7 @@ export function ReconciliationTable({
           <SystemCell
             tx={tx}
             rule={ruleFor(tx)}
+            accountName={accountName}
             editable={editable}
             onAction={onAction}
           />
@@ -758,6 +821,7 @@ export function ReconciliationTable({
               canSettle={canSettle(tx)}
               canLaunch={canLaunch(tx)}
               canRule={canRule}
+              transferTargets={transferTargets}
               onAction={onAction}
               menuOpen={menuOpenId === tx.id}
               onMenuOpenChange={(o) => onMenuOpenChange(o ? tx.id : null)}

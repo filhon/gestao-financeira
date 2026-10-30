@@ -14,6 +14,9 @@ import {
   pickStatementBalance,
   rulePattern,
   summarizeAccount,
+  transferPair,
+  yieldLine,
+  yieldToRecognize,
 } from "../src/lib/bankReconciliation";
 import type {
   BankAccount,
@@ -206,5 +209,79 @@ assert.deepEqual(
   groupByDay(closed, movement, []).map((g) => g.locked),
   [true, false],
 );
+
+// ── Aplicação: transferência e rendimento ─────────────────────────────────────
+const cdb: BankAccount = {
+  ...account,
+  id: "cdb",
+  name: "CDB Itaú",
+  kind: "investment",
+  openingBalance: 10000,
+  statementBalance: undefined,
+  statementBalanceDate: undefined,
+};
+const aplic = at(21, "APLIC CDB DI", -1000);
+
+// Sem a outra ponta no extrato: nasce o espelho, sinal invertido, id estável.
+const pair = transferPair(aplic, account, cdb, []);
+assert.equal(pair.other.id, `${aplic.id}~t`);
+assert.equal(pair.other.amount, 1000);
+assert.equal(pair.other.bankAccountId, "cdb");
+assert.equal(pair.other.description, "Aplicação de Itaú");
+assert.equal(pair.other.origin, "transfer");
+assert.equal(pair.origin.transferId, pair.other.id);
+assert.equal(pair.origin.transferAccountId, "cdb");
+assert.equal(pair.origin.status, "matched");
+assert.equal(
+  transferPair(at(22, "RESG CDB DI", 500), account, cdb, []).other.description,
+  "Resgate para Itaú",
+);
+
+// Com a outra ponta pendente no extrato da outra conta (até 3 dias): casa.
+const other = { ...at(22, "TED RECEBIDA", 1000), bankAccountId: "cdb" };
+const paired = transferPair(aplic, account, cdb, [
+  { ...other, amount: 999 },
+  other,
+]);
+assert.equal(paired.other.id, other.id);
+assert.equal(paired.other.origin, undefined);
+assert.equal(
+  transferPair(aplic, account, cdb, [{ ...other, date: new Date(2026, 9, 26) }])
+    .other.id,
+  `${aplic.id}~t`,
+);
+
+// Saldo bruto acima do sistema, tudo tratado: a diferença é o rendimento.
+const mirror = { ...(pair.other as BankTransaction) };
+const cdbAt = (balance: number) => ({
+  ...cdb,
+  statementBalance: balance,
+  statementBalanceDate: new Date(2026, 9, 31),
+});
+const cdbSummary = summarizeAccount(cdbAt(11012.34), [mirror]);
+assert.equal(cdbSummary.bookBalance, 11000);
+assert.equal(yieldToRecognize(cdbAt(11012.34), cdbSummary), 12.34);
+// Abaixo do sistema não é rendimento: falta registrar algo.
+assert.equal(
+  yieldToRecognize(cdbAt(10990), summarizeAccount(cdbAt(10990), [mirror])),
+  0,
+);
+// Conta corrente nunca tem rendimento a reconhecer.
+assert.equal(
+  yieldToRecognize(
+    { ...cdbAt(11012.34), kind: undefined },
+    summarizeAccount(cdbAt(11012.34), [mirror]),
+  ),
+  0,
+);
+// Lançado o rendimento, a prova zera e fecha.
+const y = {
+  ...yieldLine(cdb, 12.34, new Date(2026, 9, 31)),
+  status: "matched" as const,
+};
+assert.ok(!isBalanceLine(y));
+const afterYield = summarizeAccount(cdbAt(11012.34), [mirror, y]);
+assert.equal(afterYield.difference, 0);
+assert.ok(afterYield.canClose);
 
 console.log("check:reconciliation-rules ok");

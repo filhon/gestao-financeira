@@ -11,6 +11,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCostCenters } from "@/hooks/useCostCenters";
+import { useBankAccounts } from "@/hooks/useBankAccounts";
 import { ReconciliationRule } from "@/lib/types";
 
 interface RulesSheetProps {
@@ -42,6 +43,9 @@ export function RulesSheet({
   const { costCenters } = useCostCenters(open ? companyId : undefined);
   const ccName = (id: string) =>
     costCenters.find((cc) => cc.id === id)?.name ?? "centro removido";
+  const { accounts: bankAccounts } = useBankAccounts(
+    open ? companyId : undefined,
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -79,9 +83,11 @@ export function RulesSheet({
                       &ldquo;{rule.pattern}&rdquo;
                     </p>
                     <p className="truncate text-muted-foreground">
-                      {rule.action === "ignore" || !rule.template
-                        ? "Ignorar"
-                        : `Lançar “${rule.template.description}” · ${ccName(rule.template.costCenterId)}`}
+                      {rule.action === "transfer"
+                        ? `Transferir ${rule.direction === "debit" ? "para" : "de"} ${bankAccounts.find((a) => a.id === rule.transferAccountId)?.name ?? "conta inativa"}`
+                        : rule.action === "ignore" || !rule.template
+                          ? "Ignorar"
+                          : `Lançar “${rule.template.description}” · ${ccName(rule.template.costCenterId)}`}
                     </p>
                   </div>
                   {canManage && (

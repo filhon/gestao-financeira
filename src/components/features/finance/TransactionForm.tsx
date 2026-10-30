@@ -105,6 +105,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCostCenterBalances, useCostCenters } from "@/hooks/useCostCenters";
 import { useDocumentExtraction } from "@/hooks/useDocumentExtraction";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
+import { isInvestment } from "@/lib/bankReconciliation";
 import {
   accountRequiredFor,
   natureFitsSide,
@@ -661,8 +662,9 @@ export function TransactionForm({
     canViewReconciliation ? selectedCompany?.id : undefined,
   );
   const watchedBankAccountId = form.watch("bankAccountId");
+  // Aplicação não paga nem recebe título: o dinheiro passa pela conta corrente.
   const activeBankAccounts = bankAccounts.filter(
-    (a) => a.active || a.id === watchedBankAccountId,
+    (a) => (a.active && !isInvestment(a)) || a.id === watchedBankAccountId,
   );
   const onlyBankAccountId =
     activeBankAccounts.length === 1 ? activeBankAccounts[0].id : undefined;

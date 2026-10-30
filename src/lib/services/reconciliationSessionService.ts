@@ -120,6 +120,24 @@ export const reconciliationSessionService = {
     });
   },
 
+  /**
+   * Grava e apaga linhas numa só operação: as duas pontas de uma
+   * transferência mudam juntas ou nenhuma muda.
+   */
+  async commitItems(
+    companyId: string,
+    updates: ({ id: string } & Partial<BankTransaction>)[],
+    deletes: string[] = [],
+  ): Promise<void> {
+    const colRef = this.getItemsCollection(companyId);
+    const batch = writeBatch(db);
+    for (const { id, ...data } of updates) {
+      batch.set(doc(colRef, id), withFieldDeletions(data), { merge: true });
+    }
+    for (const id of deletes) batch.delete(doc(colRef, id));
+    await batch.commit();
+  },
+
   /** Remove as linhas de uma conta; sem conta, as linhas legadas sem conta. */
   async clearSession(
     companyId: string,
