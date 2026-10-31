@@ -21,6 +21,7 @@ import { ptBR } from "date-fns/locale";
 import {
   DASHBOARD_QUERY_KEYS,
   useActionQueue,
+  useBankBalance,
   useCashReserve,
   useDashboardMetrics,
   useRelatedPartyIds,
@@ -106,6 +107,7 @@ export default function DashboardPage() {
   const projection = useProjectedCashFlow("30days");
   const relatedPartyIds = useRelatedPartyIds();
   const reserve = useCashReserve();
+  const bank = useBankBalance();
 
   const queryClient = useQueryClient();
   const isDashboardQuery = (key: unknown) =>
@@ -236,6 +238,7 @@ export default function DashboardPage() {
               metrics={metrics.data}
               projection={projection.data}
               projectionLoading={projection.isLoading}
+              bank={bank.data}
             />
           )
         )}

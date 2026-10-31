@@ -2063,12 +2063,15 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
               id="bulk-date"
               type="date"
               value={format(bulkDate, "yyyy-MM-dd")}
+              // Baixa futura entraria no saldo de hoje; a função também recusa.
+              max={format(new Date(), "yyyy-MM-dd")}
               onChange={(e) => {
                 const d = e.target.valueAsDate;
-                if (d)
-                  setBulkDate(
-                    new Date(d.getTime() + d.getTimezoneOffset() * 60000),
-                  );
+                if (!d) return;
+                const local = new Date(
+                  d.getTime() + d.getTimezoneOffset() * 60000,
+                );
+                if (local <= new Date()) setBulkDate(local);
               }}
             />
           </div>

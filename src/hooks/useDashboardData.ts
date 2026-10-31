@@ -126,6 +126,20 @@ export function useCashReserve() {
   });
 }
 
+/** Patrimônio no banco pela Conciliação, para conferir o saldo pelas baixas. */
+export function useBankBalance() {
+  const { selectedCompany } = useCompany();
+  const { canViewReconciliation } = usePermissions();
+  const companyId = selectedCompany?.id;
+
+  return useQuery({
+    queryKey: ["bank-balance", companyId],
+    queryFn: () => dashboardService.getBankBalance(companyId!),
+    enabled: !!companyId && canViewReconciliation,
+    staleTime: DASHBOARD_STALE_MS,
+  });
+}
+
 export function useBudgetProgress(year?: number) {
   const { selectedCompany } = useCompany();
 
@@ -190,4 +204,5 @@ export const DASHBOARD_QUERY_KEYS = [
   "budget-progress",
   "action-queue",
   "cash-reserve",
+  "bank-balance",
 ];

@@ -181,14 +181,23 @@ async function readCompanyBalance(companyId: string) {
  * null = sem conta corrente; a projeção volta a partir das baixas.
  */
 // ponytail: baixa sem conta conta só depois do extrato mais recente; com extratos de contas em dias diferentes, o que caiu entre eles pode faltar. Conta obrigatória na baixa resolve.
-async function readBankCash(companyId: string, today: Date) {
+async function readBankCash(
+  companyId: string,
+  today: Date,
+  /** Com as aplicações: o patrimônio no banco, que se compara às baixas. */
+  withInvestments = false,
+) {
   try {
     const accounts = (await bankAccountService.getAll(companyId)).filter(
       (a) => a.active,
     );
-    const checking = accounts.filter((a) => !isInvestment(a));
+    const checking = accounts.filter(
+      (a) => withInvestments || !isInvestment(a),
+    );
     if (checking.length === 0) return null;
-    const investments = new Set(accounts.filter(isInvestment).map((a) => a.id));
+    const investments = new Set(
+      accounts.filter((a) => !checking.includes(a)).map((a) => a.id),
+    );
     const bases = new Map(
       checking.map((a) => [
         a.id,
@@ -227,7 +236,11 @@ async function readBankCash(companyId: string, today: Date) {
           ? balance.add(amount)
           : balance.subtract(amount);
     });
-    return { balance: balance.value, asOf: oldest };
+    return {
+      balance: balance.value,
+      asOf: oldest,
+      investmentAccounts: accounts.filter(isInvestment).length,
+    };
   } catch (error) {
     // Sem leitura das contas (perfil ou claims velhas): fica nas baixas.
     console.error("Error reading bank cash:", error);
@@ -288,6 +301,13 @@ async function paidTotals(
 export const dashboardService = {
   /** Saldo em caixa hoje (company_stats); base do saldo inicial dos relatórios. */
   getCashBalance: readCompanyBalance,
+
+  /**
+   * Patrimônio no banco pela Conciliação (contas correntes e aplicações, do
+   * último extrato mais as baixas depois dele): a prova do saldo pelas baixas.
+   */
+  getBankBalance: (companyId: string) =>
+    readBankCash(companyId, new Date(), true),
 
   /**
    * O que espera ação hoje, com contagem e total reais (agregados no

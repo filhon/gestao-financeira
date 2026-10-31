@@ -679,6 +679,7 @@ export const createPayableTransaction = functions
       }
 
       const isPaid = tx.status === "paid";
+      assertNotFuturePayment(tx.status, tx.paymentDate);
       const costCenterIds = [...perCc.keys()];
 
       // Datas voltam a ser Timestamp: o resto do sistema lê `.toDate()`.
@@ -1002,6 +1003,7 @@ export const createPayableInstallments = functions
 
       transactions.forEach((raw, i) => {
         const tx = raw as TxShape;
+        assertNotFuturePayment(tx.status, tx.paymentDate);
         const dueDate = asDate(tx.dueDate);
         const paymentDate = asDate(tx.paymentDate);
         const ids = (tx.costCenterAllocation || [])
@@ -1213,6 +1215,25 @@ function assertNotHeld(current: TxShape, patch: Record<string, unknown>) {
   }
 }
 
+/** Dia no fuso de Brasília, "yyyy-mm-dd": compara datas sem a hora. */
+const brDay = (d: Date) =>
+  d.toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
+
+/**
+ * Baixa com data futura entraria no saldo de hoje antes de o dinheiro sair.
+ * Só vale quando a escrita traz a data de uma conta paga.
+ */
+function assertNotFuturePayment(status: unknown, paymentDate: unknown) {
+  const date = asDate(paymentDate);
+  if (!date || !PAY_STATUSES.includes(status as string)) return;
+  if (brDay(date) > brDay(new Date())) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "A data de pagamento não pode ser futura.",
+    );
+  }
+}
+
 async function commitValidatedPatch(
   companyId: string,
   txRef: admin.firestore.DocumentReference,
@@ -1221,6 +1242,8 @@ async function commitValidatedPatch(
   opts: { enforce: boolean },
 ): Promise<PatchOutcome> {
   assertNotHeld(current, patch);
+  if ("paymentDate" in patch)
+    assertNotFuturePayment(patch.status ?? current.status, patch.paymentDate);
 
   const { byId, parentIdOf, rootId, hasChildren, archived } =
     await loadCcIndex(companyId);

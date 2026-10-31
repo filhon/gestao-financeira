@@ -917,17 +917,46 @@ export const paymentBatchService = {
     batchId: string,
     actor: BatchActor,
   ): Promise<{ count: number; total: number }> => {
-    assertStatus(await loadBatch(batchId), ["authorized"]);
+    const batch = await loadBatch(batchId);
+    assertStatus(batch, ["authorized"]);
 
     const tSnap = await batchTransactions(batchId);
+    // Data de pagamento: o banco paga no vencimento agendado, nunca antes de o
+    // lote ser liberado (autorização) nem depois de hoje. Já pagas uma a uma
+    // ficam com a própria data.
+    const today = startOfDay(new Date());
+    const released = startOfDay(
+      (batch.authorizedAt as Timestamp | undefined)?.toDate() ?? today,
+    );
+    const byDay = new Map<number, string[]>();
+    for (const tDoc of tSnap.docs) {
+      const t = tDoc.data();
+      if (t.status === "paid") continue;
+      const due = startOfDay((t.dueDate as Timestamp)?.toDate() ?? today);
+      const day = Math.min(
+        Math.max(due.getTime(), released.getTime()),
+        today.getTime(),
+      );
+      byDay.set(day, [...(byDay.get(day) ?? []), tDoc.id]);
+    }
+    // A baixa passa pela função: as rules não deixam o cliente gravar
+    // `paymentDate`, e sem ela o lote ficava pago sem data.
+    const { transactionService } = await import(
+      "@/lib/services/transactionService"
+    );
+    for (const [day, ids] of byDay) {
+      await transactionService.updateBatch(
+        ids,
+        { status: "paid", paymentDate: new Date(day) },
+        actor,
+        batch.companyId,
+        { enforce: false },
+      );
+    }
     await commitInChunks(
       tSnap.docs.map((tDoc) => [
         tDoc.ref,
-        {
-          status: "paid",
-          releasedBy: actor.uid,
-          releasedAt: serverTimestamp(),
-        },
+        { releasedBy: actor.uid, releasedAt: serverTimestamp() },
       ]),
     );
 

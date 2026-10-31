@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { parseISO, format } from "date-fns";
+import currency from "currency.js";
 import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import {
   DashboardMetrics,
@@ -14,6 +15,8 @@ interface KPICardsProps {
   /** Projeção de 30 dias: a mesma série do gráfico de fluxo de caixa. */
   projection?: ProjectedCashFlowResult | null;
   projectionLoading: boolean;
+  /** Patrimônio no banco pela Conciliação; ausente para quem não a vê. */
+  bank?: { balance: number; asOf: Date; investmentAccounts: number } | null;
 }
 
 function Money({ value }: { value: number }) {
@@ -88,6 +91,7 @@ export function KPICards({
   metrics,
   projection,
   projectionLoading,
+  bank,
 }: KPICardsProps) {
   const { year } = metrics;
   const points = projection?.data ?? [];
@@ -101,6 +105,10 @@ export function KPICards({
   // Sem baixas de outros anos, o saldo pelas baixas é o próprio resultado do
   // exercício.
   const cashIsResult = Math.abs(metrics.cashBalance - metrics.result) < 0.005;
+  // Baixa sem dinheiro saindo (ou dinheiro sem baixa) aparece aqui.
+  const bankGap = bank
+    ? currency(metrics.cashBalance).subtract(bank.balance).value
+    : 0;
 
   return (
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-4">
@@ -126,6 +134,18 @@ export function KPICards({
         ) : (
           <p>
             Resultado de {year}: {formatCurrencyAbbr(metrics.result)}
+          </p>
+        )}
+        {bank && (
+          <p
+            className={
+              bankGap ? "text-amber-700 dark:text-amber-400" : undefined
+            }
+          >
+            No banco em {format(bank.asOf, "dd/MM")}:{" "}
+            {formatCurrencyAbbr(bank.balance)}
+            {bankGap ? ` · diferença ${formatCurrency(bankGap)}` : " · confere"}
+            {bank.investmentAccounts === 0 && " · sem aplicações cadastradas"}
           </p>
         )}
       </Kpi>

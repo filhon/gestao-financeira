@@ -20,12 +20,7 @@ export {
   setCostCenterEnvelopes,
   decideBudgetRequest,
 } from "./costCenterLedger";
-import {
-  assertCanManageBudget,
-  formatBRL,
-  toCents,
-  toReais,
-} from "./costCenterLedger";
+import { formatBRL, toCents, toReais } from "./costCenterLedger";
 export {
   syncCostCenterLedger,
   createPayableTransaction,
@@ -65,84 +60,11 @@ export const onBudgetRequestCreated = functions.firestore
     );
   });
 
-/**
- * Trigger que atualiza o saldo da empresa (company_stats)
- * sempre que uma transação é criada, atualizada ou deletada.
- */
-export const onTransactionWrite = functions.firestore
-  .document("transactions/{transactionId}")
-  .onWrite(async (change, context) => {
-    const newData = change.after.exists ? change.after.data() : null;
-    const oldData = change.before.exists ? change.before.data() : null;
-
-    const companyId = newData?.companyId || oldData?.companyId;
-    if (!companyId) {
-      console.log("No companyId found");
-      return null;
-    }
-
-    const statsRef = db.collection("company_stats").doc(companyId);
-
-    // Helper para calcular o valor efetivo de uma transação no saldo
-    // Retorna positivo para entrada, negativo para saída.
-    // Retorna 0 se não estiver paga.
-    const getTransactionValue = (data: any) => {
-      if (!data || data.status !== "paid") return 0;
-
-      // Prioriza finalAmount, fallback para amount
-      const amount = Number(
-        data.finalAmount !== undefined ? data.finalAmount : data.amount || 0,
-      );
-
-      if (data.type === "receivable") {
-        return amount;
-      } else {
-        return -amount;
-      }
-    };
-
-    const oldValue = getTransactionValue(oldData);
-    const newValue = getTransactionValue(newData);
-
-    const balanceChange = newValue - oldValue;
-
-    if (balanceChange === 0) {
-      return null;
-    }
-
-    console.log(
-      `Updating balance for company ${companyId}. Change: ${balanceChange}`,
-    );
-
-    try {
-      await db.runTransaction(async (t) => {
-        const doc = await t.get(statsRef);
-
-        if (!doc.exists) {
-          // Se o documento não existe, criamos.
-          // ATENÇÃO: Se o documento não existe, assumimos que o saldo inicial é 0 + a mudança.
-          // Isso pode ser impreciso se já existirem outras transações antigas não contabilizadas.
-          // O ideal é rodar o script de recálculo total uma vez.
-          t.set(statsRef, {
-            currentBalance: balanceChange,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedBy: "trigger",
-          });
-        } else {
-          t.update(statsRef, {
-            currentBalance: admin.firestore.FieldValue.increment(balanceChange),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedBy: "trigger",
-          });
-        }
-      });
-      console.log("Balance updated successfully");
-    } catch (error) {
-      console.error("Error updating balance:", error);
-    }
-
-    return null;
-  });
+export {
+  onTransactionWrite,
+  recalculateCompanyBalance,
+  checkCompanyBalances,
+} from "./companyBalance";
 
 /**
  * Trigger que atualiza as Custom Claims do usuário no Firebase Auth
@@ -288,87 +210,6 @@ export const updateFinancialSummary = functions.firestore
 
     return null;
   });
-
-/**
- * Função chamável (Callable) para recalcular o saldo da empresa.
- * Útil para corrigir inconsistências causadas por falhas em triggers anteriores
- * ou dados legados.
- */
-export const recalculateCompanyBalance = functions.https.onCall(
-  async (data, context) => {
-    // Verificação de autenticação
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "O usuário precisa estar autenticado.",
-      );
-    }
-
-    const companyId = data.companyId;
-    if (!companyId) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Company ID é obrigatório.",
-      );
-    }
-
-    // Sem isto, qualquer usuário autenticado podia recalcular (e reescrever)
-    // o saldo de qualquer empresa.
-    await assertCanManageBudget(
-      context.auth.uid,
-      companyId,
-      "Apenas administradores e gestores financeiros podem recalcular o saldo.",
-    );
-
-    try {
-      const snapshot = await db
-        .collection("transactions")
-        .where("companyId", "==", companyId)
-        .where("status", "==", "paid")
-        .get();
-
-      let calculatedBalance = 0;
-
-      snapshot.docs.forEach((doc) => {
-        const t = doc.data();
-        let amount = Number(t.amount || 0);
-        if (t.finalAmount !== undefined && t.finalAmount !== null) {
-          amount = Number(t.finalAmount);
-        }
-
-        if (t.type === "receivable") {
-          calculatedBalance += amount;
-        } else {
-          calculatedBalance -= amount;
-        }
-      });
-
-      const statsRef = db.collection("company_stats").doc(companyId);
-
-      await statsRef.set(
-        {
-          currentBalance: calculatedBalance,
-          lastRecalculation: admin.firestore.FieldValue.serverTimestamp(),
-          recalculatedBy: context.auth.uid,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-
-      return {
-        success: true,
-        newBalance: calculatedBalance,
-        transactionCount: snapshot.size,
-      };
-    } catch (error) {
-      console.error("Error recalculating balance:", error);
-      throw new functions.https.HttpsError(
-        "internal",
-        "Erro ao recalcular saldo.",
-      );
-    }
-  },
-);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // suggestPaymentBatches

@@ -512,9 +512,10 @@ service cloud.firestore {
        // Read: All roles in the company
        allow read: if isAuthenticated() && hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
        
-       // Write: Manager only (for manual recalculation)
-       // Note: Cloud Functions bypass these rules.
-       allow write: if isAuthenticated() && isManager(companyId);
+       // Só as Cloud Functions gravam (trigger, recálculo e conferência
+       // diária); o saldo nunca é editado à mão. Os marcadores em
+       // `applied/` ficam fechados por não terem regra.
+       allow write: if false;
     }
     
     // 14. Reconciliation Sessions

@@ -177,6 +177,8 @@ export function PaymentDialog({
                 <Calendar
                   mode="single"
                   selected={date}
+                  // Baixa futura entraria no saldo de hoje; a função também recusa.
+                  disabled={{ after: new Date() }}
                   onSelect={(d) => {
                     if (!d) return;
                     setDate(d);
