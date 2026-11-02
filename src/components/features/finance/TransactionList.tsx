@@ -84,7 +84,10 @@ import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useSortableData } from "@/hooks/useSortableData";
 import { useCostCenters } from "@/hooks/useCostCenters";
-import { transactionService } from "@/lib/services/transactionService";
+import {
+  transactionService,
+  warmLedger,
+} from "@/lib/services/transactionService";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
 import { entityService } from "@/lib/services/entityService";
 import { dashboardService } from "@/lib/services/dashboardService";
@@ -252,6 +255,10 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   const { costCenters } = useCostCenters(companyId);
 
   const today = useMemo(() => startOfDay(new Date()), []);
+
+  useEffect(() => {
+    if (user) warmLedger();
+  }, [user]);
 
   // ── Preferências ───────────────────────────────────────────────────────────
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);

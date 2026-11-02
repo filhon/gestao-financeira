@@ -1,14 +1,13 @@
 import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
-import {
-  addDays,
-  addWeeks,
-  addMonths,
-  addYears,
-  isBefore,
-  isSameDay,
-} from "date-fns";
-import { syncCompany } from "./sheetsSync";
+// Imports por função: a raiz de "date-fns" carrega a biblioteca inteira
+// (~0,4 s a mais em todo cold start).
+import { addDays } from "date-fns/addDays";
+import { addWeeks } from "date-fns/addWeeks";
+import { addMonths } from "date-fns/addMonths";
+import { addYears } from "date-fns/addYears";
+import { isBefore } from "date-fns/isBefore";
+import { isSameDay } from "date-fns/isSameDay";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -768,8 +767,11 @@ export const processRecurringTemplates = functions
 // syncTransactionsToSheets
 //
 // Roda a cada hora via Cloud Scheduler.
-// Sincroniza todas as transações do Firestore com planilhas Google Sheets
+// Sincroniza as transações do Firestore com planilhas Google Sheets
 // configuradas por empresa (campo `sheetsSync` no documento da empresa).
+// De hora em hora só o que mudou na última hora (com folga); às 03:00 a base
+// inteira, para pegar escrita que não tocou `updatedAt` ou hora que falhou.
+// Antes era tudo, toda hora: ~105 mil leituras/dia com a empresa parada.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const syncTransactionsToSheets = functions
@@ -799,12 +801,25 @@ export const syncTransactionsToSheets = functions
       return null;
     }
 
+    // `googleapis` leva ~2,5 s para carregar; no topo, pesava no cold start de
+    // todas as functions.
+    const { syncCompany } = await import("./sheetsSync");
+    const hourBRT = Number(
+      new Date().toLocaleString("en-US", {
+        hour: "numeric",
+        hourCycle: "h23",
+        timeZone: "America/Sao_Paulo",
+      }),
+    );
+    const since =
+      hourBRT === 3 ? undefined : new Date(Date.now() - 70 * 60 * 1000);
+
     for (const companyDoc of companiesSnap.docs) {
       const { sheetsSync } = companyDoc.data();
       if (!sheetsSync?.spreadsheetId || !sheetsSync?.sheetName) continue;
 
       try {
-        await syncCompany(companyDoc.id, sheetsSync, serviceAccountJson);
+        await syncCompany(companyDoc.id, sheetsSync, serviceAccountJson, since);
       } catch (err) {
         console.error(`syncTransactionsToSheets [${companyDoc.id}]:`, err);
       }

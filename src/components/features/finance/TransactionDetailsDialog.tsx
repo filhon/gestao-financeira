@@ -17,7 +17,10 @@ import { format } from "date-fns";
 
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
-import { transactionService } from "@/lib/services/transactionService";
+import {
+  transactionService,
+  warmLedger,
+} from "@/lib/services/transactionService";
 import { comprovanteService } from "@/lib/services/comprovanteService";
 import { emailService } from "@/lib/services/emailService";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -588,6 +591,10 @@ export function TransactionDetailsDialog({
 
   // Cada conta aberta no painel começa com os formulários no estado pedido.
   const promise = transaction?.paymentPromise;
+  useEffect(() => {
+    if (isOpen) warmLedger();
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
     setShowHoldForm(focusAction === "hold");

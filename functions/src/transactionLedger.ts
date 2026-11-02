@@ -35,9 +35,15 @@ const db = () => admin.firestore();
 
 /**
  * Toda despesa passa por estes callables ao criar, editar ou mudar de status.
- * Uma instância sempre quente evita o cold start de 2–5 s no clique.
+ * Sem instância mínima: cada uma custava ~R$ 12/mês ociosa. O cold start de
+ * 2–5 s vinha do `googleapis` carregado no topo do index (agora sob demanda),
+ * e a tela manda `{ warmup: true }` ao abrir, para a instância subir enquanto
+ * o usuário preenche o formulário.
  */
-const HOT_PATH: functions.RuntimeOptions = { minInstances: 1 };
+const hotCallable = (handler: Parameters<typeof functions.https.onCall>[0]) =>
+  functions.https.onCall((data, context) =>
+    data?.warmup ? { warm: true } : handler(data, context),
+  );
 
 /** Rejeitadas não reservam recurso; todo o resto sim, inclusive rascunho. */
 const CONSUMES_BUDGET = (status?: string) => status !== "rejected";
@@ -539,217 +545,211 @@ export const syncCostCenterLedger = functions.firestore
  *   • nenhum ancestral pode estar negativo — se a receita prevista não entrou,
  *     a árvore trava até o gestor realocar.
  */
-export const createPayableTransaction = functions
-  .runWith(HOT_PATH)
-  .https.onCall(async (data, context) => {
-    if (!context.auth) {
+export const createPayableTransaction = hotCallable(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "O usuário precisa estar autenticado.",
+    );
+  }
+
+  const { companyId, transaction } = data as {
+    companyId?: string;
+    transaction?: Record<string, unknown>;
+  };
+
+  if (!companyId || !transaction) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "companyId e transaction são obrigatórios.",
+    );
+  }
+  await assertCompanyRole(context.auth, companyId, [
+    "admin",
+    "financial_manager",
+    "user",
+  ]);
+
+  const tx = transaction as TxShape;
+  if (tx.type !== "payable") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Esta função valida apenas despesas.",
+    );
+  }
+  await assertInitialStatus(context.auth, companyId, tx.status);
+
+  const year = effectiveYear(tx);
+  if (year === null) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "A despesa precisa de data de vencimento.",
+    );
+  }
+
+  const allocations = allocationsOf(tx);
+  if (allocations.length === 0) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Toda despesa precisa de ao menos um centro de custo.",
+    );
+  }
+
+  const { byId, parentIdOf, rootId, hasChildren, archived } =
+    await loadCcIndex(companyId);
+
+  // Consolida alocações repetidas no mesmo centro antes de validar.
+  const perCc = new Map<string, number>();
+  for (const alloc of allocations) {
+    if (!byId.has(alloc.id)) {
       throw new functions.https.HttpsError(
-        "unauthenticated",
-        "O usuário precisa estar autenticado.",
+        "not-found",
+        "Centro de custo não encontrado nesta empresa.",
       );
     }
+    if (hasChildren.has(alloc.id)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `${byId.get(alloc.id)?.name || "O centro de custo"} possui filhos. ` +
+          "Despesas só podem ser lançadas em centros de custo de último grau.",
+      );
+    }
+    assertNotArchived(archived, byId, alloc.id);
+    perCc.set(alloc.id, (perCc.get(alloc.id) || 0) + alloc.cents);
+  }
 
-    const { companyId, transaction } = data as {
-      companyId?: string;
-      transaction?: Record<string, unknown>;
+  const txRef = db().collection("transactions").doc();
+
+  await db().runTransaction(async (trx) => {
+    // Cadeia completa que a despesa afeta: cada folha e todos os ancestrais.
+    const chain = new Map<string, string[]>();
+    const needed = new Set<string>();
+    for (const ccId of perCc.keys()) {
+      const ancestors = ancestorsOf(ccId, parentIdOf);
+      chain.set(ccId, ancestors);
+      needed.add(ccId);
+      ancestors.forEach((a) => needed.add(a));
+    }
+
+    const ids = [...needed];
+    const carryIn = await readCarryIn(trx, companyId, rootId, year);
+    const snaps = await trx.getAll(
+      ...ids.map((id) =>
+        db()
+          .collection(LEDGER)
+          .doc(ledgerDocId(companyId, id, year)),
+      ),
+    );
+
+    const ledgers = new Map<string, Record<string, unknown>>();
+    ids.forEach((id, i) => {
+      const snap = snaps[i];
+      ledgers.set(
+        id,
+        snap.exists ? (snap.data() as Record<string, unknown>) : {},
+      );
+    });
+
+    const availableOf = (id: string) => {
+      const l = ledgers.get(id) || {};
+      return (
+        toCents(l.received) +
+        (id === rootId ? carryIn : 0) -
+        toCents(l.allocatedToChildren) -
+        toCents(l.spentDirect)
+      );
     };
 
-    if (!companyId || !transaction) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "companyId e transaction são obrigatórios.",
-      );
-    }
-    await assertCompanyRole(context.auth, companyId, [
-      "admin",
-      "financial_manager",
-      "user",
-    ]);
-
-    const tx = transaction as TxShape;
-    if (tx.type !== "payable") {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Esta função valida apenas despesas.",
-      );
-    }
-    await assertInitialStatus(context.auth, companyId, tx.status);
-
-    const year = effectiveYear(tx);
-    if (year === null) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "A despesa precisa de data de vencimento.",
-      );
-    }
-
-    const allocations = allocationsOf(tx);
-    if (allocations.length === 0) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Toda despesa precisa de ao menos um centro de custo.",
-      );
-    }
-
-    const { byId, parentIdOf, rootId, hasChildren, archived } =
-      await loadCcIndex(companyId);
-
-    // Consolida alocações repetidas no mesmo centro antes de validar.
-    const perCc = new Map<string, number>();
-    for (const alloc of allocations) {
-      if (!byId.has(alloc.id)) {
-        throw new functions.https.HttpsError(
-          "not-found",
-          "Centro de custo não encontrado nesta empresa.",
-        );
-      }
-      if (hasChildren.has(alloc.id)) {
+    for (const [ccId, cents] of perCc) {
+      const available = availableOf(ccId);
+      if (cents > available) {
         throw new functions.https.HttpsError(
           "failed-precondition",
-          `${byId.get(alloc.id)?.name || "O centro de custo"} possui filhos. ` +
-            "Despesas só podem ser lançadas em centros de custo de último grau.",
+          `Saldo insuficiente em ${byId.get(ccId)?.name || "centro de custo"}: ` +
+            `disponível ${formatBRL(available)}, necessário ${formatBRL(cents)}.`,
         );
       }
-      assertNotArchived(archived, byId, alloc.id);
-      perCc.set(alloc.id, (perCc.get(alloc.id) || 0) + alloc.cents);
+
+      // Um ancestral negativo significa que o recurso prometido não existe.
+      for (const ancestorId of chain.get(ccId) || []) {
+        if (availableOf(ancestorId) < 0) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `${byId.get(ancestorId)?.name || "Um centro de custo superior"} está ` +
+              "com saldo negativo. Regularize a distribuição antes de lançar novas despesas.",
+          );
+        }
+      }
     }
 
-    const txRef = db().collection("transactions").doc();
+    const isPaid = tx.status === "paid";
+    assertNotFuturePayment(tx.status, tx.paymentDate);
+    const costCenterIds = [...perCc.keys()];
 
-    await db().runTransaction(async (trx) => {
-      // Cadeia completa que a despesa afeta: cada folha e todos os ancestrais.
-      const chain = new Map<string, string[]>();
-      const needed = new Set<string>();
-      for (const ccId of perCc.keys()) {
-        const ancestors = ancestorsOf(ccId, parentIdOf);
-        chain.set(ccId, ancestors);
-        needed.add(ccId);
-        ancestors.forEach((a) => needed.add(a));
-      }
+    // Datas voltam a ser Timestamp: o resto do sistema lê `.toDate()`.
+    const dueDate = asDate(tx.dueDate);
+    const paymentDate = asDate(tx.paymentDate);
 
-      const ids = [...needed];
-      const carryIn = await readCarryIn(trx, companyId, rootId, year);
-      const snaps = await trx.getAll(
-        ...ids.map((id) =>
+    trx.set(txRef, {
+      ...transaction,
+      companyId,
+      costCenterIds,
+      costCenterId: costCenterIds[0],
+      createdBy: context.auth!.uid,
+      batchId: null,
+      ledgerApplied: true,
+      // Carimbo que diz ao trigger que o razão desta escrita já foi ajustado.
+      ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(dueDate
+        ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
+        : {}),
+      ...(paymentDate
+        ? { paymentDate: admin.firestore.Timestamp.fromDate(paymentDate) }
+        : {}),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    for (const [ccId, cents] of perCc) {
+      const targets: Array<[string, boolean]> = [
+        [ccId, true],
+        ...(chain.get(ccId) || []).map((a) => [a, false] as [string, boolean]),
+      ];
+      for (const [id, isLeaf] of targets) {
+        trx.set(
           db()
             .collection(LEDGER)
             .doc(ledgerDocId(companyId, id, year)),
-        ),
-      );
-
-      const ledgers = new Map<string, Record<string, unknown>>();
-      ids.forEach((id, i) => {
-        const snap = snaps[i];
-        ledgers.set(
-          id,
-          snap.exists ? (snap.data() as Record<string, unknown>) : {},
+          {
+            companyId,
+            costCenterId: id,
+            year,
+            parentId: parentIdOf(id),
+            isRoot: id === rootId,
+            ...(isLeaf
+              ? {
+                  spentDirect: admin.firestore.FieldValue.increment(
+                    toReais(cents),
+                  ),
+                  spentDirectPaid: admin.firestore.FieldValue.increment(
+                    isPaid ? toReais(cents) : 0,
+                  ),
+                }
+              : {}),
+            subtreeSpent: admin.firestore.FieldValue.increment(toReais(cents)),
+            subtreeSpentPaid: admin.firestore.FieldValue.increment(
+              isPaid ? toReais(cents) : 0,
+            ),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
         );
-      });
-
-      const availableOf = (id: string) => {
-        const l = ledgers.get(id) || {};
-        return (
-          toCents(l.received) +
-          (id === rootId ? carryIn : 0) -
-          toCents(l.allocatedToChildren) -
-          toCents(l.spentDirect)
-        );
-      };
-
-      for (const [ccId, cents] of perCc) {
-        const available = availableOf(ccId);
-        if (cents > available) {
-          throw new functions.https.HttpsError(
-            "failed-precondition",
-            `Saldo insuficiente em ${byId.get(ccId)?.name || "centro de custo"}: ` +
-              `disponível ${formatBRL(available)}, necessário ${formatBRL(cents)}.`,
-          );
-        }
-
-        // Um ancestral negativo significa que o recurso prometido não existe.
-        for (const ancestorId of chain.get(ccId) || []) {
-          if (availableOf(ancestorId) < 0) {
-            throw new functions.https.HttpsError(
-              "failed-precondition",
-              `${byId.get(ancestorId)?.name || "Um centro de custo superior"} está ` +
-                "com saldo negativo. Regularize a distribuição antes de lançar novas despesas.",
-            );
-          }
-        }
       }
-
-      const isPaid = tx.status === "paid";
-      assertNotFuturePayment(tx.status, tx.paymentDate);
-      const costCenterIds = [...perCc.keys()];
-
-      // Datas voltam a ser Timestamp: o resto do sistema lê `.toDate()`.
-      const dueDate = asDate(tx.dueDate);
-      const paymentDate = asDate(tx.paymentDate);
-
-      trx.set(txRef, {
-        ...transaction,
-        companyId,
-        costCenterIds,
-        costCenterId: costCenterIds[0],
-        createdBy: context.auth!.uid,
-        batchId: null,
-        ledgerApplied: true,
-        // Carimbo que diz ao trigger que o razão desta escrita já foi ajustado.
-        ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
-        ...(dueDate
-          ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
-          : {}),
-        ...(paymentDate
-          ? { paymentDate: admin.firestore.Timestamp.fromDate(paymentDate) }
-          : {}),
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      for (const [ccId, cents] of perCc) {
-        const targets: Array<[string, boolean]> = [
-          [ccId, true],
-          ...(chain.get(ccId) || []).map(
-            (a) => [a, false] as [string, boolean],
-          ),
-        ];
-        for (const [id, isLeaf] of targets) {
-          trx.set(
-            db()
-              .collection(LEDGER)
-              .doc(ledgerDocId(companyId, id, year)),
-            {
-              companyId,
-              costCenterId: id,
-              year,
-              parentId: parentIdOf(id),
-              isRoot: id === rootId,
-              ...(isLeaf
-                ? {
-                    spentDirect: admin.firestore.FieldValue.increment(
-                      toReais(cents),
-                    ),
-                    spentDirectPaid: admin.firestore.FieldValue.increment(
-                      isPaid ? toReais(cents) : 0,
-                    ),
-                  }
-                : {}),
-              subtreeSpent: admin.firestore.FieldValue.increment(
-                toReais(cents),
-              ),
-              subtreeSpentPaid: admin.firestore.FieldValue.increment(
-                isPaid ? toReais(cents) : 0,
-              ),
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true },
-          );
-        }
-      }
-    });
-
-    return { success: true, id: txRef.id };
+    }
   });
+
+  return { success: true, id: txRef.id };
+});
 
 /**
  * Verifica se uma despesa caberia no envelope, sem gravar nada.
@@ -837,243 +837,237 @@ export async function checkBudgetFit(
  * faz o parcelamento que atravessa a virada do ano ser validado contra o
  * orçamento certo de cada lado.
  */
-export const createPayableInstallments = functions
-  .runWith(HOT_PATH)
-  .https.onCall(async (data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "O usuário precisa estar autenticado.",
-      );
-    }
+export const createPayableInstallments = hotCallable(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "O usuário precisa estar autenticado.",
+    );
+  }
 
-    const { companyId, transactions } = data as {
-      companyId?: string;
-      transactions?: Array<Record<string, unknown>>;
-    };
+  const { companyId, transactions } = data as {
+    companyId?: string;
+    transactions?: Array<Record<string, unknown>>;
+  };
 
-    if (
-      !companyId ||
-      !Array.isArray(transactions) ||
-      transactions.length === 0
-    ) {
+  if (!companyId || !Array.isArray(transactions) || transactions.length === 0) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "companyId e transactions são obrigatórios.",
+    );
+  }
+  await assertCompanyRole(context.auth, companyId, [
+    "admin",
+    "financial_manager",
+    "user",
+  ]);
+  // O schema do formulário limita em 120 parcelas; o teto aqui protege o
+  // limite de operações de uma transação do Firestore.
+  if (transactions.length > 120) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Um parcelamento não pode ter mais de 120 parcelas.",
+    );
+  }
+  for (const t of transactions) {
+    await assertInitialStatus(context.auth, companyId, t.status);
+  }
+
+  const { byId, parentIdOf, rootId, hasChildren, archived } =
+    await loadCcIndex(companyId);
+
+  // Soma o efeito de todas as parcelas por (centro, exercício).
+  const totals = new Map<
+    string,
+    { ccId: string; year: number; spent: number; paid: number }
+  >();
+
+  for (const raw of transactions) {
+    const tx = raw as TxShape;
+    if (tx.type !== "payable") {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "companyId e transactions são obrigatórios.",
+        "Esta função valida apenas despesas.",
       );
     }
-    await assertCompanyRole(context.auth, companyId, [
-      "admin",
-      "financial_manager",
-      "user",
-    ]);
-    // O schema do formulário limita em 120 parcelas; o teto aqui protege o
-    // limite de operações de uma transação do Firestore.
-    if (transactions.length > 120) {
+    const effect = ledgerEffect(tx);
+    if (effect.size === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Um parcelamento não pode ter mais de 120 parcelas.",
+        "Toda parcela precisa de centro de custo e data de vencimento.",
       );
     }
-    for (const t of transactions) {
-      await assertInitialStatus(context.auth, companyId, t.status);
-    }
-
-    const { byId, parentIdOf, rootId, hasChildren, archived } =
-      await loadCcIndex(companyId);
-
-    // Soma o efeito de todas as parcelas por (centro, exercício).
-    const totals = new Map<
-      string,
-      { ccId: string; year: number; spent: number; paid: number }
-    >();
-
-    for (const raw of transactions) {
-      const tx = raw as TxShape;
-      if (tx.type !== "payable") {
+    for (const [ccId, e] of effect) {
+      if (!byId.has(ccId)) {
         throw new functions.https.HttpsError(
-          "invalid-argument",
-          "Esta função valida apenas despesas.",
+          "not-found",
+          "Centro de custo não encontrado nesta empresa.",
         );
       }
-      const effect = ledgerEffect(tx);
-      if (effect.size === 0) {
+      if (hasChildren.has(ccId)) {
         throw new functions.https.HttpsError(
-          "invalid-argument",
-          "Toda parcela precisa de centro de custo e data de vencimento.",
+          "failed-precondition",
+          `${byId.get(ccId)?.name || "O centro de custo"} possui filhos. ` +
+            "Despesas só podem ser lançadas em centros de custo de último grau.",
         );
       }
-      for (const [ccId, e] of effect) {
-        if (!byId.has(ccId)) {
-          throw new functions.https.HttpsError(
-            "not-found",
-            "Centro de custo não encontrado nesta empresa.",
-          );
-        }
-        if (hasChildren.has(ccId)) {
-          throw new functions.https.HttpsError(
-            "failed-precondition",
-            `${byId.get(ccId)?.name || "O centro de custo"} possui filhos. ` +
-              "Despesas só podem ser lançadas em centros de custo de último grau.",
-          );
-        }
-        assertNotArchived(archived, byId, ccId);
-        const key = `${ccId}_${e.year}`;
-        const cur = totals.get(key) || {
-          ccId,
-          year: e.year,
-          spent: 0,
-          paid: 0,
-        };
-        cur.spent += e.spent;
-        cur.paid += e.paid;
-        totals.set(key, cur);
-      }
-    }
-
-    const grouped = [...totals.values()];
-    const refs = transactions.map(() => db().collection("transactions").doc());
-
-    await db().runTransaction(async (trx) => {
-      const years = [...new Set(grouped.map((g) => g.year))];
-      const carryByYear = new Map<number, number>();
-      for (const y of years) {
-        carryByYear.set(y, await readCarryIn(trx, companyId, rootId, y));
-      }
-
-      const chain = new Map<string, string[]>();
-      const refKeys: Array<{ ccId: string; year: number }> = [];
-      const seen = new Set<string>();
-      for (const g of grouped) {
-        const ancestors = ancestorsOf(g.ccId, parentIdOf);
-        chain.set(g.ccId, ancestors);
-        for (const id of [g.ccId, ...ancestors]) {
-          const key = `${id}_${g.year}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          refKeys.push({ ccId: id, year: g.year });
-        }
-      }
-
-      const snaps = await trx.getAll(
-        ...refKeys.map((k) =>
-          db()
-            .collection(LEDGER)
-            .doc(ledgerDocId(companyId, k.ccId, k.year)),
-        ),
-      );
-      const ledgers = new Map<string, Record<string, unknown>>();
-      refKeys.forEach((k, i) => {
-        ledgers.set(
-          `${k.ccId}_${k.year}`,
-          snaps[i].exists ? (snaps[i].data() as Record<string, unknown>) : {},
-        );
-      });
-
-      const availableOf = (ccId: string, year: number) => {
-        const l = ledgers.get(`${ccId}_${year}`) || {};
-        return (
-          toCents(l.received) +
-          (ccId === rootId ? carryByYear.get(year) || 0 : 0) -
-          toCents(l.allocatedToChildren) -
-          toCents(l.spentDirect)
-        );
+      assertNotArchived(archived, byId, ccId);
+      const key = `${ccId}_${e.year}`;
+      const cur = totals.get(key) || {
+        ccId,
+        year: e.year,
+        spent: 0,
+        paid: 0,
       };
+      cur.spent += e.spent;
+      cur.paid += e.paid;
+      totals.set(key, cur);
+    }
+  }
 
-      for (const g of grouped) {
-        const available = availableOf(g.ccId, g.year);
-        if (g.spent > available) {
-          throw new functions.https.HttpsError(
-            "failed-precondition",
-            `Saldo insuficiente em ${byId.get(g.ccId)?.name || "centro de custo"} ` +
-              `para o exercício ${g.year}: disponível ${formatBRL(available)}, ` +
-              `necessário ${formatBRL(g.spent)} somando as parcelas.`,
-          );
-        }
-        for (const ancestorId of chain.get(g.ccId) || []) {
-          if (availableOf(ancestorId, g.year) < 0) {
-            throw new functions.https.HttpsError(
-              "failed-precondition",
-              `${byId.get(ancestorId)?.name || "Um centro de custo superior"} está ` +
-                "com saldo negativo. Regularize a distribuição antes de lançar novas despesas.",
-            );
-          }
-        }
+  const grouped = [...totals.values()];
+  const refs = transactions.map(() => db().collection("transactions").doc());
+
+  await db().runTransaction(async (trx) => {
+    const years = [...new Set(grouped.map((g) => g.year))];
+    const carryByYear = new Map<number, number>();
+    for (const y of years) {
+      carryByYear.set(y, await readCarryIn(trx, companyId, rootId, y));
+    }
+
+    const chain = new Map<string, string[]>();
+    const refKeys: Array<{ ccId: string; year: number }> = [];
+    const seen = new Set<string>();
+    for (const g of grouped) {
+      const ancestors = ancestorsOf(g.ccId, parentIdOf);
+      chain.set(g.ccId, ancestors);
+      for (const id of [g.ccId, ...ancestors]) {
+        const key = `${id}_${g.year}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        refKeys.push({ ccId: id, year: g.year });
       }
+    }
 
-      transactions.forEach((raw, i) => {
-        const tx = raw as TxShape;
-        assertNotFuturePayment(tx.status, tx.paymentDate);
-        const dueDate = asDate(tx.dueDate);
-        const paymentDate = asDate(tx.paymentDate);
-        const ids = (tx.costCenterAllocation || [])
-          .filter((a) => a?.costCenterId)
-          .map((a) => a.costCenterId);
-
-        trx.set(refs[i], {
-          ...raw,
-          companyId,
-          costCenterIds: ids,
-          costCenterId: ids[0],
-          createdBy: context.auth!.uid,
-          batchId: null,
-          ledgerApplied: true,
-          ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
-          ...(dueDate
-            ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
-            : {}),
-          ...(paymentDate
-            ? { paymentDate: admin.firestore.Timestamp.fromDate(paymentDate) }
-            : {}),
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      });
-
-      for (const g of grouped) {
-        const targets: Array<[string, boolean]> = [
-          [g.ccId, true],
-          ...(chain.get(g.ccId) || []).map(
-            (a) => [a, false] as [string, boolean],
-          ),
-        ];
-        for (const [id, isLeaf] of targets) {
-          trx.set(
-            db()
-              .collection(LEDGER)
-              .doc(ledgerDocId(companyId, id, g.year)),
-            {
-              companyId,
-              costCenterId: id,
-              year: g.year,
-              parentId: parentIdOf(id),
-              isRoot: id === rootId,
-              ...(isLeaf
-                ? {
-                    spentDirect: admin.firestore.FieldValue.increment(
-                      toReais(g.spent),
-                    ),
-                    spentDirectPaid: admin.firestore.FieldValue.increment(
-                      toReais(g.paid),
-                    ),
-                  }
-                : {}),
-              subtreeSpent: admin.firestore.FieldValue.increment(
-                toReais(g.spent),
-              ),
-              subtreeSpentPaid: admin.firestore.FieldValue.increment(
-                toReais(g.paid),
-              ),
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true },
-          );
-        }
-      }
+    const snaps = await trx.getAll(
+      ...refKeys.map((k) =>
+        db()
+          .collection(LEDGER)
+          .doc(ledgerDocId(companyId, k.ccId, k.year)),
+      ),
+    );
+    const ledgers = new Map<string, Record<string, unknown>>();
+    refKeys.forEach((k, i) => {
+      ledgers.set(
+        `${k.ccId}_${k.year}`,
+        snaps[i].exists ? (snaps[i].data() as Record<string, unknown>) : {},
+      );
     });
 
-    return { success: true, ids: refs.map((r) => r.id) };
+    const availableOf = (ccId: string, year: number) => {
+      const l = ledgers.get(`${ccId}_${year}`) || {};
+      return (
+        toCents(l.received) +
+        (ccId === rootId ? carryByYear.get(year) || 0 : 0) -
+        toCents(l.allocatedToChildren) -
+        toCents(l.spentDirect)
+      );
+    };
+
+    for (const g of grouped) {
+      const available = availableOf(g.ccId, g.year);
+      if (g.spent > available) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Saldo insuficiente em ${byId.get(g.ccId)?.name || "centro de custo"} ` +
+            `para o exercício ${g.year}: disponível ${formatBRL(available)}, ` +
+            `necessário ${formatBRL(g.spent)} somando as parcelas.`,
+        );
+      }
+      for (const ancestorId of chain.get(g.ccId) || []) {
+        if (availableOf(ancestorId, g.year) < 0) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `${byId.get(ancestorId)?.name || "Um centro de custo superior"} está ` +
+              "com saldo negativo. Regularize a distribuição antes de lançar novas despesas.",
+          );
+        }
+      }
+    }
+
+    transactions.forEach((raw, i) => {
+      const tx = raw as TxShape;
+      assertNotFuturePayment(tx.status, tx.paymentDate);
+      const dueDate = asDate(tx.dueDate);
+      const paymentDate = asDate(tx.paymentDate);
+      const ids = (tx.costCenterAllocation || [])
+        .filter((a) => a?.costCenterId)
+        .map((a) => a.costCenterId);
+
+      trx.set(refs[i], {
+        ...raw,
+        companyId,
+        costCenterIds: ids,
+        costCenterId: ids[0],
+        createdBy: context.auth!.uid,
+        batchId: null,
+        ledgerApplied: true,
+        ledgerAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(dueDate
+          ? { dueDate: admin.firestore.Timestamp.fromDate(dueDate) }
+          : {}),
+        ...(paymentDate
+          ? { paymentDate: admin.firestore.Timestamp.fromDate(paymentDate) }
+          : {}),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    for (const g of grouped) {
+      const targets: Array<[string, boolean]> = [
+        [g.ccId, true],
+        ...(chain.get(g.ccId) || []).map(
+          (a) => [a, false] as [string, boolean],
+        ),
+      ];
+      for (const [id, isLeaf] of targets) {
+        trx.set(
+          db()
+            .collection(LEDGER)
+            .doc(ledgerDocId(companyId, id, g.year)),
+          {
+            companyId,
+            costCenterId: id,
+            year: g.year,
+            parentId: parentIdOf(id),
+            isRoot: id === rootId,
+            ...(isLeaf
+              ? {
+                  spentDirect: admin.firestore.FieldValue.increment(
+                    toReais(g.spent),
+                  ),
+                  spentDirectPaid: admin.firestore.FieldValue.increment(
+                    toReais(g.paid),
+                  ),
+                }
+              : {}),
+            subtreeSpent: admin.firestore.FieldValue.increment(
+              toReais(g.spent),
+            ),
+            subtreeSpentPaid: admin.firestore.FieldValue.increment(
+              toReais(g.paid),
+            ),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+    }
   });
+
+  return { success: true, ids: refs.map((r) => r.id) };
+});
 
 /** Hierarquia de centros de custo da empresa, montada uma vez por chamada. */
 async function loadCcIndex(companyId: string) {
@@ -1478,58 +1472,52 @@ async function commitValidatedPatch(
  * Sem isto o bloqueio da criação seria contornável em dois passos: lançar um
  * valor que cabe e depois editá-lo para um que não cabe.
  */
-export const updatePayableTransaction = functions
-  .runWith(HOT_PATH)
-  .https.onCall(async (data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "O usuário precisa estar autenticado.",
-      );
-    }
-
-    const { transactionId, patch } = data as {
-      transactionId?: string;
-      patch?: Record<string, unknown>;
-    };
-
-    if (!transactionId || !patch) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "transactionId e patch são obrigatórios.",
-      );
-    }
-
-    const txRef = db().collection("transactions").doc(transactionId);
-    const snap = await txRef.get();
-    if (!snap.exists) {
-      throw new functions.https.HttpsError(
-        "not-found",
-        "Transação não encontrada.",
-      );
-    }
-
-    const current = snap.data() as TxShape;
-    const companyId = current.companyId;
-    if (!companyId) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Transação sem empresa associada.",
-      );
-    }
-
-    await assertCanWriteTransaction(context.auth, current, patch.status);
-
-    const outcome = await commitValidatedPatch(
-      companyId,
-      txRef,
-      current,
-      patch,
-      { enforce: true },
+export const updatePayableTransaction = hotCallable(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "O usuário precisa estar autenticado.",
     );
+  }
 
-    return { success: true, budgetChanged: outcome.budgetChanged };
+  const { transactionId, patch } = data as {
+    transactionId?: string;
+    patch?: Record<string, unknown>;
+  };
+
+  if (!transactionId || !patch) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "transactionId e patch são obrigatórios.",
+    );
+  }
+
+  const txRef = db().collection("transactions").doc(transactionId);
+  const snap = await txRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError(
+      "not-found",
+      "Transação não encontrada.",
+    );
+  }
+
+  const current = snap.data() as TxShape;
+  const companyId = current.companyId;
+  if (!companyId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Transação sem empresa associada.",
+    );
+  }
+
+  await assertCanWriteTransaction(context.auth, current, patch.status);
+
+  const outcome = await commitValidatedPatch(companyId, txRef, current, patch, {
+    enforce: true,
   });
+
+  return { success: true, budgetChanged: outcome.budgetChanged };
+});
 
 /**
  * Avisa administradores e gestores financeiros de que algo furou o envelope.
@@ -1967,155 +1955,153 @@ const TRANSACTION_STATUSES = new Set([
  * recusar o pagamento não desfaz a dívida. Ela nasce marcada e os gestores são
  * avisados, do mesmo jeito que a recorrência noturna.
  */
-export const setTransactionStatus = functions
-  .runWith(HOT_PATH)
-  .https.onCall(async (data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "O usuário precisa estar autenticado.",
-      );
-    }
+export const setTransactionStatus = hotCallable(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "O usuário precisa estar autenticado.",
+    );
+  }
 
-    const { transactionId, status, settlement, reason } = data as {
-      transactionId?: string;
-      status?: string;
-      reason?: string;
-      settlement?: {
-        paymentDate?: string;
-        finalAmount?: number;
-        discount?: number;
-        interest?: number;
-        bankAccountId?: string;
-      };
+  const { transactionId, status, settlement, reason } = data as {
+    transactionId?: string;
+    status?: string;
+    reason?: string;
+    settlement?: {
+      paymentDate?: string;
+      finalAmount?: number;
+      discount?: number;
+      interest?: number;
+      bankAccountId?: string;
     };
+  };
 
-    if (!transactionId || !status) {
+  if (!transactionId || !status) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "transactionId e status são obrigatórios.",
+    );
+  }
+  if (!TRANSACTION_STATUSES.has(status)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `Status inválido: ${status}.`,
+    );
+  }
+  // A baixa grava sem conferir saldo; fora de "paga" isso seria um atalho.
+  if (settlement && !PAY_STATUSES.includes(status)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Dados de baixa só valem para o status pago.",
+    );
+  }
+  // Quem pediu precisa saber o que corrigir; o magic link já exige o mesmo.
+  const rejectionReason = reason?.trim();
+  if (status === "rejected" && !rejectionReason) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Informe o motivo da rejeição.",
+    );
+  }
+
+  const txRef = db().collection("transactions").doc(transactionId);
+  const snap = await txRef.get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError(
+      "not-found",
+      "Transação não encontrada.",
+    );
+  }
+
+  const current = snap.data() as TxShape;
+  const companyId = current.companyId;
+  if (!companyId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Transação sem empresa associada.",
+    );
+  }
+
+  const role = await assertCanWriteTransaction(context.auth, current, status);
+  if (status === "approved" && current.status !== "approved") {
+    await assertWithinAlcada(current, role);
+  }
+
+  const uid = context.auth.uid;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const patch: Record<string, unknown> = { status };
+
+  if (status === "approved") {
+    patch.approvedBy = uid;
+    patch.approvedAt = now;
+  } else if (status === "paid" || status === "received") {
+    patch.releasedBy = uid;
+    patch.releasedAt = now;
+  } else if (status === "rejected") {
+    patch.rejectedBy = uid;
+    patch.rejectedAt = now;
+    patch.rejectionReason = rejectionReason;
+  } else if (status === "pending_approval") {
+    // Token do magic link: gerado no servidor e com validade de 7 dias.
+    patch.approvalToken = randomUUID();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    patch.approvalTokenExpiresAt =
+      admin.firestore.Timestamp.fromDate(expiresAt);
+  }
+
+  if (settlement) {
+    const paymentDate = asDate(settlement.paymentDate);
+    if (!paymentDate) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "transactionId e status são obrigatórios.",
+        "A baixa precisa de data de pagamento.",
       );
     }
-    if (!TRANSACTION_STATUSES.has(status)) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        `Status inválido: ${status}.`,
-      );
-    }
-    // A baixa grava sem conferir saldo; fora de "paga" isso seria um atalho.
-    if (settlement && !PAY_STATUSES.includes(status)) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Dados de baixa só valem para o status pago.",
-      );
-    }
-    // Quem pediu precisa saber o que corrigir; o magic link já exige o mesmo.
-    const rejectionReason = reason?.trim();
-    if (status === "rejected" && !rejectionReason) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Informe o motivo da rejeição.",
-      );
-    }
+    patch.paymentDate = paymentDate.toISOString();
+    patch.finalAmount = settlement.finalAmount;
+    patch.discount = settlement.discount;
+    patch.interest = settlement.interest;
 
-    const txRef = db().collection("transactions").doc(transactionId);
-    const snap = await txRef.get();
-    if (!snap.exists) {
-      throw new functions.https.HttpsError(
-        "not-found",
-        "Transação não encontrada.",
-      );
-    }
-
-    const current = snap.data() as TxShape;
-    const companyId = current.companyId;
-    if (!companyId) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Transação sem empresa associada.",
-      );
-    }
-
-    const role = await assertCanWriteTransaction(context.auth, current, status);
-    if (status === "approved" && current.status !== "approved") {
-      await assertWithinAlcada(current, role);
-    }
-
-    const uid = context.auth.uid;
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const patch: Record<string, unknown> = { status };
-
-    if (status === "approved") {
-      patch.approvedBy = uid;
-      patch.approvedAt = now;
-    } else if (status === "paid" || status === "received") {
-      patch.releasedBy = uid;
-      patch.releasedAt = now;
-    } else if (status === "rejected") {
-      patch.rejectedBy = uid;
-      patch.rejectedAt = now;
-      patch.rejectionReason = rejectionReason;
-    } else if (status === "pending_approval") {
-      // Token do magic link: gerado no servidor e com validade de 7 dias.
-      patch.approvalToken = randomUUID();
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
-      patch.approvalTokenExpiresAt =
-        admin.firestore.Timestamp.fromDate(expiresAt);
-    }
-
-    if (settlement) {
-      const paymentDate = asDate(settlement.paymentDate);
-      if (!paymentDate) {
+    if (settlement.bankAccountId) {
+      // A conta decide em que extrato o título vai casar: tem de ser desta empresa.
+      const accountSnap = await db()
+        .collection("bank_accounts")
+        .doc(settlement.bankAccountId)
+        .get();
+      if (!accountSnap.exists || accountSnap.get("companyId") !== companyId) {
         throw new functions.https.HttpsError(
           "invalid-argument",
-          "A baixa precisa de data de pagamento.",
+          "Conta bancária inválida para esta empresa.",
         );
       }
-      patch.paymentDate = paymentDate.toISOString();
-      patch.finalAmount = settlement.finalAmount;
-      patch.discount = settlement.discount;
-      patch.interest = settlement.interest;
-
-      if (settlement.bankAccountId) {
-        // A conta decide em que extrato o título vai casar: tem de ser desta empresa.
-        const accountSnap = await db()
-          .collection("bank_accounts")
-          .doc(settlement.bankAccountId)
-          .get();
-        if (!accountSnap.exists || accountSnap.get("companyId") !== companyId) {
-          throw new functions.https.HttpsError(
-            "invalid-argument",
-            "Conta bancária inválida para esta empresa.",
-          );
-        }
-        patch.bankAccountId = settlement.bankAccountId;
-      }
+      patch.bankAccountId = settlement.bankAccountId;
     }
+  }
 
-    const outcome = await commitValidatedPatch(
+  const outcome = await commitValidatedPatch(
+    companyId,
+    txRef,
+    current,
+    patch,
+    // A baixa realiza um compromisso já validado; qualquer outra mudança de
+    // status que reocupe envelope precisa caber.
+    { enforce: !settlement },
+  );
+
+  if (outcome.budgetExceeded) {
+    await notifyBudgetExceeded(
       companyId,
-      txRef,
-      current,
-      patch,
-      // A baixa realiza um compromisso já validado; qualquer outra mudança de
-      // status que reocupe envelope precisa caber.
-      { enforce: !settlement },
+      "Baixa sem saldo no centro de custo",
+      `A baixa de "${(current as { description?: string }).description || "uma despesa"}" ` +
+        `foi registrada em exercício sem orçamento suficiente. ${outcome.budgetExceededReason || ""}`,
     );
+  }
 
-    if (outcome.budgetExceeded) {
-      await notifyBudgetExceeded(
-        companyId,
-        "Baixa sem saldo no centro de custo",
-        `A baixa de "${(current as { description?: string }).description || "uma despesa"}" ` +
-          `foi registrada em exercício sem orçamento suficiente. ${outcome.budgetExceededReason || ""}`,
-      );
-    }
-
-    return {
-      success: true,
-      budgetChanged: outcome.budgetChanged,
-      budgetExceeded: outcome.budgetExceeded,
-      budgetExceededReason: outcome.budgetExceededReason,
-    };
-  });
+  return {
+    success: true,
+    budgetChanged: outcome.budgetChanged,
+    budgetExceeded: outcome.budgetExceeded,
+    budgetExceededReason: outcome.budgetExceededReason,
+  };
+});

@@ -117,14 +117,24 @@ export async function syncCompany(
   companyId: string,
   config: SheetsSyncConfig,
   serviceAccountJson: string,
+  since?: Date,
 ): Promise<void> {
   const db = admin.firestore();
+
+  let txQuery = db
+    .collection("transactions")
+    .where("companyId", "==", companyId);
+  if (since) txQuery = txQuery.where("updatedAt", ">", since);
+  const txSnap = await txQuery.get();
+  if (txSnap.empty) {
+    console.log(`syncCompany [${companyId}]: nada mudou.`);
+    return;
+  }
+
   const auth = buildSheetAuth(serviceAccountJson);
   const sheets = google.sheets({ version: "v4", auth });
 
-  // Fetch all data in parallel
-  const [txSnap, entitySnap, ccSnap] = await Promise.all([
-    db.collection("transactions").where("companyId", "==", companyId).get(),
+  const [entitySnap, ccSnap] = await Promise.all([
     db.collection("entities").where("companyId", "==", companyId).get(),
     db.collection("cost_centers").where("companyId", "==", companyId).get(),
   ]);

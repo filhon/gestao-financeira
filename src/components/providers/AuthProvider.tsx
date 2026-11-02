@@ -19,6 +19,7 @@ import {
   clearIndexedDbPersistence,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/client";
+import { clearPersistedQueries } from "@/lib/queryPersister";
 import { UserProfile } from "@/lib/types";
 import { useRouter } from "next/navigation";
 import Cookies from "js-cookie";
@@ -287,6 +288,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ponytail: falha se outra aba ainda segura o cache; ele fica até o
       // próximo logout sem abas abertas.
       await clearIndexedDbPersistence(db).catch(() => {});
+      await clearPersistedQueries();
       window.location.assign("/login");
     } catch (error) {
       console.error("Error logging out:", error);

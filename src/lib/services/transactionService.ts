@@ -177,6 +177,23 @@ const serializeForCallable = (value: unknown): unknown => {
   return value;
 };
 
+let warmedAt = 0;
+/**
+ * Acorda os callables de despesa sem esperar a resposta: a instância sobe
+ * enquanto o usuário lê a lista ou preenche o formulário, e o Salvar não paga
+ * o cold start. No máximo um ping a cada 5 min (a instância ociosa dura ~15).
+ */
+export function warmLedger() {
+  if (Date.now() - warmedAt < 5 * 60_000) return;
+  warmedAt = Date.now();
+  for (const name of [
+    "createPayableTransaction",
+    "updatePayableTransaction",
+    "setTransactionStatus",
+  ])
+    httpsCallable(fbFunctions, name)({ warmup: true }).catch(() => {});
+}
+
 /**
  * Edita uma despesa através da Cloud Function, que revalida o saldo com o
  * delta da alteração antes de gravar.
