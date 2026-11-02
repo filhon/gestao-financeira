@@ -24,8 +24,13 @@ export type AdminAuthFailure = {
   response: NextResponse;
 };
 
+/**
+ * `globalAdminOnly`: exige `role === "admin"` (mesma regra da tela, que usa
+ * `canManageCompanies`). Sem a opção, o gerente financeiro da empresa também passa.
+ */
 export async function authenticateAdminRequest(
   request: NextRequest,
+  options: { globalAdminOnly?: boolean } = {},
 ): Promise<AdminAuthSuccess | AdminAuthFailure> {
   const cookieStore = await cookies();
   const token = cookieStore.get("auth_token")?.value;
@@ -57,6 +62,16 @@ export async function authenticateAdminRequest(
 
     const profile = userDoc.data() as UserProfile;
     const isGlobalAdmin = profile.role === "admin";
+
+    if (options.globalAdminOnly && !isGlobalAdmin) {
+      return {
+        success: false,
+        response: NextResponse.json(
+          { error: "Acesso negado. Apenas administradores." },
+          { status: 403 },
+        ),
+      };
+    }
 
     const companyId = request.headers.get("x-company-id") ?? "";
     if (!companyId) {

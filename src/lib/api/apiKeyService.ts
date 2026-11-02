@@ -111,12 +111,13 @@ export async function createApiKey(
   const rawApiKey = generateRawApiKey();
   const rawSecretKey = generateRawSecretKey();
 
+  // Menor privilégio: o que não for pedido explicitamente fica negado.
   const defaultPermissions: ApiKeyPermissions = {
-    balance: params.permissions?.balance ?? true,
-    transactions: params.permissions?.transactions ?? true,
-    budgets: params.permissions?.budgets ?? true,
-    costCenters: params.permissions?.costCenters ?? true,
-    financialSummary: params.permissions?.financialSummary ?? true,
+    balance: params.permissions?.balance ?? false,
+    transactions: params.permissions?.transactions ?? false,
+    budgets: params.permissions?.budgets ?? false,
+    costCenters: params.permissions?.costCenters ?? false,
+    financialSummary: params.permissions?.financialSummary ?? false,
   };
 
   const docData: Omit<ApiKeyDocument, "id"> = {
@@ -192,13 +193,6 @@ export async function findApiKeyByValue(
     return null;
   }
 
-  // Atualiza lastUsedAt (fire-and-forget)
-  doc.ref
-    .update({
-      lastUsedAt: FieldValue.serverTimestamp(),
-    })
-    .catch(() => {});
-
   return {
     id: doc.id,
     ...data,
@@ -207,13 +201,29 @@ export async function findApiKeyByValue(
 }
 
 /**
- * Lista todas as API Keys de uma empresa (sem expor hashes e secrets).
+ * Registra o uso da chave. Chamar só depois de validar IP, permissão e
+ * assinatura: quem tem apenas a API Key (sem o segredo) não pode manter a
+ * data "viva". Fire-and-forget.
  */
-export async function listApiKeys(
-  companyId: string,
-): Promise<
+export function touchApiKeyLastUsed(keyId: string): void {
+  adminDb
+    .collection(COLLECTION)
+    .doc(keyId)
+    .update({ lastUsedAt: FieldValue.serverTimestamp() })
+    .catch(() => {});
+}
+
+/**
+ * Lista todas as API Keys de uma empresa (sem expor hashes e secrets).
+ * `createdByName` / `revokedByName` são resolvidos a partir de `users`.
+ */
+export async function listApiKeys(companyId: string): Promise<
   Array<
-    Omit<ApiKeyDocument, "hashedKey" | "encryptedSecretKey"> & { id: string }
+    Omit<ApiKeyDocument, "hashedKey" | "encryptedSecretKey"> & {
+      id: string;
+      createdByName?: string;
+      revokedByName?: string;
+    }
   >
 > {
   const snapshot = await adminDb
@@ -222,20 +232,41 @@ export async function listApiKeys(
     .orderBy("createdAt", "desc")
     .get();
 
-  return snapshot.docs.map((doc) => {
+  const keys = snapshot.docs.map((doc) => {
     const data = doc.data() as Omit<ApiKeyDocument, "id">;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { hashedKey, encryptedSecretKey, ...safe } = data;
     return { id: doc.id, ...safe };
   });
+
+  const uids = [
+    ...new Set(keys.flatMap((k) => [k.createdBy, k.revokedBy]).filter(Boolean)),
+  ] as string[];
+  const names = new Map<string, string>();
+  if (uids.length > 0) {
+    const userDocs = await adminDb.getAll(
+      ...uids.map((uid) => adminDb.collection("users").doc(uid)),
+    );
+    for (const u of userDocs) {
+      const name = u.data()?.displayName as string | undefined;
+      if (name) names.set(u.id, name);
+    }
+  }
+
+  return keys.map((k) => ({
+    ...k,
+    createdByName: names.get(k.createdBy),
+    revokedByName: k.revokedBy ? names.get(k.revokedBy) : undefined,
+  }));
 }
 
 /**
- * Revoga uma API Key (marca como inativa).
+ * Revoga uma API Key (marca como inativa e registra quem/quando).
  */
 export async function revokeApiKey(
   keyId: string,
   companyId: string,
+  revokedBy: string,
 ): Promise<void> {
   const doc = await adminDb.collection(COLLECTION).doc(keyId).get();
   if (!doc.exists) throw new Error("API Key not found");
@@ -245,6 +276,8 @@ export async function revokeApiKey(
 
   await doc.ref.update({
     active: false,
+    revokedAt: FieldValue.serverTimestamp(),
+    revokedBy,
     updatedAt: FieldValue.serverTimestamp(),
   });
 }

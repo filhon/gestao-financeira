@@ -6,6 +6,24 @@
 
 ---
 
+## Referência rápida
+
+API somente leitura (apenas `GET`). Cada chave tem permissões por endpoint; sem a permissão, a resposta é `403 FORBIDDEN`.
+
+| Endpoint                          | Permissão da chave | Retorna                            |
+| --------------------------------- | ------------------ | ---------------------------------- |
+| `GET /api/v1/balance`             | `balance`          | Saldo atual da empresa             |
+| `GET /api/v1/transactions`        | `transactions`     | Transações com filtros e paginação |
+| `GET /api/v1/transactions/search` | `transactions`     | Busca leve para typeahead          |
+| `GET /api/v1/transactions/{id}`   | `transactions`     | Uma transação                      |
+| `GET /api/v1/budgets`             | `budgets`          | Orçamentos por centro de custo     |
+| `GET /api/v1/cost-centers`        | `costCenters`      | Centros de custo                   |
+| `GET /api/v1/financial-summary`   | `financialSummary` | Resumo financeiro mensal           |
+
+Toda requisição leva os headers `X-API-Key`, `X-Timestamp` (Unix, segundos) e `X-Signature`, onde `X-Signature = hex(HMAC-SHA256(SecretKey, METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + hex(SHA256(body))))`. Para `GET`, o body é a string vazia. Erros seguem `{"error": {"code", "message"}}`.
+
+---
+
 ## Sumário
 
 1. [Autenticação](#1-autenticação)

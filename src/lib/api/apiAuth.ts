@@ -14,7 +14,7 @@
 import * as crypto from "crypto";
 import type { NextRequest } from "next/server";
 import type { NextResponse } from "next/server";
-import { findApiKeyByValue } from "./apiKeyService";
+import { findApiKeyByValue, touchApiKeyLastUsed } from "./apiKeyService";
 import { checkApiRateLimit } from "./apiRateLimit";
 import { ApiErrors, generateRequestId } from "./apiResponse";
 import type { ApiKeyPermission, AuthenticatedApiContext } from "./types";
@@ -158,6 +158,9 @@ export async function authenticateApiRequest(
   if (!timingSafeEqual(signature, expectedSignature)) {
     return { success: false, response: ApiErrors.signatureInvalid() };
   }
+
+  // Assinatura válida: só agora conta como uso da chave
+  touchApiKeyLastUsed(keyDoc.id);
 
   // 7. Rate limiting
   const { pathname: endpoint } = new URL(request.url);

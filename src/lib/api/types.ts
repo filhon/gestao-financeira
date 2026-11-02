@@ -40,6 +40,9 @@ export interface ApiKeyDocument {
   active: boolean;
   expiresAt?: firestore.Timestamp;
   lastUsedAt?: firestore.Timestamp;
+  /** Preenchidos na revogação (chaves antigas usam `updatedAt`). */
+  revokedAt?: firestore.Timestamp;
+  revokedBy?: string;
   createdBy: string;
   createdAt: firestore.Timestamp;
   updatedAt: firestore.Timestamp;

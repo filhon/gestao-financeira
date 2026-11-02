@@ -195,7 +195,7 @@ const ensureInterFont = async (doc: jsPDF): Promise<boolean> => {
   }
 };
 
-const ensureReportFont = async (doc: jsPDF): Promise<ReportFont> => {
+export const ensureReportFont = async (doc: jsPDF): Promise<ReportFont> => {
   const interOk = await ensureInterFont(doc);
   const font: ReportFont = interOk ? "Inter" : "helvetica";
   doc.setFont(font, "normal");

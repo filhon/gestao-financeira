@@ -19,7 +19,9 @@ export async function PATCH(
 ) {
   const { id: keyId } = await params;
   try {
-    const auth = await authenticateAdminRequest(request);
+    const auth = await authenticateAdminRequest(request, {
+      globalAdminOnly: true,
+    });
     if (!auth.success) return auth.response;
     const { companyId } = auth;
     const body = await request.json();
@@ -69,10 +71,12 @@ export async function DELETE(
 ) {
   const { id: keyId } = await params;
   try {
-    const auth = await authenticateAdminRequest(request);
+    const auth = await authenticateAdminRequest(request, {
+      globalAdminOnly: true,
+    });
     if (!auth.success) return auth.response;
-    const { companyId } = auth;
-    await revokeApiKey(keyId, companyId);
+    const { companyId, uid } = auth;
+    await revokeApiKey(keyId, companyId, uid);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Erro interno.";

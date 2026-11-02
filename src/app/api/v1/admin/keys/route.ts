@@ -5,7 +5,7 @@
  * POST /api/v1/admin/keys          → criar nova chave
  *
  * Protegido por cookie de sessão Firebase (auth_token).
- * Apenas administradores e gerentes financeiros podem acessar.
+ * Apenas administradores (role global) podem acessar.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { listApiKeys, createApiKey } from "@/lib/api/apiKeyService";
@@ -15,7 +15,9 @@ import { logger } from "@/lib/logger";
 // ── GET — Listar chaves ───────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   try {
-    const auth = await authenticateAdminRequest(request);
+    const auth = await authenticateAdminRequest(request, {
+      globalAdminOnly: true,
+    });
     if (!auth.success) return auth.response;
     const { companyId } = auth;
     const keys = await listApiKeys(companyId);
@@ -32,7 +34,9 @@ export async function GET(request: NextRequest) {
 // ── POST — Criar nova chave ───────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const auth = await authenticateAdminRequest(request);
+    const auth = await authenticateAdminRequest(request, {
+      globalAdminOnly: true,
+    });
     if (!auth.success) return auth.response;
     const { companyId, uid } = auth;
     const body = await request.json();
@@ -52,21 +56,54 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const perms = {
+      balance: !!permissions?.balance,
+      transactions: !!permissions?.transactions,
+      budgets: !!permissions?.budgets,
+      costCenters: !!permissions?.costCenters,
+      financialSummary: !!permissions?.financialSummary,
+    };
+    if (!Object.values(perms).some(Boolean)) {
+      return NextResponse.json(
+        { error: "Selecione ao menos uma permissão." },
+        { status: 400 },
+      );
+    }
+
+    // A checagem do IP é por igualdade exata (ou /32): outros formatos nunca casariam.
+    const ips = Array.isArray(allowedIPs)
+      ? allowedIPs.map((ip) => String(ip).trim()).filter(Boolean)
+      : [];
+    if (
+      ips.length > 20 ||
+      ips.some((ip) => !/^[0-9a-fA-F:.]+(\/32)?$/.test(ip))
+    ) {
+      return NextResponse.json(
+        { error: "IPs inválidos. Informe IPs exatos (máx. 20)." },
+        { status: 400 },
+      );
+    }
+
+    let expiry: Date | undefined;
+    if (expiresAt) {
+      expiry = new Date(expiresAt);
+      if (isNaN(expiry.getTime()) || expiry <= new Date()) {
+        return NextResponse.json(
+          { error: "A validade deve ser uma data futura." },
+          { status: 400 },
+        );
+      }
+    }
+
     const result = await createApiKey({
       companyId,
       name: name.trim(),
       createdBy: uid,
-      permissions: {
-        balance: !!permissions?.balance,
-        transactions: !!permissions?.transactions,
-        budgets: !!permissions?.budgets,
-        costCenters: !!permissions?.costCenters,
-        financialSummary: !!permissions?.financialSummary,
-      },
-      allowedIPs: Array.isArray(allowedIPs) ? allowedIPs : [],
+      permissions: perms,
+      allowedIPs: ips,
       rateLimitPerMinute:
         typeof rateLimitPerMinute === "number" ? rateLimitPerMinute : 60,
-      expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      expiresAt: expiry,
     });
 
     return NextResponse.json(

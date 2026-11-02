@@ -5,9 +5,11 @@ const nextConfig: NextConfig = {
   env: { NEXT_PUBLIC_BUILD_ID: String(Date.now()) },
 
   // O layout raiz lê docs/NOVIDADES.md em runtime; garante que o arquivo
-  // acompanhe o bundle do servidor em qualquer rota.
+  // acompanhe o bundle do servidor em qualquer rota. Idem para a documentação
+  // da API, servida em /api/internal/api-docs.
   outputFileTracingIncludes: {
     "/**": ["./docs/NOVIDADES.md"],
+    "/api/internal/api-docs": ["./docs/API_EXTERNA_DOCUMENTACAO_INTEGRACAO.md"],
   },
 
   compiler: {
