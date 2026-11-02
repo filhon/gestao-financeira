@@ -1,8 +1,6 @@
 import {
   collection,
-  addDoc,
   updateDoc,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -13,6 +11,8 @@ import {
   Timestamp,
   DocumentData,
   runTransaction,
+  writeBatch,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import {
@@ -22,8 +22,13 @@ import {
   Entity,
   Company,
 } from "@/lib/types";
-import { format } from "date-fns";
-import { formatCurrency } from "@/lib/utils";
+import { format, startOfMonth, endOfMonth } from "date-fns";
+import currency from "currency.js";
+import { formatCurrency, stripUndefined } from "@/lib/utils";
+import {
+  transactionService,
+  convertDates as convertTransaction,
+} from "@/lib/services/transactionService";
 import type jsPDF from "jspdf";
 
 // jspdf + autotable pesam ~150 KB gz: carregam só quando um PDF é gerado,
@@ -49,6 +54,7 @@ const convertDates = (data: DocumentData): ReimbursementReport => {
     approvalTokenExpiresAt: data.approvalTokenExpiresAt
       ? (data.approvalTokenExpiresAt as Timestamp)?.toDate()
       : undefined,
+    sentForApprovalAt: (data.sentForApprovalAt as Timestamp)?.toDate(),
     approvedAt: (data.approvedAt as Timestamp)?.toDate(),
     rejectedAt: (data.rejectedAt as Timestamp)?.toDate(),
     paidAt: (data.paidAt as Timestamp)?.toDate(),
@@ -97,11 +103,11 @@ const ensureInterFont = async (doc: jsPDF): Promise<boolean> => {
 
 // ─── Status labels ────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<ReimbursementReportStatus, string> = {
+export const STATUS_LABEL: Record<ReimbursementReportStatus, string> = {
   draft: "Rascunho",
-  pending_approval: "Aguardando Aprovação",
+  pending_approval: "Em aprovação",
   approved: "Aprovado",
-  paid: "Pago",
+  paid: "Aprovado",
   rejected: "Rejeitado",
 };
 
@@ -115,196 +121,222 @@ const TX_STATUS_LABEL: Record<string, string> = {
   rejected: "Rejeitado",
 };
 
+// ─── Itens ────────────────────────────────────────────────────────────────────
+
+/** Valor do item: o efetivamente pago, se já foi pago. */
+export const itemAmount = (t: Transaction) =>
+  t.status === "paid" && t.finalAmount ? t.finalAmount : t.amount;
+
+export const sumItems = (items: Transaction[]) =>
+  items.reduce((acc, t) => acc.add(itemAmount(t)), currency(0)).value;
+
+/** "paid" é legado: no fluxo vale como aprovado. */
+export const approvalStatus = (r: Pick<ReimbursementReport, "status">) =>
+  r.status === "paid" ? "approved" : r.status;
+
+const sameEmail = (a?: string | null, b?: string | null) =>
+  !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Quem pode aprovar ou rejeitar: o designado no envio, nunca quem criou. */
+export const canDecide = (
+  r: Pick<
+    ReimbursementReport,
+    "status" | "createdBy" | "sentBy" | "approverEmail"
+  >,
+  actor: { uid: string; email?: string | null },
+) =>
+  r.status === "pending_approval" &&
+  actor.uid !== r.createdBy &&
+  actor.uid !== r.sentBy &&
+  sameEmail(r.approverEmail, actor.email);
+
+const hashToken = async (token: string): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+/** Tira o vínculo dos itens que ainda existem, na mesma escrita do relatório. */
+async function unlinkItems(
+  batch: ReturnType<typeof writeBatch>,
+  report: ReimbursementReport,
+) {
+  const items = await transactionService.getByIds(report.transactionIds);
+  for (const t of items) {
+    if (t.reimbursementReportId && t.reimbursementReportId !== report.id)
+      continue;
+    batch.update(doc(db, "transactions", t.id), {
+      reimbursementReportId: deleteField(),
+    });
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Service
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const reimbursementReportService = {
-  // ── Get next RD number (atomic increment) ────────────────────────────────
-  getNextRdNumber: async (
-    companyId: string,
-  ): Promise<{ rdNumber: string; rdSequence: number }> => {
-    const companyRef = doc(db, "companies", companyId);
-    let nextSeq = 1;
-
-    await runTransaction(db, async (txn) => {
-      const snap = await txn.get(companyRef);
-      if (!snap.exists()) throw new Error("Company not found");
-      const current = (snap.data().rdCounter as number) ?? 0;
-      nextSeq = current + 1;
-      txn.update(companyRef, { rdCounter: nextSeq });
-    });
-
-    const rdNumber = `RD-${String(nextSeq).padStart(4, "0")}`;
-    return { rdNumber, rdSequence: nextSeq };
-  },
-
-  // ── Create ────────────────────────────────────────────────────────────────
+  /**
+   * Cria o RD e marca cada item com `reimbursementReportId`, tudo numa
+   * transação: a mesma despesa não entra em dois relatórios, nem com duas
+   * pessoas criando ao mesmo tempo. Período e total saem dos itens.
+   *
+   * ponytail: relatórios anteriores a esta versão não gravavam o vínculo nos
+   * itens; a fila da tela os exclui pelo `transactionIds` dos relatórios.
+   */
   create: async (
-    data: {
-      employeeId: string;
-      employeeName: string;
-      employeeDocument?: string;
-      employeeEmail?: string;
-      periodStart: Date;
-      periodEnd: Date;
-      transactionIds: string[];
-      totalAmount: number;
-      notes?: string;
-    },
-    user: { uid: string; email: string },
+    data: { employee: Entity; transactionIds: string[]; notes?: string },
+    user: { uid: string },
     companyId: string,
-  ): Promise<ReimbursementReport> => {
-    const { rdNumber, rdSequence } =
-      await reimbursementReportService.getNextRdNumber(companyId);
+  ): Promise<{ id: string; rdNumber: string }> => {
+    if (!data.transactionIds.length)
+      throw new Error("Selecione ao menos uma despesa.");
 
-    const docRef = await addDoc(collection(db, COLLECTION), {
-      companyId,
-      rdNumber,
-      rdSequence,
-      employeeId: data.employeeId,
-      employeeName: data.employeeName,
-      ...(data.employeeDocument
-        ? { employeeDocument: data.employeeDocument }
-        : {}),
-      ...(data.employeeEmail ? { employeeEmail: data.employeeEmail } : {}),
-      periodStart: Timestamp.fromDate(data.periodStart),
-      periodEnd: Timestamp.fromDate(data.periodEnd),
-      transactionIds: data.transactionIds,
-      totalAmount: data.totalAmount,
-      status: "draft",
-      ...(data.notes ? { notes: data.notes } : {}),
-      createdBy: user.uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+    const companyRef = doc(db, "companies", companyId);
+    const reportRef = doc(collection(db, COLLECTION));
+
+    const rdNumber = await runTransaction(db, async (txn) => {
+      const company = await txn.get(companyRef);
+      if (!company.exists()) throw new Error("Empresa não encontrada.");
+      const snaps = await Promise.all(
+        data.transactionIds.map((id) => txn.get(doc(db, "transactions", id))),
+      );
+
+      const items = snaps.map((s) => {
+        if (!s.exists())
+          throw new Error("Uma das despesas foi excluída. Atualize a página.");
+        return convertTransaction({ id: s.id, ...s.data() });
+      });
+      for (const t of items) {
+        if (
+          t.companyId !== companyId ||
+          !t.isReimbursement ||
+          t.entityId !== data.employee.id ||
+          t.status === "rejected"
+        )
+          throw new Error(
+            `"${t.description}" não é despesa de reembolso em aberto deste funcionário.`,
+          );
+        if (t.reimbursementReportId)
+          throw new Error(
+            `"${t.description}" já está em outro relatório. Atualize a página.`,
+          );
+      }
+
+      const seq = ((company.data().rdCounter as number) ?? 0) + 1;
+      const number = `RD-${String(seq).padStart(4, "0")}`;
+      const times = items.map((t) => t.dueDate.getTime());
+
+      txn.update(companyRef, { rdCounter: seq });
+      txn.set(
+        reportRef,
+        stripUndefined({
+          companyId,
+          rdNumber: number,
+          rdSequence: seq,
+          employeeId: data.employee.id,
+          employeeName: data.employee.name,
+          employeeDocument: data.employee.document || undefined,
+          employeeEmail: data.employee.email || undefined,
+          periodStart: Timestamp.fromDate(
+            startOfMonth(new Date(Math.min(...times))),
+          ),
+          periodEnd: Timestamp.fromDate(
+            endOfMonth(new Date(Math.max(...times))),
+          ),
+          transactionIds: items.map((t) => t.id),
+          totalAmount: sumItems(items),
+          status: "draft",
+          notes: data.notes?.trim() || undefined,
+          createdBy: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }),
+      );
+      for (const t of items)
+        txn.update(doc(db, "transactions", t.id), {
+          reimbursementReportId: reportRef.id,
+        });
+      return number;
     });
 
-    const snap = await getDoc(docRef);
-    return convertDates({ id: snap.id, ...snap.data()! });
+    return { id: reportRef.id, rdNumber };
   },
 
-  // ── Get all for company ───────────────────────────────────────────────────
-  getAll: async (
-    companyId: string,
-    filters?: {
-      employeeId?: string;
-      status?: ReimbursementReportStatus;
-    },
-  ): Promise<ReimbursementReport[]> => {
-    let q = query(
-      collection(db, COLLECTION),
-      where("companyId", "==", companyId),
-      orderBy("createdAt", "desc"),
+  getAll: async (companyId: string): Promise<ReimbursementReport[]> => {
+    const snapshot = await getDocs(
+      query(
+        collection(db, COLLECTION),
+        where("companyId", "==", companyId),
+        orderBy("createdAt", "desc"),
+      ),
     );
-
-    if (filters?.employeeId) {
-      q = query(q, where("employeeId", "==", filters.employeeId));
-    }
-    if (filters?.status) {
-      q = query(q, where("status", "==", filters.status));
-    }
-
-    const snapshot = await getDocs(q);
     return snapshot.docs.map((d) => convertDates({ id: d.id, ...d.data() }));
   },
 
-  // ── Get by ID ─────────────────────────────────────────────────────────────
   getById: async (id: string): Promise<ReimbursementReport | null> => {
     const snap = await getDoc(doc(db, COLLECTION, id));
     if (!snap.exists()) return null;
     return convertDates({ id: snap.id, ...snap.data() });
   },
 
-  // ── Get by approval token (magic link) ───────────────────────────────────
-  getByToken: async (token: string): Promise<ReimbursementReport | null> => {
-    const q = query(
-      collection(db, COLLECTION),
-      where("approvalToken", "==", token),
+  /** Todas as despesas de reembolso da empresa, com e sem relatório. */
+  getItems: async (companyId: string): Promise<Transaction[]> => {
+    const snapshot = await getDocs(
+      query(
+        collection(db, "transactions"),
+        where("companyId", "==", companyId),
+        where("isReimbursement", "==", true),
+      ),
     );
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
-    const d = snap.docs[0];
-    return convertDates({ id: d.id, ...d.data() });
+    return snapshot.docs.map((d) =>
+      convertTransaction({ id: d.id, ...d.data() }),
+    );
   },
 
-  // ── Send for approval ─────────────────────────────────────────────────────
+  /**
+   * Envia ao aprovador. O total é recalculado dos itens agora: o que se
+   * aprova é o valor do momento do envio. Devolve o token para o e-mail; o
+   * banco guarda só o hash.
+   */
   sendForApproval: async (
-    reportId: string,
+    report: ReimbursementReport,
     approverEmail: string,
-  ): Promise<void> => {
+    actor: { uid: string; email?: string | null },
+  ): Promise<{ token: string; totalAmount: number }> => {
+    if (sameEmail(approverEmail, actor.email))
+      throw new Error("Você não pode aprovar um relatório que você enviou.");
+    if (report.status !== "draft")
+      throw new Error("Só rascunho pode ser enviado. Atualize a página.");
+
+    const items = await transactionService.getByIds(report.transactionIds);
+    const totalAmount = sumItems(items);
     const token = crypto.randomUUID();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    await updateDoc(doc(db, COLLECTION, reportId), {
+    await updateDoc(doc(db, COLLECTION, report.id), {
       status: "pending_approval",
-      approverEmail,
-      approvalToken: token,
+      approverEmail: approverEmail.trim().toLowerCase(),
+      approvalTokenHash: await hashToken(token),
       approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
+      totalAmount,
+      sentForApprovalAt: serverTimestamp(),
+      sentBy: actor.uid,
+      rejectionReason: deleteField(),
       updatedAt: serverTimestamp(),
     });
+    return { token, totalAmount };
   },
 
-  // ── Approve by token ──────────────────────────────────────────────────────
-  approveByToken: async (
-    token: string,
-  ): Promise<{ success: boolean; error?: string }> => {
-    const report = await reimbursementReportService.getByToken(token);
-    if (!report)
-      return { success: false, error: "Token inválido ou expirado." };
-    if (report.status !== "pending_approval")
-      return {
-        success: false,
-        error: "Este relatório não está aguardando aprovação.",
-      };
-    if (
-      report.approvalTokenExpiresAt &&
-      report.approvalTokenExpiresAt < new Date()
-    )
-      return { success: false, error: "O link de aprovação expirou." };
-
-    await updateDoc(doc(db, COLLECTION, report.id), {
-      status: "approved",
-      approvalToken: null,
-      approvalTokenExpiresAt: null,
-      approvedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    return { success: true };
-  },
-
-  // ── Reject by token ───────────────────────────────────────────────────────
-  rejectByToken: async (
-    token: string,
-    reason: string,
-  ): Promise<{ success: boolean; error?: string }> => {
-    const report = await reimbursementReportService.getByToken(token);
-    if (!report)
-      return { success: false, error: "Token inválido ou expirado." };
-    if (report.status !== "pending_approval")
-      return {
-        success: false,
-        error: "Este relatório não está aguardando aprovação.",
-      };
-
-    await updateDoc(doc(db, COLLECTION, report.id), {
-      status: "rejected",
-      approvalToken: null,
-      approvalTokenExpiresAt: null,
-      rejectedAt: serverTimestamp(),
-      rejectionReason: reason,
-      updatedAt: serverTimestamp(),
-    });
-
-    return { success: true };
-  },
-
-  // ── Approve directly (by authenticated user) ──────────────────────────────
   approve: async (reportId: string, userId: string): Promise<void> => {
     await updateDoc(doc(db, COLLECTION, reportId), {
       status: "approved",
-      approvalToken: null,
+      approvalTokenHash: null,
       approvalTokenExpiresAt: null,
       approvedBy: userId,
       approvedAt: serverTimestamp(),
@@ -312,47 +344,58 @@ export const reimbursementReportService = {
     });
   },
 
-  // ── Reject directly (by authenticated user) ───────────────────────────────
+  /** Rejeitar devolve os itens à fila, para entrarem num relatório novo. */
   reject: async (
-    reportId: string,
+    report: ReimbursementReport,
     userId: string,
     reason: string,
   ): Promise<void> => {
-    await updateDoc(doc(db, COLLECTION, reportId), {
+    const batch = writeBatch(db);
+    batch.update(doc(db, COLLECTION, report.id), {
       status: "rejected",
-      approvalToken: null,
+      approvalTokenHash: null,
       approvalTokenExpiresAt: null,
       rejectedBy: userId,
       rejectedAt: serverTimestamp(),
       rejectionReason: reason,
       updatedAt: serverTimestamp(),
     });
+    await unlinkItems(batch, report);
+    await batch.commit();
   },
 
-  // ── Mark as paid ──────────────────────────────────────────────────────────
-  markAsPaid: async (reportId: string, userId: string): Promise<void> => {
-    await updateDoc(doc(db, COLLECTION, reportId), {
-      status: "paid",
-      paidBy: userId,
-      paidAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  },
-
-  // ── Revert to draft ───────────────────────────────────────────────────────
+  /** Recolhe o envio: o link deixa de valer e o RD volta a rascunho. */
   revertToDraft: async (reportId: string): Promise<void> => {
     await updateDoc(doc(db, COLLECTION, reportId), {
       status: "draft",
-      approvalToken: null,
+      approvalTokenHash: null,
       approvalTokenExpiresAt: null,
       approverEmail: null,
       updatedAt: serverTimestamp(),
     });
   },
 
-  // ── Delete (draft only) ───────────────────────────────────────────────────
-  delete: async (reportId: string): Promise<void> => {
-    await deleteDoc(doc(db, COLLECTION, reportId));
+  /** Só rascunho. Os itens voltam à fila. */
+  delete: async (report: ReimbursementReport): Promise<void> => {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, COLLECTION, report.id));
+    await unlinkItems(batch, report);
+    await batch.commit();
+  },
+
+  /** Busca os itens e gera o PDF. */
+  downloadPDF: async (
+    report: ReimbursementReport,
+    employee: Entity,
+    company: Company,
+  ): Promise<void> => {
+    const items = await transactionService.getByIds(report.transactionIds);
+    await reimbursementReportService.generatePDF(
+      report,
+      items,
+      employee,
+      company,
+    );
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -398,6 +441,8 @@ export const reimbursementReportService = {
     const textRGB = (c: [number, number, number]) =>
       doc.setTextColor(c[0], c[1], c[2]);
 
+    const allPaid =
+      transactions.length > 0 && transactions.every((t) => t.status === "paid");
     const statusColor: [number, number, number] =
       report.status === "approved" || report.status === "paid"
         ? GREEN_600
@@ -445,7 +490,10 @@ export const reimbursementReportService = {
     );
 
     // ── Status badge ─────────────────────────────────────────────────────────
-    const statusText = STATUS_LABEL[report.status];
+    const statusText =
+      allPaid && approvalStatus(report) === "approved"
+        ? "Pago"
+        : STATUS_LABEL[report.status];
     const statusBadgeX = PAGE_W - MARGIN - 36;
     fillRGB(statusColor);
     doc.roundedRect(statusBadgeX, 9, 38, 9, 2, 2, "F");

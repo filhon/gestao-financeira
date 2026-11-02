@@ -651,19 +651,78 @@ service cloud.firestore {
       allow read: if isAuthenticated() &&
         hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser', 'auditor', 'user']);
 
-      // Create: financial_manager and user (employees creating their own reports)
+      // Nasce rascunho, em nome de quem cria.
       allow create: if isAuthenticated() &&
-        hasCompanyRole(getCompanyId(), ['financial_manager', 'user']);
+        isManager(getCompanyId()) &&
+        request.resource.data.status == 'draft' &&
+        request.resource.data.createdBy == request.auth.uid;
 
-      // Update: financial_manager (approve/reject/pay), approver, releaser
-      // Also allow update via magic-link token path (unauthenticated) — handled server-side only
-      allow update: if isAuthenticated() &&
-        hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'releaser']);
+      // O que identifica o relatório não muda depois de criado: os itens
+      // apontam de volta para ele (`reimbursementReportId`).
+      function keepsIdentity() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+          ['companyId', 'createdBy', 'rdNumber', 'rdSequence', 'employeeId', 'transactionIds']);
+      }
 
-      // Delete: financial_manager only, and only drafts
+      // Segregação de funções: decide só a pessoa designada no envio, nunca
+      // quem criou, e a decisão não toca em mais nada. O magic link usa o
+      // Admin SDK e confere o token.
+      function isDesignatedApprover() {
+        return request.auth.uid != resource.data.createdBy &&
+          request.auth.uid != resource.data.get('sentBy', '') &&
+          request.auth.token.get('email', '').lower() ==
+            resource.data.get('approverEmail', '').lower() &&
+          hasCompanyRole(getCompanyId(), ['financial_manager', 'approver']) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+            ['status', 'approvedBy', 'approvedAt', 'rejectedBy', 'rejectedAt',
+             'rejectionReason', 'approvalTokenHash', 'approvalTokenExpiresAt', 'updatedAt']);
+      }
+
+      // Rascunho → em aprovação → aprovado | rejeitado. "Pago" não se grava:
+      // vem dos itens, que seguem o fluxo de contas a pagar.
+      function rdTransitionAllowed() {
+        let before = resource.data.get('status', '');
+        let after = request.resource.data.get('status', '');
+        let cid = getCompanyId();
+        return (before == 'draft' && after in ['draft', 'pending_approval'] && isManager(cid)) ||
+          (before == 'pending_approval' && after == 'draft' && isManager(cid)) ||
+          (before == 'pending_approval' && after in ['approved', 'rejected'] && isDesignatedApprover());
+      }
+
+      allow update: if isAuthenticated() && keepsIdentity() && rdTransitionAllowed();
+
+      // Excluir só rascunho.
       allow delete: if isAuthenticated() &&
-        hasCompanyRole(getCompanyId(), ['financial_manager']) &&
+        isManager(getCompanyId()) &&
         resource.data.status == 'draft';
+    }
+
+    // 18. Links pessoais de envio de nota (id = SHA-256 do token).
+    // Só o gestor vê e mexe; a rota pública lê com o Admin SDK.
+    match /reimbursement_links/{linkId} {
+      function getCompanyId() {
+        return resource != null ? resource.data.companyId : request.resource.data.companyId;
+      }
+      allow read, delete: if isAuthenticated() && isManager(getCompanyId());
+      allow create: if isAuthenticated() && isManager(getCompanyId()) &&
+        request.resource.data.createdBy == request.auth.uid;
+    }
+
+    // 19. Notas enviadas pelos funcionários pelo link. Nascem e mudam pelo
+    // servidor; o gestor só decide: lança (vira conta a pagar) ou recusa.
+    match /expense_submissions/{submissionId} {
+      function getCompanyId() {
+        return resource != null ? resource.data.companyId : request.resource.data.companyId;
+      }
+      allow read: if isAuthenticated() &&
+        hasCompanyRole(getCompanyId(), ['financial_manager', 'approver', 'auditor']);
+      allow create, delete: if false;
+      allow update: if isAuthenticated() && isManager(getCompanyId()) &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status in ['launched', 'refused'] &&
+        request.resource.data.decidedBy == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+          ['status', 'transactionId', 'refusedReason', 'decidedBy', 'decidedAt']);
     }
 
     // Default Deny

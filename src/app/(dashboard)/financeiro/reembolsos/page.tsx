@@ -1,24 +1,32 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
-import { reimbursementReportService } from "@/lib/services/reimbursementReportService";
-import { transactionService } from "@/lib/services/transactionService";
+import {
+  reimbursementReportService,
+  approvalStatus,
+  sumItems,
+} from "@/lib/services/reimbursementReportService";
+import { emailService } from "@/lib/services/emailService";
 import { entityService } from "@/lib/services/entityService";
+import { expenseSubmissionService } from "@/lib/services/expenseSubmissionService";
+import { flagMessage } from "@/lib/reimbursement/receiptChecks";
 import {
   ReimbursementReport,
-  ReimbursementReportStatus,
   Entity,
-  Company,
+  Transaction,
+  ExpenseSubmission,
 } from "@/lib/types";
-import { formatCurrency } from "@/lib/utils";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { formatCurrency, normalizeText, cn } from "@/lib/utils";
+import { formatCpfCnpj } from "@/lib/validations/cnpj";
+import { differenceInCalendarDays, format } from "date-fns";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -27,451 +35,952 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, FileText, Loader2, Receipt, Filter } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  ArrowDown,
+  ArrowUp,
+  FileText,
+  Link2,
+  Plus,
+  Search,
+} from "lucide-react";
+import { BatchSendDialog } from "@/components/features/finance/BatchSendDialog";
 import { CreateReimbursementDialog } from "@/components/features/finance/reembolsos/CreateReimbursementDialog";
-import { ReimbursementDetailsDialog } from "@/components/features/finance/reembolsos/ReimbursementDetailsDialog";
+import { SubmissionReviewPanel } from "@/components/features/finance/reembolsos/SubmissionReviewPanel";
+import { SubmissionLinksDialog } from "@/components/features/finance/reembolsos/SubmissionLinksDialog";
+import {
+  ReimbursementDetailsDialog,
+  actionError,
+} from "@/components/features/finance/reembolsos/ReimbursementDetailsDialog";
+import {
+  ApprovalBadge,
+  PaymentLabel,
+  formatPeriod,
+  paymentOf,
+} from "@/components/features/finance/reembolsos/reimbursementUi";
 
-// ─── Status config ────────────────────────────────────────────────────────────
+/** Rascunho parado há mais que isso vira alerta. */
+const STALE_DAYS = 30;
 
-const STATUS_CONFIG: Record<
-  ReimbursementReportStatus,
-  { label: string; className: string }
-> = {
-  draft: {
-    label: "Rascunho",
-    className: "bg-slate-100 text-slate-700 border-slate-300",
-  },
-  pending_approval: {
-    label: "Aguardando Aprovação",
-    className: "bg-amber-50 text-amber-700 border-amber-400",
-  },
-  approved: {
-    label: "Aprovado",
-    className: "bg-green-50 text-green-700 border-green-400",
-  },
-  paid: {
-    label: "Pago",
-    className: "bg-blue-50 text-blue-700 border-blue-400",
-  },
-  rejected: {
-    label: "Rejeitado",
-    className: "bg-red-50 text-red-700 border-red-400",
-  },
-};
+type View = "queue" | "reports";
+type SortKey = "number" | "period" | "total";
 
-// ─────────────────────────────────────────────────────────────────────────────
+const SITUATIONS = [
+  ["all", "Todas as situações"],
+  ["draft", "Rascunho"],
+  ["stale", `Parados há +${STALE_DAYS} dias`],
+  ["pending_approval", "Em aprovação"],
+  ["approved", "Aprovado"],
+  ["to_pay", "Aprovado, a pagar"],
+  ["rejected", "Rejeitado"],
+] as const;
 
 const NO_REPORTS: ReimbursementReport[] = [];
 const NO_ENTITIES: Entity[] = [];
+const NO_ITEMS: Transaction[] = [];
+const NO_SUBMISSIONS: ExpenseSubmission[] = [];
+
+/** Data em que o relatório chegou à situação atual. */
+const since = (r: ReimbursementReport) =>
+  r.approvedAt ?? r.rejectedAt ?? r.sentForApprovalAt ?? r.createdAt;
 
 export default function ReembolsosPage() {
   const { selectedCompany } = useCompany();
+  const { user } = useAuth();
   const { isAdmin, isFinancialManager } = usePermissions();
-
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState<string | null>(null);
-
-  // Filters
-  const [filterEmployee, setFilterEmployee] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-
-  // Dialogs
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedReport, setSelectedReport] =
-    useState<ReimbursementReport | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-
   const canManage = isAdmin || isFinancialManager;
 
-  // Em cache: voltar à tela mostra a lista na hora e revalida em segundo plano.
-  const {
-    data,
-    isPending: isLoading,
-    isError,
-    refetch,
-  } = useQuery({
+  const [view, setView] = useState<View | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterEmployee, setFilterEmployee] = useState("all");
+  const [situation, setSituation] = useState("all");
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
+    key: "number",
+    desc: true,
+  });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkSendOpen, setBulkSendOpen] = useState(false);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createFor, setCreateFor] = useState<string | undefined>();
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [linksOpen, setLinksOpen] = useState(false);
+
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["reimbursement-reports", selectedCompany?.id],
     queryFn: async () => {
-      const [reps, ents] = await Promise.all([
-        reimbursementReportService.getAll(selectedCompany!.id),
-        entityService.getAll(selectedCompany!.id),
+      const companyId = selectedCompany!.id;
+      const [reports, entities, items, submissions] = await Promise.all([
+        reimbursementReportService.getAll(companyId),
+        entityService.getAll(companyId),
+        // Papel sem leitura de todas as contas: sem fila, só os relatórios.
+        reimbursementReportService.getItems(companyId).catch(() => NO_ITEMS),
+        expenseSubmissionService
+          .getPending(companyId)
+          .catch(() => NO_SUBMISSIONS),
       ]);
       return {
-        reports: reps,
-        individuals: ents.filter((e) => e.type === "individual"),
+        reports,
+        individuals: entities.filter((e) => e.type === "individual"),
+        items,
+        submissions,
       };
     },
     enabled: !!selectedCompany,
     staleTime: 0,
   });
-  const reports: ReimbursementReport[] = data?.reports ?? NO_REPORTS;
-  const individuals: Entity[] = data?.individuals ?? NO_ENTITIES;
-  const loadData = () => {
-    void refetch();
-  };
+  const reports = data?.reports ?? NO_REPORTS;
+  const individuals = data?.individuals ?? NO_ENTITIES;
+  const items = data?.items ?? NO_ITEMS;
+  const submissions = data?.submissions ?? NO_SUBMISSIONS;
+  const reload = () => void refetch();
 
   useEffect(() => {
-    if (isError) toast.error("Erro ao carregar relatórios.");
+    if (isError) toast.error("Erro ao carregar os reembolsos.");
   }, [isError]);
 
-  // Listen for download PDF event dispatched by the details dialog
-  useEffect(() => {
-    const handler = async (e: Event) => {
-      const { reportId } = (e as CustomEvent).detail;
-      const report = reports.find((r) => r.id === reportId);
-      if (!report || !selectedCompany) return;
-
-      setIsGeneratingPDF(reportId);
-      try {
-        const [txs, allEntities] = await Promise.all([
-          transactionService.getByIds(report.transactionIds),
-          entityService.getAll(selectedCompany.id),
-        ]);
-        const employee = allEntities.find((e) => e.id === report.employeeId);
-        if (!employee) {
-          toast.error("Funcionário não encontrado nos cadastros.");
-          return;
-        }
-        const company: Company = {
-          ...selectedCompany,
-          createdAt: selectedCompany.createdAt ?? new Date(),
-          updatedAt: selectedCompany.updatedAt ?? new Date(),
-        };
-        await reimbursementReportService.generatePDF(
-          report,
-          txs,
-          employee,
-          company,
-        );
-        toast.success("PDF gerado com sucesso!");
-      } catch (err) {
-        console.error(err);
-        toast.error("Erro ao gerar o PDF.");
-      } finally {
-        setIsGeneratingPDF(null);
-      }
-    };
-
-    window.addEventListener("rd:download-pdf", handler);
-    return () => window.removeEventListener("rd:download-pdf", handler);
-  }, [reports, selectedCompany]);
-
-  const filteredReports = reports.filter((r) => {
-    if (filterEmployee !== "all" && r.employeeId !== filterEmployee)
-      return false;
-    if (filterStatus !== "all" && r.status !== filterStatus) return false;
-    return true;
-  });
-
-  // Summary counts
-  const counts = reports.reduce(
-    (acc, r) => {
-      acc[r.status] = (acc[r.status] ?? 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>,
+  // ── Derivados ────────────────────────────────────────────────────────────
+  const itemsById = useMemo(
+    () => new Map(items.map((t) => [t.id, t])),
+    [items],
   );
 
+  /**
+   * Fila: despesa de reembolso viva, sem relatório. Relatórios antigos não
+   * gravavam o vínculo no item, então o `transactionIds` deles também conta.
+   */
+  const queue = useMemo(() => {
+    const inReport = new Set(
+      reports
+        .filter((r) => r.status !== "rejected")
+        .flatMap((r) => r.transactionIds),
+    );
+    const live = new Set(reports.map((r) => r.id));
+    const byEmployee = new Map<string, Transaction[]>();
+    for (const t of items) {
+      if (t.status === "rejected" || !t.entityId || inReport.has(t.id))
+        continue;
+      if (t.reimbursementReportId && live.has(t.reimbursementReportId))
+        continue;
+      byEmployee.set(t.entityId, [...(byEmployee.get(t.entityId) ?? []), t]);
+    }
+    return byEmployee;
+  }, [items, reports]);
+
+  const rows = useMemo(
+    () =>
+      reports.map((r) => {
+        const own = r.transactionIds
+          .map((id) => itemsById.get(id))
+          .filter((t): t is Transaction => !!t);
+        const complete = own.length === r.transactionIds.length;
+        const status = approvalStatus(r);
+        const age = differenceInCalendarDays(
+          new Date(),
+          since(r) ?? new Date(),
+        );
+        return {
+          report: r,
+          status,
+          total: complete ? sumItems(own) : r.totalAmount,
+          payment: paymentOf(own),
+          unpaid: sumItems(own.filter((t) => t.status !== "paid")),
+          age,
+          stale: status === "draft" && age > STALE_DAYS,
+        };
+      }),
+    [reports, itemsById],
+  );
+
+  const queueRows = useMemo(
+    () =>
+      [...queue.entries()]
+        .map(([employeeId, list]) => {
+          const oldest = list.reduce((a, b) => (a.dueDate < b.dueDate ? a : b));
+          const employee = individuals.find((e) => e.id === employeeId);
+          return {
+            employeeId,
+            name: employee?.name ?? list[0].supplierOrClient ?? "Sem cadastro",
+            document: employee?.document,
+            count: list.length,
+            total: sumItems(list),
+            oldest: oldest.dueDate,
+            withoutNote: list.filter(
+              (t) => !(t.attachments ?? []).some((a) => a.url),
+            ).length,
+          };
+        })
+        .sort((a, b) => a.oldest.getTime() - b.oldest.getTime()),
+    [queue, individuals],
+  );
+
+  const summary = useMemo(() => {
+    const queued = [...queue.values()].flat();
+    const pending = rows.filter((r) => r.status === "pending_approval");
+    const toPay = rows.filter((r) => r.status === "approved" && r.unpaid > 0);
+    const stale = rows.filter((r) => r.stale);
+    return {
+      submitted: {
+        count: submissions.length,
+        total: submissions.reduce((s, x) => s + (x.amount ?? 0), 0),
+      },
+      queued: { count: queued.length, total: sumItems(queued) },
+      pending: {
+        count: pending.length,
+        total: pending.reduce((s, r) => s + r.total, 0),
+      },
+      toPay: {
+        count: toPay.length,
+        total: toPay.reduce((s, r) => s + r.unpaid, 0),
+      },
+      stale: {
+        count: stale.length,
+        total: stale.reduce((s, r) => s + r.total, 0),
+      },
+    };
+  }, [queue, rows, submissions]);
+
+  const queueCount = queueRows.length + submissions.length;
+  const activeView: View = view ?? (queueCount ? "queue" : "reports");
+  const reviewing = submissions.find((s) => s.id === reviewId) ?? null;
+
+  const visibleRows = useMemo(() => {
+    const term = normalizeText(search.trim());
+    const filtered = rows.filter((row) => {
+      const r = row.report;
+      if (filterEmployee !== "all" && r.employeeId !== filterEmployee)
+        return false;
+      if (situation === "stale" && !row.stale) return false;
+      if (
+        situation === "to_pay" &&
+        !(row.status === "approved" && row.unpaid > 0)
+      )
+        return false;
+      if (
+        !["all", "stale", "to_pay"].includes(situation) &&
+        row.status !== situation
+      )
+        return false;
+      if (
+        term &&
+        !normalizeText(
+          `${r.rdNumber} ${r.employeeName} ${r.employeeDocument ?? ""}`,
+        ).includes(term)
+      )
+        return false;
+      return true;
+    });
+    const value = (row: (typeof rows)[number]) =>
+      sort.key === "total"
+        ? row.total
+        : sort.key === "period"
+          ? row.report.periodStart.getTime()
+          : row.report.rdSequence;
+    return filtered.sort(
+      (a, b) => (value(a) - value(b)) * (sort.desc ? -1 : 1),
+    );
+  }, [rows, search, filterEmployee, situation, sort]);
+
+  const selectableIds = visibleRows
+    .filter((r) => r.status === "draft")
+    .map((r) => r.report.id);
+  const selectedDrafts = reports.filter(
+    (r) => selected.has(r.id) && r.status === "draft",
+  );
+
+  const detailsReport = reports.find((r) => r.id === detailsId) ?? null;
+  const hasFilters =
+    !!search || filterEmployee !== "all" || situation !== "all";
+
+  // ── Ações ────────────────────────────────────────────────────────────────
+  const openCreate = (employeeId?: string) => {
+    setCreateFor(employeeId);
+    setCreateOpen(true);
+  };
+
+  const showSituation = (value: string) => {
+    setView("reports");
+    setSituation(value);
+  };
+
+  const downloadPdf = async (report: ReimbursementReport) => {
+    if (!selectedCompany) return;
+    const employee = individuals.find((e) => e.id === report.employeeId);
+    if (!employee) {
+      toast.error("Funcionário não encontrado nos cadastros.");
+      return;
+    }
+    try {
+      await reimbursementReportService.downloadPDF(
+        report,
+        employee,
+        selectedCompany,
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error("Erro ao gerar o PDF.");
+    }
+  };
+
+  const handleBulkSend = async (_id: string, email: string) => {
+    if (!user) return;
+    const actor = { uid: user.uid, email: user.email };
+    const results = await Promise.allSettled(
+      selectedDrafts.map(async (report) => {
+        const { token, totalAmount } =
+          await reimbursementReportService.sendForApproval(
+            report,
+            email,
+            actor,
+          );
+        await emailService.sendReimbursementApprovalRequest(
+          { ...report, totalAmount },
+          token,
+          email,
+          user.displayName || user.email || "Financeiro",
+        );
+      }),
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+    reload();
+    setSelected(new Set());
+    if (failed.length === results.length) {
+      const reason = (failed[0] as PromiseRejectedResult).reason;
+      toast.error(actionError(reason, "Erro ao enviar para aprovação."));
+      throw reason;
+    }
+    const sent = results.length - failed.length;
+    if (failed.length)
+      toast.warning(
+        `${sent} enviados, ${failed.length} com erro. Confira os rascunhos.`,
+      );
+    else
+      toast.success(
+        sent === 1
+          ? `Link enviado para ${email}.`
+          : `${sent} relatórios enviados para ${email}.`,
+      );
+  };
+
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }));
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
-            Relatórios de Despesas
-          </h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            Reembolsos de funcionários — histórico e gestão
-          </p>
-        </div>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+          Reembolsos
+        </h1>
         {canManage && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Relatório
+          <Button onClick={() => openCreate()}>
+            <Plus className="mr-2 h-4 w-4" />
+            Novo relatório
           </Button>
         )}
       </div>
 
-      {/* Summary KPIs */}
-      {!isLoading && reports.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      {/* Resumo: quanto o financeiro deve aos funcionários, por etapa */}
+      {isPending ? (
+        <Skeleton className="h-[68px] w-full rounded-lg" />
+      ) : (
+        <div className="grid grid-cols-2 divide-x divide-y rounded-lg border md:grid-cols-5 md:divide-y-0">
           {(
             [
-              "draft",
-              "pending_approval",
-              "approved",
-              "paid",
-              "rejected",
-            ] as ReimbursementReportStatus[]
-          ).map((status) => {
-            const cfg = STATUS_CONFIG[status];
-            const count = counts[status] ?? 0;
-            return (
-              <button
-                key={status}
-                onClick={() =>
-                  setFilterStatus((prev) => (prev === status ? "all" : status))
-                }
+              {
+                label: "Enviadas, a conferir",
+                value: summary.submitted,
+                unit: ["nota", "notas"],
+                onClick: () => setView("queue"),
+                active: false,
+              },
+              {
+                label: "Lançadas sem relatório",
+                value: summary.queued,
+                unit: ["despesa", "despesas"],
+                onClick: () => setView("queue"),
+                active: activeView === "queue",
+              },
+              {
+                label: "Em aprovação",
+                value: summary.pending,
+                unit: ["relatório", "relatórios"],
+                onClick: () => showSituation("pending_approval"),
+                active:
+                  activeView === "reports" && situation === "pending_approval",
+              },
+              {
+                label: "Aprovado, a pagar",
+                value: summary.toPay,
+                unit: ["relatório", "relatórios"],
+                onClick: () => showSituation("to_pay"),
+                active: activeView === "reports" && situation === "to_pay",
+              },
+              {
+                label: `Rascunhos parados há +${STALE_DAYS} dias`,
+                value: summary.stale,
+                unit: ["relatório", "relatórios"],
+                onClick: () => showSituation("stale"),
+                active: activeView === "reports" && situation === "stale",
+                warn: summary.stale.count > 0,
+              },
+            ] as const
+          ).map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              onClick={s.onClick}
+              className={cn(
+                "px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                s.active && "bg-muted/70",
+              )}
+            >
+              <p
                 className={cn(
-                  "rounded-lg border p-3 text-left transition-all",
-                  filterStatus === status
-                    ? cfg.className
-                    : "bg-card hover:bg-muted/40",
+                  "text-xs text-muted-foreground",
+                  "warn" in s && s.warn && "text-amber-700 dark:text-amber-400",
                 )}
               >
-                <p className="text-xs text-muted-foreground">{cfg.label}</p>
-                <p className="text-2xl font-bold mt-0.5">{count}</p>
-              </button>
-            );
-          })}
+                {s.label}
+              </p>
+              <p className="font-financial text-lg font-semibold tabular-nums">
+                {formatCurrency(s.value.total)}
+              </p>
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {s.value.count} {s.value.count === 1 ? s.unit[0] : s.unit[1]}
+              </p>
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Filter className="h-4 w-4 text-muted-foreground" />
-        <Select value={filterEmployee} onValueChange={setFilterEmployee}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Funcionário" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os Funcionários</SelectItem>
-            {individuals.map((e) => (
-              <SelectItem key={e.id} value={e.id}>
-                {e.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os Status</SelectItem>
-            {(
-              Object.entries(STATUS_CONFIG) as [
-                ReimbursementReportStatus,
-                { label: string },
-              ][]
-            ).map(([status, { label }]) => (
-              <SelectItem key={status} value={status}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {(filterEmployee !== "all" || filterStatus !== "all") && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setFilterEmployee("all");
-              setFilterStatus("all");
-            }}
+      {/* Abas */}
+      <div className="flex items-center gap-1 border-b" role="tablist">
+        {(
+          [
+            ["queue", "A reembolsar", queueCount],
+            ["reports", "Relatórios", reports.length],
+          ] as const
+        ).map(([key, label, count]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={activeView === key}
+            onClick={() => setView(key)}
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm transition-colors",
+              activeView === key
+                ? "border-foreground font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
           >
-            Limpar filtros
-          </Button>
-        )}
+            {label}
+            <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
+              {count}
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* Table */}
-      {isLoading ? (
+      {isPending ? (
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-lg" />
+            <Skeleton key={i} className="h-12 w-full rounded-md" />
           ))}
         </div>
-      ) : filteredReports.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <div className="h-14 w-14 rounded-full bg-muted flex items-center justify-center">
-            <Receipt className="h-7 w-7 text-muted-foreground" />
-          </div>
-          <div>
-            <p className="font-semibold text-lg">
-              {reports.length === 0
-                ? "Nenhum relatório de despesas ainda"
-                : "Nenhum resultado com os filtros aplicados"}
-            </p>
-            <p className="text-muted-foreground text-sm mt-1">
-              {reports.length === 0
-                ? 'Crie o primeiro relatório clicando em "Novo Relatório".'
-                : "Tente ajustar os filtros."}
-            </p>
-          </div>
-          {canManage && reports.length === 0 && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Relatório
-            </Button>
+      ) : activeView === "queue" ? (
+        <div className="space-y-6">
+          {canManage && (
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLinksOpen(true)}
+              >
+                <Link2 className="mr-2 h-4 w-4" />
+                Links de envio
+              </Button>
+            </div>
+          )}
+
+          {/* ── Notas enviadas pelo link, a conferir ──────────────────── */}
+          {submissions.length > 0 && (
+            <section>
+              <h2 className="mb-2 text-sm font-medium">
+                Enviadas pelos funcionários
+                <span className="ml-1.5 text-xs font-normal text-muted-foreground tabular-nums">
+                  {submissions.length}
+                </span>
+              </h2>
+              <ul className="divide-y rounded-lg border">
+                {submissions.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      onClick={() => setReviewId(s.id)}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted/30"
+                    >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-muted">
+                        {s.attachment.type.startsWith("image/") ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.attachment.url}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {s.description}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {s.employeeName} ·{" "}
+                          {s.date ? format(s.date, "dd/MM/yyyy") : "sem data"}
+                        </span>
+                        {s.flags.length > 0 && (
+                          <span className="block truncate text-xs text-amber-700 dark:text-amber-400">
+                            {s.flags.map(flagMessage).join(" ")}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 font-financial text-sm font-semibold tabular-nums">
+                        {s.amount != null ? formatCurrency(s.amount) : "-"}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* ── Fila: despesas lançadas sem relatório, por funcionário ───── */}
+          {queueRows.length === 0 ? (
+            submissions.length === 0 && (
+              <div className="py-14 text-center">
+                <p className="font-medium">Nada a reembolsar</p>
+                <p className="mx-auto mt-1 max-w-prose text-sm text-muted-foreground">
+                  Toda despesa marcada como reembolso já está em um relatório.
+                  Para aparecer aqui, a conta a pagar precisa da opção Despesa
+                  de reembolso e do funcionário como fornecedor, ou o
+                  funcionário manda a nota pelo link de envio.
+                </p>
+              </div>
+            )
+          ) : (
+            <section>
+              {submissions.length > 0 && (
+                <h2 className="mb-2 text-sm font-medium">
+                  Lançadas, sem relatório
+                </h2>
+              )}
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                      <th className="px-4 py-2.5 text-left font-medium">
+                        Funcionário
+                      </th>
+                      <th className="px-4 py-2.5 text-right font-medium">
+                        Despesas
+                      </th>
+                      <th className="px-4 py-2.5 text-left font-medium">
+                        Mais antiga
+                      </th>
+                      <th className="px-4 py-2.5 text-right font-medium">
+                        Sem nota
+                      </th>
+                      <th className="px-4 py-2.5 text-right font-medium">
+                        Total
+                      </th>
+                      <th className="px-4 py-2.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queueRows.map((q) => {
+                      const days = differenceInCalendarDays(
+                        new Date(),
+                        q.oldest,
+                      );
+                      return (
+                        <tr
+                          key={q.employeeId}
+                          className="border-b last:border-b-0 hover:bg-muted/30"
+                        >
+                          <td className="px-4 py-2.5">
+                            <p className="font-medium">{q.name}</p>
+                            {q.document && (
+                              <p className="text-xs text-muted-foreground tabular-nums">
+                                {formatCpfCnpj(q.document)}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">
+                            {q.count}
+                          </td>
+                          <td className="px-4 py-2.5 whitespace-nowrap tabular-nums">
+                            {format(q.oldest, "dd/MM/yyyy")}
+                            <span
+                              className={cn(
+                                "ml-2 text-xs",
+                                days > STALE_DAYS
+                                  ? "text-amber-700 dark:text-amber-400"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {days > 0 ? `há ${days} dias` : "hoje"}
+                            </span>
+                          </td>
+                          <td
+                            className={cn(
+                              "px-4 py-2.5 text-right tabular-nums",
+                              q.withoutNote
+                                ? "text-amber-700 dark:text-amber-400"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {q.withoutNote || "-"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-financial font-semibold tabular-nums whitespace-nowrap">
+                            {formatCurrency(q.total)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            {canManage && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openCreate(q.employeeId)}
+                              >
+                                Gerar relatório
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Nº
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Funcionário
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">
-                  Período
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
-                  Itens
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Total
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Status
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  PDF
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredReports.map((r, i) => {
-                const cfg = STATUS_CONFIG[r.status];
-                const isDownloading = isGeneratingPDF === r.id;
-                return (
-                  <tr
-                    key={r.id}
-                    onClick={() => {
-                      setSelectedReport(r);
-                      setDetailsOpen(true);
-                    }}
-                    className={cn(
-                      "border-b last:border-b-0 cursor-pointer hover:bg-muted/30 transition-colors",
-                      i % 2 === 0 ? "bg-background" : "bg-muted/10",
-                    )}
-                  >
-                    <td className="px-4 py-3 font-mono font-semibold text-xs">
-                      {r.rdNumber}
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium truncate max-w-[140px]">
-                        {r.employeeName}
-                      </p>
-                      {r.employeeDocument && (
-                        <p className="text-xs text-muted-foreground">
-                          {r.employeeDocument}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell whitespace-nowrap">
-                      {format(r.periodStart, "dd/MM/yy", { locale: ptBR })} —{" "}
-                      {format(r.periodEnd, "dd/MM/yy", { locale: ptBR })}
-                    </td>
-                    <td className="px-4 py-3 text-center text-xs text-muted-foreground hidden md:table-cell">
-                      {r.transactionIds.length}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold whitespace-nowrap">
-                      {formatCurrency(r.totalAmount)}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-xs px-2 py-0.5 whitespace-nowrap",
-                          cfg.className,
-                        )}
-                      >
-                        {cfg.label}
-                      </Badge>
-                    </td>
-                    <td
-                      className="px-4 py-3 text-center"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        disabled={isDownloading}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!selectedCompany) return;
-                          setIsGeneratingPDF(r.id);
-                          try {
-                            const [txs, allEnts] = await Promise.all([
-                              transactionService.getByIds(r.transactionIds),
-                              entityService.getAll(selectedCompany.id),
-                            ]);
-                            const emp = allEnts.find(
-                              (en) => en.id === r.employeeId,
-                            );
-                            if (!emp) {
-                              toast.error("Funcionário não encontrado.");
-                              return;
-                            }
-                            const company: Company = {
-                              ...selectedCompany,
-                              createdAt:
-                                selectedCompany.createdAt ?? new Date(),
-                              updatedAt:
-                                selectedCompany.updatedAt ?? new Date(),
-                            };
-                            await reimbursementReportService.generatePDF(
-                              r,
-                              txs,
-                              emp,
-                              company,
-                            );
-                            toast.success("PDF gerado!");
-                          } catch (err) {
-                            console.error(err);
-                            toast.error("Erro ao gerar PDF.");
-                          } finally {
-                            setIsGeneratingPDF(null);
+        /* ── Relatórios ─────────────────────────────────────────────────── */
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-64">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Nº, nome ou CPF"
+                className="pl-8"
+                aria-label="Buscar relatório"
+              />
+            </div>
+            <Select value={filterEmployee} onValueChange={setFilterEmployee}>
+              <SelectTrigger className="w-56" aria-label="Funcionário">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os funcionários</SelectItem>
+                {individuals
+                  .filter((e) => reports.some((r) => r.employeeId === e.id))
+                  .map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Select value={situation} onValueChange={setSituation}>
+              <SelectTrigger className="w-56" aria-label="Situação">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SITUATIONS.map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {hasFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setFilterEmployee("all");
+                  setSituation("all");
+                }}
+              >
+                Limpar filtros
+              </Button>
+            )}
+            {canManage && selectedDrafts.length > 0 && (
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  {selectedDrafts.length} selecionado
+                  {selectedDrafts.length > 1 && "s"}
+                </span>
+                <Button size="sm" onClick={() => setBulkSendOpen(true)}>
+                  Enviar para aprovação
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {visibleRows.length === 0 ? (
+            <div className="py-14 text-center">
+              <p className="font-medium">
+                {reports.length === 0
+                  ? "Nenhum relatório ainda"
+                  : "Nenhum relatório com esses filtros"}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {reports.length === 0
+                  ? "Gere o primeiro a partir da aba A reembolsar."
+                  : "Ajuste a busca ou limpe os filtros."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                    {canManage && (
+                      <th className="w-10 px-4 py-2.5">
+                        <Checkbox
+                          aria-label="Selecionar rascunhos"
+                          disabled={!selectableIds.length}
+                          checked={
+                            selectableIds.length > 0 &&
+                            selectableIds.every((id) => selected.has(id))
                           }
-                        }}
-                      >
-                        {isDownloading ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <FileText className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </td>
+                          onCheckedChange={(v) =>
+                            setSelected(v ? new Set(selectableIds) : new Set())
+                          }
+                        />
+                      </th>
+                    )}
+                    <SortHeader
+                      label="Nº"
+                      active={sort.key === "number"}
+                      desc={sort.desc}
+                      onClick={() => toggleSort("number")}
+                    />
+                    <th className="px-4 py-2.5 text-left font-medium">
+                      Funcionário
+                    </th>
+                    <SortHeader
+                      label="Período"
+                      active={sort.key === "period"}
+                      desc={sort.desc}
+                      onClick={() => toggleSort("period")}
+                      className="hidden sm:table-cell"
+                    />
+                    <th className="hidden px-4 py-2.5 text-right font-medium md:table-cell">
+                      Itens
+                    </th>
+                    <SortHeader
+                      label="Total"
+                      active={sort.key === "total"}
+                      desc={sort.desc}
+                      onClick={() => toggleSort("total")}
+                      align="right"
+                    />
+                    <th className="px-4 py-2.5 text-left font-medium">
+                      Situação
+                    </th>
+                    <th className="hidden px-4 py-2.5 text-left font-medium lg:table-cell">
+                      Pagamento
+                    </th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {visibleRows.map((row) => {
+                    const r = row.report;
+                    const isDraft = row.status === "draft";
+                    return (
+                      <tr
+                        key={r.id}
+                        onClick={() => setDetailsId(r.id)}
+                        className={cn(
+                          "cursor-pointer border-b last:border-b-0 hover:bg-muted/30",
+                          detailsId === r.id && "bg-muted/50",
+                        )}
+                      >
+                        {canManage && (
+                          <td
+                            className="px-4 py-2.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {isDraft && (
+                              <Checkbox
+                                aria-label={`Selecionar ${r.rdNumber}`}
+                                checked={selected.has(r.id)}
+                                onCheckedChange={(v) =>
+                                  setSelected((prev) => {
+                                    const next = new Set(prev);
+                                    if (v) next.add(r.id);
+                                    else next.delete(r.id);
+                                    return next;
+                                  })
+                                }
+                              />
+                            )}
+                          </td>
+                        )}
+                        <td className="px-4 py-2.5 font-mono text-xs font-semibold whitespace-nowrap">
+                          {r.rdNumber}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium">{r.employeeName}</p>
+                          {r.employeeDocument && (
+                            <p className="text-xs text-muted-foreground tabular-nums">
+                              {formatCpfCnpj(r.employeeDocument)}
+                            </p>
+                          )}
+                        </td>
+                        <td className="hidden px-4 py-2.5 whitespace-nowrap sm:table-cell">
+                          {formatPeriod(r.periodStart, r.periodEnd)}
+                        </td>
+                        <td className="hidden px-4 py-2.5 text-right text-muted-foreground tabular-nums md:table-cell">
+                          {r.transactionIds.length}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-financial font-semibold tabular-nums whitespace-nowrap">
+                          {formatCurrency(row.total)}
+                        </td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          <ApprovalBadge report={r} />
+                          <span
+                            className={cn(
+                              "ml-2 text-xs",
+                              row.stale
+                                ? "text-amber-700 dark:text-amber-400"
+                                : "text-muted-foreground",
+                            )}
+                            title={
+                              since(r)
+                                ? format(since(r)!, "dd/MM/yyyy")
+                                : undefined
+                            }
+                          >
+                            {row.age > 0 ? `há ${row.age} dias` : "hoje"}
+                          </span>
+                        </td>
+                        <td className="hidden px-4 py-2.5 whitespace-nowrap lg:table-cell">
+                          <PaymentLabel payment={row.payment} />
+                          {row.status === "approved" && row.unpaid > 0 && (
+                            <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+                              falta {formatCurrency(row.unpaid)}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Dialogs */}
       <CreateReimbursementDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={loadData}
+        employees={individuals.filter((e) => e.active !== false)}
+        queue={queue}
+        initialEmployeeId={createFor}
+        onCreated={(id) => {
+          reload();
+          setView("reports");
+          setDetailsId(id);
+        }}
+      />
+
+      <SubmissionReviewPanel
+        submission={reviewing}
+        onClose={() => setReviewId(null)}
+        onDone={reload}
+      />
+
+      <SubmissionLinksDialog
+        open={linksOpen}
+        onOpenChange={setLinksOpen}
+        employees={individuals.filter((e) => e.active !== false)}
       />
 
       <ReimbursementDetailsDialog
-        report={selectedReport}
-        open={detailsOpen}
-        onOpenChange={(open) => {
-          setDetailsOpen(open);
-          if (!open) setSelectedReport(null);
-        }}
-        onUpdated={() => {
-          loadData();
-          // Refresh selectedReport from fresh data
-          if (selectedReport) {
-            reimbursementReportService
-              .getById(selectedReport.id)
-              .then((r) => r && setSelectedReport(r));
-          }
-        }}
+        report={detailsReport}
+        open={!!detailsReport}
+        onOpenChange={(open) => !open && setDetailsId(null)}
+        onUpdated={reload}
+        onDownloadPdf={downloadPdf}
       />
+
+      {selectedCompany && (
+        <BatchSendDialog
+          isOpen={bulkSendOpen}
+          onClose={() => setBulkSendOpen(false)}
+          onSend={handleBulkSend}
+          companyId={selectedCompany.id}
+          title={
+            selectedDrafts.length === 1
+              ? `Enviar ${selectedDrafts[0].rdNumber} para aprovação`
+              : `Enviar ${selectedDrafts.length} relatórios para aprovação`
+          }
+          description={`Total de ${formatCurrency(
+            selectedDrafts.reduce(
+              (s, r) =>
+                s + (rows.find((x) => x.report.id === r.id)?.total ?? 0),
+              0,
+            ),
+          )}. Cada relatório gera um link por e-mail, válido por 7 dias. Quem envia não pode aprovar.`}
+          buttonText="Enviar"
+        />
+      )}
     </div>
+  );
+}
+
+function SortHeader({
+  label,
+  active,
+  desc,
+  onClick,
+  align = "left",
+  className,
+}: {
+  label: string;
+  active: boolean;
+  desc: boolean;
+  onClick: () => void;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  const Icon = desc ? ArrowDown : ArrowUp;
+  return (
+    <th
+      className={cn("px-4 py-2.5 font-medium", className)}
+      aria-sort={active ? (desc ? "descending" : "ascending") : undefined}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground",
+          align === "right" && "w-full justify-end",
+          active && "text-foreground",
+        )}
+      >
+        {label}
+        {active && <Icon className="h-3 w-3" />}
+      </button>
+    </th>
   );
 }

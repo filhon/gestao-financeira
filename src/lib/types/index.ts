@@ -998,6 +998,10 @@ export interface ReconciliationRule {
 
 // ─── Reimbursement Reports ────────────────────────────────────────────────────
 
+/**
+ * "paid" é legado (marcação manual antiga): o pagamento agora vem dos itens.
+ * Trate como "approved" no fluxo.
+ */
 export type ReimbursementReportStatus =
   | "draft"
   | "pending_approval"
@@ -1029,10 +1033,12 @@ export interface ReimbursementReport {
   status: ReimbursementReportStatus;
   notes?: string;
 
-  // Approval via magic link
-  approvalToken?: string | null;
+  // Approval via magic link (só o hash fica no banco; o token vai no e-mail)
+  approvalTokenHash?: string | null;
   approvalTokenExpiresAt?: Date | null;
   approverEmail?: string;
+  sentForApprovalAt?: Date;
+  sentBy?: string;
   approvedBy?: string;
   approvedAt?: Date;
   rejectedBy?: string;
@@ -1047,4 +1053,54 @@ export interface ReimbursementReport {
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Link pessoal do funcionário para enviar notas sem login. O id do documento
+ * é o SHA-256 do token; o token fica para o gestor copiar de novo.
+ */
+export interface ReimbursementLink {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  token: string;
+  createdBy: string;
+  createdAt: Date;
+}
+
+export type ExpenseSubmissionStatus = "pending" | "launched" | "refused";
+
+/** Nota enviada pelo funcionário, à espera de o financeiro lançar ou recusar. */
+export interface ExpenseSubmission {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  linkId: string;
+  status: ExpenseSubmissionStatus;
+  attachment: {
+    id: string;
+    url: string;
+    name: string;
+    type: string;
+    path: string;
+  };
+  description: string;
+  amount: number | null;
+  date: Date | null;
+  supplierName: string | null;
+  supplierDocument: string | null;
+  accessKey: string | null;
+  confidence: number;
+  /** O funcionário corrigiu o que a IA leu. */
+  edited?: boolean;
+  /** "Para que foi", escrito pelo funcionário. */
+  note?: string;
+  flags: import("@/lib/reimbursement/receiptChecks").ReceiptFlag[];
+  createdAt: Date;
+  transactionId?: string;
+  refusedReason?: string;
+  decidedBy?: string;
+  decidedAt?: Date;
 }

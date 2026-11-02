@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
+import { formatCpfCnpj } from "@/lib/validations/cnpj";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,12 @@ interface ReportData {
   transactionCount: number;
   status: string;
   notes?: string;
+  items?: {
+    date?: string;
+    description: string;
+    amount: number;
+    attachments: { name: string; url: string }[];
+  }[];
 }
 
 type PageState =
@@ -219,7 +226,7 @@ export default function ApproveReimbursementPage() {
                     </p>
                     {reportData.employeeDocument && (
                       <p className="text-slate-500 text-xs">
-                        CPF: {reportData.employeeDocument}
+                        CPF: {formatCpfCnpj(reportData.employeeDocument)}
                       </p>
                     )}
                   </div>
@@ -228,7 +235,7 @@ export default function ApproveReimbursementPage() {
                       Período
                     </p>
                     <p className="font-semibold text-slate-900 mt-0.5">
-                      {formatDate(reportData.periodStart)} —{" "}
+                      {formatDate(reportData.periodStart)} a{" "}
                       {formatDate(reportData.periodEnd)}
                     </p>
                     <p className="text-slate-500 text-xs">
@@ -245,6 +252,45 @@ export default function ApproveReimbursementPage() {
                     {formatCurrency(reportData.totalAmount)}
                   </p>
                 </div>
+
+                {!!reportData.items?.length && (
+                  <ul className="divide-y rounded-lg border text-sm">
+                    {reportData.items.map((item, i) => (
+                      <li key={i} className="flex items-start gap-3 px-3 py-2">
+                        <span className="w-12 shrink-0 text-xs text-slate-500 tabular-nums pt-0.5">
+                          {item.date
+                            ? format(new Date(item.date), "dd/MM")
+                            : ""}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-slate-800">{item.description}</p>
+                          {item.attachments.length ? (
+                            <div className="flex flex-wrap gap-x-3 text-xs">
+                              {item.attachments.map((a, j) => (
+                                <a
+                                  key={j}
+                                  href={a.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-700 underline underline-offset-2"
+                                >
+                                  {item.attachments.length > 1
+                                    ? `Nota ${j + 1}`
+                                    : "Ver nota"}
+                                </a>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-amber-700">Sem nota</p>
+                          )}
+                        </div>
+                        <span className="shrink-0 font-medium tabular-nums text-slate-900">
+                          {formatCurrency(item.amount)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
                 {reportData.notes && (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
@@ -333,8 +379,7 @@ export default function ApproveReimbursementPage() {
                   Reembolso aprovado!
                 </p>
                 <p className="text-slate-500 text-sm mt-2">
-                  O relatório foi aprovado com sucesso. O funcionário será
-                  notificado sobre o pagamento.
+                  O relatório foi aprovado. O financeiro segue com o pagamento.
                 </p>
               </div>
             </CardContent>
@@ -354,7 +399,8 @@ export default function ApproveReimbursementPage() {
                   Reembolso recusado
                 </p>
                 <p className="text-slate-500 text-sm mt-2">
-                  O relatório foi recusado. O solicitante será notificado.
+                  O relatório foi recusado e as despesas voltaram para o
+                  financeiro.
                 </p>
               </div>
             </CardContent>

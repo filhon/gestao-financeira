@@ -226,12 +226,12 @@ export const emailService = {
 
   sendReimbursementApprovalRequest: async (
     report: ReimbursementReport,
+    token: string,
     approverEmail: string,
     senderName: string,
   ): Promise<EmailResponse> => {
     try {
       const appDomain = getAppDomain();
-      const token = report.approvalToken;
       const period = `${new Intl.DateTimeFormat("pt-BR").format(report.periodStart)} — ${new Intl.DateTimeFormat("pt-BR").format(report.periodEnd)}`;
       const totalAmount = new Intl.NumberFormat("pt-BR", {
         style: "currency",

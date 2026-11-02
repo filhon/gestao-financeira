@@ -45,7 +45,7 @@ import { paymentBatchService } from "@/lib/services/paymentBatchService";
 
 const COLLECTION_NAME = "transactions";
 
-const convertDates = (data: DocumentData): Transaction => {
+export const convertDates = (data: DocumentData): Transaction => {
   return {
     id: data.id,
     ...data,

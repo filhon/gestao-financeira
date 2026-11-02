@@ -14,6 +14,74 @@ export interface ExtractedDocumentData {
   confidence: number;
 }
 
+export interface ExtractedReceiptData {
+  description: string | null;
+  amount: number | null;
+  date: string | null;
+  supplierName: string | null;
+  supplierDocument: string | null;
+  accessKey: string | null;
+  confidence: number;
+}
+
+/** Nota de despesa de funcionário: cupom, NFC-e, recibo, táxi, pedágio. */
+export async function extractReceiptData(
+  fileBuffer: Buffer,
+  mimeType: string,
+): Promise<ExtractedReceiptData> {
+  const empty: ExtractedReceiptData = {
+    description: null,
+    amount: null,
+    date: null,
+    supplierName: null,
+    supplierDocument: null,
+    accessKey: null,
+    confidence: 0,
+  };
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      config: { responseMimeType: "application/json" },
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: fileBuffer.toString("base64") } },
+            {
+              text: `Este é o comprovante de uma despesa que um funcionário pagou do próprio bolso e quer reembolsar (cupom fiscal, NFC-e, NF-e, recibo, corrida de táxi/app, pedágio, estacionamento).
+
+Devolva só este JSON:
+{
+  "description": "O que foi, curto, com o estabelecimento. Ex.: 'Almoço - Restaurante Sabor', 'Táxi aeroporto', 'Estacionamento Shopping X'",
+  "amount": 58.9,
+  "date": "2026-10-31",
+  "supplierName": "Nome do estabelecimento",
+  "supplierDocument": "CNPJ ou CPF do emitente, só dígitos",
+  "accessKey": "Chave de acesso da NF-e/NFC-e, 44 dígitos sem espaços (fica perto do QR code, em grupos de 4)",
+  "confidence": 85
+}
+
+Regras:
+- "amount" é o valor TOTAL pago, número com ponto decimal, sem R$.
+- "date" é a data de emissão/da despesa, ISO (AAAA-MM-DD).
+- Campo que não aparece no documento: null. Não invente.
+- "confidence" de 0 a 100: sua confiança no valor e na data.`,
+            },
+          ],
+        },
+      ],
+    });
+    const text = (response.text ?? "")
+      .trim()
+      .replace(/^```json?\s*/i, "")
+      .replace(/\s*```$/i, "");
+    return { ...empty, ...(JSON.parse(text) as Partial<ExtractedReceiptData>) };
+  } catch (error) {
+    console.error("[extractReceiptData] leitura falhou:", error);
+    return empty;
+  }
+}
+
 export async function extractDocumentData(
   fileBuffer: Buffer,
   mimeType: string,
