@@ -26,6 +26,7 @@ import {
   Bookmark,
   Loader2,
   Plus,
+  BookOpen,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -45,6 +46,7 @@ import {
   type SavedSearch,
 } from "@/hooks/useSearch";
 import { normalizeText, statusKey, statusLabel } from "@/lib/search/query";
+import { CHAPTERS, faqId } from "@/lib/playbook";
 import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
 import { formatCurrency } from "@/lib/utils";
 import { format } from "date-fns";
@@ -210,7 +212,26 @@ const navigationPages: NavigationPage[] = [
     keywords: ["feedback", "sugestao", "bug", "reportar"],
     permission: "always",
   },
+  {
+    name: "Manual de operação",
+    href: "/manual",
+    icon: BookOpen,
+    keywords: ["manual", "ajuda", "regras", "como", "duvida", "rotina"],
+    permission: "always",
+  },
 ];
+
+// Tópicos e perguntas do manual, achados pelo título: /manual#topico.
+const manualEntries = CHAPTERS.flatMap((c) =>
+  c.topics.flatMap((t) => [
+    { label: t.title, hint: c.title, href: `/manual#${t.id}` },
+    ...(t.faq ?? []).map((f) => ({
+      label: f.q,
+      hint: "Problemas comuns",
+      href: `/manual#${faqId(f.q)}`,
+    })),
+  ]),
+);
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -281,6 +302,14 @@ export function GlobalSearch() {
     if (!q) return permitted;
     return permitted.filter((page) => matches(q, page.name, ...page.keywords));
   }, [q, permissions]);
+
+  const manualHits = useMemo(
+    () =>
+      q.length >= 2
+        ? manualEntries.filter((m) => matches(q, m.label)).slice(0, 5)
+        : [],
+    [q],
+  );
 
   const actions = useMemo(() => {
     const items: { label: string; href: string }[] = [];
@@ -515,6 +544,25 @@ export function GlobalSearch() {
                 >
                   <page.icon className="mr-2 h-4 w-4" />
                   <span>{page.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {!isNav && manualHits.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Manual">
+              {manualHits.map(({ label, hint, href }) => (
+                <CommandItem
+                  key={href}
+                  value={`manual ${href}`}
+                  onSelect={() => handleNavigate(href)}
+                >
+                  <BookOpen className="mr-2 h-4 w-4 text-muted-foreground" />
+                  <span className="flex-1 truncate">{label}</span>
+                  <span className="text-xs text-muted-foreground">{hint}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

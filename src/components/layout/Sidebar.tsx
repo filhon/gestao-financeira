@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Megaphone,
+  BookOpen,
   Map as MapIcon,
   MessageSquare,
   ChevronsUpDown,
@@ -183,10 +184,14 @@ export function Sidebar() {
         gAt = Date.now();
       } else if (Date.now() - gAt < 1000) {
         gAt = 0;
-        const item = flat.find((i) => i.shortcut === e.key);
-        if (item) {
+        // O manual mora no menu de ajuda, fora do NAV.
+        const href =
+          e.key === "m"
+            ? "/manual"
+            : flat.find((i) => i.shortcut === e.key)?.href;
+        if (href) {
           e.preventDefault();
-          router.push(item.href);
+          router.push(href);
         }
       }
     };
@@ -528,8 +533,8 @@ export function Sidebar() {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              title={collapsed ? "Novidades e roadmap" : undefined}
-              aria-label="Novidades e roadmap"
+              title={collapsed ? "Ajuda e novidades" : undefined}
+              aria-label="Ajuda e novidades"
               className={cn(
                 footerButton,
                 IDLE,
@@ -540,7 +545,7 @@ export function Sidebar() {
             >
               <Megaphone className="h-4 w-4 shrink-0" />
               {!collapsed && (
-                <span className="flex-1 text-left">Novidades e roadmap</span>
+                <span className="flex-1 text-left">Ajuda e novidades</span>
               )}
               {novidadesNew && (
                 <Dot tone="bg-muted-foreground" inline={!collapsed} />
@@ -549,6 +554,16 @@ export function Sidebar() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="w-56">
+            <DropdownMenuItem asChild>
+              <Link href="/manual">
+                <BookOpen className="mr-2 h-3.5 w-3.5" />
+                Manual de operação
+                <span className="ml-auto text-xs text-muted-foreground">
+                  g m
+                </span>
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setNovidadesOpen(true)}>
               <Megaphone className="mr-2 h-3.5 w-3.5" />
               Novidades

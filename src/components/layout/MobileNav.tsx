@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { MoreHorizontal, Map as MapIcon, Megaphone } from "lucide-react";
+import {
+  BookOpen,
+  MoreHorizontal,
+  Map as MapIcon,
+  Megaphone,
+} from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { useMemo, useState } from "react";
@@ -39,7 +44,8 @@ export function MobileNav() {
 
   const isMoreActive =
     visibleMoreItems.some((item) => item.href === current) ||
-    pathname.startsWith("/roadmap");
+    pathname.startsWith("/roadmap") ||
+    pathname.startsWith("/manual");
 
   return (
     <>
@@ -154,6 +160,16 @@ export function MobileNav() {
                 </Link>
               );
             })}
+            <Link
+              href="/manual"
+              onClick={() => setMoreOpen(false)}
+              className="flex items-center gap-3 rounded-xl bg-muted/40 px-3.5 py-3.5 text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-muted-foreground">
+                <BookOpen className="h-[18px] w-[18px]" />
+              </div>
+              <span className="text-sm font-medium leading-tight">Manual</span>
+            </Link>
             <Link
               href="/roadmap"
               onClick={() => setMoreOpen(false)}

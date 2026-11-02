@@ -132,9 +132,10 @@ export async function reconcileCompanyBalance(
     statsRef(companyId).collection("applied").get(),
     statsRef(companyId).get(),
   ]);
-  const previous = toCents(
-    statsSnap.get("balanceCents") ?? statsSnap.get("currentBalance"),
-  );
+  const previous =
+    typeof statsSnap.get("balanceCents") === "number"
+      ? (statsSnap.get("balanceCents") as number)
+      : toCents(statsSnap.get("currentBalance"));
   const marks = new Map(
     markSnap.docs.map((d) => [d.id, Number(d.get("cents")) || 0]),
   );
