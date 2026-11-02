@@ -1,25 +1,29 @@
-import { Cormorant_Garamond, DM_Sans } from "next/font/google";
+import type { Metadata } from "next";
+import { Geist_Mono, Hanken_Grotesk } from "next/font/google";
 import LandingPage from "@/components/features/landing/LandingPage";
 
 // Fontes exclusivas da landing: declaradas aqui, não são pré-carregadas nas
 // demais rotas.
-const cormorant = Cormorant_Garamond({
+const hanken = Hanken_Grotesk({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  style: ["normal", "italic"],
-  variable: "--font-cormorant",
+  variable: "--font-hanken",
   display: "swap",
 });
-const dmSans = DM_Sans({
+const geistMono = Geist_Mono({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
-  variable: "--font-dm-sans",
+  variable: "--font-geist-mono",
   display: "swap",
 });
 
+export const metadata: Metadata = {
+  title: "FinControl | Contas a pagar, conciliação e aprovação",
+  description:
+    "Contas a pagar e a receber com aprovação em etapas, baixa pelo extrato bancário e registro de cada alteração, para empresas brasileiras.",
+};
+
 export default function Page() {
   return (
-    <div className={`contents ${cormorant.variable} ${dmSans.variable}`}>
+    <div className={`contents ${hanken.variable} ${geistMono.variable}`}>
       <LandingPage />
     </div>
   );

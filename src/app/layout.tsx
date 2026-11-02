@@ -56,14 +56,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      {/* Prevents flash of wrong theme on the landing page before React hydrates */}
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('fin-theme');if(t==='light')document.documentElement.classList.add('fin-theme-light-pending');}catch(e){}})()`,
-          }}
-        />
-      </head>
       <body className={`${inter.className} ${ibmPlexSans.variable}`}>
         <ThemeProvider
           attribute="class"
