@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   ResponsiveModal,
@@ -36,7 +35,6 @@ export function AddToBatchDialog({
   const { selectedCompany } = useCompany();
   const companyId = selectedCompany?.id;
   const [openBatches, setOpenBatches] = useState<PaymentBatch[]>([]);
-  const [newBatchName, setNewBatchName] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
@@ -57,19 +55,12 @@ export function AddToBatchDialog({
         );
       }
       let id = batchId;
+      let name = openBatches.find((b) => b.id === batchId)?.name;
       if (!id) {
-        if (!newBatchName.trim()) throw new Error("Dê um nome ao novo lote.");
-        id = (
-          await paymentBatchService.create(
-            newBatchName.trim(),
-            companyId,
-            user.uid,
-          )
-        ).id;
+        ({ id, name } = await paymentBatchService.create(companyId, user.uid));
       }
       await paymentBatchService.addTransactions(id, transactions);
-      setNewBatchName("");
-      toast.success("Transações adicionadas ao lote!");
+      toast.success(`Transações adicionadas ao lote ${name}.`);
       onDone();
     } catch (error) {
       toast.error(friendlyError(error, "Erro ao adicionar ao lote."));
@@ -116,23 +107,17 @@ export function AddToBatchDialog({
               </div>
             )}
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="new-batch">Ou crie um novo</Label>
-            <div className="flex gap-2">
-              <Input
-                id="new-batch"
-                placeholder="Nome do novo lote"
-                value={newBatchName}
-                onChange={(e) => setNewBatchName(e.target.value)}
-              />
-              <Button disabled={isProcessing} onClick={() => addToBatch()}>
-                {isProcessing && (
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                )}
-                Criar e adicionar
-              </Button>
-            </div>
-          </div>
+          <Button
+            variant="secondary"
+            className="w-full"
+            disabled={isProcessing}
+            onClick={() => addToBatch()}
+          >
+            {isProcessing && (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            )}
+            Criar lote novo e adicionar
+          </Button>
         </div>
       </ResponsiveModalContent>
     </ResponsiveModal>

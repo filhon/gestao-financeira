@@ -2098,6 +2098,11 @@ export const setTransactionStatus = hotCallable(async (data, context) => {
     );
   }
 
+  const batchId = snap.get("batchId") as string | undefined;
+  if (status === "paid" && batchId) {
+    await closeBatchIfAllPaid(batchId, uid, context.auth.token.email ?? "");
+  }
+
   return {
     success: true,
     budgetChanged: outcome.budgetChanged,
@@ -2105,3 +2110,76 @@ export const setTransactionStatus = hotCallable(async (data, context) => {
     budgetExceededReason: outcome.budgetExceededReason,
   };
 });
+
+/**
+ * Fecha o lote autorizado quando todas as contas dele já estão pagas. Quem dá
+ * baixa uma a uma, ao longo da semana, não precisa confirmar o lote de novo no
+ * fim. Chamado na baixa (última conta paga) e na autorização (contas pagas
+ * antes de o lote ser autorizado), o que vier por último.
+ */
+async function closeBatchIfAllPaid(
+  batchId: string,
+  uid: string,
+  email: string,
+) {
+  try {
+    const batchRef = db().collection("payment_batches").doc(batchId);
+    const closed = await db().runTransaction(async (t) => {
+      const batch = await t.get(batchRef);
+      if (batch.get("status") !== "authorized") return null;
+      const txs = await t.get(
+        db().collection("transactions").where("batchId", "==", batchId),
+      );
+      if (txs.empty || txs.docs.some((d) => d.get("status") !== "paid"))
+        return null;
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      t.update(batchRef, {
+        status: "paid",
+        paidBy: uid,
+        paidAt: now,
+        updatedAt: now,
+      });
+      return {
+        companyId: batch.get("companyId") as string,
+        totalAmount: batch.get("totalAmount") as number,
+        transactionCount: txs.size,
+      };
+    });
+    if (!closed) return;
+    await db()
+      .collection("audit_logs")
+      .add({
+        companyId: closed.companyId,
+        userId: uid,
+        userEmail: email,
+        action: "pay",
+        entity: "batch",
+        entityId: batchId,
+        details: {
+          autoClosed: true,
+          transactionCount: closed.transactionCount,
+          totalAmount: closed.totalAmount,
+        },
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  } catch (err) {
+    // A baixa já foi gravada; o lote segue com o botão "Confirmar pagamentos".
+    console.error(`Falha ao fechar o lote ${batchId}:`, err);
+  }
+}
+
+/** Lote autorizado depois de todas as baixas: fecha na hora. */
+export const onBatchAuthorized = functions.firestore
+  .document("payment_batches/{batchId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    if (before.status === "authorized" || after.status !== "authorized")
+      return null;
+    await closeBatchIfAllPaid(
+      context.params.batchId,
+      after.authorizedBy ?? "system",
+      after.authorizerEmail ?? "",
+    );
+    return null;
+  });

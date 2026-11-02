@@ -36,7 +36,6 @@ import {
   ResponsiveModalTrigger,
   ResponsiveModalFooter,
 } from "@/components/ui/responsive-modal";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -106,7 +105,6 @@ export default function PaymentBatchesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [newBatchName, setNewBatchName] = useState("");
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
 
@@ -184,15 +182,10 @@ export default function PaymentBatchesPage() {
 
   // ── Criar ────────────────────────────────────────────────────────────────
 
-  const suggestedName =
-    startDate && endDate
-      ? `Pagamentos ${format(startDate, "dd/MM")} a ${format(endDate, "dd/MM/yyyy")}`
-      : "";
   const invalidRange = !!startDate && !!endDate && startDate > endDate;
 
   const handleCreateBatch = async () => {
-    const name = newBatchName.trim() || suggestedName;
-    if (!selectedCompany || !user || !name || invalidRange) return;
+    if (!selectedCompany || !user || invalidRange) return;
     try {
       let start: Date | undefined;
       let end: Date | undefined;
@@ -204,16 +197,14 @@ export default function PaymentBatchesPage() {
         end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
       }
-      await paymentBatchService.create(
-        name,
+      const { name } = await paymentBatchService.create(
         selectedCompany.id,
         user.uid,
         start,
         end,
       );
-      toast.success(`Lote "${name}" criado`);
+      toast.success(`Lote ${name} criado`);
       setIsCreateOpen(false);
-      setNewBatchName("");
       setStartDate(undefined);
       setEndDate(undefined);
       changeTab("mine");
@@ -408,15 +399,6 @@ export default function PaymentBatchesPage() {
                     lote automaticamente.
                   </p>
                 )}
-                <div className="space-y-2">
-                  <Label htmlFor="batch-name">Nome</Label>
-                  <Input
-                    id="batch-name"
-                    placeholder={suggestedName || "Ex.: Pagamentos semana 44"}
-                    value={newBatchName}
-                    onChange={(e) => setNewBatchName(e.target.value)}
-                  />
-                </div>
               </div>
               <ResponsiveModalFooter>
                 <Button
@@ -425,12 +407,7 @@ export default function PaymentBatchesPage() {
                 >
                   Cancelar
                 </Button>
-                <Button
-                  onClick={handleCreateBatch}
-                  disabled={
-                    invalidRange || !(newBatchName.trim() || suggestedName)
-                  }
-                >
+                <Button onClick={handleCreateBatch} disabled={invalidRange}>
                   Criar lote
                 </Button>
               </ResponsiveModalFooter>

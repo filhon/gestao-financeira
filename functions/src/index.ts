@@ -29,6 +29,7 @@ export {
   applyTransactionPatches,
   approveTransactionByToken,
   rejectTransactionByToken,
+  onBatchAuthorized,
 } from "./transactionLedger";
 import {
   checkBudgetFit,

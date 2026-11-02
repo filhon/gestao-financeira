@@ -91,7 +91,11 @@ service cloud.firestore {
         (hasCompanyRole(companyId, ['financial_manager', 'user']) &&
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rdCounter'])) ||
         (isManager(companyId) &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom', 'receiptsStartDate']));
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom', 'receiptsStartDate'])) ||
+        // Numeração dos lotes (LP-0001…): quem cria lote só avança o contador, de 1 em 1.
+        (hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser']) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['batchCounter']) &&
+         request.resource.data.batchCounter == resource.data.get('batchCounter', 0) + 1);
 
       // Subcoleção: sugestões de lotes geradas pela Cloud Function noturna.
       // Leitura: roles que gerenciam lotes de pagamento.

@@ -10,7 +10,6 @@ import {
   updateDoc,
   serverTimestamp,
   orderBy,
-  addDoc,
   Timestamp,
   DocumentData,
   DocumentReference,
@@ -196,39 +195,6 @@ const hashToken = async (token: string): Promise<string> => {
 };
 
 export const paymentBatchService = {
-  checkAndFinalizeBatch: async (batchId: string, userId: string) => {
-    const batchRef = doc(db, COLLECTION_NAME, batchId);
-    const batchSnap = await getDoc(batchRef);
-    if (!batchSnap.exists()) return;
-
-    const batchData = batchSnap.data() as PaymentBatch;
-    if (batchData.status === "paid") return; // Already paid
-
-    // Check all transactions
-    const q = query(
-      collection(db, TRANSACTIONS_COLLECTION),
-      where("batchId", "==", batchId),
-    );
-    const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map(
-      (d) => ({ id: d.id, ...d.data() }) as Transaction,
-    );
-
-    const allPaid = transactions.every((t) => t.status === "paid");
-
-    if (allPaid && transactions.length > 0) {
-      // Auto-close batch
-      const batch = writeBatch(db);
-      batch.update(batchRef, {
-        status: "paid",
-        paidBy: userId,
-        paidAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      await batch.commit();
-    }
-  },
-
   getAll: async (
     companyId: string,
     pageSize: number = 20,
@@ -344,25 +310,37 @@ export const paymentBatchService = {
     return convertDates({ id: snapshot.id, ...snapshot.data() });
   },
 
+  /**
+   * Cria o lote com nome sequencial da empresa (LP-0001, LP-0002…). Contador e
+   * lote na mesma transação: dois lotes criados juntos não repetem o número.
+   */
   create: async (
-    name: string,
     companyId: string,
     createdBy: string,
     startDate?: Date,
     endDate?: Date,
-  ) => {
-    // Create the batch
-    const batchRef = await addDoc(collection(db, COLLECTION_NAME), {
-      name,
-      companyId,
-      createdBy,
-      status: "open",
-      transactionIds: [],
-      totalAmount: 0,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      startDate: startDate || null,
-      endDate: endDate || null,
+  ): Promise<{ id: string; name: string }> => {
+    const batchRef = doc(collection(db, COLLECTION_NAME));
+    const companyRef = doc(db, "companies", companyId);
+    const name = await runTransaction(db, async (tx) => {
+      const company = await tx.get(companyRef);
+      const seq = ((company.get("batchCounter") as number) ?? 0) + 1;
+      const name = `LP-${String(seq).padStart(4, "0")}`;
+      tx.update(companyRef, { batchCounter: seq });
+      tx.set(batchRef, {
+        name,
+        sequence: seq,
+        companyId,
+        createdBy,
+        status: "open",
+        transactionIds: [],
+        totalAmount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        startDate: startDate || null,
+        endDate: endDate || null,
+      });
+      return name;
     });
 
     // If dates are provided, auto-add draft transactions
@@ -393,7 +371,7 @@ export const paymentBatchService = {
       }
     }
 
-    return batchRef;
+    return { id: batchRef.id, name };
   },
 
   update: async (id: string, data: Partial<PaymentBatch>) => {
@@ -953,11 +931,14 @@ export const paymentBatchService = {
         { enforce: false },
       );
     }
+    // Só nas que o lote pagou agora: as baixadas uma a uma guardam quem e quando.
     await commitInChunks(
-      tSnap.docs.map((tDoc) => [
-        tDoc.ref,
-        { releasedBy: actor.uid, releasedAt: serverTimestamp() },
-      ]),
+      [...byDay.values()]
+        .flat()
+        .map((id) => [
+          doc(db, TRANSACTIONS_COLLECTION, id),
+          { releasedBy: actor.uid, releasedAt: serverTimestamp() },
+        ]),
     );
 
     const data = await transitionBatch(batchId, ["authorized"], () => ({
@@ -1017,76 +998,5 @@ export const paymentBatchService = {
       transactionCount: tSnap.size,
       totalAmount: before.totalAmount,
     });
-  },
-
-  /**
-   * Aceita uma sugestão automática de lote gerada pela Cloud Function noturna.
-   *
-   * Cria o PaymentBatch oficial e vincula as transações sugeridas
-   * de forma atômica (writeBatch), sem download individual de cada
-   * documento de transação.
-   *
-   * Retorna a referência do PaymentBatch criado para redirect.
-   */
-  acceptSuggested: async (
-    name: string,
-    companyId: string,
-    createdBy: string,
-    transactionIds: string[],
-  ): Promise<{ id: string }> => {
-    if (transactionIds.length === 0) {
-      throw new Error("A sugestão não contém transações.");
-    }
-
-    // 1 — Cria o PaymentBatch
-    const batchDocRef = await addDoc(collection(db, COLLECTION_NAME), {
-      name,
-      companyId,
-      createdBy,
-      status: "open",
-      transactionIds,
-      totalAmount: 0, // será recalculado abaixo
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      startDate: null,
-      endDate: null,
-    });
-
-    // 2 — Vincula as transações e soma o totalAmount atomicamente
-    // Firestore writeBatch suporta até 500 ops; sugestões normalmente têm << 500 itens.
-    const CHUNK_SIZE = 499; // 1 slot reservado para a atualização do batch doc
-
-    let totalAmount = 0;
-
-    for (let i = 0; i < transactionIds.length; i += CHUNK_SIZE) {
-      const chunk = transactionIds.slice(i, i + CHUNK_SIZE);
-      const wb = writeBatch(db);
-
-      // Busca os amounts deste chunk em paralelo (leitura, não escrita)
-      const snapshots = await Promise.all(
-        chunk.map((id) => getDoc(doc(db, TRANSACTIONS_COLLECTION, id))),
-      );
-
-      let chunkAmount = 0;
-      snapshots.forEach((snap, idx) => {
-        if (!snap.exists()) return;
-        const amount = Number(snap.data().amount ?? 0);
-        chunkAmount += amount;
-        wb.update(doc(db, TRANSACTIONS_COLLECTION, chunk[idx]), {
-          batchId: batchDocRef.id,
-        });
-      });
-
-      totalAmount += chunkAmount;
-      await wb.commit();
-    }
-
-    // 3 — Atualiza o totalAmount real no batch doc
-    await updateDoc(batchDocRef, {
-      totalAmount,
-      updatedAt: serverTimestamp(),
-    });
-
-    return { id: batchDocRef.id };
   },
 };
