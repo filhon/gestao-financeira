@@ -26,7 +26,7 @@ import {
   fetchCandidateTransactions,
   fetchEntities,
   findPossibleDuplicate,
-  signalsForStorage,
+  suggestionFields,
 } from "@/lib/api/comprovanteAdmin";
 import { format } from "date-fns";
 
@@ -344,18 +344,6 @@ export async function POST(req: NextRequest) {
     updatedAt: FieldValue.serverTimestamp(),
   };
 
-  // Alternativas plausíveis: a revisão manual passa a ser escolher entre
-  // poucas opções ranqueadas em vez de procurar na lista inteira.
-  const alternatives = (outcome?.alternatives ?? []).map((candidate) => ({
-    transactionId: candidate.transactionId,
-    transactionIds: candidate.transactionIds,
-    isConsolidated: candidate.isConsolidated,
-    score: candidate.score,
-    confidenceLevel: candidate.confidenceLevel,
-    entityName: candidate.matchedEntity ?? null,
-    reason: candidate.reasons[0] ?? null,
-  }));
-
   // Mesmo valor, data e beneficiário de um comprovante já enviado: o hash não
   // pega o mesmo pagamento reenviado como print ou PDF de outro banco.
   const duplicate = best
@@ -369,19 +357,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (best) {
-    docData.suggestedTransactionId = best.transactionId;
-    docData.suggestedTransactionIds = best.transactionIds;
-    docData.matchConfidence = best.score;
-    docData.matchConfidenceLevel = best.confidenceLevel;
-    docData.matchReasons = reasons.slice(0, 6);
-    docData.matchIsAmbiguous = best.isAmbiguous ?? false;
-    docData.matchAlternatives = alternatives;
-    docData.matchSignals = signalsForStorage(best);
+  const suggestion = best
+    ? suggestionFields(best, outcome?.alternatives ?? [], reasons)
+    : null;
+  if (suggestion) {
+    for (const [key, value] of Object.entries(suggestion)) {
+      if (value != null && value !== "") docData[key] = value;
+    }
     if (duplicate) docData.possibleDuplicateOf = duplicate.id;
-    if (best.matchedAmount != null) docData.matchedAmount = best.matchedAmount;
-    if (best.matchedDate != null) docData.matchedDate = best.matchedDate;
-    if (best.matchedEntity) docData.matchedEntity = best.matchedEntity;
   }
 
   const docRef = await adminDb.collection("comprovantes").add(docData);
@@ -442,7 +425,7 @@ export async function POST(req: NextRequest) {
       matchedEntity: best?.matchedEntity,
       matchReasons: reasons.slice(0, 6),
       matchIsAmbiguous: best?.isAmbiguous ?? false,
-      matchAlternatives: alternatives,
+      matchAlternatives: suggestion?.matchAlternatives ?? [],
     },
     { status: 201 },
   );

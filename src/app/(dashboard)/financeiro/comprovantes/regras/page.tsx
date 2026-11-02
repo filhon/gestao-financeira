@@ -33,6 +33,9 @@ import { companyService } from "@/lib/services/companyService";
 import { entityService } from "@/lib/services/entityService";
 import { transactionService } from "@/lib/services/transactionService";
 import { entityIdentifiers } from "@/lib/matching";
+import { accuracyByBand } from "@/lib/matching/queue";
+import { comprovanteService } from "@/lib/services/comprovanteService";
+import { MatchAccuracy } from "@/components/features/finance/MatchAccuracy";
 import { normalizePixKey } from "@/lib/matching/brazilian";
 import { normalize } from "@/lib/matching/text";
 import { formatCnpj, validateCnpj } from "@/lib/validations/cnpj";
@@ -124,9 +127,39 @@ export default function ComprovanteRulesPage() {
             actor={actor}
             canEdit={canEdit}
           />
+          <AccuracySection companyId={companyId} />
         </>
       )}
     </div>
+  );
+}
+
+// ── Acerto das sugestões ──────────────────────────────────────────────────────
+
+function AccuracySection({ companyId }: { companyId: string }) {
+  const { data = [], isLoading } = useQuery({
+    queryKey: ["comprovantes-feedback", companyId],
+    queryFn: () => comprovanteService.getFeedback(companyId),
+    staleTime: 5 * 60 * 1000,
+  });
+  const rows = useMemo(() => accuracyByBand(data, [82, 55, 0]), [data]);
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold">Acerto das sugestões</h2>
+        <p className="mt-0.5 max-w-[70ch] text-sm text-muted-foreground">
+          O que foi feito com as sugestões do motor, por faixa de confiança:
+          confirmada como veio, trocada por outra conta ou recusada. Confirmação
+          automática não entra. Faixa alta abaixo de 80% indica peso a
+          recalibrar.
+        </p>
+      </div>
+      {isLoading ? (
+        <Skeleton className="h-32 w-full" />
+      ) : (
+        <MatchAccuracy rows={rows} labels={["Alta", "Média", "Baixa"]} />
+      )}
+    </section>
   );
 }
 

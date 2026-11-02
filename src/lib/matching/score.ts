@@ -675,6 +675,17 @@ function assemble(
     }
   }
 
+  // Pagamento que o extrato já provou: a baixa saiu do banco nesse valor e
+  // nessa data. Segunda prova, independente do comprovante.
+  if (
+    members.every((m) => m.tx.reconciled) &&
+    amount.score > 0 &&
+    (date.days ?? 99) <= 1
+  ) {
+    score += 4;
+    reasons.push("Pagamento conferido no extrato bancário");
+  }
+
   // ── Tetos e pisos ───────────────────────────────────────────────────────────
 
   const strongIdentity =

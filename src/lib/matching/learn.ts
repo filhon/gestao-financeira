@@ -47,20 +47,7 @@ export function learnableAliases(
   entity: Entity,
   allEntities: Entity[],
 ): ReceiptAliases {
-  const own = entityIdentifiers(entity);
-  const taken = allEntities
-    .filter((e) => e.id !== entity.id)
-    .map(entityIdentifiers);
-  const takenBy = (kind: keyof ReceiptAliases, value: string) =>
-    taken.some((t) => t[kind].includes(value));
-
-  const fresh = (kind: keyof ReceiptAliases, values: string[]) => {
-    const room = MAX_PER_KIND - (entity.receiptAliases?.[kind]?.length ?? 0);
-    return [...new Set(values)]
-      .filter((v) => v && !own[kind].includes(v) && !takenBy(kind, v))
-      .slice(0, Math.max(0, room));
-  };
-
+  const fresh = freshFor(entity, allEntities);
   return {
     documents: fresh(
       "documents",
@@ -76,6 +63,60 @@ export function learnableAliases(
       "names",
       facts.beneficiaryNames.map(normalize).filter((n) => n.length >= 3),
     ),
+  };
+}
+
+/** Filtra o que é novo para a entidade e não identifica outra; respeita o teto. */
+function freshFor(entity: Entity, allEntities: Entity[]) {
+  const own = entityIdentifiers(entity);
+  const taken = allEntities
+    .filter((e) => e.id !== entity.id)
+    .map(entityIdentifiers);
+  return (kind: keyof ReceiptAliases, values: string[]) => {
+    const room = MAX_PER_KIND - (entity.receiptAliases?.[kind]?.length ?? 0);
+    return [...new Set(values)]
+      .filter(
+        (v) =>
+          v &&
+          !own[kind].includes(v) &&
+          !taken.some((t) => t[kind].includes(v)),
+      )
+      .slice(0, Math.max(0, room));
+  };
+}
+
+/** Palavras do banco antes do nome: "PAGAMENTOS A FORNECEDORES", "TED RECEBIDA". */
+const STATEMENT_PREFIX =
+  /^(?:(?:pagamentos?|pagto|pgto|pag|a|ao|de|fornecedores?|fornec|pix|ted|doc|tev|transf|transferencia|enviad[oa]|recebid[oa]|sispag|boleto|\d+)\s+)+/;
+
+/** Favorecido como o banco escreveu: histórico sem prefixo, documento e data. */
+export function statementPayee(description: string): string {
+  const name = normalize(
+    description
+      .replace(/\d[\d./-]{9,18}\d/g, " ")
+      .replace(/\d{2}\/\d{2}(\/\d{2,4})?/g, " "),
+  ).replace(STATEMENT_PREFIX, "");
+  return /[a-z]{3}/.test(name) ? name : "";
+}
+
+/**
+ * O que uma linha do extrato confirmada ensina sobre o favorecido: o CPF/CNPJ
+ * e o nome que o banco imprimiu. Na próxima vez, a linha casa mesmo que o
+ * cadastro não tenha documento ou use outro nome. Mesmas travas do
+ * comprovante: nada que já identifique outra entidade.
+ */
+export function statementAliases(
+  description: string,
+  documents: string[],
+  entity: Entity,
+  allEntities: Entity[],
+): ReceiptAliases {
+  const fresh = freshFor(entity, allEntities);
+  const payee = statementPayee(description);
+  return {
+    documents: fresh("documents", documents),
+    pixKeys: [],
+    names: fresh("names", payee ? [payee] : []),
   };
 }
 

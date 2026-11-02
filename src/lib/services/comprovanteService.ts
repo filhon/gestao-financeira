@@ -22,6 +22,7 @@ import { ref, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase/client";
 import { Comprovante, ComprovanteMatchStatus } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
+import { receiptFeedback, type Feedback } from "@/lib/matching/queue";
 
 const COLLECTION = "comprovantes";
 
@@ -237,6 +238,48 @@ export const comprovanteService = {
       };
     }
     return { patch: patch as Partial<Comprovante>, learned: data.learned };
+  },
+
+  /**
+   * Redistribui a fila de revisão para nenhuma conta ficar sugerida a dois
+   * comprovantes. Devolve as sugestões que mudaram.
+   */
+  async rebalance(companyId: string): Promise<
+    Array<{
+      comprovanteId: string;
+      suggestedTransactionId?: string;
+      suggestedTransactionIds?: string[];
+      isConsolidated?: boolean;
+      matchConfidence?: number;
+      matchConfidenceLevel?: "HIGH" | "MEDIUM" | "LOW";
+      matchedAmount?: number;
+      matchedDate?: string;
+      matchedEntity?: string;
+      matchReasons?: string[];
+      matchIsAmbiguous?: boolean;
+    }>
+  > {
+    const res = await fetch("/api/internal/comprovantes/rebalance", {
+      method: "POST",
+      headers: { "x-company-id": companyId },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error ?? "Erro ao redistribuir a fila.");
+    return data.changed ?? [];
+  },
+
+  /** Sugestões já decididas por alguém, para medir o acerto do motor. */
+  async getFeedback(companyId: string): Promise<Feedback[]> {
+    // ponytail: últimos 2.000 decididos; acima disso, agregar no servidor
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTION),
+        where("companyId", "==", companyId),
+        where("matchStatus", "in", ["matched", "rejected_match"]),
+        limit(2000),
+      ),
+    );
+    return snap.docs.flatMap((d) => receiptFeedback(d.data()) ?? []);
   },
 
   // ── Pending review list ──────────────────────────────────────────────────────

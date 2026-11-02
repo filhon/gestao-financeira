@@ -38,6 +38,7 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { isOpenTitle } from "@/lib/matching/statement";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
 import { dayKey, type DayGroup } from "@/lib/bankReconciliation";
 
@@ -225,11 +226,22 @@ export function SystemCell({
     );
   }
   if (tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0) {
+    const toSettle =
+      tx.status === "potential_match" &&
+      tx.matchedBundleDetails?.some(isOpenTitle);
     return (
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="text-sm font-medium">
           {tx.matchedTransactionIds.length} lançamentos somados
+          {tx.status === "potential_match" && tx.confidence
+            ? ` · ${tx.confidence}%`
+            : ""}
         </span>
+        {toSettle && (
+          <span className="text-xs text-muted-foreground">
+            Em aberto: confirmar dá a baixa com a data do banco
+          </span>
+        )}
         {tx.matchedBundleDetails?.map((sub, i) => (
           <div
             key={sub.id || i}
@@ -249,7 +261,7 @@ export function SystemCell({
   if (tx.matchedDetails) {
     const note =
       tx.status === "potential_match" && tx.confidence
-        ? `${tx.confidence}% de semelhança${tx.confidence >= 90 ? " · sugestão forte" : ""}`
+        ? `${tx.confidence}% de semelhança${tx.confidence >= 90 ? " · sugestão forte" : ""}${isOpenTitle(tx.matchedDetails) ? " · em aberto: confirmar dá a baixa" : ""}`
         : tx.resolution && RESOLUTION_NOTE[tx.resolution];
     return <SystemLine t={tx.matchedDetails} note={note} />;
   }

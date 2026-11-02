@@ -24,8 +24,8 @@ import { cn, formatCurrency, normalizeText } from "@/lib/utils";
  * o extrato confirma o pagamento, não substitui o fluxo. Receita não tem esse
  * fluxo.
  */
-const PAYABLE_STATUSES = ["approved", "authorized"];
-const RECEIVABLE_STATUSES = [
+export const PAYABLE_STATUSES = ["approved", "authorized"];
+export const RECEIVABLE_STATUSES = [
   "draft",
   "pending_approval",
   "approved",

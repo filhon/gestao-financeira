@@ -16,6 +16,8 @@
     "check:transaction-tabs": "jiti scripts/check-transaction-tabs.ts",
     "check:dashboard": "jiti scripts/check-dashboard.ts",
     "check:reconciliation-rules": "jiti scripts/check-reconciliation-rules.ts",
+    "check:statement-matching": "jiti scripts/check-statement-matching.ts",
+    "check:matching-queue": "jiti scripts/check-matching-queue.ts",
     "check:auto-confirm": "jiti scripts/check-auto-confirm.ts",
     "check:receipt-learning": "jiti scripts/check-receipt-learning.ts",
     "check:receipt-checks": "jiti scripts/check-receipt-checks.ts",

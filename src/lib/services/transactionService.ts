@@ -487,11 +487,13 @@ export const transactionService = {
     createdBy?: string;
     costCenterId?: string;
     costCenterIds?: string[];
+    /** Padrão: só "paid". A conciliação inclui "received". */
+    statuses?: string[];
   }): Promise<Transaction[]> => {
     let q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", filter.companyId),
-      where("status", "==", "paid"),
+      where("status", "in", filter.statuses ?? ["paid"]),
       orderBy("paymentDate", "asc"),
       where("paymentDate", ">=", Timestamp.fromDate(filter.startDate)),
       where("paymentDate", "<=", Timestamp.fromDate(endOfDay(filter.endDate))),

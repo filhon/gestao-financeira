@@ -417,6 +417,38 @@ export function UploadComprovanteDialog({ open, onClose, onSuccess }: Props) {
           );
         }
 
+        // Comprovantes do mesmo valor e favorecido não disputam a mesma conta.
+        if (results.some((r) => r.matchStatus === "pending_review")) {
+          setProgressLabel("Distribuindo as sugestões...");
+          const changed = await comprovanteService
+            .rebalance(selectedCompany.id)
+            .catch(() => []);
+          for (const c of changed) {
+            const i = results.findIndex(
+              (r) => r.comprovanteId === c.comprovanteId,
+            );
+            if (i < 0) continue;
+            const page = {
+              ...results[i],
+              ...(c.suggestedTransactionIds && {
+                bestMatchTransactionId: c.suggestedTransactionId,
+                bestMatchTransactionIds: c.suggestedTransactionIds,
+                isConsolidated: c.isConsolidated,
+                matchConfidence: c.matchConfidence,
+                matchConfidenceLevel: c.matchConfidenceLevel,
+                matchedAmount: c.matchedAmount,
+                matchedDate: c.matchedDate
+                  ? new Date(c.matchedDate)
+                  : undefined,
+                matchedEntity: c.matchedEntity,
+              }),
+              matchReasons: c.matchReasons,
+              matchIsAmbiguous: c.matchIsAmbiguous,
+            };
+            results[i] = { ...page, decision: isSafe(page) ? "confirm" : null };
+          }
+        }
+
         setProgressLabel("Análise concluída!");
         setPages(results);
         setStep("review");

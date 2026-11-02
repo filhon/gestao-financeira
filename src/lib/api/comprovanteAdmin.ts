@@ -23,6 +23,7 @@ interface RawTransaction {
   supplierOrClient?: string;
   entityId?: string;
   comprovanteId?: string;
+  reconciled?: boolean;
   paymentDate?: FirebaseFirestore.Timestamp;
   dueDate?: FirebaseFirestore.Timestamp;
 }
@@ -64,6 +65,7 @@ export async function fetchCandidateTransactions(
       supplierOrClient: data.supplierOrClient,
       entityId: data.entityId,
       comprovanteId: data.comprovanteId,
+      reconciled: data.reconciled === true,
       paymentDate: data.paymentDate?.toDate(),
       dueDate: data.dueDate?.toDate() ?? new Date(),
       createdBy: "",
@@ -114,6 +116,41 @@ export function signalsForStorage(best: MatchScore) {
     ...(best.signals.amountDelta != null && {
       amountDelta: best.signals.amountDelta,
     }),
+  };
+}
+
+/**
+ * Campos da sugestão gravados no comprovante. `undefined` = campo ausente
+ * nesta sugestão; quem regrava um documento existente deve apagá-lo.
+ */
+export function suggestionFields(
+  best: MatchScore,
+  alternatives: MatchScore[],
+  reasons: string[],
+) {
+  return {
+    suggestedTransactionId: best.transactionId,
+    suggestedTransactionIds: best.transactionIds,
+    isConsolidated: best.isConsolidated,
+    matchConfidence: best.score,
+    matchConfidenceLevel: best.confidenceLevel,
+    matchReasons: reasons.slice(0, 6),
+    matchIsAmbiguous: best.isAmbiguous ?? false,
+    // Alternativas plausíveis: a revisão manual passa a ser escolher entre
+    // poucas opções ranqueadas em vez de procurar na lista inteira.
+    matchAlternatives: alternatives.map((candidate) => ({
+      transactionId: candidate.transactionId,
+      transactionIds: candidate.transactionIds,
+      isConsolidated: candidate.isConsolidated,
+      score: candidate.score,
+      confidenceLevel: candidate.confidenceLevel,
+      entityName: candidate.matchedEntity ?? null,
+      reason: candidate.reasons[0] ?? null,
+    })),
+    matchSignals: signalsForStorage(best),
+    matchedAmount: best.matchedAmount,
+    matchedDate: best.matchedDate,
+    matchedEntity: best.matchedEntity,
   };
 }
 

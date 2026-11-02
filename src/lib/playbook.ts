@@ -695,7 +695,7 @@ export const CHAPTERS: PlaybookChapter[] = [
           "Em Rotinas › Conciliação Bancária. A faixa no topo mostra as contas, a mais atrasada primeiro.",
         steps: [
           "Baixe o extrato **OFX** no internet banking e importe na conta certa. Pode importar o mesmo período de novo: linhas repetidas não duplicam.",
-          "O sistema casa cada linha com uma conta **paga/recebida** de mesmo valor e data próxima. Sugestões fortes vêm pré-selecionadas, mas confira.",
+          "**Buscar correspondências** casa cada linha com contas pagas (pela data da baixa e valor pago) e com contas **aprovadas em aberto**; nestas, confirmar dá a baixa com a data do banco. Uma linha pode casar com várias contas do mesmo favorecido que somam o valor. CPF/CNPJ e nome do favorecido no histórico do banco reforçam a sugestão. Sugestões fortes vêm pré-selecionadas, mas confira.",
           "Linha sem par? Três saídas: **Baixar pelo extrato** (a conta existe, aprovada, mas não foi baixada; uma linha pode baixar várias contas do mesmo favorecido), **Lançar** (tarifa, IOF, rendimento; cria a conta já paga) ou **Ignorar** com motivo (transferência entre contas próprias já registrada, por exemplo).",
           "Linhas que se repetem todo mês (tarifa do pacote) podem virar **regra**: o sistema passa a sugerir a mesma ação. Só o gestor cria regras.",
           "Quando a **diferença** chegar a zero e não houver pendentes, **Feche** o período.",
@@ -705,6 +705,8 @@ export const CHAPTERS: PlaybookChapter[] = [
           "Fechar exige diferença zero e nenhuma linha pendente. Reabrir é só do gestor ou administrador e fica registrado.",
           'As linhas de saldo do banco ("SALDO ANTERIOR", "SDO") não são movimento: viram conferência diária do saldo.',
           "Aplicação: o rendimento do mês é reconhecido ao fechar, pela conferência do saldo bruto informado no extrato da aplicação, com IR/IOF lançado à parte.",
+          "O sistema aprende com o gestor: ao confirmar, o CPF/CNPJ e o nome que o banco imprimiu ficam guardados no cadastro do favorecido, e a próxima linha igual já vem sugerida. Confirmou errado? Remova o apelido em [Comprovantes › Regras](/financeiro/comprovantes/regras).",
+          "Conta com comprovante confirmado pesa mais na sugestão, e comprovante de conta já conciliada no extrato também: são duas provas independentes. O menu **…** mostra o **Acerto das sugestões** por faixa; a mesma medida dos comprovantes fica em Comprovantes › Regras.",
           "Teclas: **j/k** navega, **x** seleciona, **i** ignora, **Enter** confirma, **[ ]** troca de conta.",
         ],
         faq: [

@@ -33,12 +33,21 @@ import {
 import { BalanceStrip } from "@/components/features/finance/reconciliation/BalanceStrip";
 import { AccountStrip } from "@/components/features/finance/reconciliation/AccountStrip";
 import {
+  PAYABLE_STATUSES,
+  RECEIVABLE_STATUSES,
   SettleFromStatementSheet,
   SettleItem,
 } from "@/components/features/finance/reconciliation/SettleFromStatementSheet";
+import {
+  documentsIn,
+  isOpenTitle,
+  matchStatement,
+} from "@/lib/matching/statement";
+import { hasAliases, statementAliases } from "@/lib/matching/learn";
+import { accuracyByBand, sameIds } from "@/lib/matching/queue";
+import { MatchAccuracy } from "@/components/features/finance/MatchAccuracy";
 import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
 import { transactionService } from "@/lib/services/transactionService";
-import { ReconciliationService } from "@/lib/services/reconciliationService";
 import { entityService } from "@/lib/services/entityService";
 import { bankAccountService } from "@/lib/services/bankAccountService";
 import { Button } from "@/components/ui/button";
@@ -57,7 +66,15 @@ import {
   MinusCircle,
   History,
   Undo2,
+  Target,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BankTransaction, ReconciliationRule, Transaction } from "@/lib/types";
 import { subDays, addDays, format } from "date-fns";
@@ -85,7 +102,8 @@ import {
 } from "@/components/ui/sheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn, formatCurrency, plural } from "@/lib/utils";
-import { friendlyError } from "@/lib/errors";
+import { friendlyError, userError } from "@/lib/errors";
+import currency from "currency.js";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import {
   applyRules,
@@ -222,6 +240,7 @@ export function ReconciliationDashboard() {
     canCreateReceivables,
     canManageBankAccounts,
     canManageReconciliationRules,
+    canManageEntities,
   } = usePermissions();
   const queryClient = useQueryClient();
   const companyId = selectedCompany?.id;
@@ -518,6 +537,17 @@ export function ReconciliationDashboard() {
   const [settlingTx, setSettlingTx] = useState<BankTransaction | null>(null);
   const [launchingTx, setLaunchingTx] = useState<BankTransaction | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [accuracyOpen, setAccuracyOpen] = useState(false);
+  const accuracyRows = useMemo(
+    () =>
+      accuracyByBand(
+        allItems
+          .filter((t) => t.feedback && t.suggestedScore != null)
+          .map((t) => ({ score: t.suggestedScore!, outcome: t.feedback! })),
+        [90, 70, 0],
+      ),
+    [allItems],
+  );
   const [ruleToDelete, setRuleToDelete] = useState<ReconciliationRule | null>(
     null,
   );
@@ -716,6 +746,77 @@ export function ReconciliationDashboard() {
     return to;
   };
 
+  /**
+   * Linha confirmada ensina o favorecido: o CPF/CNPJ e o nome que o banco
+   * imprimiu viram apelidos da entidade, e a próxima linha igual casa mesmo
+   * com cadastro sem documento ou com outro nome. Os apelidos aparecem (e se
+   * removem) em Comprovantes › Regras.
+   * ponytail: só quem edita entidades ensina (rules); a confirmação de quem
+   * libera pagamento não grava.
+   */
+  const learnFromLine = async (
+    line: BankTransaction,
+    titles: Transaction[],
+  ) => {
+    const ids = new Set(titles.map((t) => t.entityId));
+    const [entityId] = ids;
+    if (
+      !canManageEntities ||
+      ids.size !== 1 ||
+      !entityId ||
+      !actor ||
+      !companyId
+    )
+      return;
+    try {
+      const entities = await entityService.getAll(companyId);
+      const entity = entities.find((e) => e.id === entityId);
+      if (!entity) return;
+      const learned = statementAliases(
+        line.description,
+        documentsIn(line.description),
+        entity,
+        entities,
+      );
+      if (!hasAliases(learned)) return;
+      const current = entity.receiptAliases ?? {};
+      await entityService.update(
+        entity.id,
+        {
+          receiptAliases: {
+            documents: [...(current.documents ?? []), ...learned.documents],
+            pixKeys: current.pixKeys ?? [],
+            names: [...(current.names ?? []), ...learned.names],
+          },
+        },
+        actor,
+        companyId,
+      );
+    } catch (error) {
+      // Aprender é bônus: a conciliação já foi gravada.
+      console.error(error);
+    }
+  };
+
+  /** O que a pessoa fez com a sugestão do motor; sugestão de regra não conta. */
+  const feedbackFor = (
+    tx: BankTransaction,
+    confirmedIds: string[],
+  ): Partial<BankTransaction> => {
+    const suggested = tx.matchedTransactionIds?.length
+      ? tx.matchedTransactionIds
+      : tx.matchedTransactionId
+        ? [tx.matchedTransactionId]
+        : [];
+    if (tx.status !== "potential_match" || tx.ruleId || !suggested.length)
+      return {};
+    return {
+      suggestedIds: suggested,
+      suggestedScore: tx.confidence ?? 0,
+      feedback: sameIds(suggested, confirmedIds) ? "accepted" : "changed",
+    };
+  };
+
   /** Confirma uma sugestão — de título (`candidateId` escolhe outro) ou de regra. */
   const confirmLine = async (tx: BankTransaction, candidateId?: string) => {
     if (tx.ruleId && !candidateId) {
@@ -738,6 +839,44 @@ export function ReconciliationDashboard() {
     const selectedCandidate = candidateId
       ? tx.matchCandidates?.find((c) => c.id === candidateId)
       : undefined;
+
+    // Sugestão com título em aberto: confirmar é dar a baixa com a data do banco.
+    const titles = selectedCandidate
+      ? [selectedCandidate.transaction]
+      : tx.matchedBundleDetails?.length
+        ? tx.matchedBundleDetails
+        : tx.matchedDetails
+          ? [tx.matchedDetails]
+          : [];
+    if (titles.some(isOpenTitle)) {
+      if (!canSettleFor(tx))
+        throw userError("Seu perfil não dá baixa neste tipo de conta.");
+      const target = Math.abs(tx.amount);
+      const single = titles.length === 1;
+      // Pagou menos que o título: desconto. Pagou mais: juros/multa.
+      const gap = single
+        ? currency(target).subtract(titles[0].amount).value
+        : 0;
+      await settleAndReconcile(
+        tx,
+        titles.map((t) => ({
+          tx: t,
+          settlement: {
+            paymentDate: new Date(tx.date),
+            finalAmount: single ? target : t.amount,
+            discount: gap < 0 ? -gap : 0,
+            interest: gap > 0 ? gap : 0,
+          },
+        })),
+        feedbackFor(
+          tx,
+          titles.map((t) => t.id),
+        ),
+      );
+      await learnFromLine(tx, titles);
+      return;
+    }
+
     const matchedIds = selectedCandidate?.id
       ? [selectedCandidate.id]
       : tx.matchedTransactionIds && tx.matchedTransactionIds.length > 0
@@ -752,7 +891,9 @@ export function ReconciliationDashboard() {
       matchedDetails: selectedCandidate?.transaction || tx.matchedDetails,
       confidence: tx.confidence || 100,
       ruleId: undefined,
+      ...feedbackFor(tx, matchedIds),
     });
+    await learnFromLine(tx, titles);
   };
 
   // Uma por vez: cada lançamento passa pela validação de saldo do servidor, e
@@ -1119,6 +1260,11 @@ export function ReconciliationDashboard() {
         resolution: undefined,
         previousStatus: undefined,
         previousStatuses: undefined,
+        // Sugestão aceita e depois desfeita conta como erro do motor.
+        ...(tx.status === "matched" &&
+        (tx.feedback === "accepted" || tx.feedback === "changed")
+          ? { feedback: "undone" as const }
+          : {}),
       });
       if (tx.status === "ignored") toast.success("Linha voltou para pendente");
       else if (resolution === "launched")
@@ -1244,57 +1390,82 @@ export function ReconciliationDashboard() {
   };
 
   /**
-   * Baixa um ou vários títulos com a data e o valor do extrato e concilia a
+   * Baixa os títulos em aberto com a data e o valor do extrato e concilia a
    * linha com todos: uma transferência paga as contas de vários projetos do
-   * mesmo favorecido.
+   * mesmo favorecido. Título já pago só concilia.
    */
-  const handleSettle = async (items: SettleItem[]) => {
-    if (!settlingTx || !actor || !user || !companyId) return;
+  const settleAndReconcile = async (
+    line: BankTransaction,
+    items: SettleItem[],
+    extra: Partial<BankTransaction> = {},
+  ) => {
+    if (!actor || !user || !companyId) throw userError("Sessão expirada.");
+    // A sugestão pode ser de antes de alguém baixar o título em outra tela.
+    const current = new Map(
+      (await transactionService.getByIds(items.map((i) => i.tx.id))).map(
+        (t) => [t.id, t],
+      ),
+    );
     const done: Transaction[] = [];
     let budgetExceeded = false;
     try {
       // Uma por vez: as baixas disputam o mesmo razão do centro de custo.
       for (const { tx: title, settlement } of items) {
+        const now = current.get(title.id);
+        if (!now) throw userError(`“${title.description}” foi excluído.`);
+        if (now.reconciled)
+          throw userError(
+            `“${title.description}” já está conciliado com outra linha.`,
+          );
+        if (!isOpenTitle(now)) continue;
         const result = await transactionService.settle(
           title.id,
           settlement,
           actor,
           companyId,
         );
-        done.push(title);
+        done.push(now);
         budgetExceeded ||= result.budgetExceeded;
       }
       const ids = items.map((i) => i.tx.id);
-      await reconcileAll(ids, settlingTx);
-      const paid = items.map(({ tx: title, settlement }) => ({
-        ...title,
-        status: "paid" as const,
-        paymentDate: settlement.paymentDate,
-        finalAmount: settlement.finalAmount,
-      }));
-      await updateStatusAndSync(settlingTx.id, "matched", {
-        ...(paid.length === 1
-          ? { matchedTransactionId: paid[0].id, matchedDetails: paid[0] }
-          : { matchedTransactionIds: ids, matchedBundleDetails: paid }),
+      await reconcileAll(ids, line);
+      const titles = items.map(({ tx: title, settlement }) => {
+        const now = current.get(title.id)!;
+        return done.includes(now)
+          ? {
+              ...now,
+              status: "paid" as const,
+              paymentDate: settlement.paymentDate,
+              finalAmount: settlement.finalAmount,
+            }
+          : now;
+      });
+      await updateStatusAndSync(line.id, "matched", {
+        ...(titles.length === 1
+          ? {
+              matchedTransactionId: titles[0].id,
+              matchedDetails: titles[0],
+              matchedTransactionIds: undefined,
+              matchedBundleDetails: undefined,
+            }
+          : {
+              matchedTransactionId: undefined,
+              matchedDetails: undefined,
+              matchedTransactionIds: ids,
+              matchedBundleDetails: titles,
+            }),
         confidence: 100,
-        resolution: "settled",
-        previousStatuses: Object.fromEntries(
-          items.map((i) => [i.tx.id, i.tx.status]),
-        ),
+        ruleId: undefined,
+        resolution: done.length > 0 ? "settled" : undefined,
+        previousStatuses:
+          done.length > 0
+            ? Object.fromEntries(done.map((t) => [t.id, t.status]))
+            : undefined,
+        ...extra,
       });
       await queryClient.invalidateQueries({ queryKey: ["settle-candidates"] });
-      toast.success(
-        paid.length === 1
-          ? "Título baixado e conciliado"
-          : `${paid.length} títulos baixados e conciliados`,
-        {
-          description: budgetExceeded
-            ? "A baixa caiu num exercício sem orçamento suficiente; o gestor foi avisado."
-            : undefined,
-        },
-      );
+      return { settled: done.length, budgetExceeded };
     } catch (error) {
-      console.error(error);
       // Sem a linha conciliada, baixa pela metade vira conta paga que ninguém
       // acha: estorna o que já foi baixado. Falha no estorno fica no console.
       for (const title of done) {
@@ -1314,12 +1485,41 @@ export function ReconciliationDashboard() {
           console.error(rollbackError);
         }
       }
-      toast.error(friendlyError(error, "Erro ao baixar pelo extrato"), {
-        description:
-          done.length > 0
-            ? "As baixas feitas antes do erro foram estornadas."
-            : undefined,
-      });
+      if (done.length === 0) throw error;
+      console.error(error);
+      throw userError(
+        `${friendlyError(error, "A baixa falhou.")} As baixas feitas antes do erro foram estornadas.`,
+      );
+    }
+  };
+
+  const BUDGET_NOTE =
+    "A baixa caiu num exercício sem orçamento suficiente; o gestor foi avisado.";
+
+  const handleSettle = async (items: SettleItem[]) => {
+    if (!settlingTx) return;
+    try {
+      const { budgetExceeded } = await settleAndReconcile(
+        settlingTx,
+        items,
+        feedbackFor(
+          settlingTx,
+          items.map((i) => i.tx.id),
+        ),
+      );
+      await learnFromLine(
+        settlingTx,
+        items.map((i) => i.tx),
+      );
+      toast.success(
+        items.length === 1
+          ? "Título baixado e conciliado"
+          : `${items.length} títulos baixados e conciliados`,
+        { description: budgetExceeded ? BUDGET_NOTE : undefined },
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error(friendlyError(error, "Erro ao baixar pelo extrato"));
       throw error;
     }
   };
@@ -1334,23 +1534,46 @@ export function ReconciliationDashboard() {
     setIsMatching(true);
     try {
       const dates = open.map((t) => new Date(t.date).getTime());
-      const [systemTransactions, entities] = await Promise.all([
-        transactionService.getAll({
-          companyId,
-          // Only transactions where money actually moved are valid reconciliation
-          // candidates — matching against draft/pending/rejected transactions would
-          // let a bank line "confirm" a payment that hasn't happened.
-          statuses: ["paid", "received"],
-          startDate: subDays(new Date(Math.min(...dates)), 10),
-          endDate: addDays(new Date(Math.max(...dates)), 10),
-          ...(onlyOwnPayables ? { createdBy: user.uid } : {}),
-        }),
-        entityService.getAll(companyId),
-      ]);
+      const first = new Date(Math.min(...dates));
+      const last = new Date(Math.max(...dates));
+      const own = onlyOwnPayables ? { createdBy: user.uid } : {};
+      const [paid, openPayables, openReceivables, entities] = await Promise.all(
+        [
+          // Pago casa pela data da baixa: conta vencida em setembro e paga em
+          // outubro aparece no extrato de outubro.
+          transactionService.getByPaymentDate({
+            companyId,
+            statuses: ["paid", "received"],
+            startDate: subDays(first, 10),
+            endDate: addDays(last, 10),
+            ...own,
+          }),
+          // Em aberto só entra para quem pode dar a baixa ao confirmar.
+          // ponytail: fila de aprovadas inteira, sem janela; ela é curta.
+          canPayPayables
+            ? transactionService.getAll({
+                companyId,
+                type: "payable",
+                statuses: PAYABLE_STATUSES,
+                ...own,
+              })
+            : [],
+          canEditReceivables
+            ? transactionService.getAll({
+                companyId,
+                type: "receivable",
+                statuses: RECEIVABLE_STATUSES,
+                startDate: subDays(first, 90),
+                endDate: addDays(last, 30),
+              })
+            : [],
+          entityService.getAll(companyId),
+        ],
+      );
 
-      const processed = ReconciliationService.runAutoReconciliation(
+      const processed = matchStatement(
         open,
-        systemTransactions,
+        [...paid, ...openPayables, ...openReceivables],
         entities,
       );
 
@@ -1757,6 +1980,10 @@ export function ReconciliationDashboard() {
                 <ListChecks className="h-4 w-4" />
                 Regras de conciliação
                 {rules.length > 0 && ` (${rules.length})`}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setAccuracyOpen(true)}>
+                <Target className="h-4 w-4" />
+                Acerto das sugestões
               </DropdownMenuItem>
               {closing && canManageBankAccounts && (
                 <DropdownMenuItem onSelect={() => setReopenConfirmOpen(true)}>
@@ -2315,6 +2542,23 @@ export function ReconciliationDashboard() {
           }}
         />
       )}
+
+      <Dialog open={accuracyOpen} onOpenChange={setAccuracyOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Acerto das sugestões</DialogTitle>
+            <DialogDescription>
+              Sugestões do motor que foram confirmadas como vieram, trocadas por
+              outro título ou desfeitas depois. Faixa forte abaixo de 80% indica
+              peso a recalibrar.
+            </DialogDescription>
+          </DialogHeader>
+          <MatchAccuracy
+            rows={accuracyRows}
+            labels={["Forte", "Sugestão", "Fraca"]}
+          />
+        </DialogContent>
+      </Dialog>
 
       {companyId && (
         <RulesSheet

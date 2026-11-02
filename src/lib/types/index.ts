@@ -898,6 +898,13 @@ export interface BankTransaction {
   previousStatus?: TransactionStatus;
   /** Idem, por título, quando uma linha baixou várias contas. */
   previousStatuses?: Record<string, TransactionStatus>;
+  /**
+   * O que o motor sugeriu e o que a pessoa fez com isso; mede o acerto por
+   * faixa de pontuação (ver `accuracyByBand`).
+   */
+  suggestedIds?: string[];
+  suggestedScore?: number;
+  feedback?: "accepted" | "changed" | "undone";
   /** Transferência: id da linha da outra ponta e a conta dela. */
   transferId?: string;
   transferAccountId?: string;

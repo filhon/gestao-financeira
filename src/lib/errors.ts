@@ -17,7 +17,12 @@ const USER_FACING_CODES = new Set([
   "functions/resource-exhausted",
   // Link de aprovação expirado — a mensagem diz exatamente isso.
   "functions/deadline-exceeded",
+  "app/user",
 ]);
+
+/** Erro do próprio cliente com mensagem escrita para o usuário. */
+export const userError = (message: string) =>
+  Object.assign(new Error(message), { code: "app/user" });
 
 interface CallableError {
   code?: unknown;
