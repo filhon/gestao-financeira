@@ -57,7 +57,11 @@ approved → paid`; `pending_approval → rejected | draft`; `rejected → draft
   empresa "equipe reduzida" que libera, mas grava o motivo no log e marca o
   lançamento (o auditor filtra).
 
-### 4. "Baixar pelo extrato" nunca acha despesa
+### 4. "Baixar pelo extrato" nunca acha despesa — ✅ resolvido em 02/11/2026
+
+Lista aceita `approved` e `authorized`; uma linha baixa várias contas
+(agrupadas por favorecido, soma exata obrigatória com mais de uma) e o desfazer
+estorna todas (`previousStatuses`). Texto original abaixo.
 
 - **Onde:** `src/components/features/finance/reconciliation/SettleFromStatementSheet.tsx`
   — `PAYABLE_STATUSES = ["authorized"]`.

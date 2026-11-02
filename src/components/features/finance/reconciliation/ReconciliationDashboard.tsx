@@ -34,7 +34,7 @@ import { BalanceStrip } from "@/components/features/finance/reconciliation/Balan
 import { AccountStrip } from "@/components/features/finance/reconciliation/AccountStrip";
 import {
   SettleFromStatementSheet,
-  Settlement,
+  SettleItem,
 } from "@/components/features/finance/reconciliation/SettleFromStatementSheet";
 import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
 import { transactionService } from "@/lib/services/transactionService";
@@ -1085,18 +1085,16 @@ export function ReconciliationDashboard() {
           return;
         }
       } else {
-        // Estorna antes de soltar: se o estorno falhar, nada mudou.
-        if (
-          resolution === "settled" &&
-          tx.previousStatus &&
-          tx.matchedTransactionId
-        ) {
-          await transactionService.updateStatus(
-            tx.matchedTransactionId,
-            tx.previousStatus,
-            actor,
-            companyId,
-          );
+        // Estorna antes de soltar: se o estorno falhar, a linha segue conciliada.
+        if (resolution === "settled") {
+          const previous =
+            tx.previousStatuses ??
+            (tx.previousStatus && tx.matchedTransactionId
+              ? { [tx.matchedTransactionId]: tx.previousStatus }
+              : {});
+          for (const [id, status] of Object.entries(previous)) {
+            await transactionService.updateStatus(id, status, actor, companyId);
+          }
         }
         const unreconcileActor = {
           companyId,
@@ -1120,6 +1118,7 @@ export function ReconciliationDashboard() {
         ignoreReason: undefined,
         resolution: undefined,
         previousStatus: undefined,
+        previousStatuses: undefined,
       });
       if (tx.status === "ignored") toast.success("Linha voltou para pendente");
       else if (resolution === "launched")
@@ -1244,37 +1243,83 @@ export function ReconciliationDashboard() {
     }
   };
 
-  // Baixa um título em aberto com a data e o valor do extrato e já concilia.
-  const handleSettle = async (title: Transaction, settlement: Settlement) => {
-    if (!settlingTx || !actor || !companyId) return;
+  /**
+   * Baixa um ou vários títulos com a data e o valor do extrato e concilia a
+   * linha com todos: uma transferência paga as contas de vários projetos do
+   * mesmo favorecido.
+   */
+  const handleSettle = async (items: SettleItem[]) => {
+    if (!settlingTx || !actor || !user || !companyId) return;
+    const done: Transaction[] = [];
+    let budgetExceeded = false;
     try {
-      const result = await transactionService.settle(
-        title.id,
-        settlement,
-        actor,
-        companyId,
-      );
-      await reconcileAll([title.id], settlingTx);
+      // Uma por vez: as baixas disputam o mesmo razão do centro de custo.
+      for (const { tx: title, settlement } of items) {
+        const result = await transactionService.settle(
+          title.id,
+          settlement,
+          actor,
+          companyId,
+        );
+        done.push(title);
+        budgetExceeded ||= result.budgetExceeded;
+      }
+      const ids = items.map((i) => i.tx.id);
+      await reconcileAll(ids, settlingTx);
+      const paid = items.map(({ tx: title, settlement }) => ({
+        ...title,
+        status: "paid" as const,
+        paymentDate: settlement.paymentDate,
+        finalAmount: settlement.finalAmount,
+      }));
       await updateStatusAndSync(settlingTx.id, "matched", {
-        matchedTransactionId: title.id,
-        matchedDetails: {
-          ...title,
-          status: "paid",
-          paymentDate: settlement.paymentDate,
-          finalAmount: settlement.finalAmount,
-        },
+        ...(paid.length === 1
+          ? { matchedTransactionId: paid[0].id, matchedDetails: paid[0] }
+          : { matchedTransactionIds: ids, matchedBundleDetails: paid }),
         confidence: 100,
         resolution: "settled",
-        previousStatus: title.status,
+        previousStatuses: Object.fromEntries(
+          items.map((i) => [i.tx.id, i.tx.status]),
+        ),
       });
-      toast.success("Título baixado e conciliado", {
-        description: result.budgetExceeded
-          ? "A baixa caiu num exercício sem orçamento suficiente; o gestor foi avisado."
-          : undefined,
-      });
+      await queryClient.invalidateQueries({ queryKey: ["settle-candidates"] });
+      toast.success(
+        paid.length === 1
+          ? "Título baixado e conciliado"
+          : `${paid.length} títulos baixados e conciliados`,
+        {
+          description: budgetExceeded
+            ? "A baixa caiu num exercício sem orçamento suficiente; o gestor foi avisado."
+            : undefined,
+        },
+      );
     } catch (error) {
       console.error(error);
-      toast.error(friendlyError(error, "Erro ao baixar o título"));
+      // Sem a linha conciliada, baixa pela metade vira conta paga que ninguém
+      // acha: estorna o que já foi baixado. Falha no estorno fica no console.
+      for (const title of done) {
+        try {
+          await transactionService.unreconcile(title.id, {
+            companyId,
+            userId: user.uid,
+            userEmail: user.email,
+          });
+          await transactionService.updateStatus(
+            title.id,
+            title.status,
+            actor,
+            companyId,
+          );
+        } catch (rollbackError) {
+          console.error(rollbackError);
+        }
+      }
+      toast.error(friendlyError(error, "Erro ao baixar pelo extrato"), {
+        description:
+          done.length > 0
+            ? "As baixas feitas antes do erro foram estornadas."
+            : undefined,
+      });
       throw error;
     }
   };
@@ -2315,7 +2360,9 @@ export function ReconciliationDashboard() {
             ? `“${undoTx.matchedDetails?.description ?? "O rendimento"}” é excluído das receitas e a diferença volta a aparecer como rendimento a reconhecer.`
             : undoTx?.resolution === "launched"
               ? `“${undoTx.matchedDetails?.description ?? "O lançamento"}” foi criado a partir desta linha e será excluído. A linha volta para pendente.`
-              : `A baixa de “${undoTx?.matchedDetails?.description ?? "o título"}” é estornada e ele volta a ficar em aberto. A linha volta para pendente.`
+              : undoTx?.matchedTransactionIds?.length
+                ? `A baixa das ${undoTx.matchedTransactionIds.length} contas é estornada e elas voltam a ficar em aberto. A linha volta para pendente.`
+                : `A baixa de “${undoTx?.matchedDetails?.description ?? "o título"}” é estornada e ele volta a ficar em aberto. A linha volta para pendente.`
         }
         confirmText={
           undoTx?.resolution === "launched"

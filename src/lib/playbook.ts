@@ -696,7 +696,7 @@ export const CHAPTERS: PlaybookChapter[] = [
         steps: [
           "Baixe o extrato **OFX** no internet banking e importe na conta certa. Pode importar o mesmo período de novo: linhas repetidas não duplicam.",
           "O sistema casa cada linha com uma conta **paga/recebida** de mesmo valor e data próxima. Sugestões fortes vêm pré-selecionadas, mas confira.",
-          "Linha sem par? Três saídas: **Baixar pelo extrato** (a conta existe, mas não foi baixada), **Lançar** (tarifa, IOF, rendimento; cria a conta já paga) ou **Ignorar** com motivo (transferência entre contas próprias já registrada, por exemplo).",
+          "Linha sem par? Três saídas: **Baixar pelo extrato** (a conta existe, aprovada, mas não foi baixada; uma linha pode baixar várias contas do mesmo favorecido), **Lançar** (tarifa, IOF, rendimento; cria a conta já paga) ou **Ignorar** com motivo (transferência entre contas próprias já registrada, por exemplo).",
           "Linhas que se repetem todo mês (tarifa do pacote) podem virar **regra**: o sistema passa a sugerir a mesma ação. Só o gestor cria regras.",
           "Quando a **diferença** chegar a zero e não houver pendentes, **Feche** o período.",
         ],
@@ -714,7 +714,11 @@ export const CHAPTERS: PlaybookChapter[] = [
           },
           {
             q: "Baixar pelo extrato não mostra a despesa que eu sei que existe.",
-            a: 'Hoje essa lista de despesas só mostra contas em status "autorizada", que o fluxo atual não produz (veja [Limites conhecidos](#cap-limites)). Dê a baixa pela tela de Contas a Pagar com a data do banco e volte à conciliação: a linha casará com a conta paga.',
+            a: "A lista mostra só despesas **aprovadas** (avulsas ou no lote), sem bloqueio de pagamento e sem conta de saída diferente da linha. Rascunho ou aguardando aprovação não aparece: aprove primeiro. Se a conta já foi baixada em Contas a Pagar, ela não está aqui; ela casa sozinha na busca de sugestões.",
+          },
+          {
+            q: "Fiz uma transferência só para vários projetos da mesma instituição.",
+            a: "Em **Baixar pelo extrato**, as contas do mesmo favorecido aparecem juntas, com a soma; o grupo cuja soma bate com o extrato vem primeiro, marcado **soma exata**. Marque o grupo inteiro (ou só as contas daquela transferência) e confirme: todas são baixadas com a data do banco e a linha fica conciliada com elas. Com mais de uma conta a soma precisa bater ao centavo. Desfazer estorna todas.",
           },
           {
             q: "O saldo do painel não bate com o banco.",
@@ -1019,7 +1023,6 @@ export const CHAPTERS: PlaybookChapter[] = [
         tone: "warning",
         rulesLabel: "Ainda não existe",
         rules: [
-          "**Baixar pelo extrato**, para despesas, ainda não encontra contas. Baixe em Contas a Pagar e concilie em seguida.",
           "**RD pago não paga despesas.** Baixe as despesas antes de marcar o RD.",
           "**Retenções de impostos** (IRRF, PIS/COFINS/CSLL, ISS, INSS) não são calculadas. Lance o valor líquido ao fornecedor e uma conta separada para cada guia, conforme orientação do contador.",
           "**Recursos vinculados** (convênios, doações com destino): sem marcação própria. Use conta do plano e centro de custo exclusivos do projeto.",

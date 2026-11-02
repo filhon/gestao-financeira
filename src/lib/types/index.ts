@@ -896,6 +896,8 @@ export interface BankTransaction {
   resolution?: "launched" | "settled" | "transfer";
   /** Status do título antes da baixa pelo extrato; o desfazer volta para ele. */
   previousStatus?: TransactionStatus;
+  /** Idem, por título, quando uma linha baixou várias contas. */
+  previousStatuses?: Record<string, TransactionStatus>;
   /** Transferência: id da linha da outra ponta e a conta dela. */
   transferId?: string;
   transferAccountId?: string;
