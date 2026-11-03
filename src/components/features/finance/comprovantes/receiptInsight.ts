@@ -2,6 +2,7 @@ import currency from "currency.js";
 import { format } from "date-fns";
 import { Comprovante, Transaction } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { distantPaymentDate as readDateFarFromPayment } from "@/lib/matching/queue";
 
 export type InsightTone = "ok" | "warn" | "muted";
 export interface Insight {
@@ -35,6 +36,13 @@ export function amountDifference(
   return Math.abs(diff) > 0.01 ? diff : null;
 }
 
+/** Data lida longe de todas as datas de pagamento dos títulos. */
+export const distantPaymentDate = (c: Comprovante, txs: Transaction[]) =>
+  readDateFarFromPayment(
+    c.matchedDate,
+    txs.map((t) => t.paymentDate),
+  );
+
 /** Pede a confirmação em lote sem medo: Alta, sem empate, sem divergência. */
 export function isSafeToBulkConfirm(c: Comprovante, txs: Transaction[]) {
   return (
@@ -44,7 +52,8 @@ export function isSafeToBulkConfirm(c: Comprovante, txs: Transaction[]) {
     !c.possibleDuplicateOf &&
     txs.length > 0 &&
     txs.length === linkedTransactionIds(c).length &&
-    amountDifference(c, txs) === null
+    amountDifference(c, txs) === null &&
+    distantPaymentDate(c, txs) === null
   );
 }
 
@@ -98,6 +107,13 @@ export function receiptInsight(c: Comprovante, txs: Transaction[]): Insight {
     return {
       tone: "warn",
       text: `Valor diverge em ${formatCurrency(Math.abs(diff))}`,
+    };
+  }
+  const paidOn = distantPaymentDate(c, txs);
+  if (paidOn) {
+    return {
+      tone: "warn",
+      text: `Data diverge: comprovante de ${format(c.matchedDate!, "dd/MM/yyyy")}, título pago em ${format(paidOn, "dd/MM/yyyy")}`,
     };
   }
   const conflict = c.matchReasons?.find((r) => r.startsWith("⚠"));

@@ -801,7 +801,7 @@ export interface ComprovanteMatchSignals {
 export interface Comprovante {
   id: string;
   companyId: string;
-  uploadBatchId: string; // Groups all pages from the same PDF upload
+  uploadBatchId: string; // Agrupa as páginas de um mesmo envio (todos os arquivos)
   pageNumber: number; // 1-based page index in the original PDF
   totalPages: number; // Total pages in the original PDF
   storageUrl?: string; // Firebase Storage download URL (legado — use proxy em vez disto)

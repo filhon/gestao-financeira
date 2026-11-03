@@ -426,6 +426,7 @@ export async function POST(req: NextRequest) {
       matchReasons: reasons.slice(0, 6),
       matchIsAmbiguous: best?.isAmbiguous ?? false,
       matchAlternatives: suggestion?.matchAlternatives ?? [],
+      matchSignals: suggestion?.matchSignals,
     },
     { status: 201 },
   );

@@ -33,6 +33,9 @@ import { useCompany } from "@/components/providers/CompanyProvider";
 import { ComprovanteStatusBadge } from "./ComprovanteStatusBadge";
 import { ReadFieldsEditor } from "./ReadFieldsEditor";
 import { DocumentPreview } from "../DocumentPreview";
+import { Checkbox } from "@/components/ui/checkbox";
+import { distantPaymentDate } from "@/lib/matching/queue";
+import { DATE_TOLERANCE_DAYS } from "@/lib/matching/score";
 import {
   amountDifference,
   linkedTransactionIds,
@@ -169,18 +172,32 @@ function ReviewBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [c.matchAlternatives, byId]);
 
+  // Data do comprovante: a corrigida pelo usuário vale sobre a lida.
+  const readDate = c.manualFields?.date ?? c.matchedDate;
+  const [onlyNearDate, setOnlyNearDate] = useState(true);
+  const nearDate = onlyNearDate ? readDate : undefined;
+  const readDay = readDate?.getTime();
+  const nearDay = nearDate?.getTime();
+
   // Busca manual: sem termo, os mais próximos do valor lido aparecem primeiro;
-  // títulos que já têm comprovante vão para o fim.
+  // títulos que já têm comprovante vão para o fim. Com o filtro de data, só
+  // os pagos (ou a vencer) perto da data do comprovante.
   const searchResults = useMemo(() => {
     const terms = txSearch.toLowerCase().split(/\s+/).filter(Boolean);
     const target = c.matchedAmount;
-    const day = c.matchedDate?.getTime();
+    const day = readDate?.getTime();
     const shown = new Set(linkedIds);
     const dayGap = (t: Transaction) =>
       day == null ? 0 : Math.abs((t.paymentDate ?? t.dueDate).getTime() - day);
     return txCandidates
       .filter((t) => {
         if (shown.has(t.id)) return false;
+        if (
+          nearDate &&
+          distantPaymentDate(nearDate, [t.paymentDate ?? t.dueDate])
+        ) {
+          return false;
+        }
         if (!terms.length) return true;
         const hay = [
           t.description,
@@ -204,7 +221,7 @@ function ReviewBody({
       })
       .slice(0, 30);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txCandidates, txSearch, c.matchedAmount, c.matchedDate, linkedKey]);
+  }, [txCandidates, txSearch, c.matchedAmount, readDay, nearDay, linkedKey]);
 
   const effectiveTxs = manualTxs.length > 0 ? manualTxs : shownTxs;
   const actionable = canEdit && c.matchStatus !== "matched";
@@ -572,6 +589,16 @@ function ReviewBody({
                   </button>
                 )}
               </div>
+              {readDate && (
+                <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={onlyNearDate}
+                    onCheckedChange={(v) => setOnlyNearDate(v === true)}
+                  />
+                  Só pagos perto de {format(readDate, "dd/MM/yyyy")} (±
+                  {DATE_TOLERANCE_DAYS} dias)
+                </label>
+              )}
               <Command shouldFilter={false} className="rounded-md border">
                 <CommandInput
                   placeholder="Descrição, fornecedor ou valor…"
@@ -585,7 +612,23 @@ function ReviewBody({
                       Carregando títulos…
                     </div>
                   ) : (
-                    <CommandEmpty>Nenhum título encontrado.</CommandEmpty>
+                    <CommandEmpty>
+                      {nearDate ? (
+                        <>
+                          Nenhum título perto de{" "}
+                          {format(nearDate, "dd/MM/yyyy")}.{" "}
+                          <button
+                            type="button"
+                            onClick={() => setOnlyNearDate(false)}
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            Ver todas as datas
+                          </button>
+                        </>
+                      ) : (
+                        "Nenhum título encontrado."
+                      )}
+                    </CommandEmpty>
                   )}
                   {searchResults.map((t) => {
                     const selected = manualTxs.some((m) => m.id === t.id);
@@ -621,8 +664,11 @@ function ReviewBody({
                           </span>
                           <span className="block truncate text-xs text-muted-foreground">
                             {t.supplierOrClient}
-                            {t.paymentDate &&
-                              ` · pago em ${format(t.paymentDate, "dd/MM/yyyy")}`}
+                          </span>
+                          <span className="block text-xs tabular-nums text-muted-foreground">
+                            {t.paymentDate
+                              ? `pago em ${format(t.paymentDate, "dd/MM/yyyy")}`
+                              : `vence em ${format(t.dueDate, "dd/MM/yyyy")} (não pago)`}
                             {t.comprovanteId && " · já tem comprovante"}
                           </span>
                         </span>

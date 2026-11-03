@@ -3,6 +3,8 @@
  * Puro e sem I/O. Verificação: `npm run check:matching-queue`.
  */
 
+import { DATE_TOLERANCE_DAYS } from "./score";
+
 export type Suggested = { id: string; ids: string[]; score: number };
 
 /**
@@ -114,4 +116,21 @@ export function receiptFeedback(c: {
       ? "accepted"
       : "changed",
   };
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Data de pagamento mais próxima da data lida no comprovante, quando ainda
+ * assim fica longe dela; null quando bate ou não dá para comparar.
+ */
+export function distantPaymentDate(
+  read: Date | undefined,
+  paymentDates: (Date | undefined)[],
+): Date | null {
+  const paid = paymentDates.filter((d): d is Date => !!d);
+  if (!read || paid.length === 0) return null;
+  const gap = (d: Date) => Math.abs(d.getTime() - read.getTime());
+  const closest = paid.reduce((a, b) => (gap(b) < gap(a) ? b : a));
+  return gap(closest) > DATE_TOLERANCE_DAYS * DAY_MS ? closest : null;
 }

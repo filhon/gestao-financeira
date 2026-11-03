@@ -120,6 +120,8 @@ const WEIGHTS = {
 const HIGH_THRESHOLD = 82;
 const MEDIUM_THRESHOLD = 55;
 const AMBIGUITY_MARGIN = 6;
+// ponytail: 5 dias cobrem fim de semana e feriado entre agendamento e baixa
+export const DATE_TOLERANCE_DAYS = 5;
 
 // ── Candidatos preparados ─────────────────────────────────────────────────────
 
@@ -339,6 +341,13 @@ function evaluateDate(facts: ReceiptFacts, dates: Date[]): DateEvaluation {
         best = { score, matchedDate: receipt.date, days };
       }
     }
+  }
+
+  // Nenhuma data perto do título: guarda a mais saliente mesmo assim, para a
+  // revisão mostrar a divergência em vez de esconder a data lida.
+  if (!best.matchedDate && facts.dates.length > 0) {
+    const top = facts.dates.reduce((a, b) => (b.weight > a.weight ? b : a));
+    best = { score: 0, matchedDate: top.date };
   }
 
   return best;
@@ -602,7 +611,13 @@ function assemble(
     }
   }
 
-  if (date.score > 0 && date.matchedDate) {
+  // Mesmo fornecedor e mesmo valor todo mês: só a data separa as parcelas.
+  // Comprovante longe de todas as datas do título é de outra parcela.
+  const dateFar =
+    facts.dates.length > 0 &&
+    (date.days == null || date.days > DATE_TOLERANCE_DAYS);
+
+  if (date.score > 0 && date.matchedDate && !dateFar) {
     reasons.push(
       date.days === 0
         ? `Data ${formatDate(date.matchedDate)} confere`
@@ -651,6 +666,14 @@ function assemble(
       conflicts.push("ja_conciliada");
       reasons.push("⚠ Transação já possui outro comprovante associado");
     }
+  }
+
+  if (dateFar) {
+    score *= 0.6;
+    conflicts.push("data_distante");
+    reasons.push(
+      `⚠ Comprovante de ${date.matchedDate ? formatDate(date.matchedDate) : "data diferente"}, a ${date.days ?? "mais de 30"} dias da data do título`,
+    );
   }
 
   if (input.extraPenalty) {
@@ -719,6 +742,7 @@ function assemble(
     // Teto proporcional à gravidade do conflito.
     if (conflicts.includes("documento_divergente")) score = Math.min(score, 45);
     if (conflicts.includes("ja_conciliada")) score = Math.min(score, 60);
+    if (conflicts.includes("data_distante")) score = Math.min(score, 60);
     if (input.barcodeMatch) {
       reasons.unshift("Código de barras do boleto confere");
     }

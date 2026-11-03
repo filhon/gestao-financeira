@@ -65,6 +65,7 @@ import { transactionService } from "@/lib/services/transactionService";
 import { cn, formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { ComprovanteStatusBadge } from "@/components/features/finance/comprovantes/ComprovanteStatusBadge";
 import { UploadComprovanteDialog } from "@/components/features/finance/comprovantes/UploadComprovanteDialog";
+import { useReceiptUploadStore } from "@/lib/store/useReceiptUploadStore";
 import {
   MatchReviewPanel,
   txCandidatesKey,
@@ -321,16 +322,27 @@ export default function ComprovantesPage() {
     setSearchTerm("");
   };
 
+  // Um envio específico (vindo do resultado do upload): só as páginas dele.
+  const [batchId, setBatchId] = useState<string | null>(null);
+
   const filters: ComprovanteFilter = useMemo(
-    () => ({
-      statuses: tab === "missing" ? [] : TAB_STATUSES[tab],
-      startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
-      endDate: dateRange?.from
-        ? endOfDay(dateRange.to ?? dateRange.from)
-        : undefined,
-      searchText: debouncedSearch || undefined,
-    }),
-    [tab, dateRange, debouncedSearch],
+    () =>
+      batchId
+        ? { uploadBatchId: batchId }
+        : {
+            statuses: tab === "missing" ? [] : TAB_STATUSES[tab],
+            startDate: dateRange?.from ? startOfDay(dateRange.from) : undefined,
+            endDate: dateRange?.from
+              ? endOfDay(dateRange.to ?? dateRange.from)
+              : undefined,
+            searchText: debouncedSearch || undefined,
+          },
+    [batchId, tab, dateRange, debouncedSearch],
+  );
+
+  const uploadStatus = useReceiptUploadStore((s) => s.status);
+  const uploadProgress = useReceiptUploadStore(
+    (s) => `${s.processed} de ${s.total}`,
   );
 
   // ── Stats ────────────────────────────────────────────────────────────────────
@@ -421,7 +433,7 @@ export default function ComprovantesPage() {
 
   // ── Pagination ────────────────────────────────────────────────────────────────
   const {
-    items,
+    items: loadedItems,
     hasMore,
     loadMore,
     isLoading,
@@ -442,6 +454,29 @@ export default function ComprovantesPage() {
     },
     enabled: !!companyId && tab !== "missing",
   });
+
+  // Num envio, o que pede decisão vem primeiro, na ordem das páginas: o
+  // painel percorre a lista nessa ordem.
+  const items = useMemo(
+    () =>
+      batchId
+        ? [...loadedItems].sort(
+            (a, b) =>
+              Number(!ACTIONABLE.has(a.matchStatus)) -
+                Number(!ACTIONABLE.has(b.matchStatus)) ||
+              a.pageNumber - b.pageNumber,
+          )
+        : loadedItems,
+    [batchId, loadedItems],
+  );
+
+  // Terminou um envio (mesmo com a janela fechada): a fila mudou.
+  useEffect(() => {
+    if (uploadStatus !== "done") return;
+    refresh();
+    invalidateCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadStatus]);
 
   // ── Transaction index for inline display ─────────────────────────────────────
   const [txMap, setTxMap] = useState<Map<string, Transaction>>(new Map());
@@ -613,6 +648,27 @@ export default function ComprovantesPage() {
 
   const openReview = useCallback((c: Comprovante) => setReviewId(c.id), []);
 
+  // Vindo do resultado do envio: abre o painel assim que o envio carregar.
+  const reviewAfterLoad = useRef<string | null>(null);
+  useEffect(() => {
+    const target = reviewAfterLoad.current;
+    if (!target || !batchId || isLoading || isFetchingNextPage) return;
+    const found =
+      target === "first"
+        ? items.find(
+            (i) => i.uploadBatchId === batchId && ACTIONABLE.has(i.matchStatus),
+          )
+        : items.find((i) => i.id === target);
+    if (found) {
+      reviewAfterLoad.current = null;
+      setReviewId(found.id);
+    } else if (hasMore) {
+      loadMore();
+    } else {
+      reviewAfterLoad.current = null;
+    }
+  }, [batchId, items, isLoading, isFetchingNextPage, hasMore, loadMore]);
+
   const navigate = useCallback(
     (dir: 1 | -1) => {
       const next = reviewIndex + dir;
@@ -723,7 +779,7 @@ export default function ComprovantesPage() {
   };
 
   // ── Remove / delete / share ───────────────────────────────────────────────────
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const setUploadOpen = useReceiptUploadStore((s) => s.setDialogOpen);
   const [removeId, setRemoveId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
@@ -1025,8 +1081,21 @@ export default function ComprovantesPage() {
           )}
           {canUpload && (
             <Button onClick={() => setUploadOpen(true)} className="gap-2">
-              <Upload className="h-4 w-4" />
-              <span className="hidden sm:inline">Enviar comprovantes</span>
+              {uploadStatus === "processing" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="tabular-nums">Lendo {uploadProgress}</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  <span className="hidden sm:inline">
+                    {uploadStatus === "done"
+                      ? "Ver resultado do envio"
+                      : "Enviar comprovantes"}
+                  </span>
+                </>
+              )}
             </Button>
           )}
         </div>
@@ -1034,7 +1103,13 @@ export default function ComprovantesPage() {
 
       {/* ── Work surface ─────────────────────────────────────────────────── */}
       <div className="rounded-xl border bg-card">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
+        <Tabs
+          value={batchId ? "" : tab}
+          onValueChange={(v) => {
+            setBatchId(null);
+            setTab(v as TabKey);
+          }}
+        >
           <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-none rounded-t-xl border-b bg-transparent px-2 py-0 [scrollbar-width:none]">
             {tabs.map(({ key, label }) => {
               const n = tabCounts[key];
@@ -1064,8 +1139,38 @@ export default function ComprovantesPage() {
           </TabsList>
         </Tabs>
 
+        {batchId && (
+          <div className="flex flex-wrap items-center gap-3 border-b bg-muted/40 px-4 py-2.5 text-sm">
+            <span>
+              Só o último envio
+              {resultCount !== undefined &&
+                `: ${resultCount} comprovante${resultCount !== 1 ? "s" : ""}`}
+              <span className="text-muted-foreground">
+                , o que pede decisão primeiro.
+              </span>
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto gap-1 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setBatchId(null);
+                setTab("pending");
+              }}
+            >
+              <X className="h-3.5 w-3.5" />
+              Voltar para a fila completa
+            </Button>
+          </div>
+        )}
+
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-3 border-b px-4 py-3",
+            batchId && "hidden",
+          )}
+        >
           <div className="relative min-w-0 flex-1 md:min-w-60">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -1438,11 +1543,14 @@ export default function ComprovantesPage() {
 
       {/* ── Panels & dialogs ─────────────────────────────────────────────── */}
       <UploadComprovanteDialog
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
         onSuccess={() => {
           refresh();
           invalidateCounts();
+        }}
+        onReview={(id, comprovanteId) => {
+          setTab("all");
+          setBatchId(id);
+          reviewAfterLoad.current = comprovanteId ?? "first";
         }}
       />
 

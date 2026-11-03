@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import {
   accuracyByBand,
+  distantPaymentDate,
   distributeSuggestions,
   receiptFeedback,
 } from "../src/lib/matching/queue";
@@ -161,3 +162,73 @@ Recebedor: MISSAO XINGU`;
 }
 
 console.log("check:matching-queue ok");
+
+// 6. Parcelas mensais iguais: comprovante de 30/10 com CNPJ e valor exato não
+// pode cair na parcela paga em 30/09 só porque a de 30/10 já tem comprovante.
+{
+  const receipt = `Comprovante de transferência PIX
+Data da transferência: 30/10/2026
+Valor: R$ 1.000,00
+CPF/CNPJ do recebedor: 11.222.333/0001-81
+Nome do recebedor: MISSAO XINGU`;
+  const sep = new Date("2026-09-30T12:00:00-03:00");
+  const oct = new Date("2026-10-30T12:00:00-03:00");
+  const out = matchComprovante(
+    receipt,
+    [
+      tx("set", { paymentDate: sep, dueDate: sep }),
+      tx("out", { paymentDate: oct, dueDate: oct, comprovanteId: "outro" }),
+    ],
+    { entities: [xingu] },
+  );
+  assert.notEqual(
+    out.best?.confidenceLevel,
+    "HIGH",
+    "parcela de outro mês não é Alta",
+  );
+  if (out.best?.transactionId === "set") {
+    assert.ok(out.best.signals.penalties.includes("data_distante"));
+    assert.ok(
+      out.best.reasons.some((r) =>
+        r.startsWith("⚠ Comprovante de 30/10/2026"),
+      ),
+    );
+  }
+
+  // Mesmo comprovante, parcela do mês livre: continua Alta.
+  const ok = matchComprovante(
+    receipt,
+    [
+      tx("set", { paymentDate: sep, dueDate: sep }),
+      tx("out", { paymentDate: oct, dueDate: oct }),
+    ],
+    { entities: [xingu] },
+  );
+  assert.equal(ok.best?.transactionId, "out");
+  assert.equal(ok.best?.confidenceLevel, "HIGH");
+}
+
+// ── Data lida × data de pagamento do título ─────────────────────────────────
+{
+  const paidOn = new Date(2026, 0, 30);
+  assert.ok(
+    distantPaymentDate(new Date(2026, 9, 30), [paidOn]),
+    "comprovante de 30/10 × título pago em 30/01 diverge",
+  );
+  assert.equal(
+    distantPaymentDate(new Date(2026, 1, 2), [paidOn]),
+    null,
+    "3 dias (fim de semana) é tolerado",
+  );
+  assert.equal(
+    distantPaymentDate(new Date(2026, 9, 30), [
+      undefined,
+      paidOn,
+      new Date(2026, 9, 29),
+    ]),
+    null,
+    "consolidado: basta um título perto da data lida",
+  );
+  assert.equal(distantPaymentDate(undefined, [paidOn]), null, "sem data lida");
+  console.log("check:matching-queue datas ok");
+}

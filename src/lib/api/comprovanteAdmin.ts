@@ -219,8 +219,11 @@ export function evaluateAutoConfirm(
 
 /**
  * Grava a associação feita pela regra automática: comprovante, títulos e
- * auditoria no mesmo batch. A sugestão fica guardada para o "desfazer"
+ * auditoria na mesma transação. A sugestão fica guardada para o "desfazer"
  * conseguir devolver o comprovante à fila.
+ *
+ * Páginas do mesmo envio rodam em paralelo: a transação relê os títulos e
+ * falha se outro comprovante pegou algum deles nesse meio-tempo.
  */
 export async function commitAutoConfirm(params: {
   companyId: string;
@@ -234,45 +237,52 @@ export async function commitAutoConfirm(params: {
   extra?: Record<string, unknown>;
 }) {
   const { best, comprovanteRef } = params;
-  const batch = adminDb.batch();
+  const txRefs = best.transactionIds.map((id) =>
+    adminDb.collection("transactions").doc(id),
+  );
 
-  batch.update(comprovanteRef, {
-    matchStatus: "matched",
-    transactionId: best.transactionId,
-    transactionIds: best.transactionIds,
-    isConsolidated: best.transactionIds.length > 1,
-    autoConfirmed: true,
-    autoConfirmReason: params.reason,
-    reviewedBy: "auto",
-    reviewedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-    ...params.extra,
-  });
+  await adminDb.runTransaction(async (tx) => {
+    const snaps = await tx.getAll(...txRefs);
+    if (snaps.some((s) => !s.exists || !!s.get("comprovanteId"))) {
+      throw new Error("title_taken");
+    }
 
-  for (const txId of best.transactionIds) {
-    batch.update(adminDb.collection("transactions").doc(txId), {
-      comprovanteId: comprovanteRef.id,
-      comprovanteStoragePath: params.storagePath,
-      comprovanteUrl: null,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  }
-
-  batch.set(adminDb.collection("audit_logs").doc(), {
-    companyId: params.companyId,
-    userId: params.actorUid,
-    userEmail: params.actorEmail,
-    action: "auto_confirm_match",
-    entity: "comprovante",
-    entityId: comprovanteRef.id,
-    details: {
+    tx.update(comprovanteRef, {
+      matchStatus: "matched",
+      transactionId: best.transactionId,
       transactionIds: best.transactionIds,
-      storagePath: params.storagePath,
-      reason: params.reason,
-      score: best.score,
-    },
-    createdAt: FieldValue.serverTimestamp(),
-  });
+      isConsolidated: best.transactionIds.length > 1,
+      autoConfirmed: true,
+      autoConfirmReason: params.reason,
+      reviewedBy: "auto",
+      reviewedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      ...params.extra,
+    });
 
-  await batch.commit();
+    for (const txRef of txRefs) {
+      tx.update(txRef, {
+        comprovanteId: comprovanteRef.id,
+        comprovanteStoragePath: params.storagePath,
+        comprovanteUrl: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    tx.set(adminDb.collection("audit_logs").doc(), {
+      companyId: params.companyId,
+      userId: params.actorUid,
+      userEmail: params.actorEmail,
+      action: "auto_confirm_match",
+      entity: "comprovante",
+      entityId: comprovanteRef.id,
+      details: {
+        transactionIds: best.transactionIds,
+        storagePath: params.storagePath,
+        reason: params.reason,
+        score: best.score,
+      },
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
 }
