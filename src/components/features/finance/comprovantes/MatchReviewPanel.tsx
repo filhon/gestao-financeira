@@ -145,6 +145,8 @@ function ReviewBody({
 
   // Sugestão (pendente) ou associação confirmada.
   const linkedIds = linkedTransactionIds(c);
+  // Chave estável p/ dependência de useMemo: linkedIds é um array novo a cada render.
+  const linkedKey = linkedIds.join();
   const shownTxs = linkedIds
     .map((id) => byId.get(id))
     .filter((t): t is Transaction => !!t);
@@ -202,13 +204,7 @@ function ReviewBody({
       })
       .slice(0, 30);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    txCandidates,
-    txSearch,
-    c.matchedAmount,
-    c.matchedDate,
-    linkedIds.join(),
-  ]);
+  }, [txCandidates, txSearch, c.matchedAmount, c.matchedDate, linkedKey]);
 
   const effectiveTxs = manualTxs.length > 0 ? manualTxs : shownTxs;
   const actionable = canEdit && c.matchStatus !== "matched";

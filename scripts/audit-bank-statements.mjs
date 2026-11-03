@@ -386,10 +386,10 @@ const dayRow = (d) => {
     byDay.set(d, { date: d, bank: 0, cdb: 0, sys: 0, sysN: 0 });
   return byDay.get(d);
 };
-for (const l of toMatch)
-  l.kind === "cdb"
-    ? (dayRow(l.date).cdb += l.amount)
-    : (dayRow(l.date).bank += l.amount);
+for (const l of toMatch) {
+  if (l.kind === "cdb") dayRow(l.date).cdb += l.amount;
+  else dayRow(l.date).bank += l.amount;
+}
 for (const t of sys.filter((t) => inRange(t.paymentDate))) {
   const r = dayRow(t.paymentDate);
   r.sys += t.signed;

@@ -739,6 +739,16 @@ export const paymentBatchService = {
     const adjustmentLog: Array<Record<string, unknown>> = [];
     tSnap.docs.forEach((tDoc) => {
       const t = tDoc.data() as Transaction;
+      // Já paga (baixa avulsa, conciliação) fica como está: aprovar não desfaz pagamento
+      if (t.status === "paid") {
+        if (rejected.has(tDoc.id) || adjusted.has(tDoc.id)) {
+          throw new Error(
+            `"${t.description}" já foi paga: não pode ser rejeitada nem reduzida.`,
+          );
+        }
+        total = total.add(effectiveAmount(t));
+        return;
+      }
       const reason = rejected.get(tDoc.id);
       if (reason) {
         updates.push([
@@ -968,8 +978,14 @@ export const paymentBatchService = {
     assertStatus(before, ["paid"]);
 
     const tSnap = await batchTransactions(batchId);
+    // Só desfaz o que a confirmação do lote pagou (releasedBy); as baixadas uma
+    // a uma (conciliação, comprovante) seguem pagas.
+    // ponytail: lote confirmado antes de 25/10/2026 não tem releasedBy em
+    // nenhuma; aí volta tudo, como antes.
+    const released = tSnap.docs.filter((d) => d.get("releasedBy"));
+    const toRevert = released.length ? released : tSnap.docs;
     await commitInChunks(
-      tSnap.docs.map((tDoc) => [
+      toRevert.map((tDoc) => [
         tDoc.ref,
         {
           status: "draft",
@@ -995,7 +1011,7 @@ export const paymentBatchService = {
       paidAt: (before.paidAt as Timestamp)?.toDate().toISOString(),
       approvedBy: before.approvedBy,
       authorizedBy: before.authorizedBy,
-      transactionCount: tSnap.size,
+      transactionCount: toRevert.length,
       totalAmount: before.totalAmount,
     });
   },

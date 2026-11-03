@@ -659,6 +659,20 @@ export async function POST(request: Request) {
       const currentById = new Map(
         allTxSnap.docs.map((d) => [d.id, effectiveAmount(d.data())]),
       );
+      // Já paga (baixa avulsa, conciliação) fica como está: aprovar não desfaz pagamento
+      const paidIds = new Set(
+        allTxSnap.docs
+          .filter((d) => d.data().status === "paid")
+          .map((d) => d.id),
+      );
+      if (
+        [...rejections, ...adjustments].some((item) => paidIds.has(item.id))
+      ) {
+        return NextResponse.json(
+          { error: "Transação já paga não pode ser rejeitada nem reduzida." },
+          { status: 400 },
+        );
+      }
 
       const rejected = new Map<string, string>();
       for (const r of rejections) {
@@ -716,6 +730,7 @@ export async function POST(request: Request) {
         }
         const adj = adjusted.get(tDoc.id);
         total = total.add(adj?.to ?? currentById.get(tDoc.id)!);
+        if (paidIds.has(tDoc.id)) return;
         fsWriteBatch.update(tDoc.ref, {
           status: "approved",
           approvedBy: approverId,
