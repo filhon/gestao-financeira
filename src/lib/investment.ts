@@ -12,7 +12,24 @@ import {
 /** CDI de cada dia útil (SGS 12, % ao dia), pela data "yyyy-MM-dd". */
 export type CdiSeries = Record<string, number>;
 
-const day = (d: Date) => format(new Date(d), "yyyy-MM-dd");
+const CDI_CACHE_MS = 6 * 60 * 60 * 1000;
+
+/** Série do CDI: muda uma vez por dia útil, então fica no cache do navegador. */
+export const cdiQuery = (companyId: string, from: string) => ({
+  queryKey: ["cdi", companyId, from],
+  queryFn: async (): Promise<CdiSeries> => {
+    const res = await fetch(
+      `/api/internal/cdi?companyId=${companyId}&from=${from}`,
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data.cdi;
+  },
+  staleTime: CDI_CACHE_MS,
+  gcTime: CDI_CACHE_MS,
+});
+
+const day =(d: Date) => format(new Date(d), "yyyy-MM-dd");
 
 /** Produtos que acompanham o CDI: os outros não têm curva, só a conferência. */
 export const tracksCdi = (a: Pick<BankAccount, "kind" | "product">) =>

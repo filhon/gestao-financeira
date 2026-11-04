@@ -126,7 +126,7 @@ import {
   yieldToRecognize,
 } from "@/lib/bankReconciliation";
 import {
-  type CdiSeries,
+  cdiQuery,
   investmentPosition,
   taxWithheld,
   tracksCdi,
@@ -398,17 +398,8 @@ export function ReconciliationDashboard() {
       ? format(account.openingBalanceDate, "yyyy-MM-dd")
       : null;
   const { data: cdi } = useQuery({
-    queryKey: ["cdi", companyId, cdiFrom],
-    queryFn: async (): Promise<CdiSeries> => {
-      const res = await fetch(
-        `/api/internal/cdi?companyId=${companyId}&from=${cdiFrom}`,
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      return data.cdi;
-    },
+    ...cdiQuery(companyId ?? "", cdiFrom ?? ""),
     enabled: !!companyId && !!cdiFrom,
-    staleTime: 6 * 60 * 60 * 1000,
     retry: 1,
   });
   // Posição no dia do saldo informado (ou hoje), acertada a ele: IR e líquido

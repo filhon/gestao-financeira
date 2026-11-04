@@ -27,11 +27,9 @@
     for (const e of lista.getEntries()) {
       if (!/cloudfunctions\.net|\/api\//.test(e.name)) continue;
       const linha = linhas.findLast((l) => l.t0 <= e.startTime);
-      if (linha) {
-        linha.servidor = Math.max(
-          linha.servidor ?? 0,
-          Math.round(e.responseEnd - linha.t0),
-        );
+      if (linha && e.responseEnd - linha.t0 > (linha.servidor ?? 0)) {
+        linha.servidor = Math.round(e.responseEnd - linha.t0);
+        linha.chamada = new URL(e.name).pathname;
       }
     }
   }).observe({ type: "resource" });
@@ -89,6 +87,7 @@
       "desenho",
       "estavel",
       "servidor",
+      "chamada",
       "cortado",
     ]);
   console.log("Medindo cliques. Use o sistema e rode __cliques().");
