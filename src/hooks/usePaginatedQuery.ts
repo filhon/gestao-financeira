@@ -45,6 +45,12 @@ export interface UsePaginatedQueryOptions<T, TFilters = unknown> {
    * (padrão: herda do QueryClient — 60s).
    */
   staleTime?: number;
+
+  /**
+   * Passe o `companyId` para manter a lista anterior na tela enquanto a nova
+   * carrega (troca de aba ou filtro). Sem ele, cai no estado de carregando.
+   */
+  keepPreviousWithin?: string | null;
 }
 
 export interface UsePaginatedQueryReturn<T> {
@@ -59,6 +65,9 @@ export interface UsePaginatedQueryReturn<T> {
 
   /** Indica se a query inicial está carregando. */
   isLoading: boolean;
+
+  /** Os itens ainda são os da chave anterior: mostrar esmaecidos e sem ação. */
+  isPlaceholderData: boolean;
 
   /** Indica se está buscando a próxima página (útil para spinner no botão). */
   isFetchingNextPage: boolean;
@@ -87,6 +96,15 @@ export interface UsePaginatedQueryReturn<T> {
   removeItem: (id: string) => void;
 }
 
+/**
+ * Só reaproveita a lista anterior se a chave dela for da mesma empresa: ao
+ * trocar de empresa, a tela nunca mostra as linhas da outra.
+ */
+export const placeholderWithin =
+  (scope?: string | null) =>
+  <D>(previous: D | undefined, previousQuery?: { queryKey: QueryKey }) =>
+    scope && previousQuery?.queryKey.includes(scope) ? previous : undefined;
+
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
@@ -98,6 +116,7 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     pageSize = 25,
     enabled = true,
     staleTime,
+    keepPreviousWithin,
   } = options;
 
   const queryClient = useQueryClient();
@@ -119,6 +138,7 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     fetchNextPage,
     hasNextPage,
     isLoading,
+    isPlaceholderData,
     isFetchingNextPage,
     isError,
     error,
@@ -136,6 +156,7 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     },
     enabled,
     staleTime,
+    placeholderData: placeholderWithin(keepPreviousWithin),
   });
 
   // Achatar todas as páginas em um único array
@@ -200,6 +221,7 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     hasMore,
     loadMore,
     isLoading,
+    isPlaceholderData,
     isFetchingNextPage,
     isError,
     error: error as Error | null,

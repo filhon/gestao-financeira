@@ -62,7 +62,7 @@ export function MobileNav() {
                 key={tab.href}
                 href={tab.href}
                 className={cn(
-                  "flex flex-1 flex-col items-center justify-center gap-1 py-2.5 transition-colors min-w-0",
+                  "flex flex-1 flex-col items-center justify-center gap-1 py-2.5 transition-colors active:opacity-60 min-w-0",
                   isActive ? "text-primary" : "text-muted-foreground",
                 )}
               >
@@ -84,7 +84,7 @@ export function MobileNav() {
           <button
             onClick={() => setMoreOpen(true)}
             className={cn(
-              "flex flex-1 flex-col items-center justify-center gap-1 py-2.5 transition-colors min-w-0",
+              "flex flex-1 flex-col items-center justify-center gap-1 py-2.5 transition-colors active:opacity-60 min-w-0",
               isMoreActive ? "text-primary" : "text-muted-foreground",
             )}
           >

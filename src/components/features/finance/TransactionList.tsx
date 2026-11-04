@@ -403,7 +403,10 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     },
     pageSize: 50,
     enabled: !!companyId && !!user && !searching,
+    keepPreviousWithin: companyId,
   });
+  // Aba nova ainda carregando: as linhas são da aba anterior.
+  const stale = !searching && list.isPlaceholderData;
 
   const searchQuery = useQuery({
     queryKey: ["tx-search", type, companyId, debouncedSearch, onlyOwn],
@@ -924,7 +927,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
 
   // ── Teclado ──────────────────────────────────────────────────────────────
   const moveActive = (delta: number) => {
-    if (flat.length === 0) return;
+    if (stale || flat.length === 0) return;
     const index = flat.findIndex((t) => t.id === activeId);
     const next =
       flat[
@@ -952,7 +955,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       ) {
         return;
       }
-      const active = flat.find((t) => t.id === activeId);
+      const active = stale ? undefined : flat.find((t) => t.id === activeId);
       // Setas só com o foco numa linha, para não roubar a rolagem da página.
       const arrow =
         (e.key === "ArrowDown" || e.key === "ArrowUp") &&
@@ -1148,7 +1151,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     !!totals &&
     totals.every((t) => t.count === 0);
   const listEmpty =
-    !isLoading && !seekingBatch && !isError && flat.length === 0;
+    !isLoading && !seekingBatch && !stale && !isError && flat.length === 0;
   const weekTotals = totals?.[tabs.findIndex((t) => t.id === "week")];
 
   const gridCols =
@@ -1728,6 +1731,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       >
         <Checkbox
           checked={allSelected}
+          disabled={stale}
           onCheckedChange={(c) =>
             setSelectedIds(c ? new Set(flat.map((t) => t.id)) : new Set())
           }
@@ -1742,7 +1746,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       </div>
 
       {/* ── Linhas ────────────────────────────────────────────────────── */}
-      {isLoading || seekingBatch ? (
+      {isLoading || seekingBatch || (stale && flat.length === 0) ? (
         <ListSkeleton />
       ) : isError ? (
         <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
@@ -1801,7 +1805,12 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             )}
         </div>
       ) : (
-        <ul aria-label="Contas">
+        <ul
+          aria-label="Contas"
+          aria-busy={stale}
+          inert={stale}
+          className={cn("transition-opacity", stale && "opacity-50")}
+        >
           {groups
             ? groups.map((g) => {
                 const negative = g.balance !== undefined && g.balance < 0;
@@ -1981,7 +1990,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
                   <span className="font-financial font-medium tabular-nums text-foreground">
                     {formatCurrency(activeTotals.total)}
                   </span>
-                  {!searching && activeTotals.count > flat.length && (
+                  {!searching && !stale && activeTotals.count > flat.length && (
                     <span>
                       {" "}
                       · {flat.length} carregadas

@@ -81,7 +81,9 @@ const DOT_TONE: Record<NavBadge, string> = {
 const DOT_ORDER: NavBadge[] = ["overdue", "queue", "comprovantes", "feedbacks"];
 
 const ACTIVE = "bg-primary/12 text-foreground";
-const IDLE = "text-muted-foreground hover:bg-muted hover:text-foreground";
+// `active:` antecipa o item selecionado já ao pressionar, sem esperar a transição.
+const IDLE =
+  "text-muted-foreground hover:bg-muted hover:text-foreground active:bg-primary/12 active:text-foreground active:duration-0";
 
 const BADGE_LABEL: Record<NavBadge, string> = {
   overdue: "vencidas",
