@@ -35,8 +35,13 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
         buster: process.env.NEXT_PUBLIC_BUILD_ID,
       }}
       // O restaurado aparece na hora e é relido em seguida: não mostra
-      // número velho como se fosse atual por mais que uma ida ao servidor.
-      onSuccess={() => queryClient.invalidateQueries()}
+      // número velho como se fosse atual por mais que uma ida ao servidor. O CDI
+      // fica de fora: só muda uma vez por dia útil e a chamada é lenta.
+      onSuccess={() =>
+        queryClient.invalidateQueries({
+          predicate: (q) => q.queryKey[0] !== "cdi",
+        })
+      }
     >
       {children}
     </PersistQueryClientProvider>

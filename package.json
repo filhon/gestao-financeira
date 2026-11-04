@@ -23,7 +23,8 @@
     "check:receipt-checks": "jiti scripts/check-receipt-checks.ts",
     "check:search": "jiti scripts/check-search.ts",
     "check:reports": "jiti scripts/check-reports.ts",
-    "check:list-placeholder": "jiti scripts/check-list-placeholder.ts"
+    "check:list-placeholder": "jiti scripts/check-list-placeholder.ts",
+    "check:transaction-action": "jiti scripts/check-transaction-action.ts"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",

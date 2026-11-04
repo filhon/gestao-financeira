@@ -79,6 +79,10 @@ import {
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  usePendingTransactions,
+  useTransactionAction,
+} from "@/hooks/useTransactionAction";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
@@ -756,9 +760,12 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
 
   // ── Ações de linha ───────────────────────────────────────────────────────
   const actor = user ? { uid: user.uid, email: user.email } : null;
+  const runAction = useTransactionAction();
+  const pendingActions = usePendingTransactions();
 
   const canPayRow = (t: Transaction) =>
     t.status !== "paid" &&
+    !pendingActions.has(t.id) &&
     (isPayable
       ? (perms.isAdmin || perms.isFinancialManager) && !t.paymentHold
       : perms.canEditReceivables);
@@ -801,16 +808,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   };
 
   const confirmPay = async (data: PaymentConfirmation) => {
-    if (!payingTx || !actor || !companyId) return;
-    try {
-      await transactionService.settle(payingTx.id, data, actor, companyId);
-      toast.success(
-        isPayable ? "Pagamento confirmado!" : "Recebimento confirmado!",
-      );
-      refresh();
-    } catch (error) {
-      toast.error(friendlyError(error, "Erro ao registrar pagamento."));
-      throw error;
+    if (payingTx) {
+      runAction({ kind: "settle", transaction: payingTx, data });
     }
   };
 
@@ -862,10 +861,12 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   const bulkPayable = selectedRows.filter(
-    (t) => t.status !== "paid" && !t.paymentHold,
+    (t) => t.status !== "paid" && !t.paymentHold && !pendingActions.has(t.id),
   );
   const bulkHeld = selectedRows.filter((t) => t.paymentHold).length;
-  const bulkRevertable = selectedRows.filter((t) => t.status === "paid");
+  const bulkRevertable = selectedRows.filter(
+    (t) => t.status === "paid" && !pendingActions.has(t.id),
+  );
 
   const runBulk = async (
     fn: () => Promise<void>,
@@ -1200,6 +1201,18 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     const selected = selectedIds.has(t.id);
     const active = activeId === t.id;
     const payAllowed = canPayRow(t);
+    const pendingStatus = pendingActions.get(t.id);
+    const statusCell = pendingStatus ? (
+      <span
+        role="status"
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+      >
+        <Loader2 className="h-3 w-3 animate-spin" />
+        {pendingStatus}
+      </span>
+    ) : (
+      <StatusBadge status={t.status} type={type} />
+    );
     const desc = splitDescription(t.description);
     const installment = t.installments
       ? `${t.installments.current}/${t.installments.total}`
@@ -1428,7 +1441,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
           </div>
           {/* Recuo separa o status do valor: sem ele, "R$ 2.500,00 Rascunho" lia como uma coisa só. */}
           <div className="flex flex-col items-start gap-0.5 pl-3">
-            <StatusBadge status={t.status} type={type} />
+            {statusCell}
             {tab === "queue" && t.updatedAt && (
               <span className="text-xs text-muted-foreground">
                 parada há {differenceInCalendarDays(today, t.updatedAt)} d
@@ -1470,7 +1483,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
                 </Button>
               )}
             </div>
-            {actions}
+            {!pendingStatus && actions}
           </div>
         </div>
 
@@ -1512,11 +1525,13 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
                 {format(t.dueDate, "dd/MM/yy")}
               </span>
               {dueLabel}
-              <StatusBadge status={t.status} type={type} />
+              {statusCell}
               {flags}
             </div>
           </div>
-          <div onClick={(e) => e.stopPropagation()}>{actions}</div>
+          <div onClick={(e) => e.stopPropagation()}>
+            {!pendingStatus && actions}
+          </div>
         </div>
       </li>
     );

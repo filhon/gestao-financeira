@@ -39,11 +39,18 @@ const db = () => admin.firestore();
  * 2–5 s vinha do `googleapis` carregado no topo do index (agora sob demanda),
  * e a tela manda `{ warmup: true }` ao abrir, para a instância subir enquanto
  * o usuário preenche o formulário.
+ *
+ * O ping lê um documento: a 1ª operação no Firestore de cada instância levava
+ * 4–6 s (as seguintes, ~1 s), e sem isso quem pagava era o clique do usuário.
+ * ponytail: uma leitura por ping; se os logs não mostrarem ganho, remover.
  */
 const hotCallable = (handler: Parameters<typeof functions.https.onCall>[0]) =>
-  functions.https.onCall((data, context) =>
-    data?.warmup ? { warm: true } : handler(data, context),
-  );
+  functions.https.onCall(async (data, context) => {
+    if (!data?.warmup) return handler(data, context);
+    // Chamada anônima não ganha leitura no banco.
+    if (context.auth) await db().collection("companies").doc("_warmup").get();
+    return { warm: true };
+  });
 
 /** Rejeitadas não reservam recurso; todo o resto sim, inclusive rascunho. */
 const CONSUMES_BUDGET = (status?: string) => status !== "rejected";

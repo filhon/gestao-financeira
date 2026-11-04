@@ -8,6 +8,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCostCenters } from "@/hooks/useCostCenters";
 import { invalidateSearch } from "@/hooks/useSearch";
+import { useTransactionActionGuard } from "@/hooks/useTransactionAction";
 
 const TX_QUERY_KEYS = [
   "payable-transactions",
@@ -22,6 +23,8 @@ export function GlobalTransactionDetailModal() {
   const { user } = useAuth();
   const { onlyOwnPayables } = usePermissions();
   const queryClient = useQueryClient();
+  // Montado em todo o dashboard: vale para qualquer tela de onde a ação saiu.
+  useTransactionActionGuard();
   // Busca só ao abrir; fechado, segue usando o que já está em cache.
   const { costCenters } = useCostCenters(
     isOpen ? selectedCompany?.id : undefined,

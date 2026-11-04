@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { entityService } from "@/lib/services/entityService";
@@ -7,6 +7,7 @@ import { bankAccountService } from "@/lib/services/bankAccountService";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import { investmentBalance } from "@/lib/bankReconciliation";
 import {
+  cdiQuery,
   investmentPosition,
   isLiquidReserve,
   tracksCdi,
@@ -83,6 +84,7 @@ export function useCashReserve() {
   const { selectedCompany } = useCompany();
   const { canViewReconciliation } = usePermissions();
   const companyId = selectedCompany?.id;
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: ["cash-reserve", companyId],
@@ -99,13 +101,11 @@ export function useCashReserve() {
         : null;
       // Sem CDI o rendimento se divide pelos lotes na proporção do custo: o
       // imposto fica menos preciso, o líquido continua o do banco.
-      let cdi: CdiSeries = {};
-      if (from) {
-        const res = await fetch(
-          `/api/internal/cdi?companyId=${companyId}&from=${from}`,
-        );
-        if (res.ok) cdi = (await res.json()).cdi;
-      }
+      const cdi: CdiSeries = from
+        ? await queryClient
+            .fetchQuery(cdiQuery(companyId!, from))
+            .catch(() => ({}))
+        : {};
       return Promise.all(
         accounts.map(async (account) => {
           const items = await reconciliationSessionService.getAccountItems(

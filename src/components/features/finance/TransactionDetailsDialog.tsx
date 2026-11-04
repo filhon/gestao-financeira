@@ -22,7 +22,6 @@ import {
   warmLedger,
 } from "@/lib/services/transactionService";
 import { comprovanteService } from "@/lib/services/comprovanteService";
-import { emailService } from "@/lib/services/emailService";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Loader2,
@@ -74,6 +73,10 @@ import { TransactionForm } from "./TransactionForm";
 import { TransactionFormData } from "@/lib/validations/transaction";
 import { RecurrenceUpdateDialog } from "./RecurrenceUpdateDialog";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  usePendingTransactions,
+  useTransactionAction,
+} from "@/hooks/useTransactionAction";
 import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { useBankAccounts } from "@/hooks/useBankAccounts";
 import { RecordHistory } from "@/components/features/audit/RecordHistory";
@@ -236,7 +239,11 @@ export function TransactionDetailsDialog({
     ? bankAccounts.find((a) => a.id === transaction.bankAccountId)
     : undefined;
 
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const runAction = useTransactionAction();
+  const pendingActions = usePendingTransactions();
+  const isProcessing =
+    isSaving || (!!transaction && pendingActions.has(transaction.id));
   const [isEditing, setIsEditing] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [isRecurrenceUpdateDialogOpen, setIsRecurrenceUpdateDialogOpen] =
@@ -414,72 +421,15 @@ export function TransactionDetailsDialog({
 
   // ── Handlers — defined unconditionally (hooks rules) ────────────────────────
   const handleStatusUpdate = useCallback(
-    async (newStatus: TransactionStatus, reason?: string) => {
-      if (!user || !transaction || !selectedCompany) return;
-      try {
-        setIsProcessing(true);
-        const updatedTransaction = await transactionService.updateStatus(
-          transaction.id,
-          newStatus,
-          { uid: user.uid, email: user.email },
-          selectedCompany.id,
-          reason,
-        );
-
-        try {
-          if (newStatus === "pending_approval") {
-            const q = query(
-              collection(db, "users"),
-              where("role", "in", ["admin", "approver", "financial_manager"]),
-            );
-            const querySnapshot = await getDocs(q);
-            const approverEmails = querySnapshot.docs
-              .map((d) => d.data().email)
-              .filter((email) => email);
-            if (approverEmails.length > 0) {
-              await emailService.sendApprovalRequest(
-                updatedTransaction,
-                approverEmails[0],
-              );
-            }
-            toast.success("Solicitação enviada para aprovação!");
-          } else {
-            const userDoc = await getDoc(
-              doc(db, "users", transaction.createdBy),
-            );
-            const creatorEmail = userDoc.data()?.email;
-            if (creatorEmail) {
-              // O e-mail fala do status novo (e do motivo, se rejeitada).
-              await emailService.sendStatusUpdate(
-                updatedTransaction,
-                creatorEmail,
-                user.displayName,
-              );
-            }
-            if (newStatus === "approved")
-              toast.success("Transação aprovada com sucesso!");
-            else if (newStatus === "rejected")
-              toast.info("Transação rejeitada.");
-            else if (newStatus === "paid")
-              toast.success("Pagamento/Recebimento confirmado!");
-          }
-        } catch (emailError) {
-          console.error("Failed to send email notification:", emailError);
-          toast.warning("Status atualizado, mas houve erro ao enviar e-mail.");
-        }
-
-        onUpdate(updatedTransaction);
-        onClose();
-      } catch (error) {
-        console.error("Error updating status:", error);
-        toast.error(
-          friendlyError(error, "Erro ao atualizar status. Tente novamente."),
-        );
-      } finally {
-        setIsProcessing(false);
-      }
+    (newStatus: TransactionStatus, reason?: string) => {
+      if (!transaction) return;
+      runAction(
+        { kind: "status", transaction, status: newStatus, reason },
+        onUpdate,
+      );
+      onClose();
     },
-    [user, transaction, selectedCompany, onUpdate, onClose],
+    [transaction, runAction, onUpdate, onClose],
   );
 
   const handleEditSubmit = useCallback(
@@ -491,7 +441,7 @@ export function TransactionDetailsDialog({
         return;
       }
       try {
-        setIsProcessing(true);
+        setIsSaving(true);
         await transactionService.update(
           transaction.id,
           data,
@@ -511,7 +461,7 @@ export function TransactionDetailsDialog({
         // A recusa por saldo vem do servidor já com os valores em jogo.
         toast.error(friendlyError(error, "Erro ao atualizar transação."));
       } finally {
-        setIsProcessing(false);
+        setIsSaving(false);
       }
     },
     [user, transaction, selectedCompany, onUpdate],
@@ -522,7 +472,7 @@ export function TransactionDetailsDialog({
       if (!user || !pendingUpdateData || !transaction || !selectedCompany)
         return;
       try {
-        setIsProcessing(true);
+        setIsSaving(true);
         await transactionService.updateRecurrence(
           transaction,
           pendingUpdateData,
@@ -540,7 +490,7 @@ export function TransactionDetailsDialog({
           friendlyError(error, "Erro ao atualizar transações recorrentes."),
         );
       } finally {
-        setIsProcessing(false);
+        setIsSaving(false);
       }
     },
     [user, pendingUpdateData, transaction, selectedCompany, onUpdate],
@@ -548,26 +498,11 @@ export function TransactionDetailsDialog({
 
   const handlePaymentConfirm = useCallback(
     async (data: PaymentConfirmation) => {
-      if (!user || !selectedCompany || !transaction) return;
-      try {
-        setIsProcessing(true);
-        await transactionService.settle(
-          transaction.id,
-          data,
-          { uid: user.uid, email: user.email },
-          selectedCompany.id,
-        );
-        toast.success("Pagamento/Recebimento registrado com sucesso!");
-        onUpdate();
-        onClose();
-      } catch (error) {
-        console.error("Error settling transaction:", error);
-        toast.error(friendlyError(error, "Erro ao registrar pagamento."));
-      } finally {
-        setIsProcessing(false);
-      }
+      if (!transaction) return;
+      runAction({ kind: "settle", transaction, data }, onUpdate);
+      onClose();
     },
-    [user, selectedCompany, transaction, onUpdate, onClose],
+    [transaction, runAction, onUpdate, onClose],
   );
 
   // ── Derived values (safe to compute even when transaction is null) ───────────
