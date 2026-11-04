@@ -9,8 +9,10 @@ import {
   dailyBalances,
   findRule,
   groupByDay,
+  investmentBalance,
   isBalanceLine,
   isBeforeBase,
+  isSweep,
   newStatementLines,
   pickStatementBalance,
   rulePattern,
@@ -25,6 +27,7 @@ import {
   investmentPosition,
   iofRate,
   irRate,
+  isLiquidReserve,
   parseSgs,
   planRedemption,
   taxWithheld,
@@ -185,6 +188,37 @@ assert.deepEqual(pickStatementBalance(checking, itau, fromFile), {
 assert.equal(pickStatementBalance(account, itau, fromFile), fromFile);
 // CSV sem saldo final também ganha o saldo pela linha que confere.
 assert.equal(pickStatementBalance(checking, itau, null)?.balance, 1);
+
+// Duplicata no extrato (caso real de 03/11/2026): resgate de 18.979,83 de um
+// recorte anterior, já presente como 18.979,77 + 0,06. Fica fora da prova e da
+// conferência do dia; outro motivo de ignorar continua somando.
+const resgate = at(21, "RES APLIC AUT MAIS", 100.06, "ignored");
+const dupLines = [
+  at(21, "PAGAMENTOS A FORNECEDORES X", -100.06, "matched"),
+  at(21, "RES APLIC AUT MAIS", 100, "matched"),
+  at(21, "REND PAGO APLIC AUT APR", 0.06, "matched"),
+  at(21, "SALDO MOVIMENTAÇÃO CONTA", 1),
+];
+const dupAccount = {
+  ...checking,
+  statementBalance: 1,
+  statementBalanceDate: new Date(2026, 9, 21),
+};
+const asDuplicate = [
+  ...dupLines,
+  { ...resgate, ignoreReason: "duplicate" as const },
+];
+const dupSummary = summarizeAccount(dupAccount, asDuplicate);
+assert.equal(dupSummary.total, 3);
+assert.equal(dupSummary.difference, 0);
+assert.ok(dupSummary.canClose);
+assert.ok(dailyBalances(dupAccount, asDuplicate).at(-1)?.matches);
+const asTransfer = [
+  ...dupLines,
+  { ...resgate, ignoreReason: "transfer" as const },
+];
+assert.equal(summarizeAccount(dupAccount, asTransfer).difference, -100.06);
+assert.ok(!dailyBalances(dupAccount, asTransfer).at(-1)?.matches);
 
 // Reimportação (caso real de 29/10/2026): o Itaú numera o FITID pela posição
 // no arquivo. O 2º recorte trouxe a aplicação automática como 001 e o TED como
@@ -493,5 +527,60 @@ assert.deepEqual(
   ],
 );
 assert.equal(both[0].ir + both[0].iof, 0);
+
+// ── Aplicação automática é caixa; o saldo anda pelas linhas ───────────────────
+const sweep: BankAccount = {
+  ...cdbCdi,
+  id: "aut",
+  active: true,
+  liquidity: "daily",
+  product: "auto",
+  statementBalance: 9000,
+  statementBalanceDate: oct(30),
+};
+const sweepLine = (
+  description: string,
+  amount: number,
+  date: Date,
+  extra: Partial<BankTransaction> = {},
+): BankTransaction => ({
+  ...line(description, amount, "matched"),
+  bankAccountId: "aut",
+  date,
+  ...extra,
+});
+const nov3 = new Date(2026, 10, 3);
+const sweepItems = [
+  // Até o dia do saldo informado: já está nele.
+  sweepLine("Resgate para Itaú", -1000, oct(30)),
+  // O resgate depois do saldo informado: não é baixa, só existe aqui.
+  sweepLine("Resgate para Itaú", -1500, nov3),
+  // Saldo do banco e duplicata não são movimento; linha de outra conta não entra.
+  sweepLine("SDO APLIC AUT MAIS AP", 7500, nov3),
+  sweepLine("Resgate para Itaú", -1500, nov3, {
+    status: "ignored",
+    ignoreReason: "duplicate",
+  }),
+  sweepLine("Resgate para Itaú", -99, nov3, { bankAccountId: "outra" }),
+];
+const sweepNow = investmentBalance(sweep, sweepItems);
+assert.equal(sweepNow.balance, 7500);
+assert.equal(sweepNow.date.getTime(), nov3.getTime());
+// Sem linhas depois: o saldo e a data informados.
+const sweepThen = investmentBalance(sweep, sweepItems.slice(0, 1));
+assert.equal(sweepThen.balance, 9000);
+assert.equal(sweepThen.date.getTime(), oct(30).getTime());
+// A reserva do alerta parte do saldo atual.
+assert.equal(
+  investmentPosition(sweep, sweepItems, cdi, sweepNow.date, sweepNow.balance)
+    .gross,
+  7500,
+);
+// Caixa não é reserva: a automática sai do resgate, as outras seguem.
+assert.equal(isSweep(sweep), true);
+assert.equal(isLiquidReserve(sweep), false);
+const reserveCdb: BankAccount = { ...sweep, product: "cdb" };
+assert.equal(isSweep(reserveCdb), false);
+assert.equal(isLiquidReserve(reserveCdb), true);
 
 console.log("check:reconciliation-rules ok");

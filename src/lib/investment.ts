@@ -2,7 +2,12 @@ import currency from "currency.js";
 import { differenceInCalendarDays, format } from "date-fns";
 import type { BankAccount, BankTransaction, InvestmentProduct } from "./types";
 // Relativo: o script de verificação roda fora do Next, sem o alias "@/".
-import { isBalanceLine, isInvestment } from "./bankReconciliation";
+import {
+  isBalanceLine,
+  isDuplicate,
+  isInvestment,
+  isSweep,
+} from "./bankReconciliation";
 
 /** CDI de cada dia útil (SGS 12, % ao dia), pela data "yyyy-MM-dd". */
 export type CdiSeries = Record<string, number>;
@@ -202,6 +207,7 @@ export function investmentPosition(
       (tx) =>
         tx.bankAccountId === account.id &&
         !isBalanceLine(tx) &&
+        !isDuplicate(tx) &&
         tx.origin !== "yield" &&
         tx.origin !== "tax" &&
         day(tx.date) > openKey &&
@@ -321,9 +327,13 @@ export function curveGap(p: Position, bankGross: number | null) {
   return { gap, off: Math.abs(gap) > tolerance };
 }
 
-/** Aplicação que vira caixa no dia: liquidez diária e saldo do banco informado. */
+/**
+ * Aplicação que vira caixa no dia: liquidez diária e saldo do banco informado.
+ * A automática já conta como caixa: entrar aqui contaria duas vezes.
+ */
 export const isLiquidReserve = (a: BankAccount) =>
   isInvestment(a) &&
+  !isSweep(a) &&
   a.active &&
   a.liquidity !== "maturity" &&
   a.statementBalance !== undefined;

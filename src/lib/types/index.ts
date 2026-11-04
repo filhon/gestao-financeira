@@ -887,7 +887,7 @@ export interface BankTransaction {
   /** Sugestão (ou conciliação) que veio de uma regra, não de um título. */
   ruleId?: string;
   /** Por que a linha não pede lançamento; vai para a auditoria do fechamento. */
-  ignoreReason?: "transfer" | "investment" | "other";
+  ignoreReason?: "transfer" | "investment" | "duplicate" | "other";
   /**
    * Como a linha foi conciliada, para o desfazer saber o que reverter:
    * "launched" criou o lançamento, "settled" deu baixa num título aberto,

@@ -56,13 +56,22 @@ export const isBalanceLine = (tx: Pick<BankTransaction, "description">) =>
   /^(saldo|sdo)\b/.test(normalizeText(tx.description.trim()));
 
 /**
+ * Duplicata no extrato: o movimento não aconteceu de novo (outro recorte do
+ * banco trouxe o mesmo resgate com outro valor), então fica fora da soma. A
+ * linha continua na sessão para a reimportação não trazê-la de volta.
+ */
+export const isDuplicate = (tx: BankTransaction) =>
+  tx.status === "ignored" && tx.ignoreReason === "duplicate";
+
+/**
  * Prova da conciliação de uma conta.
  *
  * Saldo conciliado = base + linhas tratadas (conciliadas ou ignoradas) depois
  * da base e até a data do saldo do extrato. Se o saldo de abertura estiver
  * certo e nenhuma linha faltar no arquivo, a diferença zera quando não sobra
  * linha pendente. Ignorar conta como tratar: é a decisão consciente de que o
- * movimento não pede lançamento (transferência entre contas, aplicação).
+ * movimento não pede lançamento (transferência entre contas, aplicação). A
+ * exceção é a duplicata, que não é movimento.
  *
  * Como tratar soma a linha do mesmo jeito que conciliar, a diferença final já
  * é conhecida antes: `projectedDifference` conta as pendentes como estão.
@@ -80,6 +89,7 @@ export function summarizeAccount(
     (tx) =>
       tx.bankAccountId === account.id &&
       !isBalanceLine(tx) &&
+      !isDuplicate(tx) &&
       day(tx.date) > day(base.date) &&
       (!until || day(tx.date) <= until),
   );
@@ -146,7 +156,7 @@ export function dailyBalances(
   const base = balanceBase(account);
   const baseDay = day(base.date);
   const own = items.filter((tx) => tx.bankAccountId === account.id);
-  const movements = own.filter((tx) => !isBalanceLine(tx));
+  const movements = own.filter((tx) => !isBalanceLine(tx) && !isDuplicate(tx));
 
   const byDay = new Map<string, BankTransaction[]>();
   for (const tx of own.filter(isBalanceLine)) {
@@ -294,6 +304,50 @@ export function newStatementLines(
 
 export const isInvestment = (account?: Pick<BankAccount, "kind">) =>
   account?.kind === "investment";
+
+/**
+ * Aplicação automática: o banco aplica o que sobra e resgata sozinho para pagar
+ * as contas, então o saldo dela é caixa, não reserva.
+ */
+export const isSweep = (account?: Pick<BankAccount, "kind" | "product">) =>
+  isInvestment(account) && account?.product === "auto";
+
+/** O último saldo informado do banco; sem ele, o do fechamento ou da abertura. */
+export const informedBalance = (account: BankAccount) =>
+  account.statementBalance !== undefined && account.statementBalanceDate
+    ? {
+        date: new Date(account.statementBalanceDate),
+        balance: account.statementBalance,
+      }
+    : balanceBase(account);
+
+/**
+ * Saldo atual de uma aplicação: o último informado mais as linhas depois dele.
+ * Resgate é transferência, não baixa: só aparece nas linhas da aplicação.
+ */
+export function investmentBalance(
+  account: BankAccount,
+  items: BankTransaction[],
+) {
+  const informed = informedBalance(account);
+  const after = items.filter(
+    (tx) =>
+      tx.bankAccountId === account.id &&
+      !isBalanceLine(tx) &&
+      !isDuplicate(tx) &&
+      day(tx.date) > day(informed.date),
+  );
+  return {
+    date: after.reduce(
+      (latest, tx) => (day(tx.date) > day(latest) ? new Date(tx.date) : latest),
+      informed.date,
+    ),
+    balance: after.reduce(
+      (sum, tx) => sum.add(tx.amount),
+      currency(informed.balance),
+    ).value,
+  };
+}
 
 const DAY_MS = 86_400_000;
 

@@ -680,7 +680,7 @@ export const CHAPTERS: PlaybookChapter[] = [
           "Em Cadastros › Contas Bancárias. Cada conta corrente e cada aplicação (CDB, fundo, poupança) é uma conta separada, com saldo inicial e data de abertura.",
         rules: [
           "Cadastre **todas** as contas onde a organização tem dinheiro, inclusive aplicações. Dinheiro fora do sistema é dinheiro sem controle.",
-          'Aplicação automática do banco ("aplic. aut.") que você queira acompanhar vira uma conta separada do tipo aplicação.',
+          'Aplicação automática do banco ("aplic. aut.") que você queira acompanhar vira uma conta separada do tipo aplicação. O saldo dela conta como caixa no fluxo de caixa do painel; as demais aplicações ficam como reserva.',
           "Para aplicações, informe o **% do CDI** e se a entidade é isenta de IR. O sistema calcula a curva esperada e o rendimento.",
         ],
         links: [

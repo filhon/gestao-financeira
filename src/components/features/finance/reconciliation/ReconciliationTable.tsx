@@ -73,6 +73,7 @@ export const IGNORE_REASONS: {
 }[] = [
   { value: "transfer", label: "Transferência entre contas" },
   { value: "investment", label: "Aplicação ou resgate" },
+  { value: "duplicate", label: "Duplicata no extrato" },
   { value: "other", label: "Outro motivo" },
 ];
 

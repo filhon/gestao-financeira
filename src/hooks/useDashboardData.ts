@@ -5,6 +5,7 @@ import { dashboardService } from "@/lib/services/dashboardService";
 import { entityService } from "@/lib/services/entityService";
 import { bankAccountService } from "@/lib/services/bankAccountService";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
+import { investmentBalance } from "@/lib/bankReconciliation";
 import {
   investmentPosition,
   isLiquidReserve,
@@ -48,7 +49,7 @@ export function useDashboardMetrics(year?: number) {
 /** `year` só vale no modo "year"; os 30 dias partem sempre de hoje. */
 export function useProjectedCashFlow(mode: "30days" | "year", year?: number) {
   const { selectedCompany } = useCompany();
-  // Quem lê as contas vê o caixa das contas correntes; os outros, as baixas.
+  // Quem lê as contas vê o caixa do banco; os outros, as baixas.
   const { canViewReconciliation } = usePermissions();
   const scopedYear = mode === "year" ? year : undefined;
 
@@ -75,8 +76,8 @@ export function useProjectedCashFlow(mode: "30days" | "year", year?: number) {
 }
 
 /**
- * Aplicações de liquidez diária com a posição (lotes, IR, IOF) no dia do
- * último saldo do banco: a reserva de onde o alerta de saldo sugere resgatar.
+ * Aplicações de liquidez diária com a posição atual (lotes, IR, IOF): a reserva
+ * de onde o alerta de saldo sugere resgatar. A automática já está no caixa.
  */
 export function useCashReserve() {
   const { selectedCompany } = useCompany();
@@ -106,19 +107,17 @@ export function useCashReserve() {
         if (res.ok) cdi = (await res.json()).cdi;
       }
       return Promise.all(
-        accounts.map(async (account) => ({
-          account,
-          position: investmentPosition(
+        accounts.map(async (account) => {
+          const items = await reconciliationSessionService.getAccountItems(
+            companyId!,
+            account.id,
+          );
+          const { date, balance } = investmentBalance(account, items);
+          return {
             account,
-            await reconciliationSessionService.getAccountItems(
-              companyId!,
-              account.id,
-            ),
-            cdi,
-            account.statementBalanceDate!,
-            account.statementBalance,
-          ),
-        })),
+            position: investmentPosition(account, items, cdi, date, balance),
+          };
+        }),
       );
     },
     enabled: !!companyId && canViewReconciliation,

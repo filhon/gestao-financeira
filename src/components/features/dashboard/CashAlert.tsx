@@ -50,8 +50,8 @@ const days = (n: number) => `${n} ${n === 1 ? "dia" : "dias"}`;
  * O alerta de saldo diz quando, quanto e o que resolve, em três linhas:
  * os trechos negativos; o pior saldo e a entrada de que ele depende; quem em
  * atraso cobre o buraco (mais recentes primeiro) e a saída que o abre.
- * Com o saldo das contas correntes, uma linha a mais: quanto resgatar das
- * aplicações, de onde e com que imposto. Fica junto da fila porque a resposta
+ * Com o caixa do banco, uma linha a mais: quanto resgatar das aplicações de
+ * reserva, de onde e com que imposto. Fica junto da fila porque a resposta
  * dele está nela.
  */
 export function CashAlert({

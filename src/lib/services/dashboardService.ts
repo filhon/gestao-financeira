@@ -46,7 +46,14 @@ import {
 } from "date-fns";
 import { recurrenceService } from "./recurrenceService";
 import { bankAccountService } from "./bankAccountService";
-import { balanceBase, dayKey, isInvestment } from "@/lib/bankReconciliation";
+import {
+  dayKey,
+  informedBalance,
+  investmentBalance,
+  isInvestment,
+  isSweep,
+} from "@/lib/bankReconciliation";
+import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import {
   envelopePace,
   envelopeRank,
@@ -107,11 +114,12 @@ export interface ProjectedCashFlowData {
 
 export interface ProjectedCashFlowResult {
   data: ProjectedCashFlowData[];
-  /** Há saldo de partida: o das contas correntes ou o de company_stats. */
+  /** Há saldo de partida: o do banco ou o de company_stats. */
   hasCompanyStats: boolean;
   /**
-   * Partiu das contas correntes (extrato mais antigo em `asOf`): aplicações
-   * ficam fora do saldo. Ausente = partiu das baixas (company_stats).
+   * Partiu do caixa no banco (extrato mais recente em `asOf`): contas correntes
+   * e aplicação automática, sem as outras aplicações. Ausente = partiu das
+   * baixas (company_stats).
    */
   bankBase?: { asOf: Date };
   /** A receber vencido em aberto: fora de `balance`. */
@@ -177,7 +185,9 @@ async function readCompanyBalance(companyId: string) {
 /**
  * Caixa disponível hoje: o último saldo do extrato de cada conta corrente
  * (sem extrato, o do último fechamento ou da abertura) mais as baixas depois
- * dele. Aplicação fica fora: é reserva, e o alerta diz quanto resgatar.
+ * dele, e a aplicação automática, que o banco resgata sozinho. As outras
+ * aplicações ficam fora: são reserva, e o alerta diz quanto resgatar.
+ * Aplicação anda pelas linhas dela: baixa lá é o rendimento que já tem linha.
  * null = sem conta corrente; a projeção volta a partir das baixas.
  */
 // ponytail: baixa sem conta conta só depois do extrato mais recente; com extratos de contas em dias diferentes, o que caiu entre eles pode faltar. Conta obrigatória na baixa resolve.
@@ -191,21 +201,22 @@ async function readBankCash(
     const accounts = (await bankAccountService.getAll(companyId)).filter(
       (a) => a.active,
     );
-    const checking = accounts.filter(
-      (a) => withInvestments || !isInvestment(a),
-    );
+    const checking = accounts.filter((a) => !isInvestment(a));
     if (checking.length === 0) return null;
-    const investments = new Set(
-      accounts.filter((a) => !checking.includes(a)).map((a) => a.id),
+    const investments = accounts.filter(isInvestment);
+    const invested = await Promise.all(
+      investments
+        .filter((a) => withInvestments || isSweep(a))
+        .map(async (a) => ({
+          name: a.name,
+          ...investmentBalance(
+            a,
+            await reconciliationSessionService.getAccountItems(companyId, a.id),
+          ),
+        })),
     );
-    const bases = new Map(
-      checking.map((a) => [
-        a.id,
-        a.statementBalance !== undefined && a.statementBalanceDate
-          ? { date: a.statementBalanceDate, balance: a.statementBalance }
-          : balanceBase(a),
-      ]),
-    );
+    const investmentIds = new Set(investments.map((a) => a.id));
+    const bases = new Map(checking.map((a) => [a.id, informedBalance(a)]));
     const times = [...bases.values()].map((b) => b.date.getTime());
     const oldest = new Date(Math.min(...times));
     const newest = dayKey(new Date(Math.max(...times)));
@@ -219,7 +230,7 @@ async function readBankCash(
         where("paymentDate", ">", Timestamp.fromDate(endOfDay(oldest))),
       ),
     );
-    let balance = [...bases.values()].reduce(
+    let balance = [...bases.values(), ...invested].reduce(
       (s, b) => s.add(b.balance),
       currency(0),
     );
@@ -227,7 +238,7 @@ async function readBankCash(
       const t = d.data();
       const paid = dayKey((t.paymentDate as Timestamp).toDate());
       // Baixa com data futura entra no próprio dia, pela projeção.
-      if (paid > todayKey || investments.has(t.bankAccountId)) return;
+      if (paid > todayKey || investmentIds.has(t.bankAccountId)) return;
       const base = bases.get(t.bankAccountId);
       if (paid <= (base ? dayKey(base.date) : newest)) return;
       const amount = Number(t.finalAmount ?? t.amount) || 0;
@@ -236,10 +247,22 @@ async function readBankCash(
           ? balance.add(amount)
           : balance.subtract(amount);
     });
+    const positions = [
+      ...checking.map((a) => ({
+        name: a.name,
+        date: bases.get(a.id)!.date,
+      })),
+      ...invested,
+    ];
+    const asOf = new Date(Math.max(...positions.map((p) => p.date.getTime())));
     return {
       balance: balance.value,
-      asOf: oldest,
-      investmentAccounts: accounts.filter(isInvestment).length,
+      asOf,
+      /** Contas paradas em data anterior a `asOf`: o saldo delas pode ter mudado. */
+      older: positions
+        .filter((p) => dayKey(p.date) < dayKey(asOf))
+        .map(({ name, date }) => ({ name, date })),
+      investmentAccounts: investments.length,
     };
   } catch (error) {
     // Sem leitura das contas (perfil ou claims velhas): fica nas baixas.
@@ -613,8 +636,8 @@ export const dashboardService = {
   // getUpcomingTransactions and getCashFlowData removed (dead code)
 
   /**
-   * `bankBase`: nos 30 dias, partir do caixa das contas correntes em vez das
-   * baixas. Só para quem lê as contas bancárias. O exercício fica nas baixas:
+   * `bankBase`: nos 30 dias, partir do caixa no banco em vez das baixas. Só
+   * para quem lê as contas bancárias. O exercício fica nas baixas:
    * refazer o passado só pela conta corrente ignoraria aplicações e resgates.
    */
   getProjectedCashFlow: async (

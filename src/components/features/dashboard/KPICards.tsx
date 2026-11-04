@@ -16,7 +16,13 @@ interface KPICardsProps {
   projection?: ProjectedCashFlowResult | null;
   projectionLoading: boolean;
   /** Patrimônio no banco pela Conciliação; ausente para quem não a vê. */
-  bank?: { balance: number; asOf: Date; investmentAccounts: number } | null;
+  bank?: {
+    balance: number;
+    asOf: Date;
+    /** Contas com saldo mais antigo que `asOf`. Cache de versão anterior não tem. */
+    older?: { name: string; date: Date }[];
+    investmentAccounts: number;
+  } | null;
 }
 
 function Money({ value }: { value: number }) {
@@ -142,8 +148,12 @@ export function KPICards({
               bankGap ? "text-amber-700 dark:text-amber-400" : undefined
             }
           >
-            No banco em {format(bank.asOf, "dd/MM")}:{" "}
-            {formatCurrencyAbbr(bank.balance)}
+            No banco em {format(bank.asOf, "dd/MM")}
+            {!!bank.older?.length &&
+              ` (${bank.older
+                .map((a) => `${a.name} em ${format(a.date, "dd/MM")}`)
+                .join(", ")})`}
+            : {formatCurrencyAbbr(bank.balance)}
             {bankGap ? ` · diferença ${formatCurrency(bankGap)}` : " · confere"}
             {bank.investmentAccounts === 0 && " · sem aplicações cadastradas"}
           </p>
@@ -171,8 +181,8 @@ export function KPICards({
       >
         {projection?.bankBase && (
           <p>
-            Contas correntes desde o extrato de{" "}
-            {format(projection.bankBase.asOf, "dd/MM")} · sem aplicações
+            Caixa pelo extrato de {format(projection.bankBase.asOf, "dd/MM")} ·
+            sem aplicações de reserva
           </p>
         )}
         {lowest && lowest.balance < last!.balance && (
