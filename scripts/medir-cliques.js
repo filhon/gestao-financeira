@@ -1,0 +1,95 @@
+// Mede a resposta de cada clique. Cole no console do DevTools com o sistema
+// aberto (produção ou `npm run build && npm start`; em dev não há pré-carga) e
+// use normalmente. Rode `__cliques()` para ver a tabela.
+//   pintura  = do clique até a tela reagir (o que o INP mede)
+//   estavel  = do clique até a última mudança no conteúdo (dados carregados)
+//   servidor = do clique até a resposta da última function ou /api/ chamada
+// Espere a tela assentar entre um clique e outro: um clique novo encerra a
+// medição do anterior, e essa linha sai com `cortado` marcado.
+(() => {
+  const linhas = [];
+  let aberta = null;
+  const SILENCIO = 3000;
+
+  new PerformanceObserver((lista) => {
+    for (const e of lista.getEntries()) {
+      if (e.name !== "click") continue;
+      const linha = linhas.find((l) => Math.abs(l.t0 - e.startTime) < 1);
+      if (!linha) continue;
+      linha.pintura = Math.round(e.duration);
+      linha.espera = Math.round(e.processingStart - e.startTime);
+      linha.codigo = Math.round(e.processingEnd - e.processingStart);
+      linha.desenho = Math.round(e.startTime + e.duration - e.processingEnd);
+    }
+  }).observe({ type: "event", durationThreshold: 16 });
+
+  new PerformanceObserver((lista) => {
+    for (const e of lista.getEntries()) {
+      if (!/cloudfunctions\.net|\/api\//.test(e.name)) continue;
+      const linha = linhas.findLast((l) => l.t0 <= e.startTime);
+      if (linha) {
+        linha.servidor = Math.max(
+          linha.servidor ?? 0,
+          Math.round(e.responseEnd - linha.t0),
+        );
+      }
+    }
+  }).observe({ type: "resource" });
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      const alvo =
+        e.target.closest?.("a,button,[role=tab],[data-row-id]") ?? e.target;
+      const linha = {
+        alvo: (alvo.innerText || alvo.getAttribute?.("aria-label") || alvo.tagName)
+          .trim()
+          .replace(/\s+/g, " ")
+          .slice(0, 40),
+        t0: e.timeStamp,
+        pintura: "<16",
+        estavel: 0,
+      };
+      if (aberta) aberta.cortado = true;
+      linhas.push(linha);
+      aberta = linha;
+    },
+    true,
+  );
+
+  // O sumiço do toast, segundos depois, não é resposta do clique.
+  const contaComoMudanca = (r) =>
+    r.type !== "childList" ||
+    r.addedNodes.length > 0 ||
+    ![...r.removedNodes].every((n) =>
+      n.matches?.("[data-sonner-toast],[data-sonner-toaster]"),
+    );
+
+  new MutationObserver((registros) => {
+    if (!aberta || !registros.some(contaComoMudanca)) return;
+    aberta.estavel = Math.round(performance.now() - aberta.t0);
+  }).observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+
+  // Fecha a medição depois de um tempo sem mudança no conteúdo.
+  setInterval(() => {
+    if (aberta && performance.now() - aberta.t0 - aberta.estavel > SILENCIO)
+      aberta = null;
+  }, 500);
+
+  window.__cliques = () =>
+    console.table(linhas, [
+      "alvo",
+      "pintura",
+      "espera",
+      "codigo",
+      "desenho",
+      "estavel",
+      "servidor",
+      "cortado",
+    ]);
+  console.log("Medindo cliques. Use o sistema e rode __cliques().");
+})();
