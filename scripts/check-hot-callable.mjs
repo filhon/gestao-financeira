@@ -4,12 +4,17 @@
  *   npm run check:hot-callable
  * Falha com exceção na primeira regra quebrada.
  */
-const assert = require("node:assert/strict");
-const path = require("node:path");
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const functionsDir = path.join(__dirname, "..", "functions");
-const express = require(path.join(functionsDir, "node_modules", "express"));
-const ledger = require(path.join(functionsDir, "lib", "transactionLedger.js"));
+// A function compilada e o express dela vêm de functions/, fora deste pacote.
+const load = createRequire(import.meta.url);
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const functionsDir = path.join(root, "functions");
+const express = load(path.join(functionsDir, "node_modules", "express"));
+const ledger = load(path.join(functionsDir, "lib", "transactionLedger.js"));
 const fn = ledger.setTransactionStatus;
 
 // O deploy recusa trocar um callable por uma function HTTP.
