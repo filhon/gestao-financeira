@@ -1,5 +1,11 @@
 import type { PaymentConfirmation } from "@/components/features/finance/PaymentDialog";
-import type { Transaction, TransactionStatus } from "@/lib/types";
+import type {
+  CostCenter,
+  Transaction,
+  TransactionStatus,
+  UserProfile,
+  UserRole,
+} from "@/lib/types";
 
 /** Baixa ou mudança de status que corre em segundo plano, com a linha travada. */
 export type TransactionActionInput = { transaction: Transaction } & (
@@ -34,4 +40,64 @@ const STATUS_LABEL: Partial<Record<TransactionStatus, string>> = {
 export function pendingLabel(action: TransactionActionInput) {
   if (action.kind === "settle") return "Confirmando…";
   return STATUS_LABEL[action.status] ?? "Atualizando…";
+}
+
+const COMPANY_APPROVER_ROLES: UserRole[] = [
+  "approver",
+  "financial_manager",
+  "admin",
+];
+
+/**
+ * Quem recebe o link de aprovação, que aprova sem login: vale como credencial e
+ * nunca pode sair da empresa da despesa. Primeiro o aprovador de cada centro de
+ * custo, como na criação; sem ele, os aprovadores da empresa. Quem pediu fica
+ * de fora, para não aprovar o próprio pedido pelo link.
+ */
+export async function approvalRecipients(
+  transaction: Pick<Transaction, "companyId" | "costCenterAllocation">,
+  requesterEmail: string,
+  load: {
+    costCenter: (
+      id: string,
+    ) => Promise<Pick<CostCenter, "companyId" | "approverEmail"> | null>;
+    users: () => Promise<
+      Pick<UserProfile, "email" | "companyRoles" | "status" | "active">[]
+    >;
+  },
+): Promise<string[]> {
+  const { companyId, costCenterAllocation = [] } = transaction;
+  const unique = (emails: (string | undefined)[]) => {
+    const byKey = new Map<string, string>();
+    for (const raw of emails) {
+      const email = raw?.trim();
+      if (email) byKey.set(email.toLowerCase(), email);
+    }
+    byKey.delete(requesterEmail.trim().toLowerCase());
+    return [...byKey.values()];
+  };
+
+  const centers = await Promise.all(
+    costCenterAllocation.map((a) => load.costCenter(a.costCenterId)),
+  );
+  const fromCenters = unique(
+    centers
+      .filter((c) => c?.companyId === companyId)
+      .map((c) => c?.approverEmail),
+  );
+  if (fromCenters.length > 0) return fromCenters;
+
+  const users = await load.users();
+  return unique(
+    users
+      .filter((u) => {
+        const role = u.companyRoles?.[companyId];
+        return (
+          !!role &&
+          COMPANY_APPROVER_ROLES.includes(role) &&
+          (u.status === "active" || u.active)
+        );
+      })
+      .map((u) => u.email),
+  );
 }

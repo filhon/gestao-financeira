@@ -11,12 +11,18 @@ import {
   QueryClient,
 } from "@tanstack/react-query";
 import {
+  approvalRecipients,
   pendingLabel,
   TX_ACTION_OPTIONS,
   TX_ACTION_PENDING,
   type TransactionActionInput,
 } from "../src/lib/transactionAction";
-import type { Transaction } from "../src/lib/types";
+import type {
+  CostCenterAllocation,
+  Transaction,
+  UserProfile,
+  UserRole,
+} from "../src/lib/types";
 
 const transaction = { id: "t1" } as Transaction;
 const settle: TransactionActionInput = {
@@ -86,6 +92,83 @@ async function main() {
 
   client.clear();
   console.log("ok: trava das ações em segundo plano");
+
+  await checkApprovalRecipients();
+  console.log("ok: link de aprovação não sai da empresa");
+}
+
+async function checkApprovalRecipients() {
+  const usuario = (
+    email: string,
+    companyRoles: Record<string, UserRole>,
+    extra: { status?: UserProfile["status"]; active?: boolean; role?: UserRole } = {},
+  ) => ({ email, companyRoles, status: "active" as const, active: true, ...extra });
+
+  const usuarios = [
+    // A causa da falha: admin global de outra empresa vinha primeiro na busca.
+    usuario("outra@x.com", { B: "admin" }, { role: "admin" }),
+    usuario("aprovador@a.com", { A: "approver" }),
+    usuario("gestor@a.com", { A: "financial_manager" }),
+    usuario("Dono@a.com", { A: "admin" }),
+    usuario("comum@a.com", { A: "user" }),
+    usuario("auditor@a.com", { A: "auditor" }),
+    usuario("saiu@a.com", { A: "approver" }, { status: "rejected", active: false }),
+  ];
+  const centros: Record<string, { companyId: string; approverEmail?: string }> = {
+    cc1: { companyId: "A", approverEmail: "centro@a.com" },
+    cc2: { companyId: "A", approverEmail: "CENTRO@a.com" },
+    semAprovador: { companyId: "A" },
+    deOutra: { companyId: "B", approverEmail: "centro@b.com" },
+  };
+  let leuUsuarios = 0;
+  const load = {
+    costCenter: async (id: string) => centros[id] ?? null,
+    users: async () => {
+      leuUsuarios++;
+      return usuarios;
+    },
+  };
+  const para = (...ccs: string[]) =>
+    approvalRecipients(
+      {
+        companyId: "A",
+        costCenterAllocation: ccs.map(
+          (costCenterId) => ({ costCenterId }) as CostCenterAllocation,
+        ),
+      },
+      "pede@a.com",
+      load,
+    );
+
+  // Aprovador do centro de custo vem primeiro, sem repetir e sem ler usuários.
+  assert.deepEqual(await para("cc1", "cc2", "semAprovador"), ["CENTRO@a.com"]);
+  assert.equal(leuUsuarios, 0);
+
+  // Centro de outra empresa não conta; cai nos aprovadores só desta empresa.
+  const daEmpresa = ["aprovador@a.com", "gestor@a.com", "Dono@a.com"];
+  assert.deepEqual(await para("deOutra"), daEmpresa);
+  assert.deepEqual(await para(), daEmpresa);
+
+  // Quem pediu não recebe o próprio link: nem como aprovador do centro...
+  assert.deepEqual(
+    await approvalRecipients(
+      { companyId: "A", costCenterAllocation: [{ costCenterId: "cc1" } as CostCenterAllocation] },
+      " Centro@A.com ",
+      load,
+    ),
+    daEmpresa,
+  );
+  // ...nem como aprovador da empresa, mesmo com o e-mail em outra caixa.
+  assert.deepEqual(
+    await approvalRecipients({ companyId: "A" }, "dono@a.com", load),
+    ["aprovador@a.com", "gestor@a.com"],
+  );
+
+  // Empresa sem aprovador: ninguém recebe, e não um usuário de outra empresa.
+  assert.deepEqual(
+    await approvalRecipients({ companyId: "C" }, "pede@a.com", load),
+    [],
+  );
 }
 
 main();

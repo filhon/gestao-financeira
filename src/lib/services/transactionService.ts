@@ -40,6 +40,8 @@ import { ptBR } from "date-fns/locale";
 import { costCenterService } from "@/lib/services/costCenterService";
 import { auditService } from "@/lib/services/auditService";
 import { emailService } from "@/lib/services/emailService";
+import { userService } from "@/lib/services/userService";
+import { approvalRecipients } from "@/lib/transactionAction";
 import { generateChanges } from "@/lib/auditFormatter";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
 
@@ -339,9 +341,10 @@ async function createPayableViaLedger(
 }
 
 /**
- * Gera o token do magic link e manda o e-mail ao aprovador de cada centro de
- * custo. Roda em segundo plano: a despesa já está gravada e o usuário não
- * precisa esperar o e-mail sair para seguir trabalhando.
+ * Gera o token do magic link e manda o e-mail aos aprovadores. Um só token para
+ * todos: um novo a cada e-mail invalidaria os links já enviados. Roda em segundo
+ * plano: a despesa já está gravada e o usuário não precisa esperar o e-mail sair
+ * para seguir trabalhando.
  *
  * ponytail: se a aba fechar no ~1 s entre o salvar e o envio, o e-mail se
  * perde; mover para um trigger onCreate na Cloud Function se isso aparecer.
@@ -352,36 +355,48 @@ function requestApprovalInBackground(
     TransactionFormData,
     "useInstallments" | "installmentsCount"
   >,
+  companyId: string,
+  requesterEmail: string,
 ) {
   void (async () => {
-    for (const allocation of transactionData.costCenterAllocation ?? []) {
-      const costCenter = await costCenterService.getById(
-        allocation.costCenterId,
-      );
-      if (!costCenter?.approverEmail) continue;
+    const emails = await approvalRecipients(
+      {
+        companyId,
+        costCenterAllocation: transactionData.costCenterAllocation,
+      },
+      requesterEmail,
+      {
+        costCenter: costCenterService.getById,
+        users: () => userService.getAll(companyId),
+      },
+    );
+    if (emails.length === 0) return;
 
-      const token = crypto.randomUUID();
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
+    const token = crypto.randomUUID();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
 
-      // O token precisa estar no servidor antes do link chegar ao aprovador.
-      await updateDoc(ref, {
-        approvalToken: token,
-        approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
-      });
+    // O token precisa estar no servidor antes do link chegar ao aprovador.
+    await updateDoc(ref, {
+      approvalToken: token,
+      approvalTokenExpiresAt: Timestamp.fromDate(expiresAt),
+    });
 
-      await emailService.sendApprovalRequest(
-        {
-          id: ref.id,
-          ...transactionData,
-          amount: transactionData.amount, // Show total amount in email
-          approvalToken: token,
-          requestOrigin: transactionData.requestOrigin,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        costCenter.approverEmail,
-      );
-    }
+    await Promise.all(
+      emails.map((email) =>
+        emailService.sendApprovalRequest(
+          {
+            id: ref.id,
+            ...transactionData,
+            amount: transactionData.amount, // Show total amount in email
+            approvalToken: token,
+            requestOrigin: transactionData.requestOrigin,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any,
+          email,
+        ),
+      ),
+    );
   })().catch((error) =>
     console.error("Error requesting approval by e-mail:", error),
   );
@@ -1119,7 +1134,12 @@ export const transactionService = {
       // O link de aprovação aponta para a primeira parcela.
       // Ideally we would have a "Group Approval" but for now let's link the first one.
       if (status === "pending_approval") {
-        requestApprovalInBackground(refs[0], transactionData);
+        requestApprovalInBackground(
+          refs[0],
+          transactionData,
+          companyId,
+          user.email,
+        );
       }
 
       return refs[0];
@@ -1156,7 +1176,12 @@ export const transactionService = {
           });
 
     if (status === "pending_approval") {
-      requestApprovalInBackground(docRef, transactionData);
+      requestApprovalInBackground(
+        docRef,
+        transactionData,
+        companyId,
+        user.email,
+      );
     }
 
     // Log Audit
