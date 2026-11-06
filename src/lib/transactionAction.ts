@@ -1,3 +1,4 @@
+import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { PaymentConfirmation } from "@/components/features/finance/PaymentDialog";
 import type {
   CostCenter,
@@ -40,6 +41,42 @@ const STATUS_LABEL: Partial<Record<TransactionStatus, string>> = {
 export function pendingLabel(action: TransactionActionInput) {
   if (action.kind === "settle") return "Confirmando…";
   return STATUS_LABEL[action.status] ?? "Atualizando…";
+}
+
+/** A linha como o servidor acabou de gravar a baixa: só depois da resposta. */
+export function settledRow(
+  transaction: Transaction,
+  data: PaymentConfirmation,
+  actorUid: string,
+): Transaction {
+  return {
+    ...transaction,
+    ...data,
+    bankAccountId: data.bankAccountId ?? transaction.bankAccountId,
+    status: "paid",
+    releasedBy: actorUid,
+    releasedAt: new Date(),
+  };
+}
+
+/** Troca a linha nas listas e buscas em cache, sem esperar a releitura. */
+export function replaceCachedRow(qc: QueryClient, row: Transaction) {
+  const swap = (items: Transaction[]) =>
+    items.map((t) => (t.id === row.id ? row : t));
+  qc.setQueriesData<InfiniteData<{ items: Transaction[] }>>(
+    { queryKey: ["tx-list"] },
+    (old) =>
+      old && {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          items: swap(page.items),
+        })),
+      },
+  );
+  qc.setQueriesData<Transaction[]>({ queryKey: ["tx-search"] }, (old) =>
+    old ? swap(old) : old,
+  );
 }
 
 const COMPANY_APPROVER_ROLES: UserRole[] = [

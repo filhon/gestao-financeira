@@ -1,6 +1,7 @@
 /**
- * Verificação da trava das ações em segundo plano: a linha fica presa até a
- * lista ser relida, solta no erro e não fica pausada sem internet.
+ * Verificação da trava das ações em segundo plano: a linha fica presa até o
+ * fim do onSuccess, solta no erro e não fica pausada sem internet. A baixa
+ * confirmada aparece no cache antes da releitura.
  *   npm run check:transaction-action
  * Falha com exceção na primeira regra quebrada.
  */
@@ -13,6 +14,8 @@ import {
 import {
   approvalRecipients,
   pendingLabel,
+  replaceCachedRow,
+  settledRow,
   TX_ACTION_OPTIONS,
   TX_ACTION_PENDING,
   type TransactionActionInput,
@@ -53,7 +56,7 @@ async function main() {
   const pendentes = () =>
     client.getMutationCache().findAll(TX_ACTION_PENDING).length;
 
-  // A trava sobrevive à resposta do servidor até a lista ser relida.
+  // A trava sobrevive à resposta do servidor até o onSuccess terminar.
   const relida = deferred();
   const ok = new MutationObserver<string, Error, TransactionActionInput>(client, {
     ...TX_ACTION_OPTIONS,
@@ -89,6 +92,48 @@ async function main() {
   assert.equal(offline.getCurrentResult().isPaused, false);
   assert.equal(pendentes(), 0);
   onlineManager.setOnline(true);
+
+  // Baixa confirmada: a linha muda em toda lista em cache e só ela, sem reler.
+  const linha = (id: string) =>
+    ({ id, status: "approved", bankAccountId: "conta-antiga" }) as Transaction;
+  client.setQueryData(["tx-list", "payable", "vencidas"], {
+    pages: [{ items: [linha("t1"), linha("t2")], lastDoc: "cursor" }],
+    pageParams: [null],
+  });
+  client.setQueryData(["tx-list", "payable", "todas"], {
+    pages: [{ items: [linha("t3")] }, { items: [linha("t1")] }],
+    pageParams: [null, "cursor"],
+  });
+  client.setQueryData(["tx-search", "payable", "a"], [linha("t1")]);
+  const baixada = settledRow(
+    linha("t1"),
+    {
+      paymentDate: new Date("2026-11-06"),
+      finalAmount: 90,
+      discount: 10,
+      interest: 0,
+    },
+    "u1",
+  );
+  assert.equal(baixada.status, "paid");
+  assert.equal(baixada.finalAmount, 90);
+  assert.equal(baixada.releasedBy, "u1");
+  // Baixa sem conta informada mantém a que já estava na linha, como o servidor.
+  assert.equal(baixada.bankAccountId, "conta-antiga");
+
+  replaceCachedRow(client, baixada);
+  type Lista = { pages: { items: Transaction[]; lastDoc?: string }[] };
+  const vencidas = client.getQueryData<Lista>(["tx-list", "payable", "vencidas"])!;
+  assert.equal(vencidas.pages[0].items[0].status, "paid");
+  assert.equal(vencidas.pages[0].items[1].status, "approved");
+  assert.equal(vencidas.pages[0].lastDoc, "cursor");
+  const todas = client.getQueryData<Lista>(["tx-list", "payable", "todas"])!;
+  assert.equal(todas.pages[0].items[0].status, "approved");
+  assert.equal(todas.pages[1].items[0].status, "paid");
+  assert.equal(
+    client.getQueryData<Transaction[]>(["tx-search", "payable", "a"])![0].status,
+    "paid",
+  );
 
   client.clear();
   console.log("ok: trava das ações em segundo plano");

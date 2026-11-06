@@ -4,6 +4,7 @@
 //   pintura  = do clique até a tela reagir (o que o INP mede)
 //   estavel  = do clique até a última mudança no conteúdo (dados carregados)
 //   servidor = do clique até a resposta da última function ou /api/ chamada
+//   destravou = do clique até a linha sair de "Confirmando…", "Aprovando…" etc.
 // Espere a tela assentar entre um clique e outro: um clique novo encerra a
 // medição do anterior, e essa linha sai com `cortado` marcado.
 (() => {
@@ -55,15 +56,38 @@
     true,
   );
 
-  // O sumiço do toast, segundos depois, não é resposta do clique.
-  const contaComoMudanca = (r) =>
-    r.type !== "childList" ||
-    r.addedNodes.length > 0 ||
-    ![...r.removedNodes].every((n) =>
-      n.matches?.("[data-sonner-toast],[data-sonner-toaster]"),
+  // O toast some segundos depois e não é resposta do clique.
+  const contaComoMudanca = (r) => {
+    const el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+    if (el?.closest("[data-sonner-toaster]")) return false;
+    const nos = [...r.addedNodes, ...r.removedNodes];
+    return (
+      nos.length === 0 ||
+      !nos.every((n) =>
+        n.matches?.("[data-sonner-toast],[data-sonner-toaster]"),
+      )
     );
+  };
+
+  // Linha travada: vale até o rótulo sair da tela, mesmo com outro clique.
+  const TRAVA = /Confirmando…|Aprovando…|Rejeitando…|Enviando…|Atualizando…/;
+  let travada = null;
+  const acompanhaTrava = (registros) => {
+    if (travada) {
+      if (TRAVA.test(document.body.textContent)) return;
+      travada.destravou = Math.round(performance.now() - travada.t0);
+      travada = null;
+    } else if (
+      registros.some((r) =>
+        [...r.addedNodes].some((n) => TRAVA.test(n.textContent)),
+      )
+    ) {
+      travada = linhas.at(-1) ?? null;
+    }
+  };
 
   new MutationObserver((registros) => {
+    acompanhaTrava(registros);
     if (!aberta || !registros.some(contaComoMudanca)) return;
     aberta.estavel = Math.round(performance.now() - aberta.t0);
   }).observe(document.body, {
@@ -88,6 +112,7 @@
       "estavel",
       "servidor",
       "chamada",
+      "destravou",
       "cortado",
     ]);
   console.log("Medindo cliques. Use o sistema e rode __cliques().");

@@ -23,6 +23,8 @@ import { userService } from "@/lib/services/userService";
 import {
   approvalRecipients,
   pendingLabel,
+  replaceCachedRow,
+  settledRow,
   TX_ACTION_OPTIONS,
   TX_ACTION_PENDING,
   type TransactionAction,
@@ -105,18 +107,15 @@ function successToast(action: TransactionAction) {
 
 /**
  * Dispara a ação e libera a tela na hora: a linha fica travada até o servidor
- * responder e a lista ser relida. O sucesso só aparece depois da resposta.
+ * responder e o e-mail sair. O sucesso só aparece depois da resposta; as listas
+ * são relidas em segundo plano.
  */
 export function useTransactionAction() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
 
-  const mutation = useMutation<
-    Transaction | undefined,
-    unknown,
-    TransactionAction
-  >({
+  const mutation = useMutation<Transaction, unknown, TransactionAction>({
     ...TX_ACTION_OPTIONS,
     mutationFn: async (a) => {
       if (a.kind === "status") {
@@ -134,18 +133,22 @@ export function useTransactionAction() {
         a.actor,
         a.companyId,
       );
-      return undefined;
+      return settledRow(a.transaction, a.data, a.actor.uid);
     },
-    // Devolver a promessa mantém a linha travada até a lista vir atualizada,
-    // sem piscar o status antigo. Roda mesmo se o usuário já mudou de tela.
+    // A linha muda antes de destravar, sem piscar o status antigo, e não espera
+    // a releitura nem os totais. Roda mesmo se o usuário já mudou de tela.
     onSuccess: async (updated, a) => {
       successToast(a);
-      await Promise.all([
-        refreshAfterAction(qc, a.transaction),
-        a.kind === "status" && updated
-          ? notifyStatusChange(updated, a.status, a.actorName, a.actor.email)
-          : null,
-      ]);
+      replaceCachedRow(qc, updated);
+      void refreshAfterAction(qc, a.transaction);
+      if (a.kind === "status") {
+        await notifyStatusChange(
+          updated,
+          a.status,
+          a.actorName,
+          a.actor.email,
+        );
+      }
     },
     onError: (error, a) => {
       console.error("Error running transaction action:", error);
