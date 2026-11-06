@@ -2,6 +2,7 @@
 // aberto (produção ou `npm run build && npm start`; em dev não há pré-carga) e
 // use normalmente. Rode `__cliques()` para ver a tabela.
 //   pintura  = do clique até a tela reagir (o que o INP mede)
+//   pronto   = do clique até a tela ficar sem skeleton e sem lista esmaecida
 //   estavel  = do clique até a última mudança no conteúdo (dados carregados)
 //   servidor = do clique até a resposta da última function ou /api/ chamada
 //   rede = duração dessa chamada no navegador, com preflight (a execução está
@@ -113,6 +114,11 @@
     acompanhaTrava(registros);
     if (!aberta || !registros.some(contaComoMudanca)) return;
     aberta.estavel = Math.round(performance.now() - aberta.t0);
+    if (
+      aberta.pronto === undefined &&
+      !document.querySelector('[aria-busy="true"],.animate-pulse')
+    )
+      aberta.pronto = aberta.estavel;
   }).observe(document.body, {
     childList: true,
     subtree: true,
@@ -135,6 +141,7 @@
       "js",
       "layoutForcado",
       "pinturaQuadro",
+      "pronto",
       "estavel",
       "servidor",
       "chamada",
