@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import { toast } from "sonner";
 import { Transaction, ReimbursementReport } from "@/lib/types";
 
 interface EmailResponse {
@@ -6,6 +7,26 @@ interface EmailResponse {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   error?: any;
   id?: string;
+}
+
+/**
+ * Recusa, erro do Resend e envio simulado viram `error` e aviso na tela: as
+ * telas registram a ação antes do e-mail, e sem isso diziam que o link saiu.
+ */
+export async function readEmailResponse(
+  response: Response,
+): Promise<EmailResponse> {
+  const body = await response.json().catch(() => ({}));
+  const failure = !response.ok
+    ? (body.error?.message ?? body.error ?? `HTTP ${response.status}`)
+    : body.simulated
+      ? body.message
+      : null;
+  if (!failure) return body;
+  toast.warning(`Ação registrada, mas o e-mail não saiu: ${failure}`, {
+    duration: 10_000,
+  });
+  return { error: failure };
 }
 
 const getAppDomain = () => {
@@ -43,7 +64,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending approval email:", error);
       return { error };
@@ -76,7 +97,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending status update email:", error);
       return { error };
@@ -131,7 +152,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending batch approval email:", error);
       return { error };
@@ -173,7 +194,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending batch authorization email:", error);
       return { error };
@@ -213,7 +234,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending batch new transactions email:", error);
       return { error };
@@ -256,7 +277,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending reimbursement approval email:", error);
       return { error };
@@ -292,7 +313,7 @@ export const emailService = {
           },
         }),
       });
-      return await response.json();
+      return await readEmailResponse(response);
     } catch (error) {
       console.error("Error sending reimbursement approved email:", error);
       return { error };
@@ -340,7 +361,7 @@ export const emailService = {
               },
             }),
           });
-          return await response.json();
+          return await readEmailResponse(response);
         } catch (error) {
           console.error(
             `Error sending feedback notification to ${email}:`,

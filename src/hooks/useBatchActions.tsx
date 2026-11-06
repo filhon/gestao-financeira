@@ -146,7 +146,7 @@ export function useBatchActions({
               .approvalEmailContext(batch.id)
               .catch(() => ({}))
           : {};
-        await send(
+        const { error } = await send(
           batch.name,
           batch.id,
           token,
@@ -156,6 +156,7 @@ export function useBatchActions({
           email,
           { companyName: selectedCompany?.name, ...context },
         );
+        return !error;
       }),
     );
     const failed = actionBatches.filter(
@@ -180,10 +181,15 @@ export function useBatchActions({
       throw reason;
     }
     const sent = actionBatches.length - failed.length;
+    const emailed = results.filter(
+      (r) => r.status === "fulfilled" && r.value,
+    ).length;
     if (failed.length > 0) {
       toast.warning(
         `${plural(sent, "lote enviado", "lotes enviados")}. Não foi possível enviar: ${failed.map((b) => b.name).join(", ")}.`,
       );
+    } else if (emailed < sent) {
+      return; // O emailService já avisou que o e-mail não saiu.
     } else if (sent === 1) {
       toast.success(`Link enviado para ${name || email}. Vale por 48 horas.`);
     } else {
