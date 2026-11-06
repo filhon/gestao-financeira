@@ -25,7 +25,7 @@
     "check:reports": "jiti scripts/check-reports.ts",
     "check:list-placeholder": "jiti scripts/check-list-placeholder.ts",
     "check:transaction-action": "jiti scripts/check-transaction-action.ts",
-    "check:hot-callable": "npm --prefix functions run build && node scripts/check-hot-callable.cjs"
+    "check:hot-callable": "npm --prefix functions run build && node scripts/check-hot-callable.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
