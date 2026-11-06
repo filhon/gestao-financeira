@@ -20,6 +20,7 @@ import {
   TX_ACTION_PENDING,
   type TransactionActionInput,
 } from "../src/lib/transactionAction";
+import { readEmailResponse } from "../src/lib/services/emailService";
 import type {
   CostCenterAllocation,
   Transaction,
@@ -140,6 +141,26 @@ async function main() {
 
   await checkApprovalRecipients();
   console.log("ok: link de aprovação não sai da empresa");
+
+  const leitura = (status: number, body: unknown) =>
+    readEmailResponse(new Response(JSON.stringify(body), { status }));
+  assert.deepEqual(await leitura(200, { id: "1" }), { id: "1" });
+  assert.deepEqual(await leitura(401, { error: "Unauthorized" }), {
+    error: "Unauthorized",
+  });
+  assert.deepEqual(await leitura(500, { error: { message: "chave inválida" } }), {
+    error: "chave inválida",
+  });
+  // A rota responde 200 no envio simulado, mas nenhum e-mail saiu.
+  assert.deepEqual(
+    await leitura(200, { success: true, simulated: true, message: "desligado" }),
+    { error: "desligado" },
+  );
+  assert.deepEqual(
+    await readEmailResponse(new Response("<html>", { status: 502 })),
+    { error: "HTTP 502" },
+  );
+  console.log("ok: falha de e-mail não passa como envio");
 }
 
 async function checkApprovalRecipients() {

@@ -52,8 +52,16 @@ export async function POST(request: Request) {
   }
   try {
     await adminAuth.verifyIdToken(token);
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    // Token ruim é do usuário; credencial do Admin SDK faltando é do servidor.
+    if (String((error as { code?: unknown }).code).startsWith("auth/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    logger.error("Email API: Admin SDK indisponível:", error);
+    return NextResponse.json(
+      { error: "Admin SDK indisponível no servidor" },
+      { status: 500 },
+    );
   }
 
   const { type, to, data } = await request.json();
