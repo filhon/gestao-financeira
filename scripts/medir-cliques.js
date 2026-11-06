@@ -4,6 +4,9 @@
 //   pintura  = do clique até a tela reagir (o que o INP mede)
 //   estavel  = do clique até a última mudança no conteúdo (dados carregados)
 //   servidor = do clique até a resposta da última function ou /api/ chamada
+//   rede = duração dessa chamada no navegador, com preflight (a execução está
+//     no log `tempo_status` da function)
+//   js, layoutForcado, pinturaQuadro = divisão do quadro longo do clique
 //   destravou = do clique até a linha sair de "Confirmando…", "Aprovando…" etc.
 // Espere a tela assentar entre um clique e outro: um clique novo encerra a
 // medição do anterior, e essa linha sai com `cortado` marcado.
@@ -24,6 +27,25 @@
     }
   }).observe({ type: "event", durationThreshold: 16 });
 
+  // Quadro longo (50 ms+) do clique: JS, layout forçado e o restante da pintura.
+  new PerformanceObserver((lista) => {
+    for (const q of lista.getEntries()) {
+      const linha = linhas.find(
+        (l) => l.t0 >= q.startTime - 16 && l.t0 < q.startTime + q.duration,
+      );
+      if (!linha) continue;
+      linha.js = Math.round(
+        q.scripts.reduce((soma, s) => soma + s.duration, 0),
+      );
+      linha.layoutForcado = Math.round(
+        q.scripts.reduce((soma, s) => soma + s.forcedStyleAndLayoutDuration, 0),
+      );
+      linha.pinturaQuadro = Math.round(
+        q.startTime + q.duration - (q.renderStart || q.startTime + q.duration),
+      );
+    }
+  }).observe({ type: "long-animation-frame" });
+
   new PerformanceObserver((lista) => {
     for (const e of lista.getEntries()) {
       if (!/cloudfunctions\.net|\/api\//.test(e.name)) continue;
@@ -31,6 +53,7 @@
       if (linha && e.responseEnd - linha.t0 > (linha.servidor ?? 0)) {
         linha.servidor = Math.round(e.responseEnd - linha.t0);
         linha.chamada = new URL(e.name).pathname;
+        linha.rede = Math.round(e.duration);
       }
     }
   }).observe({ type: "resource" });
@@ -109,11 +132,41 @@
       "espera",
       "codigo",
       "desenho",
+      "js",
+      "layoutForcado",
+      "pinturaQuadro",
       "estavel",
       "servidor",
       "chamada",
+      "rede",
       "destravou",
       "cortado",
     ]);
-  console.log("Medindo cliques. Use o sistema e rode __cliques().");
+  // Tamanho do cache do Firestore no navegador e tempo para ler tudo dele. Toda
+  // consulta nova varre esses documentos antes de ir ao servidor.
+  window.__cacheFirestore = async () => {
+    const dbs = await indexedDB.databases();
+    const nome = dbs.find((d) => /^firestore\/.*\/main$/.test(d.name))?.name;
+    if (!nome) return console.log("Cache do Firestore não encontrado.");
+    const banco = await new Promise((ok, erro) => {
+      const req = indexedDB.open(nome);
+      req.onsuccess = () => ok(req.result);
+      req.onerror = () => erro(req.error);
+    });
+    const loja = [...banco.objectStoreNames].find((n) =>
+      n.startsWith("remoteDocuments"),
+    );
+    const inicio = performance.now();
+    const docs = await new Promise((ok, erro) => {
+      const req = banco.transaction(loja).objectStore(loja).getAll();
+      req.onsuccess = () => ok(req.result);
+      req.onerror = () => erro(req.error);
+    });
+    const ms = Math.round(performance.now() - inicio);
+    banco.close();
+    console.log(`Cache do Firestore: ${docs.length} documentos, leitura em ${ms} ms.`);
+  };
+  console.log(
+    "Medindo cliques. Use o sistema e rode __cliques() e __cacheFirestore().",
+  );
 })();
