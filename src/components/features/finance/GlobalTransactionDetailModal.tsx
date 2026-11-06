@@ -11,6 +11,8 @@ import { invalidateSearch } from "@/hooks/useSearch";
 import { useTransactionActionGuard } from "@/hooks/useTransactionAction";
 
 const TX_QUERY_KEYS = [
+  "tx-list",
+  "tx-tabs",
   "payable-transactions",
   "receivable-transactions",
   "overdue-transactions",

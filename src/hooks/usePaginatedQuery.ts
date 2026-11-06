@@ -41,8 +41,10 @@ export interface UsePaginatedQueryOptions<T, TFilters = unknown> {
   filters?: TFilters;
 
   /**
-   * Tempo em ms em que os dados são considerados "frescos"
-   * (padrão: herda do QueryClient — 60s).
+   * Tempo em ms em que voltar a uma chave já lida (troca de aba) não relê.
+   * Padrão 0: sempre relê. Só passe mais se toda ação da tela invalidar as
+   * outras chaves. Entrar na tela relê sempre, porque outras telas mudam estes
+   * dados sem invalidar as listas.
    */
   staleTime?: number;
 
@@ -115,7 +117,7 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     queryFn,
     pageSize = 25,
     enabled = true,
-    staleTime,
+    staleTime = 0,
     keepPreviousWithin,
   } = options;
 
@@ -156,6 +158,7 @@ export function usePaginatedQuery<T extends { id: string }, TFilters = unknown>(
     },
     enabled,
     staleTime,
+    refetchOnMount: "always",
     placeholderData: placeholderWithin(keepPreviousWithin),
   });
 

@@ -416,6 +416,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     pageSize: 50,
     enabled: !!companyId && !!user && !searching,
     keepPreviousWithin: companyId,
+    staleTime: 60_000,
   });
   // Aba nova ainda carregando: as linhas são da aba anterior.
   const stale = !searching && list.isPlaceholderData;
@@ -762,6 +763,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       );
       setPanelTx((cur) => (cur?.id === updated.id ? updated : cur));
       qc.invalidateQueries({ queryKey: ["tx-tabs", type] });
+      // A edição pode mudar a conta de aba: as outras releem ao abrir.
+      qc.invalidateQueries({ queryKey: ["tx-list", type], refetchType: "none" });
     },
     [list, qc, type],
   );
@@ -1166,15 +1169,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
   const gridCols =
     "md:grid-cols-[2rem_7rem_minmax(0,2fr)_minmax(0,1.2fr)_9.5rem_9rem_6.5rem]";
 
-  const SortHead = ({
-    field,
-    label,
-    className,
-  }: {
-    field: string;
-    label: string;
-    className?: string;
-  }) => (
+  // Função, não componente: declarado aqui, remontaria o cabeçalho a cada render.
+  const sortHead = (field: string, label: string, className?: string) => (
     <button
       type="button"
       onClick={() => requestSort(field)}
@@ -1690,11 +1686,11 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
           }
           aria-label="Selecionar todas"
         />
-        <SortHead field="dueDate" label="Vencimento" />
-        <SortHead field="description" label="Descrição" />
-        <SortHead field="supplierOrClient" label={copy.counterpart} />
-        <SortHead field="amount" label="Valor" className="justify-end" />
-        <SortHead field="status" label="Status" className="pl-3" />
+        {sortHead("dueDate", "Vencimento")}
+        {sortHead("description", "Descrição")}
+        {sortHead("supplierOrClient", copy.counterpart)}
+        {sortHead("amount", "Valor", "justify-end")}
+        {sortHead("status", "Status", "pl-3")}
         <span className="sr-only">Ações</span>
       </div>
 
