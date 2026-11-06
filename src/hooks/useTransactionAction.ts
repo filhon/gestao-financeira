@@ -8,14 +8,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -23,9 +16,12 @@ import { invalidateBatchQueries } from "@/hooks/useBatchActions";
 import { invalidateSearch } from "@/hooks/useSearch";
 import { friendlyError } from "@/lib/errors";
 import { db } from "@/lib/firebase/client";
+import { costCenterService } from "@/lib/services/costCenterService";
 import { emailService } from "@/lib/services/emailService";
 import { transactionService } from "@/lib/services/transactionService";
+import { userService } from "@/lib/services/userService";
 import {
+  approvalRecipients,
   pendingLabel,
   TX_ACTION_OPTIONS,
   TX_ACTION_PENDING,
@@ -56,18 +52,25 @@ async function notifyStatusChange(
   updated: Transaction,
   status: TransactionStatus,
   actorName: string,
+  actorEmail: string,
 ) {
   try {
     if (status === "pending_approval") {
-      const q = query(
-        collection(db, "users"),
-        where("role", "in", ["admin", "approver", "financial_manager"]),
-      );
-      const snap = await getDocs(q);
-      const emails = snap.docs.map((d) => d.data().email).filter(Boolean);
-      if (emails.length > 0) {
-        await emailService.sendApprovalRequest(updated, emails[0]);
+      const emails = await approvalRecipients(updated, actorEmail, {
+        costCenter: costCenterService.getById,
+        users: () => userService.getAll(updated.companyId),
+      });
+      if (emails.length === 0) {
+        toast.warning(
+          "Enviado para aprovação, mas nenhum aprovador desta empresa recebeu o e-mail.",
+        );
+        return;
       }
+      await Promise.all(
+        emails.map((email) =>
+          emailService.sendApprovalRequest(updated, email),
+        ),
+      );
       return;
     }
     const creator = await getDoc(doc(db, "users", updated.createdBy));
@@ -140,7 +143,7 @@ export function useTransactionAction() {
       await Promise.all([
         refreshAfterAction(qc, a.transaction),
         a.kind === "status" && updated
-          ? notifyStatusChange(updated, a.status, a.actorName)
+          ? notifyStatusChange(updated, a.status, a.actorName, a.actor.email)
           : null,
       ]);
     },

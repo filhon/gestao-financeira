@@ -9,6 +9,7 @@ import {
   ReimbursementApprovedEmail,
 } from "@/components/emails/EmailTemplates";
 import { NextResponse } from "next/server";
+import { adminAuth } from "@/lib/firebase/admin";
 import { sendEmail } from "@/lib/email/sendEmail";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
@@ -44,9 +45,14 @@ export async function POST(request: Request) {
   }
 
   const cookieStore = await cookies();
-  const token = cookieStore.get("auth_token");
+  const token = cookieStore.get("auth_token")?.value;
 
   if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  try {
+    await adminAuth.verifyIdToken(token);
+  } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
