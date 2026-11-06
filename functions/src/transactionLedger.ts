@@ -43,14 +43,28 @@ const db = () => admin.firestore();
  * O ping lê um documento: a 1ª operação no Firestore de cada instância levava
  * 4–6 s (as seguintes, ~1 s), e sem isso quem pagava era o clique do usuário.
  * ponytail: uma leitura por ping; se os logs não mostrarem ganho, remover.
+ *
+ * O preflight CORS custava ~217 ms a cada clique: sem `Max-Age`, o navegador só
+ * o guarda por 5 s. Com ele, guarda por até 2 h e quem paga é o ping da tela.
+ * O `onCall` não expõe essa opção; `Object.assign` mantém `__endpoint` e `run`,
+ * senão o deploy recusa a troca de callable para HTTP.
  */
-const hotCallable = (handler: Parameters<typeof functions.https.onCall>[0]) =>
-  functions.https.onCall(async (data, context) => {
+const hotCallable = (handler: Parameters<typeof functions.https.onCall>[0]) => {
+  const callable = functions.https.onCall(async (data, context) => {
     if (!data?.warmup) return handler(data, context);
     // Chamada anônima não ganha leitura no banco.
     if (context.auth) await db().collection("companies").doc("_warmup").get();
     return { warm: true };
   });
+  const withPreflightCache: typeof callable = Object.assign(
+    (req: functions.https.Request, res: functions.Response) => {
+      if (req.method === "OPTIONS") res.set("Access-Control-Max-Age", "7200");
+      return callable(req, res);
+    },
+    callable,
+  );
+  return withPreflightCache;
+};
 
 /** Rejeitadas não reservam recurso; todo o resto sim, inclusive rascunho. */
 const CONSUMES_BUDGET = (status?: string) => status !== "rejected";
