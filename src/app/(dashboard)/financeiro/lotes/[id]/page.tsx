@@ -284,12 +284,10 @@ export default function PaymentBatchPage() {
       if (result.token && result.approverEmail && result.batchName) {
         try {
           await emailService.sendBatchNewTransactionsNotification(
-            result.batchName,
             batch.id,
             result.token,
             result.newTransactionCount,
             result.additionalAmount,
-            user?.displayName ?? "Gestor Financeiro",
             result.approverEmail,
           );
         } catch (emailErr) {

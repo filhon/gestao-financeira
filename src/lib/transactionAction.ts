@@ -17,7 +17,6 @@ export type TransactionActionInput = { transaction: Transaction } & (
 export type TransactionAction = TransactionActionInput & {
   companyId: string;
   actor: { uid: string; email: string };
-  actorName: string;
 };
 
 export const TX_ACTION_OPTIONS = {

@@ -327,17 +327,15 @@ export default function ReembolsosPage() {
     const actor = { uid: user.uid, email: user.email };
     const results = await Promise.allSettled(
       selectedDrafts.map(async (report) => {
-        const { token, totalAmount } =
-          await reimbursementReportService.sendForApproval(
-            report,
-            email,
-            actor,
-          );
+        const { token } = await reimbursementReportService.sendForApproval(
+          report,
+          email,
+          actor,
+        );
         await emailService.sendReimbursementApprovalRequest(
-          { ...report, totalAmount },
+          report.id,
           token,
           email,
-          user.displayName || user.email || "Financeiro",
         );
       }),
     );

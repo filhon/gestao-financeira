@@ -53,7 +53,6 @@ function refreshAfterAction(qc: QueryClient, transaction: Transaction) {
 async function notifyStatusChange(
   updated: Transaction,
   status: TransactionStatus,
-  actorName: string,
   actorEmail: string,
 ) {
   try {
@@ -70,7 +69,7 @@ async function notifyStatusChange(
       }
       await Promise.all(
         emails.map((email) =>
-          emailService.sendApprovalRequest(updated, email),
+          emailService.sendApprovalRequest(updated.id, email),
         ),
       );
       return;
@@ -79,7 +78,7 @@ async function notifyStatusChange(
     const creatorEmail = creator.data()?.email;
     // O e-mail fala do status novo (e do motivo, se rejeitada).
     if (creatorEmail) {
-      await emailService.sendStatusUpdate(updated, creatorEmail, actorName);
+      await emailService.sendStatusUpdate(updated.id, creatorEmail);
     }
   } catch (error) {
     console.error("Failed to send email notification:", error);
@@ -142,12 +141,7 @@ export function useTransactionAction() {
       replaceCachedRow(qc, updated);
       void refreshAfterAction(qc, a.transaction);
       if (a.kind === "status") {
-        await notifyStatusChange(
-          updated,
-          a.status,
-          a.actorName,
-          a.actor.email,
-        );
+        await notifyStatusChange(updated, a.status, a.actor.email);
       }
     },
     onError: (error, a) => {
@@ -197,7 +191,6 @@ export function useTransactionAction() {
         ...input,
         companyId: selectedCompany.id,
         actor: { uid: user.uid, email: user.email },
-        actorName: user.displayName,
       },
       onDone,
     );

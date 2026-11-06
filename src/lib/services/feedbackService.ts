@@ -245,8 +245,6 @@ export const feedbackService = {
     if (adminEmails.length > 0) {
       try {
         await emailService.sendFeedbackNotification(adminEmails, {
-          userName,
-          userEmail,
           feedbackType,
           title,
           description,

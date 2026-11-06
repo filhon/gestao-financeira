@@ -23,7 +23,7 @@ import {
   sum,
 } from "firebase/firestore";
 import currency from "currency.js";
-import { format, startOfDay } from "date-fns";
+import { startOfDay } from "date-fns";
 import { PaymentBatch, PaymentBatchStatus, Transaction } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
 
@@ -610,43 +610,6 @@ export const paymentBatchService = {
       resent: data.status === "pending_approval",
     });
     return token;
-  },
-
-  /** Primeiro vencimento, alertas e os 3 maiores itens, para o e-mail ao aprovador. */
-  approvalEmailContext: async (batchId: string) => {
-    const txs = (await batchTransactions(batchId)).docs.map(
-      (d) => d.data() as Transaction,
-    );
-    const due = (t: Transaction) =>
-      (t.dueDate as unknown as Timestamp)?.toDate();
-    const dueDates = txs
-      .map(due)
-      .filter((d): d is Date => !!d)
-      .sort((a, b) => a.getTime() - b.getTime());
-    const brl = (v: number) =>
-      new Intl.NumberFormat("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      }).format(v);
-
-    const today = startOfDay(new Date());
-
-    return {
-      firstDueDate: dueDates[0] ? format(dueDates[0], "dd/MM/yyyy") : undefined,
-      overdueCount: dueDates.filter((d) => d < today).length,
-      budgetExceededCount: txs.filter((t) => t.budgetExceeded).length,
-      topItems: [...txs]
-        .sort((a, b) => effectiveAmount(b) - effectiveAmount(a))
-        .slice(0, 3)
-        .map((t) => {
-          const d = due(t);
-          return {
-            supplier: t.supplierOrClient || t.description,
-            amount: brl(effectiveAmount(t)),
-            dueDate: d ? format(d, "dd/MM") : "",
-          };
-        }),
-    };
   },
 
   /**

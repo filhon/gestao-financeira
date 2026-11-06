@@ -96,9 +96,10 @@ NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
 NEXT_PUBLIC_FIREBASE_APP_ID=
 NEXT_PUBLIC_APP_URL=
 NEXT_PUBLIC_DEV_FALLBACK_EMAIL=   # redirects all emails in dev
-RESEND_API_KEY=
+RESEND_API_KEY=                   # acesso total: envia e lê os e-mails recebidos
 EMAIL_FROM_DOMAIN=
 EMAIL_ENABLED=true
+RESEND_WEBHOOK_SECRET=            # webhook email.received (aprovação por resposta)
 ```
 
 ## Project Structure
