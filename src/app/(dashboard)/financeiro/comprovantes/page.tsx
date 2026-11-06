@@ -105,6 +105,8 @@ const TAB_STATUSES: Record<
   all: [],
 };
 
+const MISSING_PAGE = 50;
+
 /** Status que ainda pedem uma decisão humana. */
 const ACTIONABLE = new Set<ComprovanteMatchStatus>([
   "pending_review",
@@ -422,6 +424,8 @@ export default function ComprovantesPage() {
           (b.paymentDate?.getTime() ?? 0) - (a.paymentDate?.getTime() ?? 0),
       );
   }, [missingAll, searchTerm, dateRange]);
+  // Montar as 1.300+ linhas de uma vez travava o clique na aba por quase 1 s.
+  const [missingShown, setMissingShown] = useState(MISSING_PAGE);
 
   const invalidateCounts = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: STATS_QUERY_KEY(companyId) });
@@ -536,6 +540,18 @@ export default function ComprovantesPage() {
   useEffect(() => {
     if (isIntersecting && hasMore && !isFetchingNextPage) loadMore();
   }, [isIntersecting, hasMore, isFetchingNextPage, loadMore]);
+
+  const { targetRef: missingEndRef, isIntersecting: missingAtEnd } =
+    useIntersectionObserver<HTMLDivElement>({
+      threshold: 0.1,
+      enabled: tab === "missing" && missing.length > missingShown,
+    });
+
+  useEffect(() => {
+    if (missingAtEnd) setMissingShown((n) => n + MISSING_PAGE);
+  }, [missingAtEnd]);
+
+  useEffect(() => setMissingShown(MISSING_PAGE), [filters]);
 
   // ── Selection (bulk confirm) ──────────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1323,7 +1339,7 @@ export default function ComprovantesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {missing.map((t) => (
+                  {missing.slice(0, missingShown).map((t) => (
                     <TableRow key={t.id}>
                       <TableCell className="max-w-0 pl-4">
                         <p className="truncate text-sm font-medium">
@@ -1358,6 +1374,9 @@ export default function ComprovantesPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+            {missing.length > missingShown && (
+              <div ref={missingEndRef} className="h-px" />
             )}
           </>
         ) : isError ? (
