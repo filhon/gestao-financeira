@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useOptimistic,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   useQuery,
@@ -1537,90 +1545,20 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     );
   };
 
-  const tabCountLabel = (i: number) => {
-    const t = totals?.[i];
-    if (!t) return totalsQuery.isError ? "—" : null;
-    return t.count;
-  };
-
   return (
     <div className="flex flex-col rounded-xl border bg-card">
       {/* ── Abas por situação ─────────────────────────────────────────── */}
-      <div
-        role="tablist"
-        aria-label="Situação das contas"
-        className="flex overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {tabs.map((t, i) => {
-          const selected = t.id === tab && !searching;
-          const count = tabCountLabel(i);
-          const late = t.id === "overdue" && !!totals?.[i]?.count;
-          return (
-            <button
-              key={t.id}
-              role="tab"
-              type="button"
-              aria-selected={selected}
-              title={`${t.label} (${i + 1})`}
-              onClick={() => {
-                setPref("tab", t.id);
-                setSearchTerm("");
-              }}
-              className={cn(
-                "relative flex shrink-0 flex-col items-start gap-0.5 px-3 py-2.5 text-left transition-colors",
-                "after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full",
-                selected
-                  ? "after:bg-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "flex items-center gap-1.5 text-sm font-medium",
-                  late && "text-red-600 dark:text-red-400",
-                )}
-              >
-                {t.label}
-                {count === null ? (
-                  <Skeleton className="h-4 w-5 rounded-full" />
-                ) : (
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 text-[11px] tabular-nums",
-                      late
-                        ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
-                        : "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
-              </span>
-              <span className="text-xs font-financial tabular-nums text-muted-foreground">
-                {totals?.[i] ? (
-                  <>
-                    <span className="sm:hidden">
-                      {formatCurrencyAbbr(totals[i].total)}
-                    </span>
-                    <span className="hidden sm:inline">
-                      {formatCurrency(totals[i].total)}
-                    </span>
-                    {/* Só estas abas filtram por período: sem o rótulo, "Todas" parece menor que "Futuras". */}
-                    {(t.id === "paid" || t.id === "all") && (
-                      <span className="font-sans">
-                        {" "}
-                        · {periodLabel(period)}
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  " "
-                )}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <SituationTabs
+        tabs={tabs}
+        active={searching ? null : tab}
+        totals={totals}
+        totalsFailed={totalsQuery.isError}
+        periodText={periodLabel(period)}
+        onSelect={(id) => {
+          setPref("tab", id);
+          setSearchTerm("");
+        }}
+      />
 
       {/* ── Busca e filtros secundários ───────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2.5 md:px-4">
@@ -2200,6 +2138,106 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
 }
 
 // ── Peças pequenas ────────────────────────────────────────────────────────────
+
+/**
+ * A aba marcada muda na hora, só neste componente. A lista inteira re-renderiza
+ * em transição: renderizá-la junto com o clique custava até 144 ms.
+ */
+function SituationTabs({
+  tabs,
+  active,
+  totals,
+  totalsFailed,
+  periodText,
+  onSelect,
+}: {
+  tabs: { id: TabId; label: string }[];
+  active: TabId | null;
+  totals?: { count: number; total: number }[];
+  totalsFailed: boolean;
+  periodText: string;
+  onSelect: (id: TabId) => void;
+}) {
+  const [shown, setShown] = useOptimistic(active);
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Situação das contas"
+      className="flex overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      {tabs.map((t, i) => {
+        const selected = t.id === shown;
+        const total = totals?.[i];
+        const count = total ? total.count : totalsFailed ? "—" : null;
+        const late = t.id === "overdue" && !!total?.count;
+        return (
+          <button
+            key={t.id}
+            role="tab"
+            type="button"
+            aria-selected={selected}
+            title={`${t.label} (${i + 1})`}
+            onClick={() =>
+              startTransition(() => {
+                setShown(t.id);
+                onSelect(t.id);
+              })
+            }
+            className={cn(
+              "relative flex shrink-0 flex-col items-start gap-0.5 px-3 py-2.5 text-left transition-colors",
+              "after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full",
+              selected
+                ? "after:bg-primary"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span
+              className={cn(
+                "flex items-center gap-1.5 text-sm font-medium",
+                late && "text-red-600 dark:text-red-400",
+              )}
+            >
+              {t.label}
+              {count === null ? (
+                <Skeleton className="h-4 w-5 rounded-full" />
+              ) : (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-[11px] tabular-nums",
+                    late
+                      ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {count}
+                </span>
+              )}
+            </span>
+            <span className="text-xs font-financial tabular-nums text-muted-foreground">
+              {total ? (
+                <>
+                  <span className="sm:hidden">
+                    {formatCurrencyAbbr(total.total)}
+                  </span>
+                  <span className="hidden sm:inline">
+                    {formatCurrency(total.total)}
+                  </span>
+                  {/* Só estas abas filtram por período: sem o rótulo, "Todas" parece menor que "Futuras". */}
+                  {(t.id === "paid" || t.id === "all") && (
+                    <span className="font-sans"> · {periodText}</span>
+                  )}
+                </>
+              ) : (
+                " "
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Flag({
   icon: Icon,
