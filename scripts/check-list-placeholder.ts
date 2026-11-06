@@ -72,4 +72,48 @@ assert.equal(
 
 stop();
 client.clear();
-console.log("ok: lista mantida na troca de aba");
+
+// Releitura: voltar à aba dentro do prazo não vai ao servidor; invalidar e
+// entrar na tela vão. Mesmas opções que TransactionList usa por usePaginatedQuery.
+async function checkRereads() {
+  const qc = new QueryClient();
+  let reads = 0;
+  const tabOptions = (queryKey: Key) => ({
+    queryKey,
+    queryFn: async () => {
+      reads++;
+      return { items: [] };
+    },
+    initialPageParam: null,
+    getNextPageParam: () => undefined,
+    staleTime: 60_000,
+    refetchOnMount: "always" as const,
+  });
+  const settled = () => new Promise((done) => setTimeout(done, 10));
+
+  const tabs = new InfiniteQueryObserver(qc, tabOptions(A_VENCIDAS));
+  const leave = tabs.subscribe(() => {});
+  await settled();
+  tabs.setOptions(tabOptions(A_SEMANA));
+  await settled();
+  assert.equal(reads, 2);
+
+  tabs.setOptions(tabOptions(A_VENCIDAS));
+  await settled();
+  assert.equal(reads, 2, "voltar à aba não relê");
+
+  await qc.invalidateQueries({ queryKey: A_SEMANA, refetchType: "none" });
+  tabs.setOptions(tabOptions(A_SEMANA));
+  await settled();
+  assert.equal(reads, 3, "aba invalidada relê ao abrir");
+  leave();
+
+  const page = new InfiniteQueryObserver(qc, tabOptions(A_SEMANA));
+  const leavePage = page.subscribe(() => {});
+  await settled();
+  assert.equal(reads, 4, "entrar na tela relê sempre");
+  leavePage();
+  qc.clear();
+}
+
+checkRereads().then(() => console.log("ok: lista mantida na troca de aba"));
