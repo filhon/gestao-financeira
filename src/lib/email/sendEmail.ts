@@ -1,10 +1,14 @@
 import type { ReactElement } from "react";
 import { Resend } from "resend";
 import { logger } from "@/lib/logger";
+import type { EmailSender } from "@/lib/email/resolveEmail";
 
 export type SendEmailResult =
   | { simulated: true; message: string }
   | { simulated: false; data?: unknown; error?: unknown };
+
+export const emailDomain = () =>
+  process.env.EMAIL_FROM_DOMAIN || "fincontrol.ia.br";
 
 /**
  * Envio pelo Resend, só no servidor. Em desenvolvimento com
@@ -14,11 +18,17 @@ export async function sendEmail({
   to,
   subject,
   react,
+  sender,
+  replyTo,
   fromName = "FinControl",
 }: {
   to: string | string[];
   subject: string;
   react: ReactElement;
+  /** Parte antes do @: separa por finalidade, para filtros e para quem confere. */
+  sender: EmailSender;
+  /** Quem recebe a resposta: nunca fixo, para não misturar empresas. */
+  replyTo?: string;
   /** Nome do remetente na caixa de entrada, ex.: "FinControl · Hebron". */
   fromName?: string;
 }): Promise<SendEmailResult> {
@@ -42,11 +52,9 @@ export async function sendEmail({
     logger.log(`[DEV] Redirecting email from ${to} to ${fallbackEmail}`);
   }
 
-  const fromDomain =
-    process.env.EMAIL_FROM_DOMAIN || "updates.fincontrol.ia.br";
-
   const { data, error } = await resend.emails.send({
-    from: `"${fromName.replace(/["\\]/g, "")}" <noreply@${fromDomain}>`,
+    from: `"${fromName.replace(/["\\]/g, "")}" <${sender}@${emailDomain()}>`,
+    replyTo,
     to: redirect ? fallbackEmail! : to,
     subject: redirect ? `[TESTE - Original: ${to}] ${subject}` : subject,
     react,

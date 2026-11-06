@@ -1,5 +1,47 @@
 import * as React from "react";
 
+/** A resposta vai para uma pessoa: sem o aviso, quem responde "aprovado" acha que aprovou. */
+const ReplyNotice = () => (
+  <p style={{ color: "#64748b", fontSize: "12px", margin: "0 0 8px" }}>
+    A resposta vai para quem fez o pedido e não registra sua decisão. Use o
+    botão acima.
+  </p>
+);
+
+/** Só aparece quando a resposta aprovaria de fato ao chegar. */
+const ReplyApprovalNotice = ({ senderName }: { senderName: string }) => (
+  <div
+    style={{
+      fontSize: "14px",
+      margin: "0 0 16px",
+      padding: "12px 16px",
+      background: "#fff",
+      border: "1px solid #e2e8f0",
+      borderRadius: "6px",
+    }}
+  >
+    <p style={{ margin: "0 0 8px", fontWeight: "bold", color: "#0f172a" }}>
+      Prefere responder por aqui?
+    </p>
+    <p style={{ margin: "0 0 8px" }}>
+      Se está tudo certo com o lote inteiro, responda da mesma conta de e-mail
+      com uma destas frases na primeira linha: <strong>Aprovado</strong>,{" "}
+      <strong>Aprovo</strong>, <strong>De acordo</strong> ou{" "}
+      <strong>Ciente e de acordo</strong>. Sua assinatura pode ficar embaixo.
+      Depois, mandamos um e-mail confirmando a aprovação.
+    </p>
+    <p style={{ margin: "0 0 8px" }}>
+      Se a confirmação não chegar em alguns minutos, abra o botão acima: a
+      página mostra se o lote já foi aprovado.
+    </p>
+    <p style={{ margin: 0 }}>
+      Qualquer outra resposta não aprova nada e vai para {senderName}: uma
+      dúvida, um pedido de ajuste ou &quot;aprovado, menos o item 3&quot;. Para
+      mudar valores ou tirar itens, use o botão.
+    </p>
+  </div>
+);
+
 interface ApprovalRequestEmailProps {
   transactionId: string;
   description: string;
@@ -43,6 +85,7 @@ export const ApprovalRequestEmail: React.FC<
         Ver Detalhes
       </a>
     </p>
+    <ReplyNotice />
   </div>
 );
 
@@ -134,6 +177,7 @@ interface BatchApprovalEmailProps {
   /** Já vencidas no envio e criadas sem saldo: o que o aprovador olha primeiro. */
   overdueCount?: number;
   budgetExceededCount?: number;
+  replyable?: boolean;
 }
 
 const emailLabel = { padding: "6px 0", color: "#64748b" } as const;
@@ -158,6 +202,7 @@ export const BatchApprovalEmail: React.FC<
   topItems = [],
   overdueCount = 0,
   budgetExceededCount = 0,
+  replyable = false,
 }) => {
   const attention = [
     overdueCount > 0 &&
@@ -323,6 +368,12 @@ export const BatchApprovalEmail: React.FC<
           </a>
         </div>
 
+        {replyable ? (
+          <ReplyApprovalNotice senderName={senderName} />
+        ) : (
+          <ReplyNotice />
+        )}
+
         <p style={{ color: "#64748b", fontSize: "12px", margin: 0 }}>
           {expiresAt
             ? `O link vale até ${expiresAt} e é só seu: não encaminhe.`
@@ -333,6 +384,98 @@ export const BatchApprovalEmail: React.FC<
     </div>
   );
 };
+
+interface BatchReplyResultEmailProps {
+  batchName: string;
+  companyName?: string | null;
+  approverLabel: string;
+  /** Para quem enviou o lote leva o texto recebido; para o aprovador, não. */
+  audience: "approver" | "sender";
+  approved: boolean;
+  reason?: string;
+  transactionCount?: number;
+  totalAmount?: string;
+  replyText?: string;
+}
+
+export const BatchReplyResultEmail: React.FC<
+  Readonly<BatchReplyResultEmailProps>
+> = ({
+  batchName,
+  companyName,
+  approverLabel,
+  audience,
+  approved,
+  reason,
+  transactionCount,
+  totalAmount,
+  replyText,
+}) => (
+  <div
+    style={{
+      fontFamily: "sans-serif",
+      lineHeight: "1.6",
+      maxWidth: "600px",
+      margin: "0 auto",
+      color: "#334155",
+    }}
+  >
+    <div
+      style={{ background: "#f8fafc", padding: "24px", borderRadius: "8px" }}
+    >
+      {companyName && (
+        <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+          {companyName}
+        </p>
+      )}
+      <h2 style={{ color: "#0f172a", margin: "4px 0 16px", fontSize: "20px" }}>
+        {approved
+          ? "Lote aprovado por resposta de e-mail"
+          : "A resposta não aprovou o lote"}
+      </h2>
+      <p style={{ margin: "0 0 12px" }}>
+        Lote <strong>{batchName}</strong>
+        {approved && totalAmount
+          ? ` · ${transactionCount} ${transactionCount === 1 ? "transação" : "transações"} · ${totalAmount}`
+          : ""}
+        .
+      </p>
+      {approved ? (
+        <p style={{ margin: "0 0 12px" }}>
+          {audience === "approver"
+            ? "Sua resposta registrou a aprovação do lote inteiro. Se não foi você, avise o gestor financeiro agora."
+            : `${approverLabel} aprovou o lote inteiro respondendo ao e-mail.`}
+        </p>
+      ) : (
+        <p style={{ margin: "0 0 12px" }}>
+          Motivo: {reason}.{" "}
+          {audience === "approver"
+            ? "Para decidir, use o botão do e-mail original."
+            : "O lote continua como estava."}
+        </p>
+      )}
+      {audience === "sender" && replyText && (
+        <>
+          <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#64748b" }}>
+            Resposta recebida de {approverLabel}
+          </p>
+          <p
+            style={{
+              margin: 0,
+              padding: "8px 12px",
+              background: "#fff",
+              border: "1px solid #e2e8f0",
+              borderRadius: "6px",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {replyText}
+          </p>
+        </>
+      )}
+    </div>
+  </div>
+);
 
 interface ApprovalCodeEmailProps {
   code: string;
@@ -510,6 +653,8 @@ export const BatchAuthorizationEmail: React.FC<
         </a>
       </div>
 
+      <ReplyNotice />
+
       <p style={{ color: "#94a3b8", fontSize: "12px", marginBottom: 0 }}>
         Este link expira em 48 horas. Se você não reconhece esta solicitação,
         por favor ignore este email.
@@ -649,6 +794,8 @@ export const BatchNewTransactionsEmail: React.FC<
           Revisar e Aprovar Lote
         </a>
       </div>
+
+      <ReplyNotice />
 
       <p style={{ color: "#94a3b8", fontSize: "12px", marginBottom: 0 }}>
         Este link expira em 48 horas. Se você não reconhece esta solicitação,
@@ -994,6 +1141,8 @@ export const ReimbursementApprovalEmail: React.FC<
           ✕ Recusar
         </a>
       </div>
+
+      <ReplyNotice />
 
       <p style={{ color: "#94a3b8", fontSize: "12px", marginTop: "24px" }}>
         Este link expira em 7 dias. Em caso de dúvidas, acesse o sistema Fin

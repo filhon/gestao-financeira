@@ -383,19 +383,7 @@ function requestApprovalInBackground(
     });
 
     await Promise.all(
-      emails.map((email) =>
-        emailService.sendApprovalRequest(
-          {
-            id: ref.id,
-            ...transactionData,
-            amount: transactionData.amount, // Show total amount in email
-            approvalToken: token,
-            requestOrigin: transactionData.requestOrigin,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          } as any,
-          email,
-        ),
-      ),
+      emails.map((email) => emailService.sendApprovalRequest(ref.id, email)),
     );
   })().catch((error) =>
     console.error("Error requesting approval by e-mail:", error),

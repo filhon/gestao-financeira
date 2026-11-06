@@ -16,7 +16,14 @@ import {
 } from "firebase-admin/firestore";
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { createElement } from "react";
-import currency from "currency.js";
+import {
+  CODES,
+  MAX_TRANSACTIONS,
+  commitBatchApproval,
+  effectiveAmount,
+  logAudit,
+  reviewTransactions,
+} from "@/lib/api/batchApprovalAdmin";
 import { readLedgerBalances } from "@/lib/api/costCenterLedgerAdmin";
 import { sendEmail } from "@/lib/email/sendEmail";
 import { checkRateLimit } from "@/lib/rateLimit";
@@ -26,32 +33,15 @@ import {
   envelopeSnapshot,
 } from "@/components/features/finance/EnvelopeLine";
 import { CostCenter } from "@/lib/types";
-import { withPayeeAccount } from "@/lib/entityBankAccounts";
 import { splitDescription } from "@/lib/transactionTabs";
 import { formatCnpj } from "@/lib/validations/cnpj";
 
 const BATCHES = "payment_batches";
 const TRANSACTIONS = "transactions";
 const COST_CENTERS = "cost_centers";
-const ENTITIES = "entities";
-const AUDIT_LOGS = "audit_logs";
-/** Sem regra própria nas rules: cai no default deny, só o Admin SDK lê. */
-const CODES = "batch_approval_codes";
-
-/** writeBatch aceita 500 operações: lote + código consumido + 498 transações. */
-const MAX_TRANSACTIONS = 498;
-
 const CODE_MINUTES = 10;
 const CODE_MAX_ATTEMPTS = 5;
 const CODE_RESEND_SECONDS = 60;
-
-type ApprovalAlert =
-  | "budget_exceeded"
-  | "first_payment"
-  | "above_history"
-  | "entity_changed"
-  | "bank_changed"
-  | "no_payment_data";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
@@ -59,28 +49,6 @@ function hashToken(token: string): string {
 
 const toIso = (v: unknown) =>
   (v as Timestamp | undefined)?.toDate().toISOString() ?? null;
-
-const effectiveAmount = (td: DocumentData) =>
-  (td.batchAdjustedAmount ?? td.amount ?? 0) as number;
-
-async function logAudit(entry: {
-  companyId: string;
-  userId: string;
-  userEmail: string;
-  action: string;
-  entity: string;
-  entityId: string;
-  details: Record<string, unknown>;
-}): Promise<void> {
-  try {
-    await adminDb.collection(AUDIT_LOGS).add({
-      ...entry,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-  } catch (err) {
-    console.error("[batch-approval] audit log failed:", err);
-  }
-}
 
 type LoadResult =
   | { doc: QueryDocumentSnapshot; data: DocumentData }
@@ -204,70 +172,6 @@ const errorResponse = (r: Extract<LoadResult, { error: string }>) =>
     { status: r.status },
   );
 
-/** Onde o dinheiro vai cair, como o aprovador precisa conferir. */
-function payTo(td: DocumentData, entity: DocumentData | undefined) {
-  const barcode = (td.barcode as string | undefined)?.replace(/\D/g, "");
-  if (td.paymentMethod === "boleto" || (!td.paymentMethod && barcode)) {
-    return barcode ? `Boleto · final ${barcode.slice(-6)}` : null;
-  }
-  if (entity?.pixKey && td.paymentMethod !== "transfer") {
-    return `Pix ${entity.pixKey}`;
-  }
-  if (entity?.account) {
-    return [
-      entity.bankName,
-      entity.agency && `ag. ${entity.agency}`,
-      `c/c ${entity.account}`,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
-  if (td.paymentMethod === "cash") return "Dinheiro";
-  if (td.paymentMethod === "credit_card") return "Cartão de crédito";
-  return null;
-}
-
-/** Descrição sem o sufixo "(Recorrência)"/"(3/12)", em minúsculas: a chave do histórico. */
-const descriptionKey = (description: unknown) =>
-  splitDescription(String(description ?? ""))
-    .text.trim()
-    .toLowerCase();
-
-/**
- * Histórico pago do fornecedor, para os alertas de primeiro pagamento e de
- * valor acima do padrão.
- * ponytail: lê até 200 transações do fornecedor sem ordenar; se o histórico
- * passar disso, trocar por índice entityId+dueDate e pegar as mais recentes.
- */
-async function paidHistory(companyId: string, entityId: string) {
-  const snap = await adminDb
-    .collection(TRANSACTIONS)
-    .where("entityId", "==", entityId)
-    .limit(200)
-    .get();
-  return snap.docs
-    .map((d) => d.data())
-    .filter((d) => d.companyId === companyId && d.status === "paid");
-}
-
-/**
- * Média do que já foi pago ao fornecedor pelo mesmo motivo (mesma conta do
- * plano ou, sem ela, mesma descrição). Por fornecedor só, a Receita Federal
- * misturava DARF, DAS e retenções numa média que não dizia nada.
- */
-function comparableAverage(paid: DocumentData[], td: DocumentData) {
-  const same = td.accountId
-    ? (d: DocumentData) => d.accountId === td.accountId
-    : (d: DocumentData) =>
-        descriptionKey(d.description) === descriptionKey(td.description);
-  const peers = paid.filter(same);
-  // Três pagamentos dão uma média minimamente confiável
-  if (peers.length < 3) return null;
-  return peers
-    .reduce((acc, d) => acc.add(effectiveAmount(d)), currency(0))
-    .divide(peers.length).value;
-}
-
 /** CNPJ/CPF com máscara; outro formato passa como veio. */
 function formatDocument(doc: unknown) {
   if (typeof doc !== "string") return null;
@@ -338,74 +242,9 @@ export async function GET(request: Request) {
         : null,
     ]);
 
-    // Fornecedores do lote: cadastro e histórico, uma leitura por fornecedor
-    const entityIds = [
-      ...new Set(
-        txSnap.docs
-          .map((d) => d.data().entityId as string | undefined)
-          .filter((id): id is string => !!id),
-      ),
-    ];
-    const [entitySnaps, histories] = await Promise.all([
-      entityIds.length
-        ? adminDb.getAll(
-            ...entityIds.map((id) => adminDb.collection(ENTITIES).doc(id)),
-          )
-        : Promise.resolve([]),
-      Promise.all(entityIds.map((id) => paidHistory(companyId, id))),
-    ]);
-    const entities = new Map(
-      entitySnaps
-        .filter((s) => s.exists && s.data()?.companyId === companyId)
-        .map((s) => [s.id, s.data()!]),
-    );
-    const history = new Map(entityIds.map((id, i) => [id, histories[i]]));
-
-    const now = Date.now();
-    const DAY = 86_400_000;
-
-    const transactions = txSnap.docs.map((d) => {
-      const td = d.data();
-      const entity = td.entityId ? entities.get(td.entityId) : undefined;
-      const hist = td.entityId ? history.get(td.entityId) : undefined;
-      const amount = effectiveAmount(td);
-      const destination = payTo(
-        td,
-        entity && withPayeeAccount(entity, td.entityBankAccountId),
-      );
-      const average = hist ? comparableAverage(hist, td) : null;
-      const supplier: string | null =
-        entity?.name ?? td.supplierOrClient ?? null;
-
-      const alerts: ApprovalAlert[] = [];
-      if (td.budgetExceeded) alerts.push("budget_exceeded");
-      if (hist && hist.length === 0) alerts.push("first_payment");
-      if (average !== null && amount > average * 1.5) {
-        alerts.push("above_history");
-      }
-      const updatedAt = (
-        entity?.updatedAt as Timestamp | undefined
-      )?.toMillis();
-      const createdAt = (
-        entity?.createdAt as Timestamp | undefined
-      )?.toMillis();
-      const bankChangedAt = (
-        entity?.bankDetailsChangedAt as Timestamp | undefined
-      )?.toMillis();
-      if (bankChangedAt && now - bankChangedAt <= 30 * DAY) {
-        // Troca de conta recente é o padrão da fraude por e-mail falso
-        alerts.push("bank_changed");
-      } else if (
-        updatedAt &&
-        createdAt &&
-        updatedAt - createdAt > DAY &&
-        now - updatedAt <= 30 * DAY
-      ) {
-        alerts.push("entity_changed");
-      }
-      if (!destination) alerts.push("no_payment_data");
-
-      return {
+    const reviewed = await reviewTransactions(companyId, txSnap.docs);
+    const transactions = reviewed.map(
+      ({ doc: d, td, entity, supplier, amount, destination, average, alerts }) => ({
         id: d.id,
         description: withoutSupplier(
           splitDescription(td.description ?? "").text,
@@ -433,8 +272,8 @@ export async function GET(request: Request) {
             ? toIso(entity?.updatedAt)
             : null,
         alerts,
-      };
-    });
+      }),
+    );
 
     const costCenters = ccSnap.docs.map((d) => {
       const cd = d.data();
@@ -590,8 +429,16 @@ export async function POST(request: Request) {
         .collection("companies")
         .doc(batchData.companyId as string)
         .get();
+      const creator = batchData.createdBy
+        ? await adminDb
+            .collection("users")
+            .doc(batchData.createdBy as string)
+            .get()
+        : null;
       const sent = await sendEmail({
         to,
+        sender: "aprovacao",
+        replyTo: creator?.get("email"),
         subject: `Código de confirmação: ${batchData.name ?? "lote de pagamentos"}`,
         react: createElement(ApprovalCodeEmail, {
           code,
@@ -715,94 +562,18 @@ export async function POST(request: Request) {
         adjusted.set(a.id, { to: a.adjustedAmount, reason: a.reason.trim() });
       }
 
-      const fsWriteBatch = adminDb.batch();
-      let total = currency(0);
-
-      allTxSnap.docs.forEach((tDoc) => {
-        const reason = rejected.get(tDoc.id);
-        if (reason) {
-          fsWriteBatch.update(tDoc.ref, {
-            batchId: null,
-            batchRejectionReason: reason,
-            status: "draft",
-          });
-          return;
-        }
-        const adj = adjusted.get(tDoc.id);
-        total = total.add(adj?.to ?? currentById.get(tDoc.id)!);
-        if (paidIds.has(tDoc.id)) return;
-        fsWriteBatch.update(tDoc.ref, {
-          status: "approved",
-          approvedBy: approverId,
-          approvedAt: FieldValue.serverTimestamp(),
-          ...(adj
-            ? { batchAdjustedAmount: adj.to, batchAdjustmentReason: adj.reason }
-            : {}),
-        });
+      const approved = await commitBatchApproval({
+        batchDoc,
+        batchData,
+        txDocs: allTxSnap.docs,
+        tokenHash,
+        rejected,
+        adjusted,
+        comment,
+        via: "magic-link",
       });
 
-      fsWriteBatch.update(
-        batchDoc.ref,
-        {
-          status: "approved",
-          approvedBy: approverId,
-          approvedAt: FieldValue.serverTimestamp(),
-          approvalTokenHash: null,
-          approvalToken: null,
-          approvalTokenExpiresAt: null,
-          usedApprovalTokenHash: hashToken(token),
-          usedApprovalTokenBy: approverLabel,
-          usedApprovalTokenAction: "approved",
-          totalAmount: total.value,
-          transactionIds: (
-            (batchData.transactionIds as string[] | undefined) ?? []
-          ).filter((id) => !rejected.has(id)),
-          rejectedTransactionIds: [
-            ...((batchData.rejectedTransactionIds as string[] | undefined) ??
-              []),
-            ...rejected.keys(),
-          ],
-          // Sem comentário, apaga o de uma devolução anterior
-          approverComment: comment ?? null,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        unchanged,
-      );
-      fsWriteBatch.delete(codeRef);
-
-      await fsWriteBatch.commit();
-
-      await logAudit({
-        companyId: batchData.companyId as string,
-        userId: approverId,
-        userEmail: approverEmail,
-        action: "approve",
-        entity: "batch",
-        entityId: batchDoc.id,
-        details: {
-          via: "magic-link",
-          transactionCount: currentById.size - rejected.size,
-          totalAmount: total.value,
-          adjustments: [...adjusted].map(([id, a]) => ({
-            transactionId: id,
-            from: currentById.get(id),
-            to: a.to,
-            reason: a.reason,
-          })),
-          rejections: [...rejected].map(([id, reason]) => ({
-            transactionId: id,
-            reason,
-          })),
-          ...(comment ? { comment } : {}),
-        },
-      });
-
-      return NextResponse.json({
-        success: true,
-        approvedCount: currentById.size - rejected.size,
-        rejectedCount: rejected.size,
-        totalAmount: total.value,
-      });
+      return NextResponse.json({ success: true, ...approved });
     }
 
     // -----------------------------------------------------------------------

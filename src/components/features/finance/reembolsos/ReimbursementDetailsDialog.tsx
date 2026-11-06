@@ -173,13 +173,15 @@ export function ReimbursementDetailsDialog({
   const handleSend = async (_id: string, email: string) => {
     if (!actor) return;
     try {
-      const { token, totalAmount } =
-        await reimbursementReportService.sendForApproval(report, email, actor);
+      const { token } = await reimbursementReportService.sendForApproval(
+        report,
+        email,
+        actor,
+      );
       await emailService.sendReimbursementApprovalRequest(
-        { ...report, totalAmount },
+        report.id,
         token,
         email,
-        user?.displayName || user?.email || "Financeiro",
       );
       toast.success(`Link enviado para ${email}. Vale por 7 dias.`);
       onUpdated();
@@ -197,9 +199,8 @@ export function ReimbursementDetailsDialog({
         await reimbursementReportService.approve(report.id, actor!.uid);
         if (report.employeeEmail)
           await emailService.sendReimbursementApproved(
-            { ...report, status: "approved" },
+            report.id,
             report.employeeEmail,
-            user?.displayName || user?.email || "Aprovador",
           );
         toast.success(`${report.rdNumber} aprovado.`);
       },

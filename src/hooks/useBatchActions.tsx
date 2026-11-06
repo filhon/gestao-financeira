@@ -122,9 +122,6 @@ export function useBatchActions({
     if (!actionBatches.length || !actor || !user || !sendKind) return;
     const forApproval = sendKind === "send_approval";
     const recipient = { email, name: name !== email ? name : undefined };
-    const send = forApproval
-      ? emailService.sendBatchApprovalRequest
-      : emailService.sendBatchAuthorizationRequest;
 
     // Um link por lote: cada um é aprovado (ou devolvido) separadamente
     const results = await Promise.allSettled(
@@ -140,22 +137,13 @@ export function useBatchActions({
               recipient,
               actor,
             );
-        // Contexto é enfeite do e-mail: se falhar, o link ainda vai
-        const context = forApproval
-          ? await paymentBatchService
-              .approvalEmailContext(batch.id)
-              .catch(() => ({}))
-          : {};
-        const { error } = await send(
-          batch.name,
-          batch.id,
-          token,
-          batch.transactionIds.length,
-          batch.totalAmount,
-          user.displayName,
-          email,
-          { companyName: selectedCompany?.name, ...context },
-        );
+        const { error } = forApproval
+          ? await emailService.sendBatchApprovalRequest(batch.id, token, email)
+          : await emailService.sendBatchAuthorizationRequest(
+              batch.id,
+              token,
+              email,
+            );
         return !error;
       }),
     );

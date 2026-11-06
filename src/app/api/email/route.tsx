@@ -9,11 +9,81 @@ import {
   ReimbursementApprovedEmail,
 } from "@/components/emails/EmailTemplates";
 import { NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebase/admin";
-import { sendEmail } from "@/lib/email/sendEmail";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import {
+  resolveEmail,
+  type EmailLoaders,
+  type EmailType,
+} from "@/lib/email/resolveEmail";
+import { replyAddress } from "@/lib/email/replyApproval";
+import { emailDomain, sendEmail } from "@/lib/email/sendEmail";
+import {
+  expiryLabel,
+  reviewBatch,
+} from "@/lib/api/batchApprovalAdmin";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
 import { cookies } from "next/headers";
+import { FieldValue } from "firebase-admin/firestore";
+import { createElement, type ComponentType } from "react";
+
+const REPLY_APPROVALS = "batch_reply_approvals";
+
+const TEMPLATES = {
+  approval_request: ApprovalRequestEmail,
+  status_update: StatusUpdateEmail,
+  batch_approval_request: BatchApprovalEmail,
+  batch_authorization_request: BatchAuthorizationEmail,
+  batch_new_transactions: BatchNewTransactionsEmail,
+  feedback_notification: FeedbackNotificationEmail,
+  reimbursement_approval: ReimbursementApprovalEmail,
+  reimbursement_approved: ReimbursementApprovedEmail,
+} as unknown as Record<EmailType, ComponentType<Record<string, unknown>>>;
+
+const read = (collection: string) => async (id: string) =>
+  (await adminDb.collection(collection).doc(id).get()).data() ?? null;
+
+const loaders: EmailLoaders = {
+  transaction: read("transactions"),
+  batch: read("payment_batches"),
+  batchReview: (id, companyId) =>
+    reviewBatch(id, companyId).catch((error) => {
+      logger.error("Email API: resumo do lote:", error);
+      return null;
+    }),
+  expiryLabel,
+  replyApprovalEnabled: () =>
+    !!process.env.RESEND_WEBHOOK_SECRET && !!process.env.RESEND_API_KEY,
+  report: read("reimbursement_reports"),
+  costCenter: read("cost_centers") as EmailLoaders["costCenter"],
+  companyName: async (id) => (await read("companies")(id))?.name ?? null,
+  userEmail: async (uid) => (await read("users")(uid))?.email ?? null,
+  isGlobalAdmin: async (email) =>
+    !(
+      await adminDb
+        .collection("users")
+        .where("email", "==", email)
+        .where("role", "==", "admin")
+        .limit(1)
+        .get()
+    ).empty,
+  installmentAmounts: async (companyId, groupId) =>
+    (
+      await adminDb
+        .collection("transactions")
+        .where("companyId", "==", companyId)
+        .where("installments.groupId", "==", groupId)
+        .select("amount")
+        .get()
+    ).docs.map((d) => d.get("amount") as number),
+  users: async () =>
+    (
+      await adminDb
+        .collection("users")
+        .select("email", "companyRoles", "status", "active")
+        .get()
+    ).docs.map((d) => d.data() as Awaited<ReturnType<EmailLoaders["users"]>>[0]),
+};
 
 export async function POST(request: Request) {
   // Get IP address for rate limiting
@@ -50,8 +120,9 @@ export async function POST(request: Request) {
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  let decoded: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>;
   try {
-    await adminAuth.verifyIdToken(token);
+    decoded = await adminAuth.verifyIdToken(token);
   } catch (error) {
     // Token ruim é do usuário; credencial do Admin SDK faltando é do servidor.
     if (String((error as { code?: unknown }).code).startsWith("auth/")) {
@@ -64,55 +135,46 @@ export async function POST(request: Request) {
     );
   }
 
-  const { type, to, data } = await request.json();
-
-  let emailComponent;
-  let subject = "";
-  let fromName: string | undefined;
-  // Quem atende várias empresas precisa saber de qual é o pedido. Vai no
-  // remetente e com o nome curto: a razão social inteira no assunto escondia
-  // o lote e o valor na caixa de entrada do celular.
-  const shortCompany = (data?.companyName as string | undefined)
-    ?.split(/\s+[-–]\s+/)[0]
-    .trim();
-  const companyFrom = shortCompany ? `FinControl · ${shortCompany}` : undefined;
-
-  if (type === "approval_request") {
-    emailComponent = <ApprovalRequestEmail {...data} />;
-    subject = `Aprovação Necessária: ${data.description}`;
-  } else if (type === "status_update") {
-    emailComponent = <StatusUpdateEmail {...data} />;
-    subject = `Atualização de Status: ${data.description}`;
-  } else if (type === "batch_approval_request") {
-    emailComponent = <BatchApprovalEmail {...data} />;
-    subject = `Aprovar: ${data.batchName} · ${data.totalAmount}`;
-    fromName = companyFrom;
-  } else if (type === "batch_authorization_request") {
-    emailComponent = <BatchAuthorizationEmail {...data} />;
-    subject = `Autorizar: ${data.batchName}`;
-    fromName = companyFrom;
-  } else if (type === "batch_new_transactions") {
-    emailComponent = <BatchNewTransactionsEmail {...data} />;
-    subject = `Novas transações adicionadas ao lote: ${data.batchName}`;
-  } else if (type === "feedback_notification") {
-    emailComponent = <FeedbackNotificationEmail {...data} />;
-    subject = `Novo Feedback: ${data.feedbackTypeLabel} - ${data.title}`;
-  } else if (type === "reimbursement_approval") {
-    emailComponent = <ReimbursementApprovalEmail {...data} />;
-    subject = `Aprovação Necessária: ${data.rdNumber} — ${data.employeeName}`;
-  } else if (type === "reimbursement_approved") {
-    emailComponent = <ReimbursementApprovedEmail {...data} />;
-    subject = `Reembolso Aprovado: ${data.rdNumber}`;
-  } else {
-    return NextResponse.json({ error: "Invalid email type" }, { status: 400 });
-  }
-
   try {
+    const body = await request.json().catch(() => null);
+    const profile = await read("users")(decoded.uid);
+    const email = await resolveEmail(
+      body,
+      {
+        email: decoded.email ?? profile?.email,
+        displayName: profile?.displayName,
+        role: profile?.role,
+        companyRoles: profile?.companyRoles,
+      },
+      new URL(request.url).origin,
+      loaders,
+    );
+
+    if ("error" in email) {
+      return NextResponse.json({ error: email.error }, { status: email.status });
+    }
+
+    // Só o Admin SDK lê esta coleção: quem envia o lote não altera o que foi
+    // mostrado ao aprovador. Sem regra própria, cai no default deny.
+    if (email.replyApproval) {
+      const { key, ...record } = email.replyApproval;
+      await adminDb
+        .collection(REPLY_APPROVALS)
+        .doc(key)
+        .set({ ...record, createdAt: FieldValue.serverTimestamp() });
+    }
+
     const result = await sendEmail({
-      to,
-      subject,
-      react: emailComponent,
-      fromName,
+      to: email.to,
+      subject: email.subject,
+      react: createElement(TEMPLATES[email.type], email.props),
+      sender: email.sender,
+      // A resposta vai para quem fez o pedido, nunca para um endereço fixo:
+      // cada empresa fala com a própria equipe.
+      replyTo: email.replyApproval
+        ? replyAddress(email.replyApproval.key, emailDomain())
+        : (decoded.email ?? profile?.email),
+      fromName: email.fromName,
     });
 
     if (result.simulated) {
