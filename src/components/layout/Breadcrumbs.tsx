@@ -30,7 +30,7 @@ const pathNames: Record<string, string> = {
   notificacoes: "Notificações",
   perfil: "Perfil",
   "documentos-legais": "Documentos Legais",
-  feedbacks: "Feedbacks",
+  feedbacks: "Chamados",
 };
 
 /**

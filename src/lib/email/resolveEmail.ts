@@ -15,7 +15,6 @@ export type EmailSender = "aprovacao" | "autorizacao" | "notificacoes";
 
 const id = z.string().min(1).max(128);
 const token = z.string().min(1).max(128);
-const short = z.string().max(300);
 
 const request = <T extends string, D extends z.ZodRawShape>(type: T, data: D) =>
   z.object({
@@ -37,11 +36,6 @@ const emailRequest = z.discriminatedUnion("type", [
   }),
   request("reimbursement_approval", { reportId: id, token }),
   request("reimbursement_approved", { reportId: id }),
-  request("feedback_notification", {
-    feedbackType: z.enum(["bug", "improvement", "question", "praise"]),
-    title: short,
-    description: z.string().max(10_000),
-  }),
 ]);
 
 export type EmailType = z.infer<typeof emailRequest>["type"];
@@ -69,13 +63,15 @@ export type EmailLoaders = {
   installmentAmounts: (companyId: string, groupId: string) => Promise<number[]>;
   batch: (id: string) => Promise<DocumentData | null>;
   /** null se a leitura falhar: o link ainda sai, sem resumo e sem aprovar por resposta. */
-  batchReview: (id: string, companyId: string) => Promise<BatchEmailReview | null>;
+  batchReview: (
+    id: string,
+    companyId: string,
+  ) => Promise<BatchEmailReview | null>;
   expiryLabel: (expiresAt: Date) => string;
   replyApprovalEnabled: () => boolean;
   report: (id: string) => Promise<DocumentData | null>;
   companyName: (id: string) => Promise<string | null>;
   userEmail: (uid: string) => Promise<string | null>;
-  isGlobalAdmin: (email: string) => Promise<boolean>;
   costCenter: (
     id: string,
   ) => Promise<Pick<CostCenter, "companyId" | "approverEmail"> | null>;
@@ -97,7 +93,8 @@ export type ResolvedEmail = {
 export type DeniedEmail = { error: string; status: number };
 
 const DENIED: DeniedEmail = {
-  error: "Envio recusado: o destinatário ou o link não conferem com o registro.",
+  error:
+    "Envio recusado: o destinatário ou o link não conferem com o registro.",
   status: 403,
 };
 
@@ -388,31 +385,6 @@ export async function resolveEmail(
           totalAmount: brl(report.totalAmount ?? 0),
           approvedBy: senderName,
           systemLink: `${origin}/financeiro/reembolsos`,
-        },
-      };
-    }
-
-    case "feedback_notification": {
-      // Qualquer usuário manda feedback, mas o texto livre só chega aos admins.
-      if (!(await load.isGlobalAdmin(to))) return DENIED;
-      const labels = {
-        bug: "Bug",
-        improvement: "Sugestão",
-        question: "Dúvida",
-        praise: "Elogio",
-      };
-      const feedbackTypeLabel = labels[req.data.feedbackType];
-      return {
-        type: req.type,
-        to,
-        subject: `Novo Feedback: ${feedbackTypeLabel} - ${req.data.title}`,
-        sender: "notificacoes",
-        props: {
-          ...req.data,
-          feedbackTypeLabel,
-          userName: senderName,
-          userEmail: caller.email ?? "",
-          link: `${origin}/configuracoes/feedbacks`,
         },
       };
     }

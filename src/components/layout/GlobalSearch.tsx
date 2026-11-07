@@ -192,10 +192,10 @@ const navigationPages: NavigationPage[] = [
     permission: "canViewAuditLogs",
   },
   {
-    name: "Gerenciar Feedbacks",
+    name: "Chamados",
     href: "/configuracoes/feedbacks",
     icon: MessageSquare,
-    keywords: ["feedback", "admin", "gerenciar"],
+    keywords: ["chamado", "feedback", "admin", "fila", "suporte"],
     permission: "canManageFeedback",
   },
   {
@@ -206,10 +206,17 @@ const navigationPages: NavigationPage[] = [
     permission: "always",
   },
   {
-    name: "Feedback",
+    name: "Meus chamados",
     href: "/feedback",
     icon: MessageSquare,
-    keywords: ["feedback", "sugestao", "bug", "reportar"],
+    keywords: [
+      "chamado",
+      "protocolo",
+      "feedback",
+      "suporte",
+      "bug",
+      "reportar",
+    ],
     permission: "always",
   },
   {

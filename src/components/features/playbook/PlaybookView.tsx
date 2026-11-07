@@ -24,6 +24,7 @@ import {
   ROLE_GUIDE,
   faqId,
   itemOf,
+  plain,
   type PlaybookItem,
   type PlaybookTopic,
 } from "@/lib/playbook";
@@ -98,10 +99,6 @@ function Rich({ text }: { text: string }) {
     </>
   );
 }
-
-/** Texto sem marcação, para a busca não casar com rota ou asteriscos. */
-const plain = (s: string) =>
-  s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\*\*|\[\[|\]\]|`/g, "");
 
 const topicIndex = new Map<string, string>(
   CHAPTERS.flatMap((c) => c.topics).map((t): [string, string] => [
@@ -617,12 +614,12 @@ export function PlaybookView() {
               ) : (
                 <>
                   Nada encontrado para &ldquo;{query.trim()}&rdquo;. Tente outra
-                  palavra ou mande a dúvida em{" "}
+                  palavra ou mande a dúvida para a equipe em{" "}
                   <Link
                     href="/feedback"
                     className={cn("underline underline-offset-4", FOCUS)}
                   >
-                    Enviar feedback
+                    Meus chamados
                   </Link>
                   .
                 </>

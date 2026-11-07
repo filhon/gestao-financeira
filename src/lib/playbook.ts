@@ -1,5 +1,5 @@
 import type { UserRole } from "@/lib/types";
-import { normalizeText } from "@/lib/utils";
+import { normalizeText } from "./utils";
 
 /**
  * Manual de operação ("as regras do jogo"), lido pela página /manual.
@@ -59,6 +59,56 @@ export interface PlaybookChapter {
   title: string;
   summary: string;
   topics: PlaybookTopic[];
+}
+
+/** Texto sem marcação, para a busca não casar com rota ou asteriscos. */
+export const plain = (s: string) =>
+  s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\*\*|\[\[|\]\]|`/g, "");
+
+const NOISE = new Set(
+  "aqui ainda antes apos aparece apareceu assim certo coisa como consigo depois deveria esta estao estava este esse essa isso fazer fica fiz hoje mais mesmo minha muito nada para pela pelo pode porque preciso qual quando quero sera sobre sistema tela tenho tentei todo tudo voce".split(
+    " ",
+  ),
+);
+
+/**
+ * Trechos do manual parecidos com o que a pessoa está escrevendo. Pede duas
+ * palavras em comum para não sugerir qualquer coisa; a pergunta conta em dobro.
+ */
+export function suggestFromManual(text: string, limit = 3) {
+  const words = [
+    ...new Set(
+      normalizeText(plain(text))
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length >= 4 && !NOISE.has(w)),
+    ),
+  ];
+  if (words.length < 2) return [];
+
+  const entries = CHAPTERS.flatMap((c) => c.topics).flatMap((t) => [
+    ...(t.intro ? [{ q: t.title, a: t.intro, href: `/manual#${t.id}` }] : []),
+    ...(t.faq ?? []).map((f) => ({
+      q: f.q,
+      a: f.a,
+      href: `/manual#${faqId(f.q)}`,
+    })),
+  ]);
+
+  return (
+    entries
+      .map((e) => {
+        const q = normalizeText(plain(e.q));
+        const a = normalizeText(plain(e.a));
+        const hits = words.filter((w) => q.includes(w) || a.includes(w));
+        const score = hits.length + hits.filter((w) => q.includes(w)).length;
+        return { ...e, q: plain(e.q), a: plain(e.a), hits: hits.length, score };
+      })
+      // Quem manda abrir chamado não responde a quem está abrindo um.
+      .filter((e) => e.hits >= 2 && !e.a.includes("Falar com a equipe"))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(({ q, a, href }) => ({ q, a, href }))
+  );
 }
 
 export const GOLDEN_RULES = [
@@ -424,7 +474,7 @@ export const CHAPTERS: PlaybookChapter[] = [
         ],
         items: [
           "[[Ctrl+K]] (ou [[⌘K]]): busca em tudo, de qualquer tela, inclusive neste manual.",
-          "[[g]] e depois uma letra vai direto à tela: [[g i]] Início, [[g f]] Minha fila, [[g p]] Pagar, [[g r]] Receber, [[g l]] Lotes, [[g c]] Comprovantes, [[g b]] Conciliação, [[g e]] Fornecedores, [[g m]] este manual.",
+          "[[g]] e depois uma letra vai direto à tela: [[g i]] Início, [[g f]] Minha fila, [[g p]] Pagar, [[g r]] Receber, [[g l]] Lotes, [[g c]] Comprovantes, [[g b]] Conciliação, [[g e]] Fornecedores, [[g m]] este manual, [[g a]] Falar com a equipe.",
           "[[\\]] recolhe ou abre a barra lateral. Fixe as telas que você mais usa pelo ícone de alfinete.",
           "Nas listas: [[j]] e [[k]] sobem e descem, [[Enter]] abre, [[x]] seleciona, [[p]] paga, [[c]] copia a linha digitável, [[/]] busca, [[1]] a [[9]] trocam de aba.",
         ],
@@ -997,10 +1047,10 @@ export const CHAPTERS: PlaybookChapter[] = [
           },
           {
             q: "Encontrei um erro no sistema.",
-            a: "Use Enviar feedback no rodapé da barra lateral. Diga a tela, o que fez e o que esperava.",
+            a: "Use Falar com a equipe, no menu de ajuda da barra lateral, ou [[g a]]. O painel abre sobre a tela e já envia qual é ela. Diga o que fez e o que esperava; você recebe um protocolo e acompanha em Meus chamados.",
           },
         ],
-        links: [{ label: "Enviar feedback", href: "/feedback" }],
+        links: [{ label: "Meus chamados", href: "/feedback" }],
       },
     ],
   },

@@ -124,8 +124,8 @@ const load: EmailLoaders = {
   report: get,
   installmentAmounts: async () => [100, 100, 100.1],
   companyName: async () => "Hebron - Assessoria Ltda",
-  userEmail: async (uid) => (uid === "u-criador" ? "criador@empresa.com" : null),
-  isGlobalAdmin: async (email) => email === "admin@fincontrol.com",
+  userEmail: async (uid) =>
+    uid === "u-criador" ? "criador@empresa.com" : null,
   costCenter: async () => ({
     companyId: "c1",
     approverEmail: "aprovador@empresa.com",
@@ -295,22 +295,15 @@ async function main() {
     data: { reportId: "r1" },
   });
 
-  // Feedback: texto livre só para admin, e o autor vem da sessão
-  const feedback = {
-    type: "feedback_notification",
-    data: {
-      feedbackType: "bug",
-      title: "Erro",
-      description: "Clique aqui",
-      userName: "Falso",
-      userEmail: "falso@x.com",
+  // E-mail de chamado saiu daqui: o navegador não escolhe mais destinatário
+  await denied(
+    {
+      type: "feedback_notification",
+      to: ["golpista@externo.com"],
+      data: { feedbackType: "bug", title: "Erro", description: "Clique aqui" },
     },
-  };
-  const toAdmin = await ok({ ...feedback, to: ["admin@fincontrol.com"] });
-  assert.equal(toAdmin.props.userName, "Gestor");
-  assert.equal(toAdmin.props.userEmail, "gestor@empresa.com");
-  assert.equal(toAdmin.props.link, `${ORIGIN}/configuracoes/feedbacks`);
-  await denied({ ...feedback, to: ["golpista@externo.com"] });
+    400,
+  );
 
   // Aprovação por resposta só é oferecida quando poderia valer ao chegar
   const offered = await ok(batchRequest());
@@ -334,7 +327,10 @@ async function main() {
   await notOffered();
   review = null;
   await notOffered();
-  assert.equal((await ok(batchRequest())).props.link, `${ORIGIN}/approve-batch/tok-b1`);
+  assert.equal(
+    (await ok(batchRequest())).props.link,
+    `${ORIGIN}/approve-batch/tok-b1`,
+  );
   review = good;
 
   // Frases
@@ -380,12 +376,21 @@ async function main() {
   assert.notEqual(key, replyKey("outro"));
   assert.ok(!key.includes("tok"));
   const address = replyAddress(key, "fincontrol.ia.br");
-  assert.equal(findReplyKey(["a@b.com", null, `Lote <${address.toUpperCase()}>`]), key);
+  assert.equal(
+    findReplyKey(["a@b.com", null, `Lote <${address.toUpperCase()}>`]),
+    key,
+  );
   assert.equal(findReplyKey(["lote-curto@x.com", "aprovacao@x.com"]), null);
   assert.equal(emailOf('"Diretor, Fulano" <Dir@Hebron.com>'), "dir@hebron.com");
   assert.equal(
-    batchFingerprint([{ id: "a", amount: 1 }, { id: "b", amount: 2 }]),
-    batchFingerprint([{ id: "b", amount: 2 }, { id: "a", amount: 1 }]),
+    batchFingerprint([
+      { id: "a", amount: 1 },
+      { id: "b", amount: 2 },
+    ]),
+    batchFingerprint([
+      { id: "b", amount: 2 },
+      { id: "a", amount: 1 },
+    ]),
   );
   assert.notEqual(
     batchFingerprint([{ id: "a", amount: 1 }]),

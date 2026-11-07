@@ -4,7 +4,6 @@ import {
   BatchApprovalEmail,
   BatchAuthorizationEmail,
   BatchNewTransactionsEmail,
-  FeedbackNotificationEmail,
   ReimbursementApprovalEmail,
   ReimbursementApprovedEmail,
 } from "@/components/emails/EmailTemplates";
@@ -17,10 +16,7 @@ import {
 } from "@/lib/email/resolveEmail";
 import { replyAddress } from "@/lib/email/replyApproval";
 import { emailDomain, sendEmail } from "@/lib/email/sendEmail";
-import {
-  expiryLabel,
-  reviewBatch,
-} from "@/lib/api/batchApprovalAdmin";
+import { expiryLabel, reviewBatch } from "@/lib/api/batchApprovalAdmin";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
 import { cookies } from "next/headers";
@@ -35,7 +31,6 @@ const TEMPLATES = {
   batch_approval_request: BatchApprovalEmail,
   batch_authorization_request: BatchAuthorizationEmail,
   batch_new_transactions: BatchNewTransactionsEmail,
-  feedback_notification: FeedbackNotificationEmail,
   reimbursement_approval: ReimbursementApprovalEmail,
   reimbursement_approved: ReimbursementApprovedEmail,
 } as unknown as Record<EmailType, ComponentType<Record<string, unknown>>>;
@@ -58,15 +53,6 @@ const loaders: EmailLoaders = {
   costCenter: read("cost_centers") as EmailLoaders["costCenter"],
   companyName: async (id) => (await read("companies")(id))?.name ?? null,
   userEmail: async (uid) => (await read("users")(uid))?.email ?? null,
-  isGlobalAdmin: async (email) =>
-    !(
-      await adminDb
-        .collection("users")
-        .where("email", "==", email)
-        .where("role", "==", "admin")
-        .limit(1)
-        .get()
-    ).empty,
   installmentAmounts: async (companyId, groupId) =>
     (
       await adminDb
@@ -82,7 +68,9 @@ const loaders: EmailLoaders = {
         .collection("users")
         .select("email", "companyRoles", "status", "active")
         .get()
-    ).docs.map((d) => d.data() as Awaited<ReturnType<EmailLoaders["users"]>>[0]),
+    ).docs.map(
+      (d) => d.data() as Awaited<ReturnType<EmailLoaders["users"]>>[0],
+    ),
 };
 
 export async function POST(request: Request) {
@@ -151,7 +139,10 @@ export async function POST(request: Request) {
     );
 
     if ("error" in email) {
-      return NextResponse.json({ error: email.error }, { status: email.status });
+      return NextResponse.json(
+        { error: email.error },
+        { status: email.status },
+      );
     }
 
     // Só o Admin SDK lê esta coleção: quem envia o lote não altera o que foi

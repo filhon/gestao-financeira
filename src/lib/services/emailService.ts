@@ -119,22 +119,4 @@ export const emailService = {
       { reportId },
       "reimbursement approved",
     ),
-
-  // ============================================
-  // Feedback Email
-  // ============================================
-
-  sendFeedbackNotification: (
-    adminEmails: string[],
-    feedback: {
-      feedbackType: "bug" | "improvement" | "question" | "praise";
-      title: string;
-      description: string;
-    },
-  ): Promise<EmailResponse[]> =>
-    Promise.all(
-      adminEmails.map((email) =>
-        post("feedback_notification", email, feedback, "feedback"),
-      ),
-    ),
 };

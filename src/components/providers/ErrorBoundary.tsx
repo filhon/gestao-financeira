@@ -10,6 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { recordError } from "@/lib/feedbackContext";
+import { useFeedbackPanelStore } from "@/lib/store/useFeedbackPanelStore";
 
 interface Props {
   children: ReactNode;
@@ -33,6 +35,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught an error:", error, errorInfo);
+    recordError(error.message);
   }
 
   handleRetry = () => {
@@ -76,13 +79,10 @@ export class ErrorBoundary extends Component<Props, State> {
                 variant="ghost"
                 size="sm"
                 className="text-muted-foreground"
-                onClick={() => {
-                  const errorMessage = encodeURIComponent(
-                    this.state.error?.message || "Erro desconhecido",
-                  );
-                  const errorUrl = encodeURIComponent(window.location.href);
-                  window.location.href = `/feedback?error=${errorMessage}&url=${errorUrl}`;
-                }}
+                onClick={() =>
+                  // O painel mora fora deste limite: abre mesmo com a tela quebrada.
+                  useFeedbackPanelStore.getState().openPanel("bug")
+                }
               >
                 <MessageSquare className="mr-2 h-4 w-4" />
                 Reportar Problema

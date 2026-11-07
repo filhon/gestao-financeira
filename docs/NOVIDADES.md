@@ -4,6 +4,16 @@
 
 ---
 
+## Atualização de 7 de novembro de 2026
+
+### Falar com a equipe, sem sair da tela
+
+"Enviar feedback" virou "Falar com a equipe": o painel abre ao lado da tela em que você está, pelo menu de ajuda ou com as teclas g e a. Conte o que aconteceu e, se puder, cole um print com Ctrl+V. A tela, a empresa e o navegador vão junto, e você vê a lista antes de enviar. Nada de gravação de tela.
+
+Cada chamado recebe um protocolo e uma data prevista de resposta, e você acompanha tudo em Meus chamados, com conversa e avisos a cada mudança de situação. Se o problema pode atrasar um pagamento hoje, diga "Sim" na pergunta do painel: a equipe recebe um alerta de urgência.
+
+Enquanto você escreve, o painel mostra trechos do manual que podem responder. Ideias agora seguem para o Roadmap, onde dá para ver se alguém já pediu e votar. Corrigimos também o anexo de imagem, que falhava, e a lista dos seus envios, que aparecia vazia.
+
 ## Atualização de 28 de outubro de 2026
 
 ### Centros de custo: uma árvore só, com o disponível de cada centro

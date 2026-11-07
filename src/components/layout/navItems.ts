@@ -192,7 +192,7 @@ export const NAV: NavEntry[] = [
         visible: (p) => p.canManageCompanies,
       },
       {
-        title: "Feedbacks",
+        title: "Chamados",
         href: "/configuracoes/feedbacks",
         icon: MessageSquare,
         visible: (p) => p.canManageFeedback,
