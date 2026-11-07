@@ -120,6 +120,7 @@ const WEIGHTS = {
 const HIGH_THRESHOLD = 82;
 const MEDIUM_THRESHOLD = 55;
 const AMBIGUITY_MARGIN = 6;
+const BARCODE_FLOOR = 97;
 // ponytail: 5 dias cobrem fim de semana e feriado entre agendamento e baixa
 export const DATE_TOLERANCE_DAYS = 5;
 
@@ -651,7 +652,8 @@ function assemble(
 
   // ── Conflitos ───────────────────────────────────────────────────────────────
 
-  if (entity.documentConflict) {
+  // O código de barras identifica o boleto, mesmo emitido por um intermediário.
+  if (entity.documentConflict && !input.barcodeMatch) {
     score *= 0.3;
     conflicts.push("documento_divergente");
     reasons.push(
@@ -727,7 +729,7 @@ function assemble(
   // — o CNPJ divergente viraria letra morta.
   if (conflicts.length === 0) {
     if (input.barcodeMatch) {
-      score = Math.max(score, 97);
+      score = Math.max(score, BARCODE_FLOOR);
       reasons.unshift("Código de barras do boleto confere");
     } else if (strongIdentity && amount.score >= 0.95) {
       score = Math.max(score, 94);
@@ -1021,8 +1023,14 @@ export function scoreCandidates(
 
   // ── 3. Ordenação, ambiguidade e alternativas ────────────────────────────────
 
+  // Código de barras igual, sem conflito, forma o match: nenhuma outra evidência
+  // passa na frente nem empata. Só outro título com o mesmo código disputa.
+  const barcodeDecides = (m: MatchScore) =>
+    m.signals.entityEvidence === "barcode" && m.score >= BARCODE_FLOOR;
+
   scored.sort(
     (a, b) =>
+      Number(barcodeDecides(b)) - Number(barcodeDecides(a)) ||
       b.score - a.score ||
       b.signals.entity - a.signals.entity ||
       a.transactionIds.length - b.transactionIds.length,
@@ -1040,7 +1048,9 @@ export function scoreCandidates(
   const best = unique[0];
   const bestIds = new Set(best.transactionIds);
   const rival = unique.find(
-    (candidate) => !candidate.transactionIds.some((id) => bestIds.has(id)),
+    (candidate) =>
+      !candidate.transactionIds.some((id) => bestIds.has(id)) &&
+      (!barcodeDecides(best) || barcodeDecides(candidate)),
   );
 
   const margin = rival ? best.score - rival.score : best.score;
