@@ -187,6 +187,8 @@ function ReviewBody({
   // Busca manual: sem termo, os mais próximos do valor lido aparecem primeiro;
   // títulos que já têm comprovante vão para o fim. Com os filtros, só os do
   // beneficiário e os pagos (ou a vencer) perto da data do comprovante.
+  // Os títulos sugeridos vêm no topo e escapam dos filtros: a seleção substitui
+  // a sugestão, então sem eles a soma de um comprovante consolidado não fecha.
   const searchResults = useMemo(() => {
     const terms = txSearch.toLowerCase().split(/\s+/).filter(Boolean);
     const target = c.matchedAmount;
@@ -196,13 +198,14 @@ function ReviewBody({
       day == null ? 0 : Math.abs((t.paymentDate ?? t.dueDate).getTime() - day);
     return txCandidates
       .filter((t) => {
-        if (shown.has(t.id)) return false;
-        if (beneficiary && !isFromBeneficiary(c, t)) return false;
-        if (
-          nearDate &&
-          distantPaymentDate(nearDate, [t.paymentDate ?? t.dueDate])
-        ) {
-          return false;
+        if (!shown.has(t.id)) {
+          if (beneficiary && !isFromBeneficiary(c, t)) return false;
+          if (
+            nearDate &&
+            distantPaymentDate(nearDate, [t.paymentDate ?? t.dueDate])
+          ) {
+            return false;
+          }
         }
         if (!terms.length) return true;
         const hay = [
@@ -215,6 +218,8 @@ function ReviewBody({
         return terms.every((term) => hay.includes(term));
       })
       .sort((a, b) => {
+        const suggested = Number(shown.has(b.id)) - Number(shown.has(a.id));
+        if (suggested !== 0) return suggested;
         const taken = Number(!!a.comprovanteId) - Number(!!b.comprovanteId);
         if (taken !== 0) return taken;
         const byAmount =
@@ -244,7 +249,6 @@ function ReviewBody({
     actionable && c.matchStatus === "pending_review" && shownTxs.length > 0;
   const hasConfirmTarget = actionable && effectiveTxs.length > 0;
   const insight = receiptInsight(c, shownTxs);
-  const diff = amountDifference(c, shownTxs);
 
   const actor =
     selectedCompany && user
@@ -517,14 +521,7 @@ function ReviewBody({
                   <TxRow key={tx.id} tx={tx} />
                 ))}
               </ul>
-              {diff !== null && (
-                <p className="flex items-start gap-1.5 text-sm text-amber-800 dark:text-amber-300">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  Comprovante {formatCurrency(c.matchedAmount!)}, títulos{" "}
-                  {formatCurrency(titlesTotal(shownTxs))}. Diferença de{" "}
-                  {formatCurrency(Math.abs(diff))}.
-                </p>
-              )}
+              {manualTxs.length === 0 && <AmountDiff c={c} txs={shownTxs} />}
             </section>
           )}
 
@@ -745,6 +742,7 @@ function ReviewBody({
                   })}
                 </CommandList>
               </Command>
+              {manualTxs.length > 0 && <AmountDiff c={c} txs={manualTxs} />}
             </section>
           )}
         </div>
@@ -785,6 +783,19 @@ function ReviewBody({
         </div>
       )}
     </>
+  );
+}
+
+function AmountDiff({ c, txs }: { c: Comprovante; txs: Transaction[] }) {
+  const diff = amountDifference(c, txs);
+  if (diff === null) return null;
+  return (
+    <p className="flex items-start gap-1.5 text-sm text-amber-800 dark:text-amber-300">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      Comprovante {formatCurrency(c.matchedAmount!)}, títulos{" "}
+      {formatCurrency(titlesTotal(txs))}. Diferença de{" "}
+      {formatCurrency(Math.abs(diff))}.
+    </p>
   );
 }
 
