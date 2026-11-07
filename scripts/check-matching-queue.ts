@@ -11,7 +11,11 @@ import {
   isFromBeneficiary,
   receiptFeedback,
 } from "../src/lib/matching/queue";
-import { extractControlNumber, matchComprovante } from "../src/lib/matching";
+import {
+  autoConfirmReason,
+  extractControlNumber,
+  matchComprovante,
+} from "../src/lib/matching";
 import { matchStatement } from "../src/lib/matching/statement";
 import type { BankTransaction, Entity, Transaction } from "../src/lib/types";
 
@@ -294,4 +298,71 @@ Nome do recebedor: MISSAO XINGU`;
   );
   assert.ok(isFromBeneficiary(fixed, { supplierOrClient: "Missão do Céu" }));
   console.log("check:matching-queue controle e beneficiário ok");
+}
+
+// ── Código de barras desempata ────────────────────────────────────────────────
+{
+  const linha = "34191090086141955124971066670002115900000026519";
+  const outraLinha = "34191090086145998124971066670002116210000026519";
+  const receipt = (cnpj: string) => `Comprovante de pagamento de boleto
+Beneficiário: MISSAO XINGU
+CPF/CNPJ do beneficiário: ${cnpj}
+34191 09008 61419 551249 71066 670002 1 15900000026519
+Valor do pagamento (R$): 265,19
+Data de pagamento: 29/05/2026
+Operação efetuada via Sispag, CTRL 008717912271057.`;
+  const sala = (id: string, barcode?: string) =>
+    tx(id, { description: `Condomínio ${id}`, amount: 265.19, barcode });
+  const entities = [xingu];
+  const cnpj = "11.222.333/0001-81";
+
+  const tie = matchComprovante(receipt(cnpj), [sala("s1"), sala("s2")], {
+    entities,
+  }).best!;
+  assert.ok(tie.isAmbiguous, "sem código nos títulos o empate continua");
+
+  const hit = matchComprovante(
+    receipt(cnpj),
+    [sala("s1"), sala("s2", linha), sala("s3", outraLinha)],
+    { entities },
+  ).best!;
+  assert.deepEqual(hit.transactionIds, ["s2"], "o título do código vence");
+  assert.ok(!hit.isAmbiguous, "código igual não é ambíguo");
+  assert.equal(hit.confidenceLevel, "HIGH");
+  assert.equal(hit.signals.entityEvidence, "barcode");
+  assert.ok(autoConfirmReason(hit), "pode confirmar sozinho");
+
+  const both = matchComprovante(
+    receipt(cnpj),
+    [sala("s1", linha), sala("s2", linha)],
+    { entities },
+  ).best!;
+  assert.ok(both.isAmbiguous, "dois títulos com o mesmo código ainda disputam");
+
+  const other = matchComprovante(
+    receipt("04.252.011/0001-10"),
+    [sala("s2", linha)],
+    { entities },
+  ).best!;
+  assert.ok(
+    other.score >= 97 &&
+      !other.signals.penalties.includes("documento_divergente"),
+    "intermediário emitiu o boleto: o código vale sobre o CNPJ",
+  );
+
+  const far = matchComprovante(
+    receipt(cnpj),
+    [
+      sala("s1"),
+      tx("s2", {
+        amount: 265.19,
+        barcode: linha,
+        paymentDate: new Date("2026-02-02T12:00:00-03:00"),
+        dueDate: new Date("2026-02-02T12:00:00-03:00"),
+      }),
+    ],
+    { entities },
+  ).best!;
+  assert.deepEqual(far.transactionIds, ["s1"], "data distante ainda pesa");
+  console.log("check:matching-queue código de barras ok");
 }
