@@ -65,7 +65,11 @@
       const alvo =
         e.target.closest?.("a,button,[role=tab],[data-row-id]") ?? e.target;
       const linha = {
-        alvo: (alvo.innerText || alvo.getAttribute?.("aria-label") || alvo.tagName)
+        alvo: (
+          alvo.innerText ||
+          alvo.getAttribute?.("aria-label") ||
+          alvo.tagName
+        )
           .trim()
           .replace(/\s+/g, " ")
           .slice(0, 40),
@@ -171,7 +175,9 @@
     });
     const ms = Math.round(performance.now() - inicio);
     banco.close();
-    console.log(`Cache do Firestore: ${docs.length} documentos, leitura em ${ms} ms.`);
+    console.log(
+      `Cache do Firestore: ${docs.length} documentos, leitura em ${ms} ms.`,
+    );
   };
   console.log(
     "Medindo cliques. Use o sistema e rode __cliques() e __cacheFirestore().",

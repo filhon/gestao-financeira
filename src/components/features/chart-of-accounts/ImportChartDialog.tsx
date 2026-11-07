@@ -147,8 +147,7 @@ export function ImportChartDialog({
     });
   };
 
-  const preview =
-    state.step === "preview" ? state.preview : null;
+  const preview = state.step === "preview" ? state.preview : null;
   const hasIssues = !!preview && preview.issues.length > 0;
   const nothingToDo =
     !!preview &&

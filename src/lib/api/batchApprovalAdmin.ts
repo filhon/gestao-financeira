@@ -180,7 +180,16 @@ export async function reviewTransactions(
     }
     if (!destination) alerts.push("no_payment_data");
 
-    return { doc: d, td, entity, supplier, amount, destination, average, alerts };
+    return {
+      doc: d,
+      td,
+      entity,
+      supplier,
+      amount,
+      destination,
+      average,
+      alerts,
+    };
   });
 }
 
@@ -226,7 +235,8 @@ export async function reviewBatch(
     .get();
   const reviewed = await reviewTransactions(companyId, snap.docs);
 
-  const due = (td: DocumentData) => (td.dueDate as Timestamp | undefined)?.toDate();
+  const due = (td: DocumentData) =>
+    (td.dueDate as Timestamp | undefined)?.toDate();
   const dueDates = reviewed
     .map((r) => due(r.td))
     .filter((d): d is Date => !!d)

@@ -76,7 +76,8 @@ export function AddToBatchDialog({
         },
         onRound: ({ failed, complete }) => {
           onDone(failed.map((t) => t.id));
-          if (complete) toast.success(`Transações adicionadas ao lote ${name}.`);
+          if (complete)
+            toast.success(`Transações adicionadas ao lote ${name}.`);
         },
       });
     } catch (error) {

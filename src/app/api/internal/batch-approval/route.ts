@@ -244,7 +244,16 @@ export async function GET(request: Request) {
 
     const reviewed = await reviewTransactions(companyId, txSnap.docs);
     const transactions = reviewed.map(
-      ({ doc: d, td, entity, supplier, amount, destination, average, alerts }) => ({
+      ({
+        doc: d,
+        td,
+        entity,
+        supplier,
+        amount,
+        destination,
+        average,
+        alerts,
+      }) => ({
         id: d.id,
         description: withoutSupplier(
           splitDescription(td.description ?? "").text,

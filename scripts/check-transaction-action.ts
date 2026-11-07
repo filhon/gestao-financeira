@@ -59,11 +59,14 @@ async function main() {
 
   // A trava sobrevive à resposta do servidor até o onSuccess terminar.
   const relida = deferred();
-  const ok = new MutationObserver<string, Error, TransactionActionInput>(client, {
-    ...TX_ACTION_OPTIONS,
-    mutationFn: async () => "ok",
-    onSuccess: () => relida.promise,
-  });
+  const ok = new MutationObserver<string, Error, TransactionActionInput>(
+    client,
+    {
+      ...TX_ACTION_OPTIONS,
+      mutationFn: async () => "ok",
+      onSuccess: () => relida.promise,
+    },
+  );
   const fim = ok.mutate(settle);
   await tick();
   assert.equal(pendentes(), 1);
@@ -72,23 +75,29 @@ async function main() {
   assert.equal(pendentes(), 0);
 
   // Erro solta a linha.
-  const falha = new MutationObserver<string, Error, TransactionActionInput>(client, {
-    ...TX_ACTION_OPTIONS,
-    mutationFn: async () => {
-      throw new Error("recusada");
+  const falha = new MutationObserver<string, Error, TransactionActionInput>(
+    client,
+    {
+      ...TX_ACTION_OPTIONS,
+      mutationFn: async () => {
+        throw new Error("recusada");
+      },
     },
-  });
+  );
   await assert.rejects(falha.mutate(settle));
   assert.equal(pendentes(), 0);
 
   // Sem internet: falha na hora, não pausa.
   onlineManager.setOnline(false);
-  const offline = new MutationObserver<string, Error, TransactionActionInput>(client, {
-    ...TX_ACTION_OPTIONS,
-    mutationFn: async () => {
-      throw new Error("sem rede");
+  const offline = new MutationObserver<string, Error, TransactionActionInput>(
+    client,
+    {
+      ...TX_ACTION_OPTIONS,
+      mutationFn: async () => {
+        throw new Error("sem rede");
+      },
     },
-  });
+  );
   await assert.rejects(offline.mutate(settle));
   assert.equal(offline.getCurrentResult().isPaused, false);
   assert.equal(pendentes(), 0);
@@ -124,7 +133,11 @@ async function main() {
 
   replaceCachedRow(client, baixada);
   type Lista = { pages: { items: Transaction[]; lastDoc?: string }[] };
-  const vencidas = client.getQueryData<Lista>(["tx-list", "payable", "vencidas"])!;
+  const vencidas = client.getQueryData<Lista>([
+    "tx-list",
+    "payable",
+    "vencidas",
+  ])!;
   assert.equal(vencidas.pages[0].items[0].status, "paid");
   assert.equal(vencidas.pages[0].items[1].status, "approved");
   assert.equal(vencidas.pages[0].lastDoc, "cursor");
@@ -132,7 +145,8 @@ async function main() {
   assert.equal(todas.pages[0].items[0].status, "approved");
   assert.equal(todas.pages[1].items[0].status, "paid");
   assert.equal(
-    client.getQueryData<Transaction[]>(["tx-search", "payable", "a"])![0].status,
+    client.getQueryData<Transaction[]>(["tx-search", "payable", "a"])![0]
+      .status,
     "paid",
   );
 
@@ -148,12 +162,19 @@ async function main() {
   assert.deepEqual(await leitura(401, { error: "Unauthorized" }), {
     error: "Unauthorized",
   });
-  assert.deepEqual(await leitura(500, { error: { message: "chave inválida" } }), {
-    error: "chave inválida",
-  });
+  assert.deepEqual(
+    await leitura(500, { error: { message: "chave inválida" } }),
+    {
+      error: "chave inválida",
+    },
+  );
   // A rota responde 200 no envio simulado, mas nenhum e-mail saiu.
   assert.deepEqual(
-    await leitura(200, { success: true, simulated: true, message: "desligado" }),
+    await leitura(200, {
+      success: true,
+      simulated: true,
+      message: "desligado",
+    }),
     { error: "desligado" },
   );
   assert.deepEqual(
@@ -167,8 +188,18 @@ async function checkApprovalRecipients() {
   const usuario = (
     email: string,
     companyRoles: Record<string, UserRole>,
-    extra: { status?: UserProfile["status"]; active?: boolean; role?: UserRole } = {},
-  ) => ({ email, companyRoles, status: "active" as const, active: true, ...extra });
+    extra: {
+      status?: UserProfile["status"];
+      active?: boolean;
+      role?: UserRole;
+    } = {},
+  ) => ({
+    email,
+    companyRoles,
+    status: "active" as const,
+    active: true,
+    ...extra,
+  });
 
   const usuarios = [
     // A causa da falha: admin global de outra empresa vinha primeiro na busca.
@@ -178,14 +209,19 @@ async function checkApprovalRecipients() {
     usuario("Dono@a.com", { A: "admin" }),
     usuario("comum@a.com", { A: "user" }),
     usuario("auditor@a.com", { A: "auditor" }),
-    usuario("saiu@a.com", { A: "approver" }, { status: "rejected", active: false }),
+    usuario(
+      "saiu@a.com",
+      { A: "approver" },
+      { status: "rejected", active: false },
+    ),
   ];
-  const centros: Record<string, { companyId: string; approverEmail?: string }> = {
-    cc1: { companyId: "A", approverEmail: "centro@a.com" },
-    cc2: { companyId: "A", approverEmail: "CENTRO@a.com" },
-    semAprovador: { companyId: "A" },
-    deOutra: { companyId: "B", approverEmail: "centro@b.com" },
-  };
+  const centros: Record<string, { companyId: string; approverEmail?: string }> =
+    {
+      cc1: { companyId: "A", approverEmail: "centro@a.com" },
+      cc2: { companyId: "A", approverEmail: "CENTRO@a.com" },
+      semAprovador: { companyId: "A" },
+      deOutra: { companyId: "B", approverEmail: "centro@b.com" },
+    };
   let leuUsuarios = 0;
   const load = {
     costCenter: async (id: string) => centros[id] ?? null,
@@ -218,7 +254,10 @@ async function checkApprovalRecipients() {
   // Quem pediu não recebe o próprio link: nem como aprovador do centro...
   assert.deepEqual(
     await approvalRecipients(
-      { companyId: "A", costCenterAllocation: [{ costCenterId: "cc1" } as CostCenterAllocation] },
+      {
+        companyId: "A",
+        costCenterAllocation: [{ costCenterId: "cc1" } as CostCenterAllocation],
+      },
       " Centro@A.com ",
       load,
     ),

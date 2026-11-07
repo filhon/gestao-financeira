@@ -994,10 +994,7 @@ export function ReconciliationDashboard() {
     items: BankTransaction[],
     data: (t: BankTransaction) => Partial<BankTransaction>,
     fallback: string,
-    onRound?: (round: {
-      done: BankTransaction[];
-      complete: boolean;
-    }) => void,
+    onRound?: (round: { done: BankTransaction[]; complete: boolean }) => void,
   ) =>
     startBatchRun<BankTransaction>({
       key,
@@ -2021,9 +2018,7 @@ export function ReconciliationDashboard() {
     try {
       if (amount > 0) {
         setClosePhase(
-          closeTax > 0
-            ? "Lançando rendimento e IR…"
-            : "Lançando o rendimento…",
+          closeTax > 0 ? "Lançando rendimento e IR…" : "Lançando o rendimento…",
         );
         await recognizeYield(amount, summary.statementDate, closeTax);
       }

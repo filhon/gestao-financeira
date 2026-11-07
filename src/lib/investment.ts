@@ -29,7 +29,7 @@ export const cdiQuery = (companyId: string, from: string) => ({
   gcTime: CDI_CACHE_MS,
 });
 
-const day =(d: Date) => format(new Date(d), "yyyy-MM-dd");
+const day = (d: Date) => format(new Date(d), "yyyy-MM-dd");
 
 /** Produtos que acompanham o CDI: os outros não têm curva, só a conferência. */
 export const tracksCdi = (a: Pick<BankAccount, "kind" | "product">) =>

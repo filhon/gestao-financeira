@@ -117,9 +117,7 @@ function RunCard({ run }: { run: BatchRunView }) {
                 disabled={run.dismissing}
                 onClick={() => dismissBatchRun(run.key)}
               >
-                {run.dismissing && (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                )}
+                {run.dismissing && <Loader2 className="h-3 w-3 animate-spin" />}
                 {run.dismissLabel ?? "Fechar"}
               </Button>
               {failed > 1 && (

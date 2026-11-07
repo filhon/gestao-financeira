@@ -650,9 +650,7 @@ function Reports() {
               {
                 description: [
                   ...failed.slice(0, 5),
-                  ...(failed.length > 5
-                    ? [`e mais ${failed.length - 5}`]
-                    : []),
+                  ...(failed.length > 5 ? [`e mais ${failed.length - 5}`] : []),
                 ].join("\n"),
                 duration: 15_000,
                 action: {

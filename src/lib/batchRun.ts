@@ -151,7 +151,9 @@ export function createBatchRun<T>(
     retry: (id?: string) => {
       const again = failures.filter((f) => !id || f.failure.id === id);
       failures = failures.filter((f) => !again.includes(f));
-      queue.unshift(...again.flatMap((f) => (f.item === undefined ? [] : [f.item])));
+      queue.unshift(
+        ...again.flatMap((f) => (f.item === undefined ? [] : [f.item])),
+      );
       emit();
       return drain();
     },

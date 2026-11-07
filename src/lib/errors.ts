@@ -43,7 +43,8 @@ export function connectionAwareError(error: unknown, fallback: string): string {
     (error instanceof TypeError && /fetch/i.test(message ?? ""))
   )
     return "Sem conexão com o servidor.";
-  if (message === "deadline-exceeded") return "O servidor não respondeu a tempo.";
+  if (message === "deadline-exceeded")
+    return "O servidor não respondeu a tempo.";
   return friendlyError(error, fallback);
 }
 
