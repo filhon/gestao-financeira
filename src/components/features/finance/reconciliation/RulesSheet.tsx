@@ -21,6 +21,8 @@ interface RulesSheetProps {
   rules: ReconciliationRule[];
   canManage: boolean;
   onToggle: (rule: ReconciliationRule, active: boolean) => void;
+  /** Regra sendo ligada ou desligada: a chave trava até gravar. */
+  togglingId?: string | null;
   onDelete: (rule: ReconciliationRule) => void;
 }
 
@@ -38,6 +40,7 @@ export function RulesSheet({
   rules,
   canManage,
   onToggle,
+  togglingId,
   onDelete,
 }: RulesSheetProps) {
   const { costCenters } = useCostCenters(open ? companyId : undefined);
@@ -70,7 +73,7 @@ export function RulesSheet({
                 <li key={rule.id} className="flex items-start gap-3 px-5 py-3">
                   <Checkbox
                     checked={rule.active}
-                    disabled={!canManage}
+                    disabled={!canManage || togglingId === rule.id}
                     onCheckedChange={(c) => onToggle(rule, !!c)}
                     aria-label={
                       rule.active ? "Desativar regra" : "Ativar regra"

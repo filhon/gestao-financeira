@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState, useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FeedbackForm } from "@/components/features/feedback/FeedbackForm";
@@ -43,7 +44,7 @@ function FeedbackPageContent() {
     if (!user) return;
     try {
       setIsLoading(true);
-      const data = await feedbackService.getByUser(user.uid);
+      const data = await trackLoad(feedbackService.getByUser(user.uid));
       setFeedbacks(data);
     } catch (error) {
       console.error("Error loading feedbacks:", error);

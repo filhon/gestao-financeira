@@ -42,6 +42,7 @@ export function UploadStatement({
   const { selectedCompany } = useCompany();
   const queryClient = useQueryClient();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [phase, setPhase] = useState("Lendo o arquivo…");
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +67,7 @@ export function UploadStatement({
     }
 
     setIsProcessing(true);
+    setPhase("Lendo o arquivo…");
     try {
       const text = await file.text();
       const [parsed, meta] = await Promise.all([
@@ -107,10 +109,12 @@ export function UploadStatement({
         bankAccountId: target.id,
       }));
 
+      setPhase(`Conferindo ${plural(transactions.length, "linha", "linhas")}…`);
       const { added, skipped, items } =
         await reconciliationSessionService.mergeItems(
           selectedCompany.id,
           transactions,
+          (written, total) => setPhase(`Gravando ${written} de ${total}…`),
         );
 
       // Linhas da conta depois da importação: as que já estavam e as novas.
@@ -167,8 +171,17 @@ export function UploadStatement({
       }
     } catch (error) {
       console.error(error);
+      // Reimportar só grava o que faltou: as linhas já gravadas são reconhecidas.
       toast.error(
         friendlyError(error, `Não foi possível importar "${file.name}".`),
+        {
+          description: "As linhas já gravadas ficam; a nova tentativa grava só o resto.",
+          duration: 10_000,
+          action: {
+            label: "Tentar de novo",
+            onClick: () => void processFile(file),
+          },
+        },
       );
     } finally {
       setIsProcessing(false);
@@ -206,7 +219,9 @@ export function UploadStatement({
           ) : (
             <Upload className="h-4 w-4" />
           )}
-          <span className="hidden sm:inline">Importar extrato</span>
+          <span className="hidden sm:inline" aria-live="polite">
+            {isProcessing ? phase : "Importar extrato"}
+          </span>
         </Button>
       </>
     );
@@ -255,7 +270,9 @@ export function UploadStatement({
           ) : (
             <Upload className="h-4 w-4" />
           )}
-          {isProcessing ? "Importando..." : "Selecionar arquivo"}
+          <span aria-live="polite">
+            {isProcessing ? phase : "Selecionar arquivo"}
+          </span>
         </Button>
         <p className="mt-4 text-xs text-muted-foreground">
           No internet banking, procure por “Exportar extrato” ou “Salvar como

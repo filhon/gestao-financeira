@@ -3,6 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Loader2 } from "lucide-react";
 
+import { ElapsedSeconds } from "@/components/ui/elapsed-seconds";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
@@ -57,13 +58,14 @@ function Button({
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
-      disabled={disabled ?? loading}
+      disabled={disabled || loading}
       {...props}
     >
       {loading && !asChild ? (
         <>
           <Loader2 className="animate-spin" />
           {children}
+          <ElapsedSeconds />
         </>
       ) : (
         children

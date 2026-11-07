@@ -25,6 +25,7 @@
     "check:reports": "jiti scripts/check-reports.ts",
     "check:list-placeholder": "jiti scripts/check-list-placeholder.ts",
     "check:transaction-action": "jiti scripts/check-transaction-action.ts",
+    "check:batch-run": "jiti scripts/check-batch-run.ts",
     "check:email-request": "jiti scripts/check-email-request.ts",
     "check:hot-callable": "npm --prefix functions run build && node scripts/check-hot-callable.mjs"
   },

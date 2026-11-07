@@ -81,6 +81,12 @@ export const useMyStore = create<MyState>((set) => ({ ... }));
 - `date-fns` with `ptBR` locale for all date formatting
 - Always use `currency.js` for monetary values — never raw floats
 
+### Progress feedback
+
+- Never fake progress: no timers or invented percentages. Show N of M, bytes (`uploadBytesResumable`, XHR) or named stages that change when the stage really starts; a single request gets activity text with no percentage.
+- Batch actions go through `startBatchRun` (`src/lib/store/useBatchRunStore.ts`): one failed item never stops the others, what was written stays written, and the failed line is named with its own retry in `BatchRunTray`.
+- Workers must tolerate a retry: the write may have succeeded and only the response was lost.
+
 ### Firestore collections
 
 `transactions`, `users`, `companies`, `payment_batches`, `cost_centers`, `entities`, `recurring_templates`, `audit_logs`, `notifications`, `budgets`, `api_keys`, `reconciliation_sessions`, `company_stats`

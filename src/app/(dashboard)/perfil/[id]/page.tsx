@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState, use } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -375,7 +376,7 @@ export default function UserProfilePage({
       }
     };
 
-    loadData();
+    void trackLoad(loadData());
   }, [userId, selectedCompany, year]);
 
   if (isLoading) {

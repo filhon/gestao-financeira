@@ -1842,10 +1842,10 @@ export const transactionService = {
    * Migração: Preenche o campo `costCenterIds` em todas as transações
    * que possuem `costCenterAllocation` mas não possuem `costCenterIds`
    * (ou o array está vazio). Isso corrige o filtro por centro de custo.
+   * Devolve o que corrigir, para a tela mostrar o progresso e refazer só o que
+   * falhar; reaplicar o mesmo índice não muda nada.
    */
-  backfillCostCenterIds: async (
-    companyId: string,
-  ): Promise<{ updated: number; total: number }> => {
+  planCostCenterBackfill: async (companyId: string) => {
     const q = query(
       collection(db, COLLECTION_NAME),
       where("companyId", "==", companyId),
@@ -1858,6 +1858,7 @@ export const transactionService = {
     // move e a conferência de saldo não tem nada a recusar.
     const patches: Array<{
       transactionId: string;
+      description: string;
       patch: Record<string, unknown>;
     }> = [];
 
@@ -1881,6 +1882,7 @@ export const transactionService = {
       if (isMissing) {
         patches.push({
           transactionId: docSnapshot.id,
+          description: data.description ?? docSnapshot.id,
           patch: {
             costCenterIds: expectedIds,
             costCenterId: expectedIds[0],
@@ -1889,12 +1891,15 @@ export const transactionService = {
       }
     }
 
-    const CHUNK_SIZE = 500;
-    for (let i = 0; i < patches.length; i += CHUNK_SIZE) {
-      await applyPatchesViaLedger(patches.slice(i, i + CHUNK_SIZE));
-    }
-
-    return { updated: patches.length, total: snapshot.size };
+    return {
+      patches,
+      total: snapshot.size,
+      apply: async (chunk: typeof patches) => {
+        await applyPatchesViaLedger(
+          chunk.map(({ transactionId, patch }) => ({ transactionId, patch })),
+        );
+      },
+    };
   },
 
   /**

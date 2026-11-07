@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState, useCallback } from "react";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -301,9 +302,11 @@ export default function ApiKeysPage() {
     setIsLoading(true);
     setLoadError(false);
     try {
-      const res = await fetch("/api/v1/admin/keys", {
-        headers: { "x-company-id": selectedCompany.id },
-      });
+      const res = await trackLoad(
+        fetch("/api/v1/admin/keys", {
+          headers: { "x-company-id": selectedCompany.id },
+        }),
+      );
       if (!res.ok) throw new Error("Falha ao carregar chaves.");
       const json = await res.json();
       setKeys(json.data ?? []);

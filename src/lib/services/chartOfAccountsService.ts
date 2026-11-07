@@ -618,19 +618,26 @@ export const chartOfAccountsService = {
     return preview;
   },
 
-  applyImport: async (
+  /**
+   * Prepara a importação conta a conta, para a tela mostrar o progresso e
+   * refazer só o que falhar. O id da conta nova sai aqui: gravar de novo a
+   * mesma conta depois de perder a resposta não cria uma cópia.
+   */
+  planImport: (
     companyId: string,
     preview: ImportPreview,
     actor: Actor,
     source: string,
   ) => {
     if (preview.issues.length > 0) throw new Error(preview.issues[0].message);
+    type Op = (batch: ReturnType<typeof writeBatch>) => void;
 
-    await commitInChunks([
-      ...preview.toCreate.map(
-        (a) => (batch: ReturnType<typeof writeBatch>) =>
+    const items: { code: string; name: string; op: Op }[] = [
+      ...preview.toCreate.map((a) => {
+        const ref = doc(collection(db, COLLECTION_NAME));
+        const op: Op = (batch) =>
           batch.set(
-            doc(collection(db, COLLECTION_NAME)),
+            ref,
             stripUndefined({
               ...writable(a, false),
               archived: false,
@@ -638,32 +645,39 @@ export const chartOfAccountsService = {
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             }),
-          ),
-      ),
-      ...preview.toUpdate.map(
-        ({ current, next }) =>
-          (batch: ReturnType<typeof writeBatch>) =>
-            batch.update(doc(db, COLLECTION_NAME, current.id), {
-              ...writable(next, true),
-              updatedAt: serverTimestamp(),
-            }),
-      ),
-    ]);
+          );
+        return { code: a.code, name: a.name, op };
+      }),
+      ...preview.toUpdate.map(({ current, next }) => {
+        const op: Op = (batch) =>
+          batch.update(doc(db, COLLECTION_NAME, current.id), {
+            ...writable(next, true),
+            updatedAt: serverTimestamp(),
+          });
+        return { code: next.code, name: next.name, op };
+      }),
+    ];
 
-    auditService.log({
-      companyId,
-      userId: actor.uid,
-      userEmail: actor.email,
-      action: "create",
-      entity: "chart_account",
-      entityId: `import:${preview.toCreate.length + preview.toUpdate.length}`,
-      details: {
-        source,
-        created: preview.toCreate.length,
-        updated: preview.toUpdate.length,
-        unchanged: preview.unchanged,
+    return {
+      items,
+      write: (chunk: typeof items) => commitInChunks(chunk.map((i) => i.op)),
+      finish: async () => {
+        auditService.log({
+          companyId,
+          userId: actor.uid,
+          userEmail: actor.email,
+          action: "create",
+          entity: "chart_account",
+          entityId: `import:${items.length}`,
+          details: {
+            source,
+            created: preview.toCreate.length,
+            updated: preview.toUpdate.length,
+            unchanged: preview.unchanged,
+          },
+        });
       },
-    });
+    };
   },
 
   /** Lê .xlsx, .xls ou .csv no formato do modelo. */

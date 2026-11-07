@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import currency from "currency.js";
 import { differenceInCalendarDays, format } from "date-fns";
-import { Check, Loader2, Minus, Search } from "lucide-react";
+import { Check, Minus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,7 +57,8 @@ interface SettleFromStatementSheetProps {
   companyId: string;
   bankTx: BankTransaction | null;
   onOpenChange: (open: boolean) => void;
-  onSettle: (items: SettleItem[]) => Promise<void>;
+  /** Dispara a baixa: o progresso e as falhas aparecem no painel da tela. */
+  onSettle: (items: SettleItem[]) => void;
 }
 
 const sum = (txs: Transaction[]) =>
@@ -92,7 +93,6 @@ export function SettleFromStatementSheet({
   const isDebit = bankTx ? bankTx.amount < 0 : true;
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
 
   const { data: open = [], isLoading } = useQuery({
     queryKey: ["settle-candidates", companyId, isDebit],
@@ -190,40 +190,33 @@ export function SettleFromStatementSheet({
     onOpenChange(false);
   };
 
-  const confirm = async () => {
+  const confirm = () => {
     if (blocked || !bankTx) return;
     const paymentDate = new Date(bankTx.date);
-    setSaving(true);
-    try {
-      await onSettle(
-        multiple
-          ? selected.map((tx) => ({
-              tx,
+    onSettle(
+      multiple
+        ? selected.map((tx) => ({
+            tx,
+            settlement: {
+              paymentDate,
+              finalAmount: tx.amount,
+              discount: 0,
+              interest: 0,
+            },
+          }))
+        : [
+            {
+              tx: selected[0],
               settlement: {
                 paymentDate,
-                finalAmount: tx.amount,
-                discount: 0,
-                interest: 0,
+                finalAmount: target,
+                discount: gap < 0 ? -gap : 0,
+                interest: gap > 0 ? gap : 0,
               },
-            }))
-          : [
-              {
-                tx: selected[0],
-                settlement: {
-                  paymentDate,
-                  finalAmount: target,
-                  discount: gap < 0 ? -gap : 0,
-                  interest: gap > 0 ? gap : 0,
-                },
-              },
-            ],
-      );
-      close();
-    } catch {
-      // O chamador já avisou; o painel fica aberto para tentar de novo.
-    } finally {
-      setSaving(false);
-    }
+            },
+          ],
+    );
+    close();
   };
 
   const itemRow = ({ tx, amountGap, dayGap }: Candidate, nested: boolean) => {
@@ -416,8 +409,7 @@ export function SettleFromStatementSheet({
             <Button variant="outline" onClick={close}>
               Cancelar
             </Button>
-            <Button disabled={blocked || saving} onClick={confirm}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            <Button disabled={blocked} onClick={confirm}>
               {multiple
                 ? `Baixar ${selected.length} e conciliar`
                 : "Baixar e conciliar"}

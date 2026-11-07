@@ -115,6 +115,7 @@ export function AdminFeedbackTable({
   );
   const [responseText, setResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showResponseDialog, setShowResponseDialog] = useState(false);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
 
@@ -187,6 +188,7 @@ export function AdminFeedbackTable({
     feedbackId: string,
     newStatus: FeedbackStatus,
   ) => {
+    setUpdatingId(feedbackId);
     try {
       await feedbackService.updateStatus(feedbackId, newStatus);
       toast.success("Status atualizado!");
@@ -194,6 +196,8 @@ export function AdminFeedbackTable({
     } catch (error) {
       console.error("Error updating status:", error);
       toast.error("Erro ao atualizar status.");
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -336,6 +340,7 @@ export function AdminFeedbackTable({
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Select
                       value={feedback.status}
+                      disabled={updatingId === feedback.id}
                       onValueChange={(value) =>
                         handleStatusChange(feedback.id, value as FeedbackStatus)
                       }

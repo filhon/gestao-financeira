@@ -72,6 +72,8 @@ export function BulkImportDialog({
   const [defaultCostCenterId, setDefaultCostCenterId] = useState<string>("");
   const [bulkCostCenterId, setBulkCostCenterId] = useState<string>("");
   const [progress, setProgress] = useState(0);
+  const [importing, setImporting] = useState(0);
+  const [imported, setImported] = useState(0);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [editingCell, setEditingCell] = useState<{
     id: string;
@@ -151,18 +153,9 @@ export function BulkImportDialog({
       }
 
       setStep("processing");
-      setProgress(0);
 
       try {
-        // Simulate progress for UX
-        const progressInterval = setInterval(() => {
-          setProgress((prev) => Math.min(prev + 10, 80));
-        }, 100);
-
         const parsed = await importService.parseFile(file);
-
-        clearInterval(progressInterval);
-        setProgress(100);
 
         // Validate rows
         let validatedRows = importService.validateRows(
@@ -313,41 +306,62 @@ export function BulkImportDialog({
     setRows(updated);
   };
 
-  // Import confirmation
-  const handleConfirmImport = async () => {
+  const importRows = async (toImport: ImportedRow[]) => {
     if (!user || !selectedCompany) return;
-
-    const validRows = rows.filter((r) => r.isValid && r.costCenterId);
-    if (validRows.length === 0) {
-      toast.error("Nenhuma linha válida para importar");
-      return;
-    }
-
     setStep("importing");
     setProgress(0);
+    setImporting(toImport.length);
+    setImported(0);
 
     try {
-      const importResult = await importService.createTransactions(
-        validRows,
+      const round = await importService.createTransactions(
+        toImport,
         type,
         { uid: user.uid, email: user.email },
         selectedCompany.id,
         (current, total) => {
           setProgress(Math.round((current / total) * 100));
+          setImported(current);
         },
       );
 
-      setResult(importResult);
+      // Numa nova tentativa, as linhas já gravadas continuam contando.
+      const retried = new Set(toImport.map((r) => r.rowNumber));
+      setResult((previous) => {
+        const errors = [
+          ...(previous?.errors ?? []).filter((e) => !retried.has(e.row)),
+          ...round.errors,
+        ].sort((a, b) => a.row - b.row);
+        return {
+          success: (previous?.success ?? 0) + round.success,
+          failed: errors.length,
+          errors,
+        };
+      });
       setStep("result");
 
-      if (importResult.success > 0) {
+      if (round.success > 0) {
         onSuccess();
       }
     } catch {
       toast.error("Erro durante a importação");
-      setStep("preview");
+      setStep(result ? "result" : "preview");
     }
   };
+
+  // Import confirmation
+  const handleConfirmImport = () => {
+    const validRows = rows.filter((r) => r.isValid && r.costCenterId);
+    if (validRows.length === 0) {
+      toast.error("Nenhuma linha válida para importar");
+      return;
+    }
+    setResult(null);
+    void importRows(validRows);
+  };
+
+  const failedRows = (lines: number[]) =>
+    rows.filter((r) => lines.includes(r.rowNumber));
 
   // Computed values
   const validCount = rows.filter((r) => r.isValid && r.costCenterId).length;
@@ -430,7 +444,6 @@ export function BulkImportDialog({
           Lendo e validando dados da planilha
         </p>
       </div>
-      <Progress value={progress} className="w-full max-w-md mx-auto" />
     </div>
   );
 
@@ -738,12 +751,14 @@ export function BulkImportDialog({
       <div>
         <p className="text-lg font-medium mb-2">Importando transações...</p>
         <p className="text-sm text-muted-foreground">
-          Criando {validCount}{" "}
+          Criando {importing}{" "}
           {type === "payable" ? "contas a pagar" : "contas a receber"}
         </p>
       </div>
       <Progress value={progress} className="w-full max-w-md mx-auto" />
-      <p className="text-sm text-muted-foreground">{progress}%</p>
+      <p className="text-sm text-muted-foreground tabular-nums">
+        {imported} de {importing}
+      </p>
     </div>
   );
 
@@ -776,24 +791,41 @@ export function BulkImportDialog({
       {result?.errors && result.errors.length > 0 && (
         <div className="text-left bg-red-500/10 rounded-lg p-4 max-w-md mx-auto">
           <p className="text-sm font-medium text-red-500 mb-2">
-            Erros encontrados:
+            Linhas que não foram importadas. As outras já estão gravadas.
           </p>
-          <ul className="text-sm space-y-1">
-            {result.errors.slice(0, 5).map((err, i) => (
-              <li key={i} className="text-muted-foreground">
-                Linha {err.row}: {err.message}
+          <ul className="max-h-60 divide-y overflow-y-auto text-sm">
+            {result.errors.map((err) => (
+              <li key={err.row} className="flex items-center gap-2 py-1.5">
+                <span className="min-w-0 flex-1 text-muted-foreground">
+                  Linha {err.row}: {err.message}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={() => void importRows(failedRows([err.row]))}
+                >
+                  Tentar de novo
+                </Button>
               </li>
             ))}
-            {result.errors.length > 5 && (
-              <li className="text-muted-foreground">
-                ... e mais {result.errors.length - 5} erro(s)
-              </li>
-            )}
           </ul>
         </div>
       )}
 
-      <Button onClick={onClose}>Fechar</Button>
+      <div className="flex justify-center gap-2">
+        {result && result.errors.length > 1 && (
+          <Button
+            variant="outline"
+            onClick={() =>
+              void importRows(failedRows(result.errors.map((e) => e.row)))
+            }
+          >
+            Tentar todas ({result.errors.length})
+          </Button>
+        )}
+        <Button onClick={onClose}>Fechar</Button>
+      </div>
     </div>
   );
 

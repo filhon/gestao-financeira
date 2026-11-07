@@ -34,8 +34,10 @@ import {
   ListChecks,
   MoreHorizontal,
   ChevronRight,
+  AlertCircle,
   AlertTriangle,
   ArrowLeftRight,
+  Loader2,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { isOpenTitle } from "@/lib/matching/statement";
@@ -66,6 +68,11 @@ export type ActionHandler = (
 
 /** O que a linha deixa fazer: período fechado e linha da abertura não mudam. */
 export type RowState = "editable" | "readonly" | "locked" | "before";
+
+/** Ação da linha em andamento (na etapa dita) ou que falhou num lote. */
+export type LineProgress =
+  | { stage: string }
+  | { error: string; retry: () => void };
 
 export const IGNORE_REASONS: {
   value: NonNullable<BankTransaction["ignoreReason"]>;
@@ -332,6 +339,7 @@ export function RowActions({
   onAction,
   menuOpen,
   onMenuOpenChange,
+  progress,
 }: {
   tx: BankTransaction;
   state: RowState;
@@ -342,7 +350,41 @@ export function RowActions({
   onAction: ActionHandler;
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
+  progress?: LineProgress;
 }) {
+  if (progress && "stage" in progress) {
+    return (
+      <span
+        role="status"
+        className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
+      >
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+        {progress.stage}
+      </span>
+    );
+  }
+  if (progress) {
+    return (
+      <div className="flex items-center justify-end gap-2">
+        <span
+          className="inline-flex items-center gap-1 text-xs font-medium text-destructive"
+          title={progress.error}
+        >
+          <AlertCircle className="h-3.5 w-3.5" />
+          Falhou
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={progress.retry}
+          aria-label={`Tentar de novo: ${tx.description}. ${progress.error}`}
+        >
+          Tentar de novo
+        </Button>
+      </div>
+    );
+  }
   if (state === "locked") {
     return (
       <span
@@ -623,6 +665,7 @@ interface ReconciliationTableProps {
   showEmptyDays: boolean;
   onAction: ActionHandler;
   rowState: (tx: BankTransaction) => RowState;
+  lineProgress: (tx: BankTransaction) => LineProgress | undefined;
   canSettle: (tx: BankTransaction) => boolean;
   canLaunch: (tx: BankTransaction) => boolean;
   canRule: boolean;
@@ -649,6 +692,7 @@ export function ReconciliationTable({
   showEmptyDays,
   onAction,
   rowState,
+  lineProgress,
   canSettle,
   canLaunch,
   canRule,
@@ -766,10 +810,12 @@ export function ReconciliationTable({
     const state = rowState(tx);
     const editable = state === "editable";
     const active = activeId === tx.id;
+    const progress = lineProgress(tx);
     return (
       <TableRow
         key={tx.id}
         data-row-id={tx.id}
+        aria-busy={!!progress && "stage" in progress}
         // Tab entra pela linha ativa (ou a primeira); j/k e setas andam dentro.
         tabIndex={tx.id === (activeId ?? firstId) ? 0 : -1}
         onFocus={() => onActiveChange(tx.id)}
@@ -819,7 +865,7 @@ export function ReconciliationTable({
             tx={tx}
             rule={ruleFor(tx)}
             accountName={accountName}
-            editable={editable}
+            editable={editable && !progress}
             onAction={onAction}
           />
         </TableCell>
@@ -838,6 +884,7 @@ export function ReconciliationTable({
               onAction={onAction}
               menuOpen={menuOpenId === tx.id}
               onMenuOpenChange={(o) => onMenuOpenChange(o ? tx.id : null)}
+              progress={progress}
             />
           </div>
         </TableCell>

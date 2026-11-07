@@ -12,6 +12,7 @@ import {
   CostCenter,
   PaymentMethod,
 } from "@/lib/types";
+import { connectionAwareError, userError } from "@/lib/errors";
 import { transactionService } from "./transactionService";
 import { accountRequiredFor, natureFitsSide } from "@/lib/chartOfAccounts";
 import { normalizeText } from "@/lib/utils";
@@ -395,7 +396,7 @@ export const importService = {
         const dueDate = parseDate(row.dueDate);
 
         if (!amount || !dueDate || !row.costCenterId) {
-          throw new Error("Dados inválidos");
+          throw userError("Dados inválidos");
         }
 
         const data: TransactionFormData = {
@@ -428,7 +429,10 @@ export const importService = {
         result.failed++;
         result.errors.push({
           row: row.rowNumber,
-          message: error instanceof Error ? error.message : "Erro desconhecido",
+          message: connectionAwareError(
+            error,
+            "Não foi possível criar este lançamento.",
+          ),
         });
       }
 

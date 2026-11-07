@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ElapsedSeconds } from "@/components/ui/elapsed-seconds";
 import { Loader2 } from "lucide-react";
 
 interface ConfirmDialogProps {
@@ -25,6 +26,8 @@ interface ConfirmDialogProps {
   /** Conteúdo extra entre a descrição e os botões (ex.: campo de motivo). */
   children?: React.ReactNode;
   confirmDisabled?: boolean;
+  /** Etapa em andamento, no lugar do texto do botão enquanto confirma. */
+  workingLabel?: string;
 }
 
 export function ConfirmDialog({
@@ -38,6 +41,7 @@ export function ConfirmDialog({
   onConfirm,
   children,
   confirmDisabled = false,
+  workingLabel,
 }: ConfirmDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -78,7 +82,8 @@ export function ConfirmDialog({
             }
           >
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {confirmText}
+            {isLoading && workingLabel ? workingLabel : confirmText}
+            {isLoading && <ElapsedSeconds />}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

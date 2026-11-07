@@ -242,6 +242,7 @@ function Reports() {
   const [hideZero, setHideZero] = useState(true);
   const [drill, setDrill] = useState<Drill | null>(null);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
+  const [receiptProgress, setReceiptProgress] = useState<string | null>(null);
   const [confirmExport, setConfirmExport] = useState<ExportFormat | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [draftRange, setDraftRange] = useState<DateRange | undefined>();
@@ -635,15 +636,30 @@ function Reports() {
           entity,
           accountOf,
           withReceipts: fmt === "pdf_receipts",
+          onReceiptProgress: (current: number, total: number) =>
+            setReceiptProgress(`Anexando ${current} de ${total}`),
         };
         if (fmt === "pdf" || fmt === "pdf_receipts") {
           const { failed } = await reportService.generatePaymentsPDF(
             payments,
             pctx,
           );
-          if (failed > 0) {
+          if (failed.length > 0) {
             toast.warning(
-              `${failed} comprovante(s) ficaram fora do PDF (formato não suportado ou arquivo indisponível).`,
+              `${failed.length} comprovante(s) ficaram fora do PDF (formato não suportado ou arquivo indisponível).`,
+              {
+                description: [
+                  ...failed.slice(0, 5),
+                  ...(failed.length > 5
+                    ? [`e mais ${failed.length - 5}`]
+                    : []),
+                ].join("\n"),
+                duration: 15_000,
+                action: {
+                  label: "Gerar de novo",
+                  onClick: () => void handleExport(fmt),
+                },
+              },
             );
           }
         }
@@ -669,6 +685,7 @@ function Reports() {
       toast.error("Não foi possível gerar o arquivo. Tente novamente.");
     } finally {
       setExporting(null);
+      setReceiptProgress(null);
     }
   };
 
@@ -742,7 +759,7 @@ function Reports() {
               }
             >
               {exporting === null && <Download className="h-4 w-4" />}
-              Exportar
+              {receiptProgress ?? "Exportar"}
               <ChevronDown className="h-3.5 w-3.5 opacity-60" />
             </Button>
           </DropdownMenuTrigger>

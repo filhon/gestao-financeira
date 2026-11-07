@@ -100,6 +100,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { AddToBatchDialog } from "@/components/features/finance/AddToBatchDialog";
+import { ElapsedSeconds } from "@/components/ui/elapsed-seconds";
 import { exportSearchXlsx } from "@/components/features/search/exportSearch";
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -1339,7 +1340,8 @@ function SearchContent() {
               ) : (
                 <Wand2 className="mr-1.5 h-4 w-4" />
               )}
-              Interpretar frase
+              {interpreting ? "Interpretando…" : "Interpretar frase"}
+              {interpreting && <ElapsedSeconds />}
             </Button>
           )}
           {/* Sem termo, a ajuda já está aberta na página. */}
@@ -2031,9 +2033,8 @@ function SearchContent() {
         open={batchOpen}
         onOpenChange={setBatchOpen}
         transactions={selectedRows.map((r) => r.tx)}
-        onDone={() => {
-          setBatchOpen(false);
-          setSelected(new Set());
+        onDone={(failedIds) => {
+          setSelected(new Set(failedIds));
           refresh();
         }}
       />

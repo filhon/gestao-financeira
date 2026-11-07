@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState } from "react";
 import { companyService } from "@/lib/services/companyService";
 import { Company } from "@/lib/types";
@@ -55,7 +56,7 @@ export default function CompaniesPage() {
   const fetchCompanies = async () => {
     try {
       setIsLoading(true);
-      const data = await companyService.getAll();
+      const data = await trackLoad(companyService.getAll());
       setCompanies(data);
     } catch (error) {
       console.error("Error fetching companies:", error);

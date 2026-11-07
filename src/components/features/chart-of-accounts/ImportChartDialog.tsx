@@ -19,6 +19,7 @@ import {
   ResponsiveModalHeader,
   ResponsiveModalTitle,
 } from "@/components/ui/responsive-modal";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { cn } from "@/lib/utils";
 import {
   chartOfAccountsService,
@@ -40,8 +41,7 @@ interface ImportChartDialogProps {
 type State =
   | { step: "upload" }
   | { step: "loading" }
-  | { step: "preview"; preview: ImportPreview; source: string }
-  | { step: "saving"; preview: ImportPreview; source: string };
+  | { step: "preview"; preview: ImportPreview; source: string };
 
 export function ImportChartDialog({
   open,
@@ -108,33 +108,47 @@ export function ImportChartDialog({
     void load(file.name, () => chartOfAccountsService.parseFile(file));
   };
 
-  const confirm = async () => {
+  const confirm = () => {
     if (state.step !== "preview") return;
-    setState({ ...state, step: "saving" });
+    const { toCreate, toUpdate } = state.preview;
+    let plan: ReturnType<typeof chartOfAccountsService.planImport>;
     try {
-      await chartOfAccountsService.applyImport(
+      plan = chartOfAccountsService.planImport(
         companyId,
         state.preview,
         actor,
         state.source,
       );
-      const { toCreate, toUpdate } = state.preview;
-      toast.success(
-        `Plano de contas importado: ${toCreate.length} ${toCreate.length === 1 ? "criada" : "criadas"}, ${toUpdate.length} ${toUpdate.length === 1 ? "atualizada" : "atualizadas"}.`,
-      );
-      onImported();
-      onOpenChange(false);
     } catch (error) {
       console.error(error);
       toast.error(
         error instanceof Error ? error.message : "Erro ao gravar o plano.",
       );
-      setState({ ...state, step: "preview" });
+      return;
     }
+    onOpenChange(false);
+    void startBatchRun({
+      key: `chart-import-${companyId}`,
+      title: "Importando o plano de contas",
+      items: plan.items,
+      id: (a) => a.code,
+      label: (a) => `${a.code} · ${a.name}`,
+      chunkSize: 450,
+      fallback: "Erro ao gravar esta conta.",
+      work: plan.write,
+      finish: { label: "Registrando na auditoria", run: plan.finish },
+      onRound: ({ complete }) => {
+        onImported();
+        if (complete)
+          toast.success(
+            `Plano de contas importado: ${toCreate.length} ${toCreate.length === 1 ? "criada" : "criadas"}, ${toUpdate.length} ${toUpdate.length === 1 ? "atualizada" : "atualizadas"}.`,
+          );
+      },
+    });
   };
 
   const preview =
-    state.step === "preview" || state.step === "saving" ? state.preview : null;
+    state.step === "preview" ? state.preview : null;
   const hasIssues = !!preview && preview.issues.length > 0;
   const nothingToDo =
     !!preview &&
@@ -333,13 +347,12 @@ export function ImportChartDialog({
             <Button
               variant="outline"
               onClick={() => setState({ step: "upload" })}
-              disabled={state.step === "saving"}
             >
               Escolher outro arquivo
             </Button>
           )}
           {preview && !hasIssues && !nothingToDo ? (
-            <Button onClick={confirm} loading={state.step === "saving"}>
+            <Button onClick={confirm}>
               Importar {preview.toCreate.length + preview.toUpdate.length}{" "}
               {preview.toCreate.length + preview.toUpdate.length === 1
                 ? "conta"

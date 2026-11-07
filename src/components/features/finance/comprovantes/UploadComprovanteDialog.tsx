@@ -176,7 +176,8 @@ export function UploadComprovanteDialog({ onSuccess, onReview }: Props) {
 // ── Leitura em andamento ─────────────────────────────────────────────────────
 
 function ProcessingView({ onBackground }: { onBackground: () => void }) {
-  const { phase, total, processed, results } = useReceiptUploadStore();
+  const { phase, total, processed, results, bytesSent, bytesTotal } =
+    useReceiptUploadStore();
   const auto = results.filter((r) => r.autoConfirmed).length;
   const pct = total ? Math.round((processed / total) * 100) : 0;
 
@@ -192,6 +193,11 @@ function ProcessingView({ onBackground }: { onBackground: () => void }) {
         </span>
       </div>
       <Progress value={pct} className="h-2" aria-label="Progresso da leitura" />
+      {bytesTotal > 0 && bytesSent < bytesTotal && (
+        <p className="text-xs tabular-nums text-muted-foreground">
+          Enviando os arquivos: {Math.round((bytesSent / bytesTotal) * 100)}%
+        </p>
+      )}
       {results.length > 0 && (
         <p className="text-sm text-muted-foreground tabular-nums">
           Até agora: {plural(auto, "associado", "associados")} automaticamente,{" "}
@@ -388,30 +394,54 @@ function ResultView({
         {upload.failures.length > 0 && (
           <div
             role="alert"
-            className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
+            className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
           >
-            <div className="min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-medium text-destructive">
                 {plural(
                   upload.failures.length,
-                  "página falhou",
-                  "páginas falharam",
-                )}{" "}
-                e não foi gravada
+                  "página não foi gravada",
+                  "páginas não foram gravadas",
+                )}
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {upload.failures.map(failureLabel).join("; ")}
-              </p>
+              {upload.failures.length > 1 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => upload.retryFailures(ctx)}
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                  Tentar todas
+                </Button>
+              )}
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
-              onClick={() => upload.retryFailures(ctx)}
-            >
-              <RotateCw className="h-3.5 w-3.5" />
-              Tentar de novo
-            </Button>
+            <ul className="mt-2 max-h-48 divide-y overflow-y-auto">
+              {upload.failures.map((page) => (
+                <li
+                  key={`${page.fileHash}-${page.pageNumber}`}
+                  className="flex items-center justify-between gap-3 py-1.5"
+                >
+                  <span className="min-w-0">
+                    <span className="block wrap-break-word">
+                      {failureLabel(page)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {page.message}
+                    </span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 gap-1.5 text-xs"
+                    onClick={() => upload.retryFailures(ctx, page)}
+                  >
+                    <RotateCw className="h-3 w-3" />
+                    Tentar de novo
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

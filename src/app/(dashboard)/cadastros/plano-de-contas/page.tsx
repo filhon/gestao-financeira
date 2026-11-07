@@ -255,8 +255,10 @@ export default function ChartOfAccountsPage() {
     }
   };
 
+  const [isReactivating, setIsReactivating] = useState(false);
   const setArchived = async (account: ChartAccount, archived: boolean) => {
     if (!actor) return;
+    setIsReactivating(!archived);
     try {
       await chartOfAccountsService.setArchived(account.id, archived, actor);
       await refresh();
@@ -266,6 +268,8 @@ export default function ChartOfAccountsPage() {
       toast.error(
         error instanceof Error ? error.message : "Erro ao arquivar a conta.",
       );
+    } finally {
+      setIsReactivating(false);
     }
   };
 
@@ -800,8 +804,13 @@ export default function ChartOfAccountsPage() {
                           type="button"
                           variant="ghost"
                           onClick={() => setArchived(editing, false)}
+                          disabled={isReactivating}
+                          loading={isReactivating}
                         >
-                          <ArchiveRestore className="h-4 w-4" /> Reativar
+                          {!isReactivating && (
+                            <ArchiveRestore className="h-4 w-4" />
+                          )}{" "}
+                          Reativar
                         </Button>
                       ) : (
                         <Button

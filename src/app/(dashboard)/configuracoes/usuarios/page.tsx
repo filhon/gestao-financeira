@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { userService } from "@/lib/services/userService";
@@ -103,6 +104,7 @@ export default function UsersPage() {
     useState<UserRole>("financial_manager");
   const [rejectUserId, setRejectUserId] = useState<string | null>(null);
   const [isApproving, setIsApproving] = useState(false);
+  const [updatingUid, setUpdatingUid] = useState<string | null>(null);
 
   // Pre-select the user's requested role when opening approval dialog
   useEffect(() => {
@@ -120,7 +122,7 @@ export default function UsersPage() {
   const fetchUsers = async () => {
     try {
       setIsLoading(true);
-      const data = await userService.getAll(selectedCompany?.id);
+      const data = await trackLoad(userService.getAll(selectedCompany?.id));
       setUsers(data);
     } catch (error) {
       console.error("Error fetching users:", error);
@@ -139,6 +141,7 @@ export default function UsersPage() {
     if (!selectedCompany) return;
     if (!currentUser) return;
     const admin = { uid: currentUser.uid, email: currentUser.email ?? "" };
+    setUpdatingUid(uid);
     try {
       if (newRole === "none") {
         await userService.revokeAccess(uid, selectedCompany.id, admin);
@@ -182,6 +185,8 @@ export default function UsersPage() {
     } catch (error) {
       console.error("Error updating role:", error);
       toast.error("Erro ao atualizar função.");
+    } finally {
+      setUpdatingUid(null);
     }
   };
 
@@ -464,9 +469,14 @@ export default function UsersPage() {
                               onValueChange={(value) =>
                                 handleRoleUpdate(user.uid, value as UserRole)
                               }
-                              disabled={isCurrentUser}
+                              disabled={
+                                isCurrentUser || updatingUid === user.uid
+                              }
                             >
                               <SelectTrigger className="w-full sm:w-[180px] ml-auto">
+                                {updatingUid === user.uid && (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                )}
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>

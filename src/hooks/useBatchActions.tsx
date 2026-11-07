@@ -14,6 +14,7 @@ import {
 } from "@/lib/services/paymentBatchService";
 import { notificationService } from "@/lib/services/notificationService";
 import { emailService } from "@/lib/services/emailService";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { PaymentBatch } from "@/lib/types";
 import { formatCurrency, plural } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -97,6 +98,7 @@ export function useBatchActions({
   } | null>(null);
   const [editingBatch, setEditingBatch] = useState<PaymentBatch | null>(null);
   const [editingBatchName, setEditingBatchName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [deleteBatch, setDeleteBatch] = useState<PaymentBatch | null>(null);
   const [recallBatch, setRecallBatch] = useState<PaymentBatch | null>(null);
   const [revertBatch, setRevertBatch] = useState<PaymentBatch | null>(null);
@@ -122,10 +124,21 @@ export function useBatchActions({
     if (!actionBatches.length || !actor || !user || !sendKind) return;
     const forApproval = sendKind === "send_approval";
     const recipient = { email, name: name !== email ? name : undefined };
+    const emailFailed = new Set<string>();
 
     // Um link por lote: cada um é aprovado (ou devolvido) separadamente
-    const results = await Promise.allSettled(
-      actionBatches.map(async (batch) => {
+    void startBatchRun<PaymentBatch>({
+      key: `batch-send-${sendKind}`,
+      title: forApproval
+        ? "Enviando para aprovação"
+        : "Enviando para autorização",
+      items: actionBatches,
+      id: (b) => b.id,
+      label: (b) => `${b.name} · ${formatCurrency(b.totalAmount)}`,
+      fallback: forApproval
+        ? "Erro ao enviar para aprovação"
+        : "Erro ao enviar para autorização",
+      work: async ([batch]) => {
         const token = forApproval
           ? await paymentBatchService.sendForApproval(
               batch.id,
@@ -144,47 +157,42 @@ export function useBatchActions({
               token,
               email,
             );
-        return !error;
-      }),
-    );
-    const failed = actionBatches.filter(
-      (_, i) => results[i].status === "rejected",
-    );
-    onSent?.(failed.map((b) => b.id));
-    refresh();
+        if (error) emailFailed.add(batch.id);
+      },
+      onRound: ({ done, failed, complete }) => {
+        onSent?.(failed.map((b) => b.id));
+        refresh();
+        if (!complete || emailFailed.size > 0) return; // O emailService já avisou.
+        toast.success(
+          done.length === 1
+            ? `Link enviado para ${name || email}. Vale por 48 horas.`
+            : `${plural(done.length, "lote enviado", "lotes enviados")} para ${name || email}. Cada link vale por 48 horas.`,
+        );
+      },
+    });
+  };
 
-    if (failed.length === actionBatches.length) {
-      const reason = (
-        results.find((r) => r.status === "rejected") as PromiseRejectedResult
-      ).reason;
-      console.error("Error sending batch:", reason);
-      toast.error(
-        errorMessage(
-          reason,
-          forApproval
-            ? "Erro ao enviar para aprovação"
-            : "Erro ao enviar para autorização",
-        ),
-      );
-      throw reason;
-    }
-    const sent = actionBatches.length - failed.length;
-    const emailed = results.filter(
-      (r) => r.status === "fulfilled" && r.value,
-    ).length;
-    if (failed.length > 0) {
-      toast.warning(
-        `${plural(sent, "lote enviado", "lotes enviados")}. Não foi possível enviar: ${failed.map((b) => b.name).join(", ")}.`,
-      );
-    } else if (emailed < sent) {
-      return; // O emailService já avisou que o e-mail não saiu.
-    } else if (sent === 1) {
-      toast.success(`Link enviado para ${name || email}. Vale por 48 horas.`);
-    } else {
-      toast.success(
-        `${plural(sent, "lote enviado", "lotes enviados")} para ${name || email}. Cada link vale por 48 horas.`,
-      );
-    }
+  /** Só conta depois de ler o lote: um lote errado fica no diálogo, sem começar. */
+  const startConfirmPayments = async (batch: PaymentBatch, by: BatchActor) => {
+    const plan = await paymentBatchService.planPayments(batch.id, by);
+    void startBatchRun({
+      key: `batch-pay-${batch.id}`,
+      title: `Confirmando pagamentos de "${batch.name}"`,
+      items: plan.items,
+      id: (t) => t.id,
+      label: (t) => `${t.description} · ${formatCurrency(t.amount)}`,
+      chunkSize: 25,
+      fallback: "Erro ao confirmar o pagamento",
+      work: plan.pay,
+      finish: { label: "Concluindo o lote", run: plan.finish },
+      onRound: ({ complete }) => {
+        refresh();
+        if (complete)
+          toast.success(
+            `${plural(plan.count, "transação marcada", "transações marcadas")} como paga${plan.count === 1 ? "" : "s"} · ${formatCurrency(plan.total)}`,
+          );
+      },
+    });
   };
 
   const handleConfirmStep = async () => {
@@ -207,17 +215,11 @@ export function useBatchActions({
               selectedCompany.id,
             )
             .catch((e) => console.error("Error notifying authorization:", e));
+        refresh();
       } else {
-        const result = await paymentBatchService.confirmPayments(
-          batch.id,
-          actor,
-        );
-        toast.success(
-          `${plural(result.count, "transação marcada", "transações marcadas")} como paga${result.count === 1 ? "" : "s"} · ${formatCurrency(result.total)}`,
-        );
+        await startConfirmPayments(batch, actor);
       }
       setConfirmStep(null);
-      refresh();
     } catch (error) {
       console.error("Error confirming step:", error);
       toast.error(
@@ -233,7 +235,8 @@ export function useBatchActions({
   };
 
   const handleUpdateBatch = async () => {
-    if (!editingBatch || !editingBatchName.trim()) return;
+    if (!editingBatch || !editingBatchName.trim() || renaming) return;
+    setRenaming(true);
     try {
       await paymentBatchService.update(editingBatch.id, {
         name: editingBatchName.trim(),
@@ -244,6 +247,8 @@ export function useBatchActions({
     } catch (error) {
       console.error("Error updating batch:", error);
       toast.error(errorMessage(error, "Erro ao renomear lote"));
+    } finally {
+      setRenaming(false);
     }
   };
 
@@ -424,7 +429,8 @@ export function useBatchActions({
             </Button>
             <Button
               onClick={handleUpdateBatch}
-              disabled={!editingBatchName.trim()}
+              disabled={!editingBatchName.trim() || renaming}
+              loading={renaming}
             >
               Salvar
             </Button>

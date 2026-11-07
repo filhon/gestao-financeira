@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import {
   AlertTriangle,
   Download,
@@ -312,24 +313,26 @@ export default function EntitiesPage() {
 
   const setActive = async (entities: Entity[], active: boolean) => {
     if (!actor || !selectedCompany) return;
-    try {
-      await entityService.setActive(
-        entities,
-        active,
-        actor,
-        selectedCompany.id,
-      );
-      toast.success(
-        entities.length === 1
-          ? `${entities[0].name} ${active ? "reativada" : "inativada"}.`
-          : `${entities.length} entidades ${active ? "reativadas" : "inativadas"}.`,
-      );
-      setSelected(new Set());
-      refresh();
-    } catch (error) {
-      console.error("Error toggling entity:", error);
-      toast.error("Não foi possível alterar a situação.");
-    }
+    const companyId = selectedCompany.id;
+    await startBatchRun<Entity>({
+      key: "entities-active",
+      title: active ? "Reativando entidades" : "Inativando entidades",
+      items: entities,
+      id: (e) => e.id,
+      label: (e) => e.name,
+      fallback: "Não foi possível alterar a situação.",
+      work: (chunk) => entityService.setActive(chunk, active, actor, companyId),
+      onRound: ({ done, failed, complete }) => {
+        refresh();
+        setSelected(new Set(failed.map((e) => e.id)));
+        if (complete)
+          toast.success(
+            done.length === 1
+              ? `${done[0].name} ${active ? "reativada" : "inativada"}.`
+              : `${done.length} entidades ${active ? "reativadas" : "inativadas"}.`,
+          );
+      },
+    });
   };
 
   // Com lançamentos, excluir apagaria a referência do histórico: oferece inativar.

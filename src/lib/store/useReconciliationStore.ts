@@ -4,6 +4,12 @@ import { BankTransaction, Transaction } from "@/lib/types";
 interface ReconciliationState {
   transactions: BankTransaction[];
   isLoading: boolean;
+  /**
+   * Etapa de cada linha com ação em andamento. Fora do componente para a trava
+   * valer já no clique seguinte e sobreviver à troca de tela.
+   */
+  lineStages: ReadonlyMap<string, string>;
+  setLineStage: (id: string, stage: string | null) => void;
 
   // Actions
   setTransactions: (transactions: BankTransaction[]) => void;
@@ -45,6 +51,15 @@ export const reviveBankTx = (tx: BankTransaction): BankTransaction => ({
 export const useReconciliationStore = create<ReconciliationState>((set) => ({
   transactions: [],
   isLoading: false,
+  lineStages: new Map(),
+
+  setLineStage: (id, stage) =>
+    set((state) => {
+      const lineStages = new Map(state.lineStages);
+      if (stage === null) lineStages.delete(id);
+      else lineStages.set(id, stage);
+      return { lineStages };
+    }),
 
   setTransactions: (transactions) =>
     set({ transactions: transactions.map(reviveBankTx), isLoading: false }),

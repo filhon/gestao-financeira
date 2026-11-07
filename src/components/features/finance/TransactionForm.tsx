@@ -38,6 +38,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ElapsedSeconds } from "@/components/ui/elapsed-seconds";
 import {
   TransactionFormData,
   transactionSchema,
@@ -426,6 +427,7 @@ export function TransactionForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const duplicateRef = useRef<HTMLDivElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [extraction, setExtraction] = useState<{ confidence: number } | null>(
     null,
@@ -1245,9 +1247,14 @@ export function TransactionForm({
     // comprovantes de demanda, não o documento de cobrança.
     const canExtract = isPayable && attachmentFields.length === 0;
     setIsUploading(true);
+    setUploadPercent(0);
     try {
       const [uploaded, result] = await Promise.all([
-        storageService.uploadFile(file, `transactions/${selectedCompany.id}`),
+        storageService.uploadFile(
+          file,
+          `transactions/${selectedCompany.id}`,
+          setUploadPercent,
+        ),
         canExtract
           ? extractFromFile(file, selectedCompany.id)
           : Promise.resolve(null),
@@ -1615,15 +1622,19 @@ export function TransactionForm({
                 )}
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">
+                    {/* As duas coisas correm juntas; a leitura não informa andamento. */}
                     {isExtracting
-                      ? "Lendo o documento…"
+                      ? isUploading && uploadPercent < 100
+                        ? `Lendo o documento · enviando ${Math.round(uploadPercent)}%`
+                        : "Lendo o documento… "
                       : isUploading
-                        ? "Enviando…"
+                        ? `Enviando ${Math.round(uploadPercent)}%`
                         : isDragOver
                           ? "Solte para anexar"
                           : isPayable
                             ? "Arraste o boleto ou a nota fiscal, ou clique"
                             : "Arraste a nota, o contrato ou a fatura, ou clique"}
+                    {isExtracting && <ElapsedSeconds />}
                   </span>
                   {!isUploading && !isExtracting && (
                     <span className="block text-xs text-muted-foreground">

@@ -108,6 +108,7 @@ export default function PaymentBatchesPage() {
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
 
+  const [isCreating, setIsCreating] = useState(false);
   const batchHref = (b: PaymentBatch) => `/financeiro/lotes/${b.id}`;
   const actions = useBatchActions({
     onApprove: (b) => router.push(batchHref(b)),
@@ -185,7 +186,8 @@ export default function PaymentBatchesPage() {
   const invalidRange = !!startDate && !!endDate && startDate > endDate;
 
   const handleCreateBatch = async () => {
-    if (!selectedCompany || !user || invalidRange) return;
+    if (!selectedCompany || !user || invalidRange || isCreating) return;
+    setIsCreating(true);
     try {
       let start: Date | undefined;
       let end: Date | undefined;
@@ -212,6 +214,8 @@ export default function PaymentBatchesPage() {
     } catch (error) {
       console.error("Error creating batch:", error);
       toast.error(errorMessage(error, "Erro ao criar lote"));
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -407,7 +411,11 @@ export default function PaymentBatchesPage() {
                 >
                   Cancelar
                 </Button>
-                <Button onClick={handleCreateBatch} disabled={invalidRange}>
+                <Button
+                  onClick={handleCreateBatch}
+                  disabled={invalidRange || isCreating}
+                  loading={isCreating}
+                >
                   Criar lote
                 </Button>
               </ResponsiveModalFooter>

@@ -66,6 +66,7 @@ import { cn, formatCurrency, comprovanteProxyUrl } from "@/lib/utils";
 import { ComprovanteStatusBadge } from "@/components/features/finance/comprovantes/ComprovanteStatusBadge";
 import { UploadComprovanteDialog } from "@/components/features/finance/comprovantes/UploadComprovanteDialog";
 import { useReceiptUploadStore } from "@/lib/store/useReceiptUploadStore";
+import { startBatchRun, useBatchRunStore } from "@/lib/store/useBatchRunStore";
 import {
   MatchReviewPanel,
   txCandidatesKey,
@@ -106,6 +107,17 @@ const TAB_STATUSES: Record<
 };
 
 const MISSING_PAGE = 50;
+const BULK_CONFIRM_RUN = "comprovantes-confirm";
+
+/** Como o comprovante aparece no painel de progresso. */
+const receiptLabel = (c: Comprovante) =>
+  [
+    c.matchedEntity ?? "Comprovante",
+    c.matchedAmount !== undefined ? formatCurrency(c.matchedAmount) : null,
+    c.totalPages > 1 ? `página ${c.pageNumber}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 /** Status que ainda pedem uma decisão humana. */
 const ACTIONABLE = new Set<ComprovanteMatchStatus>([
@@ -555,7 +567,9 @@ export default function ComprovantesPage() {
 
   // ── Selection (bulk confirm) ──────────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkBusy = useBatchRunStore((s) =>
+    s.runs.some((r) => r.key === BULK_CONFIRM_RUN),
+  );
   const selectable = tab === "pending" && canUpload;
 
   useEffect(() => setSelected(new Set()), [filters]);
@@ -581,11 +595,10 @@ export default function ComprovantesPage() {
       return next;
     });
 
-  const handleBulkConfirm = async () => {
+  const handleBulkConfirm = () => {
     if (!user || selected.size === 0) return;
-    setBulkBusy(true);
     const used = new Set<string>();
-    const done: { id: string; ids: string[] }[] = [];
+    const plan: { c: Comprovante; ids: string[]; txs: Transaction[] }[] = [];
     let skipped = 0;
 
     for (const id of selected) {
@@ -602,7 +615,27 @@ export default function ComprovantesPage() {
         skipped++;
         continue;
       }
-      try {
+      ids.forEach((x) => used.add(x));
+      plan.push({ c, ids, txs });
+    }
+
+    const skippedNote = skipped
+      ? `${skipped} ficaram para revisão individual.`
+      : undefined;
+    setSelected(new Set());
+    if (plan.length === 0) {
+      if (skippedNote) toast.info(skippedNote);
+      return;
+    }
+
+    void startBatchRun({
+      key: BULK_CONFIRM_RUN,
+      title: "Confirmando comprovantes",
+      items: plan,
+      id: ({ c }) => c.id,
+      label: ({ c }) => receiptLabel(c),
+      fallback: "Erro ao confirmar este comprovante.",
+      work: async ([{ c, ids, txs }]) => {
         await comprovanteService.confirmMatch(
           c.id,
           ids,
@@ -611,8 +644,6 @@ export default function ComprovantesPage() {
           c.storagePath,
           actor,
         );
-        ids.forEach((x) => used.add(x));
-        done.push({ id: c.id, ids });
         updateItem(c.id, (prev) => ({
           ...prev,
           matchStatus: "matched",
@@ -621,38 +652,43 @@ export default function ComprovantesPage() {
           isConsolidated: ids.length > 1,
           reviewedAt: new Date(),
         }));
-      } catch {
-        skipped++;
-      }
-    }
-
-    setBulkBusy(false);
-    setSelected(new Set());
-    invalidateCounts();
-    toast.success(
-      `${done.length} associaç${done.length !== 1 ? "ões confirmadas" : "ão confirmada"}` +
-        (skipped ? `. ${skipped} ficaram para revisão individual.` : "."),
-      done.length
-        ? {
+      },
+      onRound: ({ done, failed, complete }) => {
+        invalidateCounts();
+        setSelected(new Set(failed.map(({ c }) => c.id)));
+        if (!complete) return;
+        toast.success(
+          `${done.length} associaç${done.length !== 1 ? "ões confirmadas" : "ão confirmada"}.`,
+          {
+            description: skippedNote,
             action: {
               label: "Desfazer",
-              onClick: async () => {
-                for (const d of done) {
-                  await comprovanteService.removeMatch(
-                    d.id,
-                    d.ids,
-                    user.uid,
-                    actor,
-                    "pending_review",
-                  );
-                }
-                refresh();
-                invalidateCounts();
-              },
+              onClick: () =>
+                void startBatchRun({
+                  key: "comprovantes-confirm-undo",
+                  title: "Desfazendo associações",
+                  items: done,
+                  id: ({ c }) => c.id,
+                  label: ({ c }) => receiptLabel(c),
+                  fallback: "Erro ao desfazer esta associação.",
+                  work: ([{ c, ids }]) =>
+                    comprovanteService.removeMatch(
+                      c.id,
+                      ids,
+                      user.uid,
+                      actor,
+                      "pending_review",
+                    ),
+                  onRound: () => {
+                    refresh();
+                    invalidateCounts();
+                  },
+                }),
             },
-          }
-        : undefined,
-    );
+          },
+        );
+      },
+    });
   };
 
   // ── Review panel ──────────────────────────────────────────────────────────────
@@ -1595,7 +1631,8 @@ export default function ComprovantesPage() {
         onOpenChange={(o) => !autoBusy && setAutoConfirmOpen(o)}
         title="Confirmar automaticamente os pendentes"
         description="Associa sem revisão só os comprovantes com confiança Alta, sem empate, valor exato e beneficiário identificado por código de barras, CNPJ/CPF ou chave Pix (ou fornecedor marcado como de confiança). Cada associação fica na auditoria e pode ser removida depois. O resto continua na fila."
-        confirmText={autoBusy ? "Aplicando…" : "Aplicar regra"}
+        confirmText="Aplicar regra"
+        workingLabel="Conferindo os pendentes no servidor…"
         onConfirm={runAutoConfirm}
       />
 

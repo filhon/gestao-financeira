@@ -28,9 +28,40 @@ interface Submission {
   createdAt: string | null;
 }
 
-type PendingUpload = { key: string; name: string; error?: string };
+type PendingUpload = {
+  key: string;
+  file: File;
+  /** Bytes enviados; ao chegar a 100, o servidor está lendo a nota. */
+  percent: number;
+  error?: string;
+};
 
 const API = "/api/internal/expense-submission";
+
+/** `fetch` não informa o envio: só o XHR diz quantos bytes já saíram. */
+function postWithProgress(
+  body: FormData,
+  onProgress: (percent: number) => void,
+) {
+  return new Promise<{ ok: boolean; data: Submission & { error?: string } }>(
+    (resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", API);
+      xhr.responseType = "json";
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress((e.loaded / e.total) * 100);
+      };
+      xhr.onload = () =>
+        resolve({
+          ok: xhr.status >= 200 && xhr.status < 300,
+          data: xhr.response ?? {},
+        });
+      xhr.onerror = () =>
+        reject(new Error("Sem conexão. Confira a internet e tente de novo."));
+      xhr.send(body);
+    },
+  );
+}
 
 /** Foto de celular passa fácil de 5 MB: reduz para ~2000 px antes de subir. */
 async function shrink(file: File): Promise<Blob> {
@@ -90,42 +121,47 @@ export default function EnviarDespesaPage() {
       .catch(() => setState("invalid"));
   }, [token]);
 
-  const send = async (files: FileList | null) => {
-    for (const file of Array.from(files ?? [])) {
-      const key = `${file.name}-${Math.random()}`;
-      setUploads((u) => [...u, { key, name: file.name }]);
-      try {
-        const body = new FormData();
-        body.append("token", token);
-        const blob = await shrink(file);
-        body.append(
-          "file",
-          blob,
-          blob === file ? file.name : file.name.replace(/\.\w+$/, "") + ".jpg",
-        );
-        const res = await fetch(API, { method: "POST", body });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        setItems((list) => [{ ...data, stage: "Recebida" }, ...list]);
-        // Leitura com problema: já abre para o funcionário conferir.
-        if (data.flags.length) setOpenId(data.id);
-        setUploads((u) => u.filter((x) => x.key !== key));
-      } catch (error) {
-        setUploads((u) =>
-          u.map((x) =>
-            x.key === key
-              ? {
-                  ...x,
-                  error:
-                    error instanceof Error && error.message
-                      ? error.message
-                      : "Falhou. Tente de novo.",
-                }
-              : x,
-          ),
-        );
-      }
+  const patchUpload = (key: string, patch: Partial<PendingUpload>) =>
+    setUploads((u) => u.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+
+  /** Uma foto com erro fica na lista com a própria nova tentativa; as outras seguem. */
+  const sendOne = async (key: string, file: File) => {
+    patchUpload(key, { error: undefined, percent: 0 });
+    try {
+      const body = new FormData();
+      body.append("token", token);
+      const blob = await shrink(file);
+      body.append(
+        "file",
+        blob,
+        blob === file ? file.name : file.name.replace(/\.\w+$/, "") + ".jpg",
+      );
+      const { ok, data } = await postWithProgress(body, (percent) =>
+        patchUpload(key, { percent }),
+      );
+      if (!ok) throw new Error(data.error);
+      setItems((list) => [{ ...data, stage: "Recebida" }, ...list]);
+      // Leitura com problema: já abre para o funcionário conferir.
+      if (data.flags.length) setOpenId(data.id);
+      setUploads((u) => u.filter((x) => x.key !== key));
+    } catch (error) {
+      patchUpload(key, {
+        error:
+          error instanceof Error && error.message
+            ? error.message
+            : "Falhou. Tente de novo.",
+      });
     }
+  };
+
+  const send = async (files: FileList | null) => {
+    const added = Array.from(files ?? []).map((file) => ({
+      key: `${file.name}-${Math.random()}`,
+      file,
+      percent: 0,
+    }));
+    setUploads((u) => [...u, ...added]);
+    for (const { key, file } of added) await sendOne(key, file);
   };
 
   if (state === "loading")
@@ -219,17 +255,31 @@ export default function EnviarDespesaPage() {
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
                 )}
                 <span className="min-w-0 flex-1 truncate">
-                  {u.error ?? "Lendo a nota…"}
+                  {u.error
+                    ? `${u.file.name}: ${u.error}`
+                    : u.percent < 100
+                      ? `${u.file.name}: enviando ${Math.round(u.percent)}%`
+                      : `${u.file.name}: lendo a nota…`}
                 </span>
                 {u.error && (
-                  <button
-                    className="text-xs text-muted-foreground underline"
-                    onClick={() =>
-                      setUploads((list) => list.filter((x) => x.key !== u.key))
-                    }
-                  >
-                    Fechar
-                  </button>
+                  <>
+                    <button
+                      className="text-xs font-medium underline"
+                      onClick={() => void sendOne(u.key, u.file)}
+                    >
+                      Tentar de novo
+                    </button>
+                    <button
+                      className="text-xs text-muted-foreground underline"
+                      onClick={() =>
+                        setUploads((list) =>
+                          list.filter((x) => x.key !== u.key),
+                        )
+                      }
+                    >
+                      Fechar
+                    </button>
+                  </>
                 )}
               </li>
             ))}
