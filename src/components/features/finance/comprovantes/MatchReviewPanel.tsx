@@ -34,7 +34,7 @@ import { ComprovanteStatusBadge } from "./ComprovanteStatusBadge";
 import { ReadFieldsEditor } from "./ReadFieldsEditor";
 import { DocumentPreview } from "../DocumentPreview";
 import { Checkbox } from "@/components/ui/checkbox";
-import { distantPaymentDate } from "@/lib/matching/queue";
+import { distantPaymentDate, isFromBeneficiary } from "@/lib/matching/queue";
 import { DATE_TOLERANCE_DAYS } from "@/lib/matching/score";
 import {
   amountDifference,
@@ -178,10 +178,14 @@ function ReviewBody({
   const nearDate = onlyNearDate ? readDate : undefined;
   const readDay = readDate?.getTime();
   const nearDay = nearDate?.getTime();
+  // Sem beneficiário lido não há o que filtrar: a lista inteira fica disponível
+  // até a pessoa conferir e corrigir a leitura.
+  const [onlyBeneficiary, setOnlyBeneficiary] = useState(true);
+  const beneficiary = onlyBeneficiary ? c.matchedEntity : undefined;
 
   // Busca manual: sem termo, os mais próximos do valor lido aparecem primeiro;
-  // títulos que já têm comprovante vão para o fim. Com o filtro de data, só
-  // os pagos (ou a vencer) perto da data do comprovante.
+  // títulos que já têm comprovante vão para o fim. Com os filtros, só os do
+  // beneficiário e os pagos (ou a vencer) perto da data do comprovante.
   const searchResults = useMemo(() => {
     const terms = txSearch.toLowerCase().split(/\s+/).filter(Boolean);
     const target = c.matchedAmount;
@@ -192,6 +196,7 @@ function ReviewBody({
     return txCandidates
       .filter((t) => {
         if (shown.has(t.id)) return false;
+        if (beneficiary && !isFromBeneficiary(c, t)) return false;
         if (
           nearDate &&
           distantPaymentDate(nearDate, [t.paymentDate ?? t.dueDate])
@@ -219,9 +224,18 @@ function ReviewBody({
         // Parcelas do mesmo valor: a paga mais perto da data lida primeiro.
         return byAmount || dayGap(a) - dayGap(b);
       })
-      .slice(0, 30);
+      .slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txCandidates, txSearch, c.matchedAmount, readDay, nearDay, linkedKey]);
+  }, [
+    txCandidates,
+    txSearch,
+    c.matchedAmount,
+    readDay,
+    nearDay,
+    linkedKey,
+    beneficiary,
+    c.manualFields?.entityId,
+  ]);
 
   const effectiveTxs = manualTxs.length > 0 ? manualTxs : shownTxs;
   const actionable = canEdit && c.matchStatus !== "matched";
@@ -447,6 +461,7 @@ function ReviewBody({
             canEdit={canEdit}
             onPatch={(patch) => {
               setManualTxs([]);
+              setOnlyBeneficiary(true);
               onPatch(c.id, patch);
             }}
           />
@@ -589,6 +604,15 @@ function ReviewBody({
                   </button>
                 )}
               </div>
+              {c.matchedEntity && (
+                <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={onlyBeneficiary}
+                    onCheckedChange={(v) => setOnlyBeneficiary(v === true)}
+                  />
+                  Só de {c.matchedEntity}
+                </label>
+              )}
               {readDate && (
                 <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                   <Checkbox
@@ -613,17 +637,31 @@ function ReviewBody({
                     </div>
                   ) : (
                     <CommandEmpty>
-                      {nearDate ? (
+                      {beneficiary || nearDate ? (
                         <>
-                          Nenhum título perto de{" "}
-                          {format(nearDate, "dd/MM/yyyy")}.{" "}
-                          <button
-                            type="button"
-                            onClick={() => setOnlyNearDate(false)}
-                            className="underline underline-offset-2 hover:text-foreground"
-                          >
-                            Ver todas as datas
-                          </button>
+                          Nenhum título
+                          {beneficiary && ` de ${beneficiary}`}
+                          {nearDate &&
+                            ` perto de ${format(nearDate, "dd/MM/yyyy")}`}
+                          .{" "}
+                          {nearDate && (
+                            <button
+                              type="button"
+                              onClick={() => setOnlyNearDate(false)}
+                              className="underline underline-offset-2 hover:text-foreground"
+                            >
+                              Ver todas as datas
+                            </button>
+                          )}{" "}
+                          {beneficiary && (
+                            <button
+                              type="button"
+                              onClick={() => setOnlyBeneficiary(false)}
+                              className="underline underline-offset-2 hover:text-foreground"
+                            >
+                              Ver outros beneficiários
+                            </button>
+                          )}
                         </>
                       ) : (
                         "Nenhum título encontrado."

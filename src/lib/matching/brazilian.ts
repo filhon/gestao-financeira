@@ -188,6 +188,22 @@ export function extractEndToEndIds(folded: string): string[] {
   return [...ids];
 }
 
+/**
+ * Número de controle do Sispag: 15 dígitos após "controle" ou "CTRL". No texto
+ * do OCR os rótulos vêm numa coluna e os valores em outra, então o número pode
+ * estar longe do rótulo: vale o único de 15 dígitos sozinho no documento.
+ */
+// ponytail: só o formato do Itaú; em outro banco vale apenas o hash do arquivo
+export function extractControlNumber(text: string): string | undefined {
+  const labeled = text.match(/(?:controle|ctrl)\s*[:.-]?\s*(\d{15})(?!\d)/i);
+  if (labeled) return labeled[1];
+  if (!/\bcontrole\b/i.test(text)) return undefined;
+  const alone = new Set(
+    [...text.matchAll(/(?:^|\s)(\d{15})(?=\s|$)/g)].map((m) => m[1]),
+  );
+  return alone.size === 1 ? [...alone][0] : undefined;
+}
+
 // ── Valores monetários ────────────────────────────────────────────────────────
 
 /**

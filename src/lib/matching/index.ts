@@ -37,6 +37,7 @@ import type { Transaction } from "@/lib/types";
 import { parseReceipt, type ReceiptFacts } from "./receipt";
 import { scoreCandidates, type MatchOptions, type MatchOutcome } from "./score";
 
+export { extractControlNumber } from "./brazilian";
 export { parseReceipt, primaryAmount, primaryDate } from "./receipt";
 export type {
   ExtractedAmount,

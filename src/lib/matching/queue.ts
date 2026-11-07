@@ -4,8 +4,24 @@
  */
 
 import { DATE_TOLERANCE_DAYS } from "./score";
+import { normalize } from "./text";
 
 export type Suggested = { id: string; ids: string[]; score: number };
+
+/**
+ * O título é do beneficiário do comprovante? O cadastro informado na correção
+ * vale sobre o nome; título sem cadastro compara pelo nome.
+ */
+export function isFromBeneficiary(
+  c: { matchedEntity?: string; manualFields?: { entityId?: string } },
+  t: { entityId?: string; supplierOrClient?: string },
+): boolean {
+  const entityId = c.manualFields?.entityId;
+  if (entityId && t.entityId) return t.entityId === entityId;
+  return (
+    normalize(t.supplierOrClient ?? "") === normalize(c.matchedEntity ?? "")
+  );
+}
 
 /**
  * Cada título fica com uma sugestão só. Comprovantes são casados um a um, e
