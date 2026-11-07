@@ -178,12 +178,16 @@ interface TransactionDetailsDialogProps {
   focusAction?: "hold" | "promise" | null;
   /** Atraso médio do cliente (contas a receber). */
   punctuality?: { avgDays: number; count: number };
+  /** Aberto a partir da revisão de comprovante: a coluna de decisão fica à vista. */
+  beside?: boolean;
 }
 
 /**
  * Detalhe da conta, sempre como painel lateral (bottom sheet no celular), para
  * a lista de onde veio continuar visível. Anexos abrem numa segunda folha à
- * esquerda do painel, sem sair da página.
+ * esquerda do painel, sem sair da página. Com `beside`, o painel encosta na
+ * revisão de comprovante (largura e coluna de 400px de MatchReviewPanel) e o
+ * anexo abre dentro dele, porque à esquerda não sobra tela.
  */
 export function TransactionDetailsDialog({
   transaction: propTransaction,
@@ -194,6 +198,7 @@ export function TransactionDetailsDialog({
   onNavigate,
   focusAction = null,
   punctuality,
+  beside = false,
 }: TransactionDetailsDialogProps) {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
@@ -1122,7 +1127,11 @@ export function TransactionDetailsDialog({
         <ResponsiveModalContent
           // A folha do documento fica fora da caixa do painel: a rolagem vai
           // para o corpo, senão o overflow a cortaria.
-          sheetClassName="gap-0 overflow-visible p-0 max-md:pt-3"
+          sheetClassName={cn(
+            "gap-0 overflow-visible p-0 max-md:pt-3",
+            beside &&
+              "md:right-[max(400px,min(1120px,96vw,calc(100vw-42rem)))] md:max-w-[min(42rem,calc(100vw-400px))] lg:max-w-[min(42rem,calc(100vw-400px))]",
+          )}
           data-panel
           onEscapeKeyDown={(e) => {
             if (previewDoc) {
@@ -1409,7 +1418,11 @@ export function TransactionDetailsDialog({
               {previewDoc && (
                 <aside
                   aria-label={`Documento: ${previewDoc.name}`}
-                  className="absolute inset-0 z-10 flex flex-col bg-background shadow-xl duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] animate-in fade-in-0 slide-in-from-right-8 lg:left-auto lg:right-full lg:w-[min(56rem,calc(100vw-100%-1.5rem))] lg:border-l"
+                  className={cn(
+                    "absolute inset-0 z-10 flex flex-col bg-background shadow-xl duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] animate-in fade-in-0 slide-in-from-right-8",
+                    !beside &&
+                      "lg:left-auto lg:right-full lg:w-[min(56rem,calc(100vw-100%-1.5rem))] lg:border-l",
+                  )}
                 >
                   <div className="flex shrink-0 items-center gap-1 border-b px-3 py-2">
                     <Button

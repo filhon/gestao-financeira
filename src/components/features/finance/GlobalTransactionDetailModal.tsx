@@ -17,10 +17,11 @@ const TX_QUERY_KEYS = [
   "receivable-transactions",
   "overdue-transactions",
   "pending-approvals",
+  "tx-candidates",
 ];
 
 export function GlobalTransactionDetailModal() {
-  const { transaction, isOpen, close } = useTransactionDetailStore();
+  const { transaction, isOpen, beside, close } = useTransactionDetailStore();
   const { selectedCompany } = useCompany();
   const { user } = useAuth();
   const { onlyOwnPayables } = usePermissions();
@@ -47,6 +48,7 @@ export function GlobalTransactionDetailModal() {
       onClose={close}
       onUpdate={handleUpdate}
       costCenters={costCenters}
+      beside={beside}
     />
   );
 }

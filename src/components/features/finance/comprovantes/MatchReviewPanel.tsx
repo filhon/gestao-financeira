@@ -30,6 +30,7 @@ import { comprovanteService } from "@/lib/services/comprovanteService";
 import { transactionService } from "@/lib/services/transactionService";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
 import { ComprovanteStatusBadge } from "./ComprovanteStatusBadge";
 import { ReadFieldsEditor } from "./ReadFieldsEditor";
 import { DocumentPreview } from "../DocumentPreview";
@@ -331,8 +332,11 @@ function ReviewBody({
   }, [user, isProcessing, c.id, onDone]);
 
   // Atalhos: J/K navegam, Enter confirma, R rejeita. Campos de texto e botões
-  // focados mantêm o comportamento nativo.
+  // focados mantêm o comportamento nativo. Com os detalhes de um título abertos
+  // por cima, nenhum vale: Enter não pode confirmar uma associação escondida.
+  const detailsOpen = useTransactionDetailStore((s) => s.isOpen);
   useEffect(() => {
+    if (detailsOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement;
@@ -357,7 +361,14 @@ function ReviewBody({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onNavigate, hasConfirmTarget, canReject, handleConfirm, handleReject]);
+  }, [
+    detailsOpen,
+    onNavigate,
+    hasConfirmTarget,
+    canReject,
+    handleConfirm,
+    handleReject,
+  ]);
 
   const toggleManualTx = (tx: Transaction) => {
     setManualTxs((prev) => {
@@ -551,36 +562,50 @@ function ReviewBody({
                 {alternatives.map((alt) => {
                   const key = [...alt.transactionIds].sort().join(",");
                   const selected = key === selectedAltKey;
+                  const single = alt.transactions.length === 1;
                   return (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() =>
-                        setManualTxs(selected ? [] : alt.transactions)
-                      }
-                      className={cn(
-                        "w-full rounded-md border px-3 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        selected
-                          ? "border-primary bg-primary/5"
-                          : "border-border",
+                    <div key={key} className="relative">
+                      <button
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() =>
+                          setManualTxs(selected ? [] : alt.transactions)
+                        }
+                        className={cn(
+                          "w-full rounded-md border px-3 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          selected
+                            ? "border-primary bg-primary/5"
+                            : "border-border",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm font-medium">
+                            {alt.transactions[0].description}
+                            {!single &&
+                              ` e mais ${alt.transactions.length - 1}`}
+                          </span>
+                          <span className="shrink-0 font-financial text-sm">
+                            {formatCurrency(titlesTotal(alt.transactions))}
+                          </span>
+                        </div>
+                        <p
+                          className={cn(
+                            "mt-0.5 text-xs text-muted-foreground",
+                            single && "pr-20",
+                          )}
+                        >
+                          {alt.entityName ??
+                            alt.transactions[0].supplierOrClient}
+                          {alt.reason && ` · ${alt.reason}`}
+                        </p>
+                      </button>
+                      {single && (
+                        <DetailsLink
+                          tx={alt.transactions[0]}
+                          className="absolute bottom-2 right-3"
+                        />
                       )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {alt.transactions[0].description}
-                          {alt.transactions.length > 1 &&
-                            ` e mais ${alt.transactions.length - 1}`}
-                        </span>
-                        <span className="shrink-0 font-financial text-sm">
-                          {formatCurrency(titlesTotal(alt.transactions))}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {alt.entityName ?? alt.transactions[0].supplierOrClient}
-                        {alt.reason && ` · ${alt.reason}`}
-                      </p>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -671,46 +696,51 @@ function ReviewBody({
                   {searchResults.map((t) => {
                     const selected = manualTxs.some((m) => m.id === t.id);
                     return (
-                      <CommandItem
-                        key={t.id}
-                        value={t.id}
-                        onSelect={() => toggleManualTx(t)}
-                        aria-selected={selected}
-                        className={cn(
-                          "flex items-start gap-2",
-                          selected && "bg-primary/5",
-                        )}
-                      >
-                        <span
+                      <div key={t.id} className="relative">
+                        <CommandItem
+                          value={t.id}
+                          onSelect={() => toggleManualTx(t)}
+                          aria-selected={selected}
                           className={cn(
-                            "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border",
-                            selected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-muted-foreground",
+                            "flex items-start gap-2",
+                            selected && "bg-primary/5",
                           )}
                         >
-                          {selected && <CheckCircle2 className="h-3 w-3" />}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex justify-between gap-2">
-                            <span className="truncate text-sm">
-                              {t.description}
+                          <span
+                            className={cn(
+                              "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-muted-foreground",
+                            )}
+                          >
+                            {selected && <CheckCircle2 className="h-3 w-3" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex justify-between gap-2">
+                              <span className="truncate text-sm">
+                                {t.description}
+                              </span>
+                              <span className="shrink-0 font-financial text-sm">
+                                {formatCurrency(t.finalAmount ?? t.amount)}
+                              </span>
                             </span>
-                            <span className="shrink-0 font-financial text-sm">
-                              {formatCurrency(t.finalAmount ?? t.amount)}
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {t.supplierOrClient}
+                            </span>
+                            <span className="block pr-20 text-xs tabular-nums text-muted-foreground">
+                              {t.paymentDate
+                                ? `pago em ${format(t.paymentDate, "dd/MM/yyyy")}`
+                                : `vence em ${format(t.dueDate, "dd/MM/yyyy")} (não pago)`}
+                              {t.comprovanteId && " · já tem comprovante"}
                             </span>
                           </span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {t.supplierOrClient}
-                          </span>
-                          <span className="block text-xs tabular-nums text-muted-foreground">
-                            {t.paymentDate
-                              ? `pago em ${format(t.paymentDate, "dd/MM/yyyy")}`
-                              : `vence em ${format(t.dueDate, "dd/MM/yyyy")} (não pago)`}
-                            {t.comprovanteId && " · já tem comprovante"}
-                          </span>
-                        </span>
-                      </CommandItem>
+                        </CommandItem>
+                        <DetailsLink
+                          tx={t}
+                          className="absolute bottom-1.5 right-2"
+                        />
+                      </div>
                     );
                   })}
                 </CommandList>
@@ -758,6 +788,30 @@ function ReviewBody({
   );
 }
 
+/** Abre os detalhes do título ao lado do painel, sem fechar o comprovante. */
+function DetailsLink({
+  tx,
+  className,
+}: {
+  tx: Transaction;
+  className?: string;
+}) {
+  const openTransaction = useTransactionDetailStore((s) => s.openTransaction);
+  return (
+    <button
+      type="button"
+      onClick={() => openTransaction(tx, { beside: true })}
+      aria-label={`Ver detalhes de ${tx.description}`}
+      className={cn(
+        "shrink-0 rounded-sm text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        className,
+      )}
+    >
+      Ver detalhes
+    </button>
+  );
+}
+
 function TxRow({ tx }: { tx: Transaction }) {
   return (
     <li className="space-y-0.5 px-3 py-2">
@@ -767,12 +821,15 @@ function TxRow({ tx }: { tx: Transaction }) {
           {formatCurrency(tx.finalAmount ?? tx.amount)}
         </p>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {tx.supplierOrClient && `${tx.supplierOrClient} · `}
-        {tx.paymentDate
-          ? `pago em ${format(tx.paymentDate, "dd/MM/yyyy")}`
-          : `vence em ${format(tx.dueDate, "dd/MM/yyyy")} (autorizado, ainda não pago)`}
-      </p>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {tx.supplierOrClient && `${tx.supplierOrClient} · `}
+          {tx.paymentDate
+            ? `pago em ${format(tx.paymentDate, "dd/MM/yyyy")}`
+            : `vence em ${format(tx.dueDate, "dd/MM/yyyy")} (autorizado, ainda não pago)`}
+        </p>
+        <DetailsLink tx={tx} />
+      </div>
     </li>
   );
 }
