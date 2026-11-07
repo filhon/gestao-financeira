@@ -16,7 +16,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
-import { matchComprovante } from "@/lib/matching";
+import { extractControlNumber, matchComprovante } from "@/lib/matching";
 import type { Entity, ComprovanteMatchStatus } from "@/lib/types";
 import { GoogleGenAI } from "@google/genai";
 import { FieldValue } from "firebase-admin/firestore";
@@ -297,6 +297,29 @@ export async function POST(req: NextRequest) {
   // ── Text extraction / OCR ────────────────────────────────────────────────────
   const extractedText = await extractText(fileBuffer, mimeType);
 
+  // ── Dedup: mesmo número de controle, em qualquer status ──────────────────────
+  // O hash não pega o mesmo comprovante gerado de novo pelo banco.
+  const controlNumber = extractControlNumber(extractedText);
+  if (controlNumber) {
+    const sameControl = await adminDb
+      .collection("comprovantes")
+      .where("companyId", "==", companyId)
+      .where("controlNumber", "==", controlNumber)
+      .limit(1)
+      .get();
+    if (!sameControl.empty) {
+      const dup = sameControl.docs[0];
+      return NextResponse.json(
+        {
+          comprovanteId: dup.id,
+          duplicate: true,
+          matchStatus: dup.data().matchStatus,
+        },
+        { status: 200 },
+      );
+    }
+  }
+
   // ── Fetch candidates + cadastro (evidência de CNPJ/Pix/conta) ────────────────
   const [candidates, entities] = await Promise.all([
     fetchCandidateTransactions(companyId),
@@ -333,6 +356,7 @@ export async function POST(req: NextRequest) {
     storagePath,
     fileSize,
     fileHash,
+    ...(controlNumber && { controlNumber }),
     matchStatus,
     isConsolidated: best?.isConsolidated ?? false,
     extractedText,
@@ -367,7 +391,22 @@ export async function POST(req: NextRequest) {
     if (duplicate) docData.possibleDuplicateOf = duplicate.id;
   }
 
-  const docRef = await adminDb.collection("comprovantes").add(docData);
+  // ID derivado do controle: páginas lidas em paralelo com o mesmo número passam
+  // juntas pela consulta acima, mas só uma consegue criar o documento.
+  const comprovantes = adminDb.collection("comprovantes");
+  const docRef = controlNumber
+    ? comprovantes.doc(`${companyId}_${controlNumber}`)
+    : comprovantes.doc();
+  const ALREADY_EXISTS = 6;
+  try {
+    await docRef.create(docData);
+  } catch (err) {
+    if ((err as { code?: number }).code !== ALREADY_EXISTS) throw err;
+    return NextResponse.json(
+      { comprovanteId: docRef.id, duplicate: true },
+      { status: 200 },
+    );
+  }
 
   // ── Confirmação automática (regra estrita) ───────────────────────────────────
   const autoReason = best

@@ -8,9 +8,10 @@ import {
   accuracyByBand,
   distantPaymentDate,
   distributeSuggestions,
+  isFromBeneficiary,
   receiptFeedback,
 } from "../src/lib/matching/queue";
-import { matchComprovante } from "../src/lib/matching";
+import { extractControlNumber, matchComprovante } from "../src/lib/matching";
 import { matchStatement } from "../src/lib/matching/statement";
 import type { BankTransaction, Entity, Transaction } from "../src/lib/types";
 
@@ -231,4 +232,66 @@ Nome do recebedor: MISSAO XINGU`;
   );
   assert.equal(distantPaymentDate(undefined, [paidOn]), null, "sem data lida");
   console.log("check:matching-queue datas ok");
+}
+
+// ── Número de controle e beneficiário ─────────────────────────────────────────
+{
+  const ctl = "000009046871551";
+  assert.equal(extractControlNumber(`ID: E60 controle: ${ctl} transação`), ctl);
+  assert.equal(
+    extractControlNumber(`via Sispag, CTRL 001492662428818.`),
+    "001492662428818",
+  );
+  assert.equal(
+    extractControlNumber(`DY5PXFIG3AMcontrole:${ctl}transação efetuada`),
+    ctl,
+    "PDF com o texto colado",
+  );
+  assert.equal(
+    extractControlNumber(`controle\nHEBRON\n03.458.134/0001-49\n${ctl}\nFim`),
+    ctl,
+    "OCR com rótulos e valores em colunas",
+  );
+  assert.equal(
+    extractControlNumber(`controle\n${ctl}\n271793382417389`),
+    ctl,
+    "colado ao rótulo vence os soltos",
+  );
+  assert.equal(
+    extractControlNumber(`controle\nA\n${ctl}\n271793382417389`),
+    undefined,
+    "dois candidatos soltos: não adivinha",
+  );
+  assert.equal(extractControlNumber(`Autenticação\n${ctl}`), undefined);
+  assert.equal(
+    extractControlNumber(
+      `controle\n34191090086144173124971066670002116210000074240`,
+    ),
+    undefined,
+    "código de barras não é controle",
+  );
+
+  const read = { matchedEntity: "Missão do Céu" };
+  assert.ok(isFromBeneficiary(read, { supplierOrClient: "MISSAO DO CEU" }));
+  assert.ok(!isFromBeneficiary(read, { supplierOrClient: "Outro" }));
+  assert.ok(!isFromBeneficiary(read, {}), "título sem fornecedor");
+  const fixed = {
+    matchedEntity: "Missão do Céu",
+    manualFields: { entityId: "e1" },
+  };
+  assert.ok(
+    isFromBeneficiary(fixed, {
+      entityId: "e1",
+      supplierOrClient: "Nome antigo",
+    }),
+    "cadastro corrigido vale sobre o nome",
+  );
+  assert.ok(
+    !isFromBeneficiary(fixed, {
+      entityId: "e2",
+      supplierOrClient: "Missão do Céu",
+    }),
+  );
+  assert.ok(isFromBeneficiary(fixed, { supplierOrClient: "Missão do Céu" }));
+  console.log("check:matching-queue controle e beneficiário ok");
 }

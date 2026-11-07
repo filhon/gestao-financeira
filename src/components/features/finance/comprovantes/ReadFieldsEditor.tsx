@@ -172,7 +172,7 @@ export function ReadFieldsEditor({ c, insight, canEdit, onPatch }: Props) {
             {tag(corrected?.date)}
           </dd>
           <dt className="text-muted-foreground">Beneficiário</dt>
-          <dd className="min-w-0 break-words">
+          <dd className="min-w-0 wrap-break-word">
             {c.matchedEntity ? (
               <>
                 {c.matchedEntity}
@@ -239,7 +239,7 @@ export function ReadFieldsEditor({ c, insight, canEdit, onPatch }: Props) {
             </Button>
           </PopoverTrigger>
           <PopoverContent
-            className="w-[var(--radix-popover-trigger-width)] p-0"
+            className="w-(--radix-popover-trigger-width) p-0"
             align="start"
           >
             <Command>

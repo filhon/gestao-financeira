@@ -632,7 +632,7 @@ service cloud.firestore {
           'matchedAmount', 'matchedDate', 'matchedEntity',
           'matchReasons', 'matchIsAmbiguous', 'matchAlternatives',
           'matchSignals', 'possibleDuplicateOf', 'autoConfirmReason', 'manualFields',
-          'fileHash', 'storagePath', 'uploadedBy', 'companyId'
+          'fileHash', 'controlNumber', 'storagePath', 'uploadedBy', 'companyId'
         ]) &&
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['suggestedTransactionId']) ||
          request.resource.data.suggestedTransactionId == null) &&

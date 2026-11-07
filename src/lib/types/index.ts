@@ -838,6 +838,7 @@ export interface Comprovante {
   };
   extractedText?: string; // Raw text extracted from the PDF page
   fileHash?: string; // SHA-256 of the page blob — used to detect duplicate uploads
+  controlNumber?: string; // Número de controle lido: não importa o mesmo duas vezes
 
   // Metadata
   uploadedBy: string; // User ID
