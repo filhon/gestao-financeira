@@ -64,6 +64,11 @@ const convertDates = (data: DocumentData): Comprovante => ({
   uploadedAt: (data.uploadedAt as Timestamp)?.toDate?.() ?? new Date(),
   reviewedAt: (data.reviewedAt as Timestamp)?.toDate?.(),
   matchedDate: (data.matchedDate as Timestamp)?.toDate?.(),
+  manualFields: data.manualFields && {
+    ...data.manualFields,
+    date: (data.manualFields.date as Timestamp)?.toDate?.(),
+    at: (data.manualFields.at as Timestamp)?.toDate?.() ?? new Date(),
+  },
   createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
   updatedAt: (data.updatedAt as Timestamp)?.toDate?.() ?? new Date(),
 });
