@@ -105,6 +105,7 @@ import { entityService } from "@/lib/services/entityService";
 import { dashboardService } from "@/lib/services/dashboardService";
 import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import { friendlyError } from "@/lib/errors";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { reviveTransaction } from "@/hooks/useSearch";
 import { AddToBatchDialog } from "@/components/features/finance/AddToBatchDialog";
 import type { Transaction } from "@/lib/types";
@@ -869,7 +870,6 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     "pay" | "batch" | "revert" | null
   >(null);
   const [bulkDate, setBulkDate] = useState<Date>(new Date());
-  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   const bulkPayable = selectedRows.filter(
     (t) => t.status !== "paid" && !t.paymentHold && !pendingActions.has(t.id),
@@ -879,61 +879,75 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
     (t) => t.status === "paid" && !pendingActions.has(t.id),
   );
 
-  const runBulk = async (
-    fn: () => Promise<void>,
-    success: string,
-    fail: string,
+  // Em fatias: a função grava cada uma inteira ou nada, e a que falhar é
+  // refeita conta a conta para mostrar qual causou o erro. A seleção fica com
+  // as que faltam.
+  const runBulk = (
+    action: string,
+    title: string,
+    rows: Transaction[],
+    update: (ids: string[]) => Promise<void>,
+    success: (count: number) => string,
+    fallback: string,
   ) => {
-    setIsBulkProcessing(true);
-    try {
-      await fn();
-      toast.success(success);
-      setBulkDialog(null);
-      setSelectedIds(new Set());
-      refresh();
-    } catch (error) {
-      toast.error(friendlyError(error, fail));
-    } finally {
-      setIsBulkProcessing(false);
-    }
+    setBulkDialog(null);
+    setSelectedIds(new Set());
+    void startBatchRun<Transaction>({
+      key: `tx-bulk-${type}-${action}`,
+      title,
+      items: rows,
+      id: (t) => t.id,
+      label: (t) => `${t.description} · ${formatCurrency(t.amount)}`,
+      chunkSize: 25,
+      fallback,
+      work: (chunk) => update(chunk.map((t) => t.id)),
+      onRound: ({ done, failed, complete }) => {
+        refresh();
+        setSelectedIds(new Set(failed.map((t) => t.id)));
+        if (complete) toast.success(success(done.length));
+      },
+    });
   };
 
-  const bulkPay = () =>
+  const bulkPay = () => {
+    if (!actor || !companyId) return;
+    const paymentDate = bulkDate;
     runBulk(
-      async () => {
-        if (!actor || !companyId || bulkPayable.length === 0) {
-          throw new Error("Nenhuma conta elegível para pagamento selecionada.");
-        }
-        // A baixa não é recusada por saldo: a conta já é devida. Quando o
-        // pagamento cai em exercício sem orçamento, o lançamento fica marcado.
-        await transactionService.updateBatch(
-          bulkPayable.map((t) => t.id),
-          { status: "paid", paymentDate: bulkDate },
+      "pay",
+      "Pagando contas",
+      bulkPayable,
+      // A baixa não é recusada por saldo: a conta já é devida. Quando o
+      // pagamento cai em exercício sem orçamento, o lançamento fica marcado.
+      (ids) =>
+        transactionService.updateBatch(
+          ids,
+          { status: "paid", paymentDate },
           actor,
           companyId,
           { enforce: false },
-        );
-      },
-      `${bulkPayable.length} conta(s) paga(s)!`,
-      "Erro ao realizar pagamento em lote.",
+        ),
+      (count) => `${count} conta(s) paga(s)!`,
+      "Erro ao realizar o pagamento.",
     );
+  };
 
-  const bulkRevert = () =>
+  const bulkRevert = () => {
+    if (!actor || !companyId) return;
     runBulk(
-      async () => {
-        if (!actor || !companyId || bulkRevertable.length === 0) {
-          throw new Error("Nenhuma conta paga selecionada para reversão.");
-        }
-        await transactionService.updateBatch(
-          bulkRevertable.map((t) => t.id),
+      "revert",
+      "Revertendo pagamentos",
+      bulkRevertable,
+      (ids) =>
+        transactionService.updateBatch(
+          ids,
           { status: "draft" },
           actor,
           companyId,
-        );
-      },
-      `${bulkRevertable.length} pagamento(s) revertido(s)!`,
-      "Erro ao reverter pagamentos em lote.",
+        ),
+      (count) => `${count} pagamento(s) revertido(s)!`,
+      "Erro ao reverter o pagamento.",
     );
+  };
 
   const openBatchDialog = () => setBulkDialog("batch");
 
@@ -2044,13 +2058,7 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             <Button variant="outline" onClick={() => setBulkDialog(null)}>
               Cancelar
             </Button>
-            <Button
-              onClick={bulkPay}
-              disabled={isBulkProcessing || bulkPayable.length === 0}
-            >
-              {isBulkProcessing && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
+            <Button onClick={bulkPay} disabled={bulkPayable.length === 0}>
               Confirmar pagamento
             </Button>
           </ResponsiveModalFooter>
@@ -2061,9 +2069,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         open={bulkDialog === "batch"}
         onOpenChange={(o) => !o && setBulkDialog(null)}
         transactions={selectedRows}
-        onDone={() => {
-          setBulkDialog(null);
-          setSelectedIds(new Set());
+        onDone={(failedIds) => {
+          setSelectedIds(new Set(failedIds));
           refresh();
         }}
       />
@@ -2087,11 +2094,8 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
             <Button
               variant="destructive"
               onClick={bulkRevert}
-              disabled={isBulkProcessing}
+              disabled={bulkRevertable.length === 0}
             >
-              {isBulkProcessing && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
               Reverter
             </Button>
           </ResponsiveModalFooter>

@@ -60,11 +60,13 @@ const withFieldDeletions = (
 const runBatched = async <T>(
   items: T[],
   apply: (batch: ReturnType<typeof writeBatch>, item: T) => void,
+  onProgress?: (written: number, total: number) => void,
 ): Promise<void> => {
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = writeBatch(db);
     items.slice(i, i + BATCH_SIZE).forEach((item) => apply(batch, item));
     await batch.commit();
+    onProgress?.(Math.min(i + BATCH_SIZE, items.length), items.length);
   }
 };
 
@@ -82,6 +84,7 @@ export const reconciliationSessionService = {
   async mergeItems(
     companyId: string,
     transactions: BankTransaction[],
+    onProgress?: (written: number, total: number) => void,
   ): Promise<{ added: number; skipped: number; items: BankTransaction[] }> {
     const colRef = this.getItemsCollection(companyId);
     const existingSnap = await getDocs(colRef);
@@ -92,9 +95,13 @@ export const reconciliationSessionService = {
       transactions,
     );
 
-    await runBatched(newItems, (batch, tx) => {
-      batch.set(doc(colRef, tx.id), serializeItem(tx));
-    });
+    await runBatched(
+      newItems,
+      (batch, tx) => {
+        batch.set(doc(colRef, tx.id), serializeItem(tx));
+      },
+      onProgress,
+    );
 
     return {
       added: newItems.length,
@@ -148,13 +155,14 @@ export const reconciliationSessionService = {
   async clearSession(
     companyId: string,
     bankAccountId: string | null,
+    onProgress?: (written: number, total: number) => void,
   ): Promise<void> {
     const colRef = this.getItemsCollection(companyId);
     const snap = await getDocs(colRef);
     const docs = snap.docs.filter(
       (d) => (d.data().bankAccountId ?? null) === bankAccountId,
     );
-    await runBatched(docs, (batch, d) => batch.delete(d.ref));
+    await runBatched(docs, (batch, d) => batch.delete(d.ref), onProgress);
   },
 
   /** Linhas de uma conta só: a posição de uma aplicação fora da conciliação. */

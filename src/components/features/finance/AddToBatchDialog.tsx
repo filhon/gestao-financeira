@@ -15,7 +15,8 @@ import {
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { paymentBatchService } from "@/lib/services/paymentBatchService";
-import { friendlyError } from "@/lib/errors";
+import { friendlyError, userError } from "@/lib/errors";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { formatCurrency } from "@/lib/utils";
 import type { PaymentBatch, Transaction } from "@/lib/types";
 
@@ -29,7 +30,8 @@ export function AddToBatchDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   transactions: Transaction[];
-  onDone: () => void;
+  /** Ao fim de cada rodada, com as contas que ficaram de fora. */
+  onDone: (failedIds: string[]) => void;
 }) {
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
@@ -49,19 +51,34 @@ export function AddToBatchDialog({
     if (!companyId || !user) return;
     setIsProcessing(true);
     try {
-      if (transactions.some((t) => t.status !== "draft")) {
-        throw new Error(
-          "Apenas transações em rascunho podem ser adicionadas ao lote.",
-        );
-      }
       let id = batchId;
       let name = openBatches.find((b) => b.id === batchId)?.name;
       if (!id) {
         ({ id, name } = await paymentBatchService.create(companyId, user.uid));
       }
-      await paymentBatchService.addTransactions(id, transactions);
-      toast.success(`Transações adicionadas ao lote ${name}.`);
-      onDone();
+      const targetId = id;
+      onOpenChange(false);
+      // Fatia recusada é refeita conta a conta: a que não pode entrar aparece
+      // com o motivo, e as outras entram.
+      void startBatchRun<Transaction>({
+        key: `add-to-batch-${targetId}`,
+        title: `Adicionando ao lote ${name}`,
+        items: transactions,
+        id: (t) => t.id,
+        label: (t) => `${t.description} · ${formatCurrency(t.amount)}`,
+        chunkSize: 100,
+        fallback: "Erro ao adicionar ao lote.",
+        work: async (chunk) => {
+          if (chunk.some((t) => t.status !== "draft")) {
+            throw userError("Só conta em rascunho pode entrar em lote.");
+          }
+          await paymentBatchService.addTransactions(targetId, chunk);
+        },
+        onRound: ({ failed, complete }) => {
+          onDone(failed.map((t) => t.id));
+          if (complete) toast.success(`Transações adicionadas ao lote ${name}.`);
+        },
+      });
     } catch (error) {
       toast.error(friendlyError(error, "Erro ao adicionar ao lote."));
     } finally {

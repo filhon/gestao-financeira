@@ -26,6 +26,7 @@ import currency from "currency.js";
 import { startOfDay } from "date-fns";
 import { PaymentBatch, PaymentBatchStatus, Transaction } from "@/lib/types";
 import { auditService } from "@/lib/services/auditService";
+import { userError } from "@/lib/errors";
 
 const COLLECTION_NAME = "payment_batches";
 const TRANSACTIONS_COLLECTION = "transactions";
@@ -34,6 +35,14 @@ const TRANSACTIONS_COLLECTION = "transactions";
 export interface BatchActor {
   uid: string;
   email: string;
+}
+
+/** Conta do lote a marcar como paga, com o dia que a baixa vai registrar. */
+export interface PaymentToConfirm {
+  id: string;
+  description: string;
+  amount: number;
+  day: number;
 }
 
 export const BATCH_STATUSES: PaymentBatchStatus[] = [
@@ -467,7 +476,7 @@ export const paymentBatchService = {
   addTransactions: async (batchId: string, transactions: Transaction[]) => {
     const held = transactions.filter((t) => t.paymentHold);
     if (held.length > 0) {
-      throw new Error(
+      throw userError(
         `${held.length} conta(s) com pagamento bloqueado não podem entrar em lote.`,
       );
     }
@@ -549,10 +558,11 @@ export const paymentBatchService = {
     const newIds = batchData.transactionIds.filter(
       (id) => !idsToRemove.has(id),
     );
-    const amountToRemove = transactions.reduce(
-      (acc, t) => acc.add(effectiveAmount(t)),
-      currency(0),
-    );
+    // Só o que ainda está no lote: repetir depois de perder a resposta não pode
+    // descontar o total duas vezes.
+    const amountToRemove = transactions
+      .filter((t) => batchData.transactionIds.includes(t.id))
+      .reduce((acc, t) => acc.add(effectiveAmount(t)), currency(0));
 
     batch.update(batchRef, {
       transactionIds: newIds,
@@ -860,14 +870,12 @@ export const paymentBatchService = {
   },
 
   /**
-   * Gestor confirma que todos os pagamentos do lote saíram. As transações vão
-   * primeiro (idempotente, em partes); a troca de status do lote vem por
-   * último e só acontece uma vez.
+   * Gestor confirma que todos os pagamentos do lote saíram. Devolve as contas a
+   * baixar e as duas etapas, para a tela mostrar o progresso e refazer só a
+   * conta que falhar. As transações vão primeiro (idempotente, em partes); a
+   * troca de status do lote vem por último e só acontece uma vez.
    */
-  confirmPayments: async (
-    batchId: string,
-    actor: BatchActor,
-  ): Promise<{ count: number; total: number }> => {
+  planPayments: async (batchId: string, actor: BatchActor) => {
     const batch = await loadBatch(batchId);
     assertStatus(batch, ["authorized"]);
 
@@ -879,52 +887,69 @@ export const paymentBatchService = {
     const released = startOfDay(
       (batch.authorizedAt as Timestamp | undefined)?.toDate() ?? today,
     );
-    const byDay = new Map<number, string[]>();
+    const items: PaymentToConfirm[] = [];
     for (const tDoc of tSnap.docs) {
       const t = tDoc.data();
       if (t.status === "paid") continue;
       const due = startOfDay((t.dueDate as Timestamp)?.toDate() ?? today);
-      const day = Math.min(
-        Math.max(due.getTime(), released.getTime()),
-        today.getTime(),
-      );
-      byDay.set(day, [...(byDay.get(day) ?? []), tDoc.id]);
+      items.push({
+        id: tDoc.id,
+        description: t.description,
+        amount: t.amount,
+        day: Math.min(
+          Math.max(due.getTime(), released.getTime()),
+          today.getTime(),
+        ),
+      });
     }
     // A baixa passa pela função: as rules não deixam o cliente gravar
     // `paymentDate`, e sem ela o lote ficava pago sem data.
     const { transactionService } = await import(
       "@/lib/services/transactionService"
     );
-    for (const [day, ids] of byDay) {
-      await transactionService.updateBatch(
-        ids,
-        { status: "paid", paymentDate: new Date(day) },
-        actor,
-        batch.companyId,
-        { enforce: false },
-      );
-    }
-    // Só nas que o lote pagou agora: as baixadas uma a uma guardam quem e quando.
-    await commitInChunks(
-      [...byDay.values()]
-        .flat()
-        .map((id) => [
-          doc(db, TRANSACTIONS_COLLECTION, id),
-          { releasedBy: actor.uid, releasedAt: serverTimestamp() },
-        ]),
-    );
+    // Uma fatia pode ter dias diferentes: o que já gravou não repete quando ela
+    // é refeita conta a conta.
+    const paid = new Set<string>();
 
-    const data = await transitionBatch(batchId, ["authorized"], () => ({
-      status: "paid",
-      paidBy: actor.uid,
-      paidAt: serverTimestamp(),
-    }));
-
-    logBatch(data.companyId, actor, "pay", batchId, {
-      transactionCount: tSnap.size,
-      totalAmount: data.totalAmount,
-    });
-    return { count: tSnap.size, total: data.totalAmount };
+    return {
+      items,
+      count: tSnap.size,
+      total: batch.totalAmount,
+      pay: async (chunk: PaymentToConfirm[]) => {
+        const byDay = new Map<number, string[]>();
+        for (const { id, day } of chunk) {
+          if (!paid.has(id)) byDay.set(day, [...(byDay.get(day) ?? []), id]);
+        }
+        for (const [day, ids] of byDay) {
+          await transactionService.updateBatch(
+            ids,
+            { status: "paid", paymentDate: new Date(day) },
+            actor,
+            batch.companyId,
+            { enforce: false },
+          );
+          ids.forEach((id) => paid.add(id));
+        }
+      },
+      finish: async () => {
+        // Só nas que o lote pagou agora: as baixadas uma a uma guardam quem e quando.
+        await commitInChunks(
+          items.map(({ id }) => [
+            doc(db, TRANSACTIONS_COLLECTION, id),
+            { releasedBy: actor.uid, releasedAt: serverTimestamp() },
+          ]),
+        );
+        const data = await transitionBatch(batchId, ["authorized"], () => ({
+          status: "paid",
+          paidBy: actor.uid,
+          paidAt: serverTimestamp(),
+        }));
+        logBatch(data.companyId, actor, "pay", batchId, {
+          transactionCount: tSnap.size,
+          totalAmount: data.totalAmount,
+        });
+      },
+    };
   },
 
   /**

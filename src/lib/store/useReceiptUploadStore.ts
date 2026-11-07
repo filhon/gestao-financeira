@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
-import { ref, uploadBytes, deleteObject } from "firebase/storage";
+import { ref, uploadBytesResumable, deleteObject } from "firebase/storage";
+import { connectionAwareError } from "@/lib/errors";
 import { storage } from "@/lib/firebase/client";
 import { splitPdfPages } from "@/lib/pdfUtils";
 import { comprovanteService } from "@/lib/services/comprovanteService";
@@ -18,6 +19,9 @@ interface PageJob {
   fileName: string;
   fileHash: string;
 }
+
+/** Página que não foi gravada, com o motivo. */
+export type FailedPage = PageJob & { message: string };
 
 interface UploadContext {
   companyId: string;
@@ -36,11 +40,15 @@ interface ReceiptUploadState {
   total: number;
   processed: number;
   results: UploadedReceipt[];
-  failures: PageJob[];
+  failures: FailedPage[];
   duplicates: number;
+  /** Bytes das páginas desta rodada: o envio é real, a leitura depois não informa. */
+  bytesSent: number;
+  bytesTotal: number;
   setDialogOpen: (open: boolean) => void;
   start: (files: File[], ctx: UploadContext) => Promise<void>;
-  retryFailures: (ctx: UploadContext) => Promise<void>;
+  /** Refaz uma página; sem ela, todas as que falharam. */
+  retryFailures: (ctx: UploadContext, page?: FailedPage) => Promise<void>;
   patchResults: (patches: Record<string, Partial<Comprovante>>) => void;
   reset: () => void;
 }
@@ -79,6 +87,7 @@ async function processPage(
   job: PageJob,
   ctx: UploadContext,
   batchId: string,
+  onBytes: (delta: number) => void,
 ): Promise<UploadedReceipt | null> {
   const ext = job.mimeType.startsWith("image/")
     ? job.mimeType.split("/")[1]
@@ -89,7 +98,15 @@ async function processPage(
   );
 
   try {
-    await uploadBytes(storageRef, job.blob, { contentType: job.mimeType });
+    const task = uploadBytesResumable(storageRef, job.blob, {
+      contentType: job.mimeType,
+    });
+    let sent = 0;
+    task.on("state_changed", (s) => {
+      onBytes(s.bytesTransferred - sent);
+      sent = s.bytesTransferred;
+    });
+    await task;
     const resp = await fetch("/api/internal/comprovantes/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -166,6 +183,8 @@ const INITIAL = {
   results: [],
   failures: [],
   duplicates: 0,
+  bytesSent: 0,
+  bytesTotal: 0,
 };
 
 /**
@@ -175,11 +194,17 @@ const INITIAL = {
 export const useReceiptUploadStore = create<ReceiptUploadState>((set, get) => {
   const runJobs = async (jobs: PageJob[], ctx: UploadContext) => {
     const batchId = get().batchId!;
-    set({ phase: "Lendo comprovantes" });
+    set({
+      phase: "Lendo comprovantes",
+      bytesSent: 0,
+      bytesTotal: jobs.reduce((sum, job) => sum + job.blob.size, 0),
+    });
 
     await runPool(jobs, CONCURRENCY, async (job) => {
       try {
-        const r = await processPage(job, ctx, batchId);
+        const r = await processPage(job, ctx, batchId, (delta) =>
+          set((s) => ({ bytesSent: s.bytesSent + delta })),
+        );
         set((s) =>
           r
             ? { results: [...s.results, r], processed: s.processed + 1 }
@@ -188,7 +213,16 @@ export const useReceiptUploadStore = create<ReceiptUploadState>((set, get) => {
       } catch (err) {
         console.error(`[receipt-upload] ${failureLabel(job)}:`, err);
         set((s) => ({
-          failures: [...s.failures, job],
+          failures: [
+            ...s.failures,
+            {
+              ...job,
+              message: connectionAwareError(
+                err,
+                "Não foi possível ler esta página.",
+              ),
+            },
+          ],
           processed: s.processed + 1,
         }));
       }
@@ -328,12 +362,12 @@ export const useReceiptUploadStore = create<ReceiptUploadState>((set, get) => {
       }
     },
 
-    async retryFailures(ctx) {
-      const jobs = get().failures;
+    async retryFailures(ctx, page) {
+      const jobs = page ? [page] : get().failures;
       if (!jobs.length || get().status === "processing") return;
       set((s) => ({
         status: "processing",
-        failures: [],
+        failures: s.failures.filter((f) => !jobs.includes(f)),
         processed: s.processed - jobs.length,
       }));
       window.addEventListener("beforeunload", warnBeforeUnload);

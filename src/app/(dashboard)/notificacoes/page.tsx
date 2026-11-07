@@ -153,13 +153,17 @@ export default function NotificationsPage() {
     );
 
   const markRead = async (ids: string[]) => {
-    try {
-      await Promise.all(ids.map((id) => notificationService.markAsRead(id)));
-      setNotifications((prev) =>
-        prev.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)),
-      );
-    } catch (e) {
-      console.error("Error marking notification as read:", e);
+    const results = await Promise.allSettled(
+      ids.map((id) => notificationService.markAsRead(id)),
+    );
+    // A que falhou continua não lida na lista, e abrir de novo refaz só ela.
+    const marked = ids.filter((_, i) => results[i].status === "fulfilled");
+    setNotifications((prev) =>
+      prev.map((n) => (marked.includes(n.id) ? { ...n, read: true } : n)),
+    );
+    const failure = results.find((r) => r.status === "rejected");
+    if (failure) {
+      console.error("Error marking notification as read:", failure.reason);
       toast.error("Não foi possível marcar como lida.");
     }
   };

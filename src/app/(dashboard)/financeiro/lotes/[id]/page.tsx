@@ -19,6 +19,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -257,21 +258,28 @@ export default function PaymentBatchPage() {
 
   // ── Ações nas transações ────────────────────────────────────────────────
 
-  const handleRemove = async () => {
+  const handleRemove = () => {
     const toRemove = transactions.filter((t) => removeIds.includes(t.id));
-    try {
-      await paymentBatchService.removeTransactions(batch.id, toRemove);
-      toast.success(
-        `${plural(toRemove.length, "transação removida", "transações removidas")} do lote`,
-      );
-      setRemoveIds([]);
-      setSelectedIds(new Set());
-      refresh();
-    } catch (error) {
-      console.error("Error removing transactions", error);
-      toast.error(errorMessage(error, "Erro ao remover transações"));
-      throw error;
-    }
+    setRemoveIds([]);
+    setSelectedIds(new Set());
+    void startBatchRun<Transaction>({
+      key: `batch-remove-${batch.id}`,
+      title: "Removendo do lote",
+      items: toRemove,
+      id: (t) => t.id,
+      label: (t) => `${t.description} · ${formatCurrency(t.amount)}`,
+      chunkSize: 100,
+      fallback: "Erro ao remover do lote",
+      work: (chunk) => paymentBatchService.removeTransactions(batch.id, chunk),
+      onRound: ({ done, failed, complete }) => {
+        refresh();
+        setSelectedIds(new Set(failed.map((t) => t.id)));
+        if (complete)
+          toast.success(
+            `${plural(done.length, "transação removida", "transações removidas")} do lote`,
+          );
+      },
+    });
   };
 
   const handleAdd = async (tx: Transaction) => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -107,7 +108,7 @@ export default function AdminFeedbacksPage() {
   const loadFeedbacks = async () => {
     try {
       setIsLoading(true);
-      const data = await feedbackService.getAll();
+      const data = await trackLoad(feedbackService.getAll());
       setFeedbacks(data);
     } catch (error) {
       console.error("Error loading feedbacks:", error);

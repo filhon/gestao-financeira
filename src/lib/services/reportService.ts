@@ -213,6 +213,7 @@ export type PaymentsExportContext = ReportContext & {
   accountOf?: (t: Transaction) => string;
   /** Anexa os comprovantes ao PDF. */
   withReceipts?: boolean;
+  onReceiptProgress?: (current: number, total: number) => void;
 };
 
 type PaymentKey =
@@ -315,13 +316,17 @@ async function appendReceipts(
   pdf: ArrayBuffer,
   lines: PaymentLine[],
   numberOf: (l: PaymentLine) => number,
+  onProgress?: (current: number, total: number) => void,
 ) {
   const { PDFDocument, StandardFonts } = await import("pdf-lib");
   const out = await PDFDocument.load(pdf);
   const font = await out.embedFont(StandardFonts.Helvetica);
   const [A4W, A4H] = [595.28, 841.89];
-  let failed = 0;
-  for (const l of lines) {
+  const failed: string[] = [];
+  const failedName = (l: PaymentLine) =>
+    `Anexo ${numberOf(l)}: ${l.tx.description ?? "sem descrição"}`;
+  for (const [index, l] of lines.entries()) {
+    onProgress?.(index + 1, lines.length);
     const caption = latin1(
       `Anexo ${numberOf(l)}  -  ${format(l.date, "dd/MM/yyyy")}  -  ${formatCurrency(l.amount)}  -  ${l.tx.description ?? ""}`,
     ).slice(0, 120);
@@ -356,11 +361,11 @@ async function appendReceipts(
           height: img.height * scale,
         });
       } else {
-        failed++;
+        failed.push(failedName(l));
       }
     } catch (error) {
       console.warn("Comprovante fora do PDF", l.tx.id, error);
-      failed++;
+      failed.push(failedName(l));
     }
   }
   return { bytes: await out.save(), failed };
@@ -1523,7 +1528,7 @@ export const reportService = {
   generatePaymentsPDF: async (
     report: PaymentsReport,
     ctx: PaymentsExportContext,
-  ): Promise<{ failed: number }> => {
+  ): Promise<{ failed: string[] }> => {
     const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF();
     const reportFont = await ensureReportFont(doc);
@@ -1601,12 +1606,13 @@ export const reportService = {
     const pdf = doc.output("arraybuffer");
     if (annex.size === 0) {
       downloadBlob(new Blob([pdf], { type: "application/pdf" }), name);
-      return { failed: 0 };
+      return { failed: [] };
     }
     const { bytes, failed } = await appendReceipts(
       pdf,
       report.lines.filter((l) => annex.has(l.tx.id)),
       (l) => annex.get(l.tx.id)!,
+      ctx.onReceiptProgress,
     );
     downloadBlob(
       new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" }),

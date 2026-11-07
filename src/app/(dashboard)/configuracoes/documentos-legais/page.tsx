@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,7 +59,7 @@ export default function LegalDocumentsSettingsPage() {
     const fetchContent = async () => {
       setLoading(true);
       try {
-        const data = await getLegalDocument(activeTab);
+        const data = await trackLoad(getLegalDocument(activeTab));
         if (data) {
           setContent(data);
         } else {

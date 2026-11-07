@@ -24,6 +24,7 @@ import { formatCurrency, normalizeText, cn } from "@/lib/utils";
 import { formatCpfCnpj } from "@/lib/validations/cnpj";
 import { differenceInCalendarDays, format } from "date-fns";
 import { toast } from "sonner";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,7 +50,6 @@ import { SubmissionReviewPanel } from "@/components/features/finance/reembolsos/
 import { SubmissionLinksDialog } from "@/components/features/finance/reembolsos/SubmissionLinksDialog";
 import {
   ReimbursementDetailsDialog,
-  actionError,
 } from "@/components/features/finance/reembolsos/ReimbursementDetailsDialog";
 import {
   ApprovalBadge,
@@ -325,39 +325,43 @@ export default function ReembolsosPage() {
   const handleBulkSend = async (_id: string, email: string) => {
     if (!user) return;
     const actor = { uid: user.uid, email: user.email };
-    const results = await Promise.allSettled(
-      selectedDrafts.map(async (report) => {
-        const { token } = await reimbursementReportService.sendForApproval(
-          report,
-          email,
-          actor,
-        );
+    // O relatório sai de rascunho antes do e-mail: se só o e-mail falhar, a nova
+    // tentativa reaproveita o link em vez de ser recusada.
+    const tokens = new Map<string, string>();
+    setSelected(new Set());
+    void startBatchRun<ReimbursementReport>({
+      key: "reimbursement-send",
+      title: "Enviando relatórios para aprovação",
+      items: selectedDrafts,
+      id: (r) => r.id,
+      label: (r) => `${r.rdNumber} · ${r.employeeName}`,
+      fallback: "Erro ao enviar para aprovação.",
+      work: async ([report]) => {
+        const token =
+          tokens.get(report.id) ??
+          (await reimbursementReportService.sendForApproval(
+            report,
+            email,
+            actor,
+          )).token;
+        tokens.set(report.id, token);
         await emailService.sendReimbursementApprovalRequest(
           report.id,
           token,
           email,
         );
-      }),
-    );
-    const failed = results.filter((r) => r.status === "rejected");
-    reload();
-    setSelected(new Set());
-    if (failed.length === results.length) {
-      const reason = (failed[0] as PromiseRejectedResult).reason;
-      toast.error(actionError(reason, "Erro ao enviar para aprovação."));
-      throw reason;
-    }
-    const sent = results.length - failed.length;
-    if (failed.length)
-      toast.warning(
-        `${sent} enviados, ${failed.length} com erro. Confira os rascunhos.`,
-      );
-    else
-      toast.success(
-        sent === 1
-          ? `Link enviado para ${email}.`
-          : `${sent} relatórios enviados para ${email}.`,
-      );
+      },
+      onRound: ({ done, failed, complete }) => {
+        reload();
+        setSelected(new Set(failed.map((r) => r.id)));
+        if (complete)
+          toast.success(
+            done.length === 1
+              ? `Link enviado para ${email}.`
+              : `${done.length} relatórios enviados para ${email}.`,
+          );
+      },
+    });
   };
 
   const toggleSort = (key: SortKey) =>

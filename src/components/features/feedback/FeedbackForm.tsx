@@ -152,6 +152,7 @@ export function FeedbackForm({ onSuccess, errorContext }: FeedbackFormProps) {
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
 
   const form = useForm<FeedbackFormData>({
     resolver: zodResolver(feedbackSchema),
@@ -173,8 +174,13 @@ export function FeedbackForm({ onSuccess, errorContext }: FeedbackFormProps) {
     if (e.target.files && e.target.files[0]) {
       try {
         setIsUploading(true);
+        setUploadPercent(0);
         const file = e.target.files[0];
-        const uploadedFile = await storageService.uploadFile(file, "feedbacks");
+        const uploadedFile = await storageService.uploadFile(
+          file,
+          "feedbacks",
+          setUploadPercent,
+        );
         form.setValue("screenshotUrl", uploadedFile.url);
         toast.success("Screenshot anexado!");
       } catch (error) {
@@ -417,7 +423,7 @@ export function FeedbackForm({ onSuccess, errorContext }: FeedbackFormProps) {
                   )}
                   <span className="text-sm font-medium">
                     {isUploading
-                      ? "Enviando..."
+                      ? `Enviando ${Math.round(uploadPercent)}%`
                       : "Clique para anexar screenshot"}
                   </span>
                   <span className="text-xs">PNG, JPG, GIF até 10MB</span>

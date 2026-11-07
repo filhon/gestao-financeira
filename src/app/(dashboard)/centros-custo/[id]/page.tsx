@@ -1,5 +1,6 @@
 "use client";
 
+import { trackLoad } from "@/lib/loadActivity";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -171,11 +172,13 @@ export default function CostCenterDashboard() {
     setIsLoadingStructure(true);
     (async () => {
       try {
-        const [cc, kids, all] = await Promise.all([
-          costCenterService.getById(id),
-          costCenterService.getChildren(id),
-          costCenterService.getAll(selectedCompany.id),
-        ]);
+        const [cc, kids, all] = await trackLoad(
+          Promise.all([
+            costCenterService.getById(id),
+            costCenterService.getChildren(id),
+            costCenterService.getAll(selectedCompany.id),
+          ]),
+        );
         if (cancelled) return;
         setCostCenter(cc);
         setChildren(kids);
@@ -227,8 +230,8 @@ export default function CostCenterDashboard() {
       // Duas consultas porque uma despesa paga pertence ao exercício do
       // pagamento, que pode cair fora da faixa de vencimento. `allSettled`
       // para que a falha do razão não derrube a lista de despesas.
-      const [ledgerResult, byDueResult, byPaymentResult] =
-        await Promise.allSettled([
+      const [ledgerResult, byDueResult, byPaymentResult] = await trackLoad(
+        Promise.allSettled([
           costCenterLedgerService.getBalances(
             selectedCompany.id,
             allCostCenters,
@@ -249,7 +252,8 @@ export default function CostCenterDashboard() {
             endDate: end,
             createdBy,
           }),
-        ]);
+        ]),
+      );
       if (cancelled) return;
 
       // Falha do razão vira erro na tela: mostrar "sem envelope" e R$ 0 seria

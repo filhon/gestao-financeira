@@ -66,6 +66,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pagination } from "@/components/ui/pagination";
 import { toast } from "sonner";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import { cn, formatCurrency, normalizeText } from "@/lib/utils";
 import { EditRecurrenceDialog } from "@/components/features/finance/EditRecurrenceDialog";
 import {
@@ -692,33 +693,52 @@ function Recorrencias() {
     active: boolean,
   ) => {
     if (targets.length === 0) return;
-    const results = await Promise.allSettled(
-      targets.map((t) => setActive(t, active)),
-    );
-    const done = targets.filter((_, i) => results[i].status === "fulfilled");
-    const failed = targets.length - done.length;
-    if (failed > 0) toast.error(`${failed} não puderam ser atualizadas.`);
-    if (done.length > 0) {
-      const what =
-        done.length === 1 ? "Recorrência" : `${done.length} recorrências`;
-      toast.success(
-        `${what} ${active ? "retomada" : "pausada"}${done.length > 1 ? "s" : ""}.`,
-        {
-          action: {
-            label: "Desfazer",
-            onClick: async () => {
-              const undo = await Promise.allSettled(
-                done.map((t) => setActive(t, !active)),
-              );
-              if (undo.some((r) => r.status === "rejected"))
-                toast.error("Não foi possível desfazer tudo.");
-              fetchTemplates();
+    const run = (
+      key: string,
+      title: string,
+      items: RecurringTransactionTemplate[],
+      value: boolean,
+      onComplete: (done: RecurringTransactionTemplate[]) => void,
+    ) =>
+      startBatchRun<RecurringTransactionTemplate>({
+        key,
+        title,
+        items,
+        id: (t) => t.id,
+        label: (t) => t.description,
+        fallback: "Não foi possível atualizar esta recorrência.",
+        work: ([t]) => setActive(t, value),
+        onRound: ({ done, complete }) => {
+          fetchTemplates();
+          if (complete) onComplete(done);
+        },
+      });
+    await run(
+      "recurrence-active",
+      active ? "Retomando recorrências" : "Pausando recorrências",
+      targets,
+      active,
+      (done) => {
+        const what =
+          done.length === 1 ? "Recorrência" : `${done.length} recorrências`;
+        toast.success(
+          `${what} ${active ? "retomada" : "pausada"}${done.length > 1 ? "s" : ""}.`,
+          {
+            action: {
+              label: "Desfazer",
+              onClick: () =>
+                void run(
+                  "recurrence-active-undo",
+                  "Desfazendo",
+                  done,
+                  !active,
+                  () => toast.success("Desfeito."),
+                ),
             },
           },
-        },
-      );
-    }
-    fetchTemplates();
+        );
+      },
+    );
   };
 
   const handleToggleActive = (template: RecurringTransactionTemplate) =>

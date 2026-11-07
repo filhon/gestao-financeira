@@ -29,6 +29,24 @@ interface CallableError {
   message?: unknown;
 }
 
+/** Como `friendlyError`, mas diz quando o problema foi a conexão. */
+export function connectionAwareError(error: unknown, fallback: string): string {
+  const { code, message } = (error ?? {}) as {
+    code?: string;
+    message?: string;
+  };
+  if (
+    !navigator.onLine ||
+    code === "functions/unavailable" ||
+    code === "unavailable" ||
+    code === "storage/retry-limit-exceeded" ||
+    (error instanceof TypeError && /fetch/i.test(message ?? ""))
+  )
+    return "Sem conexão com o servidor.";
+  if (message === "deadline-exceeded") return "O servidor não respondeu a tempo.";
+  return friendlyError(error, fallback);
+}
+
 /**
  * Devolve a mensagem do servidor quando ela foi escrita para o usuário, e o
  * texto de fallback em qualquer outro caso.

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { Button } from "@/components/ui/button";
+import { ElapsedSeconds } from "@/components/ui/elapsed-seconds";
+import { startBatchRun } from "@/lib/store/useBatchRunStore";
 import {
   Card,
   CardContent,
@@ -71,21 +73,36 @@ export default function SystemSettingsPage() {
 
     try {
       setIsMigrating(true);
-      const result = await transactionService.backfillCostCenterIds(
+      const plan = await transactionService.planCostCenterBackfill(
         selectedCompany.id,
       );
+      const { total } = plan;
 
-      setMigrationResult(result);
-
-      if (result.updated > 0) {
-        toast.success("Índices Corrigidos", {
-          description: `${result.updated} transações corrigidas de ${result.total} analisadas.`,
-        });
-      } else {
-        toast.success("Tudo certo!", {
-          description: `Nenhuma correção necessária. ${result.total} transações verificadas.`,
-        });
-      }
+      // Em fatias: a que falhar é refeita uma a uma para mostrar qual foi, e o
+      // que já foi corrigido fica.
+      await startBatchRun({
+        key: "cost-center-backfill",
+        title: "Corrigindo índices",
+        items: plan.patches,
+        id: (p) => p.transactionId,
+        label: (p) => p.description,
+        chunkSize: 500,
+        fallback: "Não foi possível corrigir esta transação.",
+        work: plan.apply,
+        onRound: ({ done, complete }) => {
+          setMigrationResult({ updated: done.length, total });
+          if (!complete) return;
+          if (done.length > 0) {
+            toast.success("Índices Corrigidos", {
+              description: `${done.length} transações corrigidas de ${total} analisadas.`,
+            });
+          } else {
+            toast.success("Tudo certo!", {
+              description: `Nenhuma correção necessária. ${total} transações verificadas.`,
+            });
+          }
+        },
+      });
     } catch (error) {
       console.error(error);
       toast.error("Erro", {
@@ -151,7 +168,8 @@ export default function SystemSettingsPage() {
                 {isRecalculating ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Recalculando...
+                    Somando as transações pagas…
+                    <ElapsedSeconds />
                   </>
                 ) : (
                   "Recalcular Agora"
@@ -226,7 +244,8 @@ export default function SystemSettingsPage() {
                 {isMigrating ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Corrigindo...
+                    Lendo as transações…
+                    <ElapsedSeconds />
                   </>
                 ) : (
                   "Corrigir Índices"

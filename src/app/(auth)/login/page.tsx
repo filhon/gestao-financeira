@@ -148,6 +148,7 @@ function LoginContent() {
     }
   };
 
+  const [isResetting, setIsResetting] = useState(false);
   const handleResetPassword = async () => {
     setLoginError(null);
     setResetMessage("");
@@ -159,6 +160,7 @@ function LoginContent() {
       document.getElementById("email")?.focus();
       return;
     }
+    setIsResetting(true);
     try {
       await sendPasswordResetEmail(auth, email);
     } catch (error) {
@@ -171,6 +173,8 @@ function LoginContent() {
         });
         return;
       }
+    } finally {
+      setIsResetting(false);
     }
     // Mesma resposta exista ou não a conta, para não revelar cadastros.
     setResetMessage(
@@ -272,9 +276,10 @@ function LoginContent() {
                 <button
                   type="button"
                   onClick={handleResetPassword}
+                  disabled={isResetting}
                   className="rounded-sm text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
-                  Esqueci minha senha
+                  {isResetting ? "Enviando o link…" : "Esqueci minha senha"}
                 </button>
               </div>
               {loginError && (

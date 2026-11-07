@@ -14,6 +14,7 @@ import {
   ActionHandler,
   AccountNameFn,
   IGNORE_REASONS,
+  LineProgress,
   TransferTarget,
 } from "@/components/features/finance/reconciliation/ReconciliationTable";
 import {
@@ -47,6 +48,11 @@ import { hasAliases, statementAliases } from "@/lib/matching/learn";
 import { accuracyByBand, sameIds } from "@/lib/matching/queue";
 import { MatchAccuracy } from "@/components/features/finance/MatchAccuracy";
 import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
+import {
+  retryBatchRun,
+  startBatchRun,
+  useBatchRunStore,
+} from "@/lib/store/useBatchRunStore";
 import { transactionService } from "@/lib/services/transactionService";
 import { entityService } from "@/lib/services/entityService";
 import { bankAccountService } from "@/lib/services/bankAccountService";
@@ -149,9 +155,31 @@ const TABS: { id: Tab; label: string }[] = [
 const tabOf = (status: BankTransaction["status"]): Tab =>
   status === "unmatched" || status === "potential_match" ? "pending" : status;
 
+const CONFIRM_RUN = "reconciliation-confirm";
+
+/** Como a linha aparece no painel de progresso: dia, histórico e valor. */
+const lineLabel = (tx: BankTransaction) =>
+  `${format(new Date(tx.date), "dd/MM")} · ${tx.description} · ${formatCurrency(Math.abs(tx.amount))}`;
+
+const titleLabel = ({ tx }: SettleItem) =>
+  `${tx.description} · ${formatCurrency(tx.amount)}`;
+
+/** Baixas de uma linha, com o status de cada título antes de a baixa começar. */
+type Settling = {
+  before: Map<string, Transaction>;
+  settled: Transaction[];
+  budgetExceeded: boolean;
+};
+const newSettling = (): Settling => ({
+  before: new Map(),
+  settled: [],
+  budgetExceeded: false,
+});
+
 function MobileBankTxCard({
   tx,
   state,
+  progress,
   canSettle,
   canLaunch,
   canRule,
@@ -162,6 +190,7 @@ function MobileBankTxCard({
 }: {
   tx: BankTransaction;
   state: RowState;
+  progress?: LineProgress;
   canSettle: boolean;
   canLaunch: boolean;
   canRule: boolean;
@@ -200,7 +229,7 @@ function MobileBankTxCard({
           tx={tx}
           rule={rule}
           accountName={accountName}
-          editable={state === "editable"}
+          editable={state === "editable" && !progress}
           onAction={onAction}
         />
       </div>
@@ -214,6 +243,7 @@ function MobileBankTxCard({
           canRule={canRule}
           transferTargets={transferTargets}
           onAction={onAction}
+          progress={progress}
         />
       </div>
     </div>
@@ -223,6 +253,8 @@ function MobileBankTxCard({
 export function ReconciliationDashboard() {
   const {
     transactions: allItems,
+    lineStages,
+    setLineStage,
     isLoading: isStoreLoading,
     setTransactions,
     updateTransactionStatus,
@@ -252,6 +284,10 @@ export function ReconciliationDashboard() {
     [accounts],
   );
   const [isMatching, setIsMatching] = useState(false);
+  const [matchPhase, setMatchPhase] = useState("");
+  const [closePhase, setClosePhase] = useState("");
+  const [clearPhase, setClearPhase] = useState("");
+  const [togglingRuleId, setTogglingRuleId] = useState<string | null>(null);
 
   // Sync with Firestore (only for roles allowed to view the bank statement)
   useEffect(() => {
@@ -509,12 +545,28 @@ export function ReconciliationDashboard() {
       return activeAccounts.some((a) => a.id === rule.transferAccountId);
     return rule.action === "ignore" || canLaunchFor(tx);
   };
+  const confirmRun = useBatchRunStore((s) =>
+    s.runs.find((r) => r.key === CONFIRM_RUN),
+  );
+  // Com falhas no painel, a próxima confirmação espera ele ser resolvido.
+  const bulkConfirming = !!confirmRun;
+  const lineProgress = (tx: BankTransaction): LineProgress | undefined => {
+    const stage = lineStages.get(tx.id);
+    if (stage) return { stage };
+    const failure = confirmRun?.failures.find((f) => f.id === tx.id);
+    return failure
+      ? {
+          error: failure.message,
+          retry: () => void retryBatchRun(CONFIRM_RUN, tx.id),
+        }
+      : undefined;
+  };
   /** Qualquer linha a tratar entra no lote: confirmar as sugestões, ignorar o resto. */
   const selectableFor = (tx: BankTransaction) =>
     rowStateFor(tx) === "editable" &&
+    !lineProgress(tx) &&
     (tx.status === "unmatched" || tx.status === "potential_match");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkConfirming, setBulkConfirming] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIndex = useRef(-1);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
@@ -808,6 +860,48 @@ export function ReconciliationDashboard() {
     };
   };
 
+  /** Trava a linha durante a ação; a etapa aparece no lugar dos botões. */
+  const withLine = async (
+    id: string,
+    stage: string,
+    action: () => Promise<void>,
+  ) => {
+    setLineStage(id, stage);
+    try {
+      await action();
+    } finally {
+      setLineStage(id, null);
+    }
+  };
+
+  /** Títulos da sugestão de `tx`, com os títulos em aberto já prontos para a baixa. */
+  const suggestedTitles = (tx: BankTransaction, candidateId?: string) => {
+    const selectedCandidate = candidateId
+      ? tx.matchCandidates?.find((c) => c.id === candidateId)
+      : undefined;
+    const titles = selectedCandidate
+      ? [selectedCandidate.transaction]
+      : tx.matchedBundleDetails?.length
+        ? tx.matchedBundleDetails
+        : tx.matchedDetails
+          ? [tx.matchedDetails]
+          : [];
+    const target = Math.abs(tx.amount);
+    const single = titles.length === 1;
+    // Pagou menos que o título: desconto. Pagou mais: juros/multa.
+    const gap = single ? currency(target).subtract(titles[0].amount).value : 0;
+    const items: SettleItem[] = titles.map((t) => ({
+      tx: t,
+      settlement: {
+        paymentDate: new Date(tx.date),
+        finalAmount: single ? target : t.amount,
+        discount: gap < 0 ? -gap : 0,
+        interest: gap > 0 ? gap : 0,
+      },
+    }));
+    return { selectedCandidate, titles, items };
+  };
+
   /** Confirma uma sugestão — de título (`candidateId` escolhe outro) ou de regra. */
   const confirmLine = async (tx: BankTransaction, candidateId?: string) => {
     if (tx.ruleId && !candidateId) {
@@ -827,38 +921,18 @@ export function ReconciliationDashboard() {
       return;
     }
 
-    const selectedCandidate = candidateId
-      ? tx.matchCandidates?.find((c) => c.id === candidateId)
-      : undefined;
+    const { selectedCandidate, titles, items } = suggestedTitles(
+      tx,
+      candidateId,
+    );
 
     // Sugestão com título em aberto: confirmar é dar a baixa com a data do banco.
-    const titles = selectedCandidate
-      ? [selectedCandidate.transaction]
-      : tx.matchedBundleDetails?.length
-        ? tx.matchedBundleDetails
-        : tx.matchedDetails
-          ? [tx.matchedDetails]
-          : [];
     if (titles.some(isOpenTitle)) {
       if (!canSettleFor(tx))
         throw userError("Seu perfil não dá baixa neste tipo de conta.");
-      const target = Math.abs(tx.amount);
-      const single = titles.length === 1;
-      // Pagou menos que o título: desconto. Pagou mais: juros/multa.
-      const gap = single
-        ? currency(target).subtract(titles[0].amount).value
-        : 0;
       await settleAndReconcile(
         tx,
-        titles.map((t) => ({
-          tx: t,
-          settlement: {
-            paymentDate: new Date(tx.date),
-            finalAmount: single ? target : t.amount,
-            discount: gap < 0 ? -gap : 0,
-            interest: gap > 0 ? gap : 0,
-          },
-        })),
+        items,
         feedbackFor(
           tx,
           titles.map((t) => t.id),
@@ -887,82 +961,100 @@ export function ReconciliationDashboard() {
     await learnFromLine(tx, titles);
   };
 
-  // Uma por vez: cada lançamento passa pela validação de saldo do servidor, e
-  // a falha de uma não deve derrubar as outras.
-  const confirmSelected = async (ids: string[]) => {
-    setBulkConfirming(true);
-    let done = 0;
-    const failures: string[] = [];
-    for (const id of ids) {
-      const tx = transactions.find((t) => t.id === id);
-      if (!tx) continue;
-      try {
-        await confirmLine(tx);
-        done++;
-      } catch (error) {
-        console.error(error);
-        failures.push(friendlyError(error, "Erro ao confirmar"));
-      }
-    }
+  // Uma por vez: cada lançamento passa pela validação de saldo do servidor. A
+  // linha é o item do lote: a que falha fica marcada e se refaz sozinha.
+  const confirmSelected = (ids: string[]) => {
+    const items = transactions.filter((t) => ids.includes(t.id));
     setSelected(new Set());
-    setBulkConfirming(false);
-    if (failures.length === 0) {
-      toast.success(
-        `${plural(done, "sugestão confirmada", "sugestões confirmadas")}`,
-      );
-    } else {
-      toast.warning(
-        `${done} de ${done + failures.length} confirmadas; ${plural(failures.length, "falhou", "falharam")}`,
-        { description: failureList(failures) },
-      );
-    }
+    items.forEach((t) => setLineStage(t.id, "Na fila…"));
+    void startBatchRun({
+      key: CONFIRM_RUN,
+      title: "Confirmando sugestões",
+      items,
+      id: (t) => t.id,
+      label: lineLabel,
+      fallback: "Erro ao confirmar",
+      work: ([tx]) => withLine(tx.id, "Confirmando…", () => confirmLine(tx)),
+      onRound: ({ done, complete }) => {
+        if (complete)
+          toast.success(
+            plural(done.length, "sugestão confirmada", "sugestões confirmadas"),
+          );
+      },
+    });
   };
+
+  /**
+   * Grava o mesmo tipo de mudança em muitas linhas, em fatias. A que falhar é
+   * refeita linha a linha, para o painel dizer qual foi.
+   */
+  const writeLines = (
+    key: string,
+    title: string,
+    items: BankTransaction[],
+    data: (t: BankTransaction) => Partial<BankTransaction>,
+    fallback: string,
+    onRound?: (round: {
+      done: BankTransaction[];
+      complete: boolean;
+    }) => void,
+  ) =>
+    startBatchRun<BankTransaction>({
+      key,
+      title,
+      items,
+      id: (t) => t.id,
+      label: lineLabel,
+      chunkSize: 400,
+      fallback,
+      work: (chunk) =>
+        reconciliationSessionService.bulkUpdateItems(
+          companyId!,
+          chunk.map((t) => ({ id: t.id, data: data(t) })),
+        ),
+      onRound,
+    });
 
   /** Volta as linhas ao estado de antes de ignorar: status, motivo e regra. */
   const undoIgnore = (before: BankTransaction[]) => ({
     label: "Desfazer",
-    onClick: async () => {
+    onClick: () => {
       if (!companyId) return;
-      try {
-        await reconciliationSessionService.bulkUpdateItems(
-          companyId,
-          before.map((t) => ({
-            id: t.id,
-            data: {
-              status: t.status,
-              ignoreReason: t.ignoreReason,
-              ruleId: t.ruleId,
-            },
-          })),
-        );
-      } catch (error) {
-        toast.error(friendlyError(error, "Erro ao desfazer"));
-      }
+      void writeLines(
+        "reconciliation-ignore-undo",
+        "Desfazendo",
+        before,
+        (t) => ({
+          status: t.status,
+          ignoreReason: t.ignoreReason,
+          ruleId: t.ruleId,
+        }),
+        "Erro ao desfazer",
+      );
     },
   });
 
-  const ignoreSelected = async (
+  const ignoreSelected = (
     ids: string[],
     reason: NonNullable<BankTransaction["ignoreReason"]>,
   ) => {
     if (!companyId) return;
-    const before = transactions.filter((t) => ids.includes(t.id));
-    try {
-      await reconciliationSessionService.bulkUpdateItems(
-        companyId,
-        ids.map((id) => ({
-          id,
-          data: { status: "ignored", ignoreReason: reason, ruleId: undefined },
-        })),
-      );
-      setSelected(new Set());
-      toast.success(plural(ids.length, "linha ignorada", "linhas ignoradas"), {
-        action: undoIgnore(before),
-      });
-    } catch (error) {
-      console.error(error);
-      toast.error(friendlyError(error, "Erro ao ignorar as linhas"));
-    }
+    const items = transactions.filter((t) => ids.includes(t.id));
+    setSelected(new Set());
+    void writeLines(
+      "reconciliation-ignore",
+      "Ignorando linhas",
+      items,
+      () => ({ status: "ignored", ignoreReason: reason, ruleId: undefined }),
+      "Erro ao ignorar a linha",
+      ({ done, complete }) => {
+        if (complete)
+          toast.success(
+            plural(done.length, "linha ignorada", "linhas ignoradas"),
+            { action: undoIgnore(done) },
+          );
+      },
+    );
   };
 
   /**
@@ -998,13 +1090,15 @@ export function ReconciliationDashboard() {
         ),
     );
     const hits = applyRules(pending, [rule]).filter((t, i) => t !== pending[i]);
+    // A regra já existe: linha que não recebeu a sugestão fica no painel para
+    // refazer, sem que a repetição crie uma segunda regra.
     if (hits.length > 0) {
-      await reconciliationSessionService.bulkUpdateItems(
-        companyId!,
-        hits.map((t) => ({
-          id: t.id,
-          data: { status: t.status, ruleId: t.ruleId },
-        })),
+      await writeLines(
+        `reconciliation-rule-${id}`,
+        "Aplicando a regra",
+        hits,
+        (t) => ({ status: t.status, ruleId: t.ruleId }),
+        "Erro ao aplicar a regra nesta linha",
       );
     }
     return { ruleId: id, hits: hits.length };
@@ -1044,23 +1138,25 @@ export function ReconciliationDashboard() {
   /** Cria a regra que sugere a mesma transferência para as próximas linhas iguais. */
   const transferAlways = async (tx: BankTransaction, toId: string) => {
     const pattern = rulePattern(tx.description);
-    try {
-      const { hits } = await createRuleAndApply(
-        {
-          pattern,
-          direction: tx.amount < 0 ? "debit" : "credit",
-          action: "transfer",
-          transferAccountId: toId,
-        },
-        tx.id,
-      );
-      toast.success(`Regra criada: transferir “${pattern}”`, {
-        description: hitsNote(hits),
-      });
-    } catch (error) {
-      console.error(error);
-      toast.error(friendlyError(error, "Erro ao criar a regra"));
-    }
+    await withLine(tx.id, "Criando regra…", async () => {
+      try {
+        const { hits } = await createRuleAndApply(
+          {
+            pattern,
+            direction: tx.amount < 0 ? "debit" : "credit",
+            action: "transfer",
+            transferAccountId: toId,
+          },
+          tx.id,
+        );
+        toast.success(`Regra criada: transferir “${pattern}”`, {
+          description: hitsNote(hits),
+        });
+      } catch (error) {
+        console.error(error);
+        toast.error(friendlyError(error, "Erro ao criar a regra"));
+      }
+    });
   };
 
   const handleQuickLaunch = async (
@@ -1107,6 +1203,7 @@ export function ReconciliationDashboard() {
     active: boolean,
   ) => {
     if (!actor) return;
+    setTogglingRuleId(rule.id);
     try {
       await reconciliationRuleService.setActive(rule, active, actor);
       await queryClient.invalidateQueries({
@@ -1114,6 +1211,8 @@ export function ReconciliationDashboard() {
       });
     } catch (error) {
       toast.error(friendlyError(error, "Erro ao atualizar a regra"));
+    } finally {
+      setTogglingRuleId(null);
     }
   };
 
@@ -1127,12 +1226,12 @@ export function ReconciliationDashboard() {
         (t) => t.ruleId === rule.id && t.status === "potential_match",
       );
       if (open.length > 0) {
-        await reconciliationSessionService.bulkUpdateItems(
-          companyId,
-          open.map((t) => ({
-            id: t.id,
-            data: { status: "unmatched", ruleId: undefined },
-          })),
+        await writeLines(
+          `reconciliation-rule-delete-${rule.id}`,
+          "Voltando as sugestões da regra",
+          open,
+          () => ({ status: "unmatched", ruleId: undefined }),
+          "Erro ao voltar esta linha para pendente",
         );
       }
       await queryClient.invalidateQueries({
@@ -1278,52 +1377,88 @@ export function ReconciliationDashboard() {
     if (!canManageReconciliation || !user || !companyId) return;
     const tx = transactions.find((t) => t.id === id);
     if (!tx || rowStateFor(tx) !== "editable") return;
+    // O estado no momento do clique: dois cliques seguidos não fazem duas baixas.
+    if (useReconciliationStore.getState().lineStages.has(id)) return;
+    const retry = {
+      label: "Tentar de novo",
+      onClick: () => void handleAction(id, action, arg),
+    };
 
     if (action === "confirm") {
-      try {
-        await confirmLine(tx, arg);
-        toast.success("Conciliação confirmada");
-      } catch (error) {
-        console.error(error);
-        toast.error(friendlyError(error, "Erro ao confirmar conciliação"));
-      }
-    } else if (action === "ignore") {
-      try {
-        await updateStatusAndSync(id, "ignored", {
-          ignoreReason: (arg ?? "other") as BankTransaction["ignoreReason"],
-          ruleId: undefined,
-        });
-        toast.success("Linha ignorada", { action: undoIgnore([tx]) });
-      } catch (error) {
-        console.error(error);
-        toast.error(friendlyError(error, "Erro ao ignorar lançamento"));
-      }
-    } else if (action === "ignoreAlways") {
-      await ignoreAlways(tx);
-    } else if (action === "transfer" && arg) {
-      try {
-        const to = await transferLine(tx, arg);
-        const canRule =
-          canManageReconciliationRules &&
-          rulePattern(tx.description).length >= 3;
-        toast.success(
-          `Transferência ${tx.amount < 0 ? "para" : "de"} ${to.name}`,
-          {
-            description: canRule
-              ? "Quer a mesma sugestão nas próximas linhas iguais?"
-              : undefined,
-            action: canRule
-              ? {
-                  label: "Sempre sugerir",
-                  onClick: () => transferAlways(tx, to.id),
-                }
-              : undefined,
-          },
+      // Vários títulos em aberto: lote. O que baixou fica, e só o que falhou se refaz.
+      const { titles, items } = suggestedTitles(tx, arg);
+      if (
+        (!tx.ruleId || arg) &&
+        items.length > 1 &&
+        titles.some(isOpenTitle) &&
+        canSettleFor(tx)
+      ) {
+        startSettleRun(
+          tx,
+          items,
+          feedbackFor(
+            tx,
+            titles.map((t) => t.id),
+          ),
         );
-      } catch (error) {
-        console.error(error);
-        toast.error(friendlyError(error, "Erro ao transferir"));
+        return;
       }
+      await withLine(id, "Confirmando…", async () => {
+        try {
+          await confirmLine(tx, arg);
+          toast.success("Conciliação confirmada");
+        } catch (error) {
+          console.error(error);
+          toast.error(friendlyError(error, "Erro ao confirmar conciliação"), {
+            action: retry,
+          });
+        }
+      });
+    } else if (action === "ignore") {
+      await withLine(id, "Ignorando…", async () => {
+        try {
+          await updateStatusAndSync(id, "ignored", {
+            ignoreReason: (arg ?? "other") as BankTransaction["ignoreReason"],
+            ruleId: undefined,
+          });
+          toast.success("Linha ignorada", { action: undoIgnore([tx]) });
+        } catch (error) {
+          console.error(error);
+          toast.error(friendlyError(error, "Erro ao ignorar lançamento"), {
+            action: retry,
+          });
+        }
+      });
+    } else if (action === "ignoreAlways") {
+      await withLine(id, "Criando regra…", () => ignoreAlways(tx));
+    } else if (action === "transfer" && arg) {
+      await withLine(id, "Transferindo…", async () => {
+        try {
+          const to = await transferLine(tx, arg);
+          const canRule =
+            canManageReconciliationRules &&
+            rulePattern(tx.description).length >= 3;
+          toast.success(
+            `Transferência ${tx.amount < 0 ? "para" : "de"} ${to.name}`,
+            {
+              description: canRule
+                ? "Quer a mesma sugestão nas próximas linhas iguais?"
+                : undefined,
+              action: canRule
+                ? {
+                    label: "Sempre sugerir",
+                    onClick: () => transferAlways(tx, to.id),
+                  }
+                : undefined,
+            },
+          );
+        } catch (error) {
+          console.error(error);
+          toast.error(friendlyError(error, "Erro ao transferir"), {
+            action: retry,
+          });
+        }
+      });
     } else if (action === "create") {
       setLaunchingTx(tx);
     } else if (action === "settle") {
@@ -1336,7 +1471,7 @@ export function ReconciliationDashboard() {
       ) {
         setUndoTx(tx);
       } else {
-        await undoLine(tx);
+        await withLine(id, "Desfazendo…", () => undoLine(tx));
       }
     }
   };
@@ -1381,9 +1516,114 @@ export function ReconciliationDashboard() {
   };
 
   /**
-   * Baixa os títulos em aberto com a data e o valor do extrato e concilia a
-   * linha com todos: uma transferência paga as contas de vários projetos do
-   * mesmo favorecido. Título já pago só concilia.
+   * Baixa um título com a data e o valor do extrato. Relê antes de gravar, nesta
+   * e em cada nova tentativa: a sugestão pode ser de antes de alguém baixar o
+   * título em outra tela, e uma baixa cuja resposta se perdeu já está gravada.
+   */
+  const settleTitle = async (
+    { tx: title, settlement }: SettleItem,
+    settling: Settling,
+  ) => {
+    const [now] = await transactionService.getByIds([title.id]);
+    if (!now) throw userError(`“${title.description}” foi excluído.`);
+    if (now.reconciled)
+      throw userError(
+        `“${title.description}” já está conciliado com outra linha.`,
+      );
+    const before = settling.before.get(title.id) ?? now;
+    settling.before.set(title.id, before);
+    if (isOpenTitle(now)) {
+      const result = await transactionService.settle(
+        title.id,
+        settlement,
+        actor!,
+        companyId!,
+      );
+      settling.budgetExceeded ||= result.budgetExceeded;
+      settling.settled.push(before);
+    } else if (isOpenTitle(before)) {
+      settling.settled.push(before);
+    }
+  };
+
+  /** Concilia a linha com todos os títulos. Título que já estava pago só concilia. */
+  const finishSettlement = async (
+    line: BankTransaction,
+    items: SettleItem[],
+    settling: Settling,
+    extra: Partial<BankTransaction>,
+  ) => {
+    const { before, settled } = settling;
+    const ids = items.map((i) => i.tx.id);
+    await reconcileAll(ids, line);
+    const titles = items.map(({ tx: title, settlement }) => {
+      const was = before.get(title.id)!;
+      return settled.includes(was)
+        ? {
+            ...was,
+            status: "paid" as const,
+            paymentDate: settlement.paymentDate,
+            finalAmount: settlement.finalAmount,
+          }
+        : was;
+    });
+    await updateStatusAndSync(line.id, "matched", {
+      ...(titles.length === 1
+        ? {
+            matchedTransactionId: titles[0].id,
+            matchedDetails: titles[0],
+            matchedTransactionIds: undefined,
+            matchedBundleDetails: undefined,
+          }
+        : {
+            matchedTransactionId: undefined,
+            matchedDetails: undefined,
+            matchedTransactionIds: ids,
+            matchedBundleDetails: titles,
+          }),
+      confidence: 100,
+      ruleId: undefined,
+      resolution: settled.length > 0 ? "settled" : undefined,
+      previousStatuses:
+        settled.length > 0
+          ? Object.fromEntries(settled.map((t) => [t.id, t.status]))
+          : undefined,
+      ...extra,
+    });
+    await queryClient.invalidateQueries({ queryKey: ["settle-candidates"] });
+  };
+
+  /** Estorna as baixas feitas. Se uma falhar, ela continua na lista para refazer. */
+  const rollbackSettled = async (settling: Settling) => {
+    const failures: unknown[] = [];
+    for (const title of [...settling.settled]) {
+      try {
+        await transactionService.unreconcile(title.id, {
+          companyId: companyId!,
+          userId: user!.uid,
+          userEmail: user!.email,
+        });
+        await transactionService.updateStatus(
+          title.id,
+          title.status,
+          actor!,
+          companyId!,
+        );
+        settling.settled.splice(settling.settled.indexOf(title), 1);
+      } catch (error) {
+        console.error(error);
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0)
+      throw userError(
+        `${plural(failures.length, "baixa não foi estornada", "baixas não foram estornadas")}. Tente de novo.`,
+      );
+  };
+
+  /**
+   * Baixa e concilia uma linha como uma unidade, para o lote de linhas: se algo
+   * falha, a linha volta ao que era e a nova tentativa a refaz inteira.
    */
   const settleAndReconcile = async (
     line: BankTransaction,
@@ -1391,92 +1631,25 @@ export function ReconciliationDashboard() {
     extra: Partial<BankTransaction> = {},
   ) => {
     if (!actor || !user || !companyId) throw userError("Sessão expirada.");
-    // A sugestão pode ser de antes de alguém baixar o título em outra tela.
-    const current = new Map(
-      (await transactionService.getByIds(items.map((i) => i.tx.id))).map(
-        (t) => [t.id, t],
-      ),
-    );
-    const done: Transaction[] = [];
-    let budgetExceeded = false;
+    const settling = newSettling();
     try {
       // Uma por vez: as baixas disputam o mesmo razão do centro de custo.
-      for (const { tx: title, settlement } of items) {
-        const now = current.get(title.id);
-        if (!now) throw userError(`“${title.description}” foi excluído.`);
-        if (now.reconciled)
-          throw userError(
-            `“${title.description}” já está conciliado com outra linha.`,
-          );
-        if (!isOpenTitle(now)) continue;
-        const result = await transactionService.settle(
-          title.id,
-          settlement,
-          actor,
-          companyId,
+      for (const [i, item] of items.entries()) {
+        setLineStage(
+          line.id,
+          items.length > 1
+            ? `Baixando ${i + 1} de ${items.length}…`
+            : "Baixando…",
         );
-        done.push(now);
-        budgetExceeded ||= result.budgetExceeded;
+        await settleTitle(item, settling);
       }
-      const ids = items.map((i) => i.tx.id);
-      await reconcileAll(ids, line);
-      const titles = items.map(({ tx: title, settlement }) => {
-        const now = current.get(title.id)!;
-        return done.includes(now)
-          ? {
-              ...now,
-              status: "paid" as const,
-              paymentDate: settlement.paymentDate,
-              finalAmount: settlement.finalAmount,
-            }
-          : now;
-      });
-      await updateStatusAndSync(line.id, "matched", {
-        ...(titles.length === 1
-          ? {
-              matchedTransactionId: titles[0].id,
-              matchedDetails: titles[0],
-              matchedTransactionIds: undefined,
-              matchedBundleDetails: undefined,
-            }
-          : {
-              matchedTransactionId: undefined,
-              matchedDetails: undefined,
-              matchedTransactionIds: ids,
-              matchedBundleDetails: titles,
-            }),
-        confidence: 100,
-        ruleId: undefined,
-        resolution: done.length > 0 ? "settled" : undefined,
-        previousStatuses:
-          done.length > 0
-            ? Object.fromEntries(done.map((t) => [t.id, t.status]))
-            : undefined,
-        ...extra,
-      });
-      await queryClient.invalidateQueries({ queryKey: ["settle-candidates"] });
-      return { settled: done.length, budgetExceeded };
+      setLineStage(line.id, "Conciliando…");
+      await finishSettlement(line, items, settling, extra);
     } catch (error) {
-      // Sem a linha conciliada, baixa pela metade vira conta paga que ninguém
-      // acha: estorna o que já foi baixado. Falha no estorno fica no console.
-      for (const title of done) {
-        try {
-          await transactionService.unreconcile(title.id, {
-            companyId,
-            userId: user.uid,
-            userEmail: user.email,
-          });
-          await transactionService.updateStatus(
-            title.id,
-            title.status,
-            actor,
-            companyId,
-          );
-        } catch (rollbackError) {
-          console.error(rollbackError);
-        }
-      }
-      if (done.length === 0) throw error;
+      const hadSettled = settling.settled.length > 0;
+      setLineStage(line.id, "Estornando…");
+      await rollbackSettled(settling).catch(console.error);
+      if (!hadSettled) throw error;
       console.error(error);
       throw userError(
         `${friendlyError(error, "A baixa falhou.")} As baixas feitas antes do erro foram estornadas.`,
@@ -1487,32 +1660,94 @@ export function ReconciliationDashboard() {
   const BUDGET_NOTE =
     "A baixa caiu num exercício sem orçamento suficiente; o gestor foi avisado.";
 
-  const handleSettle = async (items: SettleItem[]) => {
-    if (!settlingTx) return;
-    try {
-      const { budgetExceeded } = await settleAndReconcile(
-        settlingTx,
-        items,
-        feedbackFor(
-          settlingTx,
-          items.map((i) => i.tx.id),
-        ),
-      );
-      await learnFromLine(
-        settlingTx,
-        items.map((i) => i.tx),
-      );
-      toast.success(
-        items.length === 1
-          ? "Título baixado e conciliado"
-          : `${items.length} títulos baixados e conciliados`,
-        { description: budgetExceeded ? BUDGET_NOTE : undefined },
-      );
-    } catch (error) {
-      console.error(error);
-      toast.error(friendlyError(error, "Erro ao baixar pelo extrato"));
-      throw error;
+  /**
+   * Baixa vários títulos de uma linha, um a um. O que falha não desfaz o resto:
+   * refaz-se só aquele título, ou desiste-se e estorna-se tudo. A linha fica
+   * travada até uma das duas coisas, para não ser conciliada pela metade.
+   */
+  const startSettleRun = (
+    line: BankTransaction,
+    items: SettleItem[],
+    extra: Partial<BankTransaction>,
+  ) => {
+    if (!actor || !user || !companyId) {
+      toast.error("Sessão expirada.");
+      return;
     }
+    const settling = newSettling();
+    setLineStage(line.id, "Baixando…");
+    void startBatchRun<SettleItem>({
+      key: `settle:${line.id}`,
+      title: `Baixando ${plural(items.length, "título", "títulos")} do extrato`,
+      items,
+      id: (item) => item.tx.id,
+      label: titleLabel,
+      fallback: "Erro ao baixar o título",
+      work: async ([item]) => {
+        setLineStage(
+          line.id,
+          `Baixando ${items.indexOf(item) + 1} de ${items.length}…`,
+        );
+        await settleTitle(item, settling);
+      },
+      finish: {
+        label: "Conciliando a linha do extrato",
+        run: async () => {
+          setLineStage(line.id, "Conciliando…");
+          await finishSettlement(line, items, settling, extra);
+        },
+      },
+      onRound: async ({ complete }) => {
+        if (!complete) {
+          setLineStage(line.id, "Baixa incompleta");
+          return;
+        }
+        await learnFromLine(
+          line,
+          items.map((i) => i.tx),
+        );
+        setLineStage(line.id, null);
+        toast.success(
+          items.length === 1
+            ? "Título baixado e conciliado"
+            : `${items.length} títulos baixados e conciliados`,
+          {
+            description: settling.budgetExceeded ? BUDGET_NOTE : undefined,
+          },
+        );
+      },
+      dismiss: {
+        label: () =>
+          settling.settled.length > 0
+            ? `Estornar ${plural(settling.settled.length, "baixa", "baixas")}`
+            : undefined,
+        run: async () => {
+          setLineStage(line.id, "Estornando…");
+          try {
+            await rollbackSettled(settling);
+            setLineStage(line.id, null);
+            void queryClient.invalidateQueries({
+              queryKey: ["settle-candidates"],
+            });
+          } catch (error) {
+            setLineStage(line.id, "Baixa incompleta");
+            throw error;
+          }
+        },
+      },
+    });
+  };
+
+  const handleSettle = (items: SettleItem[]) => {
+    if (!settlingTx) return;
+    startSettleRun(
+      settlingTx,
+      items,
+      feedbackFor(
+        settlingTx,
+        items.map((i) => i.tx.id),
+      ),
+    );
   };
 
   const triggerAutoMatch = async () => {
@@ -1523,6 +1758,7 @@ export function ReconciliationDashboard() {
       return;
     }
     setIsMatching(true);
+    setMatchPhase("Lendo os títulos do sistema…");
     try {
       const dates = open.map((t) => new Date(t.date).getTime());
       const first = new Date(Math.min(...dates));
@@ -1562,6 +1798,9 @@ export function ReconciliationDashboard() {
         ],
       );
 
+      setMatchPhase(`Cruzando ${plural(open.length, "linha", "linhas")}…`);
+      // O cruzamento trava a tela: a etapa precisa ser pintada antes.
+      await new Promise((resolve) => setTimeout(resolve));
       const processed = matchStatement(
         open,
         [...paid, ...openPayables, ...openReceivables],
@@ -1588,6 +1827,9 @@ export function ReconciliationDashboard() {
       const changedById = new Map(changed.map((tx) => [tx.id, tx]));
       setTransactions(allItems.map((t) => changedById.get(t.id) ?? t));
       if (changed.length > 0) {
+        setMatchPhase(
+          `Salvando ${plural(changed.length, "sugestão", "sugestões")}…`,
+        );
         await reconciliationSessionService.bulkUpdateItems(
           companyId,
           changed.map((tx) => ({ id: tx.id, data: tx })),
@@ -1641,32 +1883,43 @@ export function ReconciliationDashboard() {
 
   const handleClearSession = async () => {
     if (!canManageReconciliation || !companyId || !account) return;
+    setClearPhase("Lendo as linhas…");
     try {
-      await reconciliationSessionService.clearSession(companyId, account.id);
+      await reconciliationSessionService.clearSession(
+        companyId,
+        account.id,
+        (written, total) => setClearPhase(`Removendo ${written} de ${total}…`),
+      );
       toast.success("Linhas do extrato removidas");
     } catch (error) {
       console.error(error);
-      toast.error(friendlyError(error, "Erro ao limpar a sessão"));
+      // Refazer lê de novo o que sobrou: o que já saiu não volta.
+      toast.error(friendlyError(error, "Erro ao limpar o extrato"), {
+        duration: 10_000,
+        action: {
+          label: "Tentar de novo",
+          onClick: () => void handleClearSession(),
+        },
+      });
     }
   };
 
-  const assignLegacy = async () => {
+  const assignLegacy = () => {
     if (!companyId || !account) return;
-    try {
-      await reconciliationSessionService.bulkUpdateItems(
-        companyId,
-        legacyItems.map((t) => ({
-          id: t.id,
-          data: { bankAccountId: account.id },
-        })),
-      );
-      toast.success(
-        `${plural(legacyItems.length, "linha atribuída", "linhas atribuídas")} a ${account.name}`,
-      );
-    } catch (error) {
-      console.error(error);
-      toast.error(friendlyError(error, "Erro ao atribuir as linhas"));
-    }
+    const name = account.name;
+    void writeLines(
+      "reconciliation-assign-legacy",
+      `Atribuindo linhas a ${name}`,
+      legacyItems,
+      () => ({ bankAccountId: account.id }),
+      "Erro ao atribuir esta linha",
+      ({ done, complete }) => {
+        if (complete)
+          toast.success(
+            `${plural(done.length, "linha atribuída", "linhas atribuídas")} a ${name}`,
+          );
+      },
+    );
   };
 
   const refreshAccounts = () =>
@@ -1766,8 +2019,15 @@ export function ReconciliationDashboard() {
     const amount = yieldToRecognize(account, summary, closeTax);
     if (!amount && !summary.canClose) return;
     try {
-      if (amount > 0)
+      if (amount > 0) {
+        setClosePhase(
+          closeTax > 0
+            ? "Lançando rendimento e IR…"
+            : "Lançando o rendimento…",
+        );
         await recognizeYield(amount, summary.statementDate, closeTax);
+      }
+      setClosePhase("Registrando o fechamento…");
       await bankAccountService.close(
         account,
         summary.statementDate,
@@ -1781,6 +2041,9 @@ export function ReconciliationDashboard() {
       );
     } catch (error) {
       toast.error(friendlyError(error, "Erro ao fechar o período"));
+      // O diálogo fica aberto para tentar de novo. O rendimento já lançado sai
+      // do saldo a reconhecer, então a nova tentativa não lança duas vezes.
+      throw error;
     }
   };
 
@@ -2374,7 +2637,7 @@ export function ReconciliationDashboard() {
                     className="flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium shadow-sm"
                   >
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    Buscando correspondências…
+                    {matchPhase}
                   </div>
                 </div>
               )}
@@ -2386,6 +2649,7 @@ export function ReconciliationDashboard() {
                 showEmptyDays={unfiltered}
                 onAction={handleAction}
                 rowState={rowStateFor}
+                lineProgress={lineProgress}
                 canSettle={canSettleFor}
                 canLaunch={canLaunchFor}
                 canRule={canManageReconciliationRules}
@@ -2447,6 +2711,7 @@ export function ReconciliationDashboard() {
                       key={tx.id}
                       tx={tx}
                       state={rowStateFor(tx)}
+                      progress={lineProgress(tx)}
                       canSettle={canSettleFor(tx)}
                       canLaunch={canLaunchFor(tx)}
                       canRule={canManageReconciliationRules}
@@ -2470,6 +2735,7 @@ export function ReconciliationDashboard() {
         description={`${plural(transactions.length, "linha importada", "linhas importadas")} desta conta saem da tela, incluindo ${summary?.pending ?? 0} ainda pendentes. Lançamentos já conciliados continuam conciliados no sistema, e os períodos fechados não mudam.`}
         confirmText="Limpar extrato"
         variant="destructive"
+        workingLabel={clearPhase}
         onConfirm={handleClearSession}
       />
 
@@ -2484,6 +2750,7 @@ export function ReconciliationDashboard() {
         }
         confirmText={pendingYield > 0 ? "Lançar e fechar" : "Fechar período"}
         confirmDisabled={!!closeTaxBlocker}
+        workingLabel={closePhase}
         onConfirm={handleClosePeriod}
       >
         {investment && periodRedemptions > 0 && !account.taxExempt && (
@@ -2559,6 +2826,7 @@ export function ReconciliationDashboard() {
           rules={rules}
           canManage={canManageReconciliationRules}
           onToggle={handleRuleToggle}
+          togglingId={togglingRuleId}
           onDelete={setRuleToDelete}
         />
       )}
@@ -2665,10 +2933,3 @@ function Kbd({ children }: { children: React.ReactNode }) {
     </kbd>
   );
 }
-
-/** Todas as falhas do lote, não só a primeira; a partir da quarta, a contagem. */
-const failureList = (failures: string[]) =>
-  [
-    ...failures.slice(0, 3),
-    ...(failures.length > 3 ? [`e mais ${failures.length - 3}`] : []),
-  ].join("\n");

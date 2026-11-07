@@ -8,6 +8,8 @@ import { MobileNav } from "@/components/layout/MobileNav";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { GlobalTransactionDetailModal } from "@/components/features/finance/GlobalTransactionDetailModal";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
+import { BatchRunTray } from "@/components/layout/BatchRunTray";
+import { QueryActivityBar } from "@/components/layout/QueryActivityBar";
 import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -101,6 +103,8 @@ export default function DashboardShell({
 
   return (
     <div className="flex h-screen bg-background">
+      <QueryActivityBar />
+      <BatchRunTray />
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
