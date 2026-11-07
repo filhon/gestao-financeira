@@ -175,7 +175,8 @@ export function UploadStatement({
       toast.error(
         friendlyError(error, `Não foi possível importar "${file.name}".`),
         {
-          description: "As linhas já gravadas ficam; a nova tentativa grava só o resto.",
+          description:
+            "As linhas já gravadas ficam; a nova tentativa grava só o resto.",
           duration: 10_000,
           action: {
             label: "Tentar de novo",

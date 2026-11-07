@@ -765,7 +765,10 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
       setPanelTx((cur) => (cur?.id === updated.id ? updated : cur));
       qc.invalidateQueries({ queryKey: ["tx-tabs", type] });
       // A edição pode mudar a conta de aba: as outras releem ao abrir.
-      qc.invalidateQueries({ queryKey: ["tx-list", type], refetchType: "none" });
+      qc.invalidateQueries({
+        queryKey: ["tx-list", type],
+        refetchType: "none",
+      });
     },
     [list, qc, type],
   );

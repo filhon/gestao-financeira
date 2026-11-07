@@ -58,7 +58,11 @@ const brl = (value: number) =>
     value,
   );
 
-async function handleReply(emailId: string, record: ReplyRecord, apiKey: string) {
+async function handleReply(
+  emailId: string,
+  record: ReplyRecord,
+  apiKey: string,
+) {
   const email = await fetchReceived(emailId, apiKey);
 
   const batchRef = adminDb.collection("payment_batches").doc(record.batchId);
@@ -196,7 +200,10 @@ export async function POST(request: Request) {
       webhookSecret: secret,
     }) as ReceivedEvent;
   } catch {
-    return NextResponse.json({ error: "Assinatura inválida." }, { status: 401 });
+    return NextResponse.json(
+      { error: "Assinatura inválida." },
+      { status: 401 },
+    );
   }
 
   const emailId = event.data?.email_id;

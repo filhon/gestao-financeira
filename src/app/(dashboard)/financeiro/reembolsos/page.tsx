@@ -48,9 +48,7 @@ import { BatchSendDialog } from "@/components/features/finance/BatchSendDialog";
 import { CreateReimbursementDialog } from "@/components/features/finance/reembolsos/CreateReimbursementDialog";
 import { SubmissionReviewPanel } from "@/components/features/finance/reembolsos/SubmissionReviewPanel";
 import { SubmissionLinksDialog } from "@/components/features/finance/reembolsos/SubmissionLinksDialog";
-import {
-  ReimbursementDetailsDialog,
-} from "@/components/features/finance/reembolsos/ReimbursementDetailsDialog";
+import { ReimbursementDetailsDialog } from "@/components/features/finance/reembolsos/ReimbursementDetailsDialog";
 import {
   ApprovalBadge,
   PaymentLabel,
@@ -339,11 +337,13 @@ export default function ReembolsosPage() {
       work: async ([report]) => {
         const token =
           tokens.get(report.id) ??
-          (await reimbursementReportService.sendForApproval(
-            report,
-            email,
-            actor,
-          )).token;
+          (
+            await reimbursementReportService.sendForApproval(
+              report,
+              email,
+              actor,
+            )
+          ).token;
         tokens.set(report.id, token);
         await emailService.sendReimbursementApprovalRequest(
           report.id,

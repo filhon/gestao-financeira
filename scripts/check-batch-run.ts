@@ -90,13 +90,7 @@ async function main() {
     const bad = new Set(["c"]);
     const t = setup(["a", "b", "c", "d", "e"], bad, { chunkSize: 2 });
     await t.run.start();
-    assert.deepEqual(t.calls, [
-      ["a", "b"],
-      ["c", "d"],
-      ["c"],
-      ["d"],
-      ["e"],
-    ]);
+    assert.deepEqual(t.calls, [["a", "b"], ["c", "d"], ["c"], ["d"], ["e"]]);
     assert.deepEqual(t.written, ["a", "b", "d", "e"]);
     assert.deepEqual(
       t.snap().failures.map((f) => f.id),

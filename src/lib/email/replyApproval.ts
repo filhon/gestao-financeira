@@ -16,7 +16,8 @@ const sha256 = (value: string) =>
   createHash("sha256").update(value, "utf8").digest("hex");
 
 /** Derivada do token do envio: reenviar o lote gera outro endereço e invalida o antigo. */
-export const replyKey = (token: string) => sha256(`reply:${token}`).slice(0, 32);
+export const replyKey = (token: string) =>
+  sha256(`reply:${token}`).slice(0, 32);
 
 export const replyAddress = (key: string, domain: string) =>
   `lote-${key}@${domain}`;
@@ -164,7 +165,10 @@ export function decideReply(input: {
   ) {
     return refuse("este envio do lote não está mais aguardando aprovação");
   }
-  if (batch.expiresAtMillis !== undefined && batch.expiresAtMillis < input.now) {
+  if (
+    batch.expiresAtMillis !== undefined &&
+    batch.expiresAtMillis < input.now
+  ) {
     return refuse("o prazo deste envio terminou");
   }
   if (emailOf(record.senderEmail) === emailOf(record.approverEmail)) {
