@@ -75,6 +75,14 @@ export async function POST(req: NextRequest) {
       const outcome = rematched.get(id);
       let patch: Record<string, unknown>;
       if (outcome?.best) {
+        // Perdeu a disputa para um título equivalente: o que sobrou não fica
+        // mais certo por isso, e não pode virar confirmação automática.
+        if (doc.get("matchIsAmbiguous") === true) {
+          outcome.best.isAmbiguous = true;
+          if (outcome.best.confidenceLevel === "HIGH") {
+            outcome.best.confidenceLevel = "MEDIUM";
+          }
+        }
         const fields = suggestionFields(outcome.best, outcome.alternatives, [
           LOST,
           ...outcome.best.reasons,
