@@ -122,6 +122,15 @@ service firebase.storage {
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isGlobalAdmin());
     }
 
+    // Imagem anexada a um chamado
+    // Path: feedbacks/{userId}/{fileId}-{filename}
+    match /feedbacks/{userId}/{fileName} {
+      allow read, delete: if isAuthenticated() && (request.auth.uid == userId || isGlobalAdmin());
+      allow create, update: if isAuthenticated() && request.auth.uid == userId
+        && request.resource.size < 10 * 1024 * 1024 // Max 10MB
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // 6. Reports/Exports (Generated PDF/Excel reports)
     // Path: exports/{companyId}/{userId}/{fileId}-{filename}
     match /exports/{companyId}/{userId}/{fileName} {

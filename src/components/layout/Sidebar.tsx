@@ -12,9 +12,11 @@ import {
   Megaphone,
   BookOpen,
   Map as MapIcon,
+  Inbox,
   MessageSquare,
   ChevronsUpDown,
 } from "lucide-react";
+import { useFeedbackPanelStore } from "@/lib/store/useFeedbackPanelStore";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { CompanySwitcher } from "@/components/layout/CompanySwitcher";
 import {
@@ -111,6 +113,7 @@ export function Sidebar() {
   const permissions = usePermissions();
   const setNovidadesOpen = useGlobalStore((s) => s.setNovidadesOpen);
   const novidadesNew = useGlobalStore((s) => s.novidadesNew);
+  const openFeedback = useFeedbackPanelStore((s) => s.openPanel);
 
   // Sidebar só monta no cliente (DashboardShell espera hidratar).
   const [collapsed, setCollapsed] = useState(() =>
@@ -186,6 +189,12 @@ export function Sidebar() {
         gAt = Date.now();
       } else if (Date.now() - gAt < 1000) {
         gAt = 0;
+        // Abre sobre a tela atual: não é navegação.
+        if (e.key === "a") {
+          e.preventDefault();
+          openFeedback();
+          return;
+        }
         // O manual mora no menu de ajuda, fora do NAV.
         const href =
           e.key === "m"
@@ -199,7 +208,7 @@ export function Sidebar() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [flat, router]);
+  }, [flat, router, openFeedback]);
 
   const toggleGroup = (title: string) =>
     setOpenGroups((prev) =>
@@ -581,10 +590,15 @@ export function Sidebar() {
                 Roadmap e sugestões
               </Link>
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openFeedback()}>
+              <MessageSquare className="mr-2 h-3.5 w-3.5" />
+              Falar com a equipe
+              <span className="ml-auto text-xs text-muted-foreground">g a</span>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/feedback">
-                <MessageSquare className="mr-2 h-3.5 w-3.5" />
-                Enviar feedback
+                <Inbox className="mr-2 h-3.5 w-3.5" />
+                Meus chamados
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />

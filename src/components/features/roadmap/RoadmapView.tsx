@@ -80,6 +80,8 @@ export function RoadmapView() {
   const [mineOnly, setMineOnly] = useState(false);
   const [sort, setSort] = useState<Sort>("votes");
   const [creating, setCreating] = useState(false);
+  // Vindo de "Falar com a equipe", com o texto que a pessoa já escreveu.
+  const arrivedToSuggest = searchParams.get("nova") === "1";
   const openId = searchParams.get("item");
   const openItem = items.find((i) => i.id === openId) ?? null;
 
@@ -346,8 +348,12 @@ export function RoadmapView() {
 
       {companyId && user && (
         <SuggestionPanel
-          open={creating}
-          onOpenChange={setCreating}
+          open={creating || arrivedToSuggest}
+          onOpenChange={(open) => {
+            setCreating(open);
+            if (!open && arrivedToSuggest) openPanel(null);
+          }}
+          initialDescription={searchParams.get("texto") ?? ""}
           companyId={companyId}
           user={user}
           items={items}

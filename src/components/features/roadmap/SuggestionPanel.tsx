@@ -57,11 +57,13 @@ interface SuggestionPanelProps {
   onVote: (item: RoadmapItem) => void;
   onOpenItem: (id: string) => void;
   onCreated: (id: string) => void;
+  initialDescription?: string;
 }
 
 export function SuggestionPanel({
   open,
   onOpenChange,
+  initialDescription = "",
   companyId,
   user,
   items,
@@ -76,6 +78,12 @@ export function SuggestionPanel({
   });
   const [similarIds, setSimilarIds] = useState<string[]>([]);
   const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    if (open && initialDescription) {
+      form.setValue("description", initialDescription);
+    }
+  }, [open, initialDescription, form]);
 
   // Procura pedidos parecidos quando a pessoa para de digitar o título
   const title = form.watch("title").trim();

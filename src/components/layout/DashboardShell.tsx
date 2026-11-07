@@ -7,6 +7,7 @@ import { Header } from "@/components/layout/Header";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { GlobalTransactionDetailModal } from "@/components/features/finance/GlobalTransactionDetailModal";
+import { FeedbackPanel } from "@/components/features/feedback/FeedbackPanel";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { BatchRunTray } from "@/components/layout/BatchRunTray";
 import { QueryActivityBar } from "@/components/layout/QueryActivityBar";
@@ -123,6 +124,7 @@ export default function DashboardShell({
       <MobileNav />
       <GlobalSearch />
       <GlobalTransactionDetailModal />
+      <FeedbackPanel />
     </div>
   );
 }

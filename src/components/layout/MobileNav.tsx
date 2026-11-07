@@ -5,11 +5,14 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   BookOpen,
+  Inbox,
+  MessageSquare,
   MoreHorizontal,
   Map as MapIcon,
   Megaphone,
 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useFeedbackPanelStore } from "@/lib/store/useFeedbackPanelStore";
 import { useGlobalStore } from "@/lib/store/useGlobalStore";
 import { useMemo, useState } from "react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -35,6 +38,7 @@ export function MobileNav() {
   const [moreOpen, setMoreOpen] = useState(false);
   const setNovidadesOpen = useGlobalStore((s) => s.setNovidadesOpen);
   const novidadesNew = useGlobalStore((s) => s.novidadesNew);
+  const openFeedback = useFeedbackPanelStore((s) => s.openPanel);
 
   const flat = useMemo(() => flatNav(visibleNav(permissions)), [permissions]);
   const visibleTabs = flat.filter((i) => i.href in TAB_LABELS);
@@ -179,6 +183,33 @@ export function MobileNav() {
                 <MapIcon className="h-[18px] w-[18px]" />
               </div>
               <span className="text-sm font-medium leading-tight">Roadmap</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                openFeedback();
+              }}
+              className="flex items-center gap-3 rounded-xl bg-muted/40 px-3.5 py-3.5 text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-muted-foreground">
+                <MessageSquare className="h-[18px] w-[18px]" />
+              </div>
+              <span className="text-sm font-medium leading-tight">
+                Falar com a equipe
+              </span>
+            </button>
+            <Link
+              href="/feedback"
+              onClick={() => setMoreOpen(false)}
+              className="flex items-center gap-3 rounded-xl bg-muted/40 px-3.5 py-3.5 text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-muted-foreground">
+                <Inbox className="h-[18px] w-[18px]" />
+              </div>
+              <span className="text-sm font-medium leading-tight">
+                Meus chamados
+              </span>
             </Link>
             <button
               type="button"

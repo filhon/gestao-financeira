@@ -8,6 +8,7 @@ import {
   Search,
   LogOut,
   User,
+  Inbox,
   MessageSquare,
   TrendingUp,
   Building2,
@@ -33,9 +34,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { useFeedbackPanelStore } from "@/lib/store/useFeedbackPanelStore";
 import { cn } from "@/lib/utils";
 
-const ROLE_LABELS: Record<string, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   admin: "Administrador",
   financial_manager: "Gestor Financeiro",
   approver: "Aprovador",
@@ -64,6 +66,7 @@ export function Header() {
   const { currentRole } = usePermissions();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  const openFeedback = useFeedbackPanelStore((s) => s.openPanel);
   const [isMac] = useState(
     () =>
       typeof navigator !== "undefined" &&
@@ -195,11 +198,18 @@ export function Header() {
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuItem
-                onClick={() => router.push("/feedback")}
+                onClick={() => openFeedback()}
                 className="cursor-pointer"
               >
                 <MessageSquare className="mr-2 h-3.5 w-3.5" />
-                <span>Enviar feedback</span>
+                <span>Falar com a equipe</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push("/feedback")}
+                className="cursor-pointer"
+              >
+                <Inbox className="mr-2 h-3.5 w-3.5" />
+                <span>Meus chamados</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

@@ -717,7 +717,12 @@ export interface RecurringTransactionTemplate {
 
 // Feedback System Types
 export type FeedbackType = "bug" | "improvement" | "question" | "praise";
-export type FeedbackStatus = "pending" | "in_review" | "resolved" | "wont_fix";
+export type FeedbackStatus =
+  | "pending"
+  | "in_review"
+  | "waiting_user"
+  | "resolved"
+  | "wont_fix";
 export type FeedbackPriority = "low" | "medium" | "high" | "critical";
 
 export type SystemFeature =
@@ -732,21 +737,50 @@ export type SystemFeature =
   | "cadastros"
   | "outro";
 
+/** O que acompanha o chamado sem a pessoa digitar. O usuário vê antes de enviar. */
+export interface FeedbackContext {
+  screen: string;
+  url: string;
+  browser: string;
+  viewport: string;
+  /** Preenchido pelo servidor, a partir da sessão. */
+  role?: string;
+  errors: { message: string; at: string }[];
+}
+
+export interface FeedbackEvent {
+  id: string;
+  kind: "message" | "status";
+  from: "user" | "team";
+  authorName: string;
+  text?: string;
+  status?: FeedbackStatus;
+  at: Date;
+}
+
 export interface Feedback {
   id: string;
+  /** Ausente em chamados abertos antes do protocolo. */
+  protocol?: string;
   userId: string;
   userEmail: string;
   userName: string;
+  companyId?: string;
+  companyName?: string;
 
   // Content
   type: FeedbackType;
   priority: FeedbackPriority;
-  relatedFeatures: SystemFeature[];
+  /** "Isso pode atrasar um pagamento hoje?" */
+  blocksPayment?: boolean;
+  /** Só em chamados antigos. */
+  relatedFeatures?: SystemFeature[];
   title: string;
   description: string;
   screenshotUrl?: string;
+  context?: FeedbackContext;
 
-  // Error context (when coming from ErrorBoundary)
+  // Error context of older tickets (new ones use context.errors)
   errorContext?: {
     message: string;
     url: string;
@@ -756,8 +790,18 @@ export interface Feedback {
   // Status
   status: FeedbackStatus;
   read: boolean;
+  /** Há novidade que quem abriu ainda não viu. */
+  userUnread?: boolean;
+  dueAt?: Date;
+  events?: FeedbackEvent[];
+  /** A correção saiu e está descrita em Novidades. */
+  fixedAt?: Date;
+  /** Resposta a "Isso resolveu?". */
+  solved?: boolean;
+  mergedInto?: string;
+  mergedIntoProtocol?: string;
 
-  // Admin response
+  // Resposta única dos chamados antigos; os novos usam `events`.
   adminResponse?: string;
   respondedBy?: string;
   respondedByEmail?: string;

@@ -810,8 +810,13 @@ export const BatchNewTransactionsEmail: React.FC<
 // ============================================
 
 interface FeedbackNotificationEmailProps {
+  heading: string;
+  protocol: string;
+  urgent: boolean;
   userName: string;
   userEmail: string;
+  companyName: string;
+  screen: string;
   feedbackType: string;
   feedbackTypeLabel: string;
   title: string;
@@ -822,8 +827,13 @@ interface FeedbackNotificationEmailProps {
 export const FeedbackNotificationEmail: React.FC<
   Readonly<FeedbackNotificationEmailProps>
 > = ({
+  heading,
+  protocol,
+  urgent,
   userName,
   userEmail,
+  companyName,
+  screen,
   feedbackType,
   feedbackTypeLabel,
   title,
@@ -837,16 +847,8 @@ export const FeedbackNotificationEmail: React.FC<
     praise: "#059669",
   };
 
-  const typeEmojis = {
-    bug: "🐛",
-    improvement: "💡",
-    question: "❓",
-    praise: "⭐",
-  };
-
   const color =
     typeColors[feedbackType as keyof typeof typeColors] || "#6b7280";
-  const emoji = typeEmojis[feedbackType as keyof typeof typeEmojis] || "📝";
 
   return (
     <div
@@ -860,9 +862,23 @@ export const FeedbackNotificationEmail: React.FC<
       <div
         style={{ background: "#f8fafc", padding: "20px", borderRadius: "8px" }}
       >
-        <h2 style={{ color: "#1e293b", marginTop: 0 }}>
-          {emoji} Novo Feedback Recebido
-        </h2>
+        <h2 style={{ color: "#1e293b", marginTop: 0 }}>{heading}</h2>
+        {protocol && (
+          <p style={{ color: "#475569", margin: "0 0 8px 0" }}>
+            Protocolo <strong>{protocol}</strong>
+          </p>
+        )}
+        {urgent && (
+          <p
+            style={{
+              color: "#b91c1c",
+              fontWeight: "bold",
+              margin: "0 0 8px 0",
+            }}
+          >
+            O usuário informou que isso pode atrasar um pagamento hoje.
+          </p>
+        )}
 
         <div
           style={{
@@ -914,6 +930,17 @@ export const FeedbackNotificationEmail: React.FC<
           >
             {userEmail}
           </p>
+          {(companyName || screen) && (
+            <p
+              style={{
+                margin: "4px 0 0 0",
+                fontSize: "12px",
+                color: "#64748b",
+              }}
+            >
+              {[companyName, screen].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
 
         <div style={{ textAlign: "center", margin: "24px 0" }}>
@@ -929,7 +956,7 @@ export const FeedbackNotificationEmail: React.FC<
               display: "inline-block",
             }}
           >
-            Ver Feedback e Responder
+            Abrir chamado
           </a>
         </div>
 
@@ -941,12 +968,80 @@ export const FeedbackNotificationEmail: React.FC<
             textAlign: "center",
           }}
         >
-          Este é um email automático do sistema de feedbacks do Fin Control.
+          Este é um email automático dos chamados do FinControl.
         </p>
       </div>
     </div>
   );
 };
+
+export const FeedbackUpdateEmail: React.FC<
+  Readonly<{ protocol: string; title: string; message: string; link: string }>
+> = ({ protocol, title, message, link }) => (
+  <div
+    style={{
+      fontFamily: "sans-serif",
+      lineHeight: "1.6",
+      maxWidth: "600px",
+      margin: "0 auto",
+    }}
+  >
+    <div
+      style={{ background: "#f8fafc", padding: "20px", borderRadius: "8px" }}
+    >
+      <h2 style={{ color: "#1e293b", marginTop: 0 }}>
+        Novidade no seu chamado
+      </h2>
+      <p style={{ color: "#475569", margin: "0 0 4px 0" }}>
+        {protocol && (
+          <>
+            <strong>{protocol}</strong> ·{" "}
+          </>
+        )}
+        {title}
+      </p>
+      <p
+        style={{
+          background: "#fff",
+          border: "1px solid #e2e8f0",
+          borderRadius: "6px",
+          color: "#1e293b",
+          padding: "16px",
+          margin: "16px 0",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {message}
+      </p>
+      <div style={{ textAlign: "center", margin: "24px 0" }}>
+        <a
+          href={link}
+          style={{
+            background: "#1e293b",
+            color: "#fff",
+            padding: "12px 32px",
+            textDecoration: "none",
+            borderRadius: "6px",
+            fontWeight: "bold",
+            display: "inline-block",
+          }}
+        >
+          Ver chamado
+        </a>
+      </div>
+      <p
+        style={{
+          color: "#94a3b8",
+          fontSize: "12px",
+          marginBottom: 0,
+          textAlign: "center",
+        }}
+      >
+        Para responder, use o botão acima.
+      </p>
+    </div>
+  </div>
+);
 
 // ============================================
 // Reimbursement Report Emails
