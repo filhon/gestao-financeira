@@ -439,7 +439,11 @@ export const reportService = {
       drawRGB(SLATE_300);
       doc.setLineWidth(0.2);
       doc.line(MARGIN, PAGE_H - 12, PAGE_W - MARGIN, PAGE_H - 12);
-      doc.text("FinControl • Documento Confidencial", MARGIN, PAGE_H - 7);
+      doc.text(
+        "Hebron ASEEC · Financeiro • Documento Confidencial",
+        MARGIN,
+        PAGE_H - 7,
+      );
       doc.text(companyName, PAGE_W / 2, PAGE_H - 7, { align: "center" });
       doc.text(
         `Página ${pageNum} de ${totalPages}`,
@@ -808,7 +812,7 @@ export const reportService = {
     const entities = ctx.entities ?? [];
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "FinControl";
+    workbook.creator = "Hebron ASEEC · Financeiro";
     workbook.created = new Date();
 
     // ── Mapa de entidades ─────────────────────────────────────────────────
@@ -1346,7 +1350,7 @@ export const reportService = {
     const accounts = ctx.accounts ?? [];
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "FinControl";
+    workbook.creator = "Hebron ASEEC · Financeiro";
     workbook.created = new Date();
 
     const MONEY = '#,##0.00;[Red](#,##0.00);"-"';
@@ -1627,7 +1631,7 @@ export const reportService = {
   ) => {
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "FinControl";
+    workbook.creator = "Hebron ASEEC · Financeiro";
     workbook.created = new Date();
     const cols = paymentColumns(ctx);
     const sheet = workbook.addWorksheet(
@@ -1734,7 +1738,7 @@ export const reportService = {
   ) => {
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "FinControl";
+    workbook.creator = "Hebron ASEEC · Financeiro";
     workbook.created = new Date();
 
     const entitiesMap = entities.reduce(

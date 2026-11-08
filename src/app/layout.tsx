@@ -1,12 +1,22 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, IBM_Plex_Sans } from "next/font/google";
+import { Parkinsans, Titillium_Web, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/providers/ToastProvider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
-const inter = Inter({ subsets: ["latin"] });
+// Identidade Hebron ASEEC: Parkinsans em títulos, Titillium no corpo.
+// Titillium não tem peso 500 — font-medium cai no 400.
+const parkinsans = Parkinsans({
+  subsets: ["latin"],
+  variable: "--font-parkinsans",
+});
+const titillium = Titillium_Web({
+  subsets: ["latin"],
+  weight: ["300", "400", "600", "700"],
+  variable: "--font-titillium",
+});
 const ibmPlexSans = IBM_Plex_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
@@ -18,19 +28,19 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+    { media: "(prefers-color-scheme: dark)", color: "#151a33" },
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
   ],
 };
 
 export const metadata: Metadata = {
-  title: "Fin Control",
+  title: "Financeiro · Hebron ASEEC",
   description: "Sistema de Gestão Financeira",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black",
-    title: "FinControl",
+    title: "Financeiro",
   },
   icons: {
     icon: [
@@ -56,7 +66,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <body className={`${inter.className} ${ibmPlexSans.variable}`}>
+      <body
+        className={`${parkinsans.variable} ${titillium.variable} ${ibmPlexSans.variable} font-sans`}
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

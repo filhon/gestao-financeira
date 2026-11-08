@@ -381,7 +381,7 @@ export function Sidebar() {
               <TrendingUp className="h-4 w-4 text-primary-foreground" />
             </div>
             <span className="flex-1 text-base font-semibold tracking-tight">
-              Fin Control
+              Financeiro
             </span>
           </>
         )}

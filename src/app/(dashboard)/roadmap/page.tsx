@@ -3,7 +3,7 @@ import { Metadata } from "next";
 import { RoadmapView } from "@/components/features/roadmap/RoadmapView";
 
 export const metadata: Metadata = {
-  title: "Roadmap | Fin Control",
+  title: "Roadmap | Financeiro",
   description: "Sugira melhorias, vote e acompanhe o que está em execução.",
 };
 

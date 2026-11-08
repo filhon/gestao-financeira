@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FinControl | Contas a pagar, conciliação e aprovação",
+  title: "Financeiro · Hebron ASEEC | Contas a pagar, conciliação e aprovação",
   description:
     "Contas a pagar e a receber com aprovação em etapas, baixa pelo extrato bancário e registro de cada alteração, para empresas brasileiras.",
 };

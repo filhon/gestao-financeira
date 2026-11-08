@@ -265,7 +265,7 @@ export const apiDocsPdfService = {
     doc.setFont(font, "normal");
     doc.setFontSize(7.5);
     ink(GRAY_400);
-    doc.text("FINCONTROL", MARGIN, 10);
+    doc.text("HEBRON ASEEC · FINANCEIRO", MARGIN, 10);
     ink(GRAY_300);
     if (version)
       doc.text(`Versão ${version}`, PAGE_W - MARGIN, 15, { align: "right" });
@@ -507,7 +507,7 @@ export const apiDocsPdfService = {
       doc.setFontSize(7);
       ink(GRAY_400);
       doc.text(
-        `FinControl • API Financeira${version ? ` v${version}` : ""}`,
+        `Hebron ASEEC • API Financeira${version ? ` v${version}` : ""}`,
         MARGIN,
         PAGE_H - 7,
       );

@@ -198,7 +198,7 @@ export default function TermsOfServicePage() {
             </Link>
           </div>
           <span>
-            &copy; {new Date().getFullYear()} Fin Control. Todos os direitos
+            &copy; {new Date().getFullYear()} Hebron ASEEC. Todos os direitos
             reservados.
           </span>
         </div>

@@ -219,11 +219,11 @@ function LoginContent() {
       <div className="w-full max-w-sm">
         <div className="mb-8 flex items-center gap-2">
           <Image src="/favicon.svg" alt="" width={24} height={24} priority />
-          <p className="text-base font-semibold tracking-tight">Fin Control</p>
+          <p className="text-base font-semibold tracking-tight">Financeiro</p>
         </div>
 
         <h1 className="mb-6 text-2xl font-semibold tracking-tight">
-          {tab === "login" ? "Entrar no Fin Control" : "Criar sua conta"}
+          {tab === "login" ? "Entrar no Financeiro" : "Criar sua conta"}
         </h1>
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>

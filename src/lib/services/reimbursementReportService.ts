@@ -596,7 +596,11 @@ export const reimbursementReportService = {
       drawRGB(SLATE_300);
       doc.setLineWidth(0.2);
       doc.line(MARGIN, PAGE_H - 12, PAGE_W - MARGIN, PAGE_H - 12);
-      doc.text("FinControl • Documento Confidencial", MARGIN, PAGE_H - 7);
+      doc.text(
+        "Hebron ASEEC · Financeiro • Documento Confidencial",
+        MARGIN,
+        PAGE_H - 7,
+      );
       doc.text(company.name, PAGE_W / 2, PAGE_H - 7, { align: "center" });
       doc.text(
         `Pág. ${pageNum} de ${totalPages}`,

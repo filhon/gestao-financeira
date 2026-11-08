@@ -1,7 +1,8 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="6" fill="#2563EB"/>
-  <g transform="translate(6, 6) scale(0.8333)">
-    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <polyline points="16 7 22 7 22 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="112" fill="#202C85"/>
+  <g transform="translate(86.709, 84.043) scale(13.33)">
+    <polyline points="2 18 8.5 11.5 13.5 16.5 20 10" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="20" cy="10" r="3.4" fill="#EA5A06"/>
+    <circle cx="20" cy="10" r="3.4" stroke="#202C85" stroke-width="1"/>
   </g>
 </svg>

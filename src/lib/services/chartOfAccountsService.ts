@@ -771,7 +771,7 @@ export const chartOfAccountsService = {
   ) => {
     const ExcelJS = (await import("exceljs")).default;
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "FinControl";
+    workbook.creator = "Hebron ASEEC · Financeiro";
     workbook.created = new Date();
 
     const rows =

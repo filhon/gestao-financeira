@@ -15,6 +15,19 @@ export function QueryActivityBar() {
   const started = useRef(new Set<string>());
 
   useEffect(() => {
+    // O cache avisa de forma síncrona quando um useQuery monta, ainda durante
+    // a renderização de outro componente; setState ali é proibido. Adiar para
+    // um microtask também junta a rajada de avisos numa só atualização.
+    let pending = false;
+    let alive = true;
+    const schedule = () => {
+      if (pending) return;
+      pending = true;
+      queueMicrotask(() => {
+        pending = false;
+        if (alive) update();
+      });
+    };
     const update = () => {
       const fetching = cache.findAll({ fetchStatus: "fetching" });
       const other = loadActivity.snapshot();
@@ -28,9 +41,10 @@ export function QueryActivityBar() {
       const total = started.current.size + other.started;
       setProgress((total - fetching.length - other.active) / total);
     };
-    const stopCache = cache.subscribe(update);
-    const stopOther = loadActivity.subscribe(update);
+    const stopCache = cache.subscribe(schedule);
+    const stopOther = loadActivity.subscribe(schedule);
     return () => {
+      alive = false;
       stopCache();
       stopOther();
     };

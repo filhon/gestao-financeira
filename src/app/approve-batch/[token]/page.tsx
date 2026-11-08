@@ -765,7 +765,7 @@ export default function BatchApprovalPage() {
       <header className="bg-background border-b">
         <div className="px-4 py-4 sm:px-6 lg:px-8">
           <p className="text-xs text-muted-foreground">
-            {batch?.companyName ?? "FinControl"} · Aprovação de lote de
+            {batch?.companyName ?? "Financeiro"} · Aprovação de lote de
             pagamentos
           </p>
           <h1 className="text-lg sm:text-xl font-semibold mt-0.5">

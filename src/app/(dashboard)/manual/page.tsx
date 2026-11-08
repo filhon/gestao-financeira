@@ -3,7 +3,7 @@ import { Metadata } from "next";
 import { PlaybookView } from "@/components/features/playbook/PlaybookView";
 
 export const metadata: Metadata = {
-  title: "Manual de operação | Fin Control",
+  title: "Manual de operação | Financeiro",
   description: "As regras do jogo: quem faz o quê, em que ordem e por quê.",
 };
 

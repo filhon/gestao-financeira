@@ -92,9 +92,7 @@ export function Header() {
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shrink-0">
           <TrendingUp className="h-4 w-4 text-primary-foreground" />
         </div>
-        <span className="text-sm font-semibold tracking-tight">
-          Fin Control
-        </span>
+        <span className="text-sm font-semibold tracking-tight">Financeiro</span>
       </div>
 
       <button

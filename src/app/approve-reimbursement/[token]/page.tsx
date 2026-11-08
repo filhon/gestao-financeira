@@ -152,7 +152,7 @@ export default function ApproveReimbursementPage() {
         {/* Header */}
         <div className="text-center mb-6">
           <p className="text-xs text-slate-500 uppercase tracking-widest font-medium">
-            Fin Control
+            Financeiro
           </p>
           <h1 className="text-2xl font-bold text-slate-900 mt-1">
             Relatório de Despesas
@@ -408,7 +408,7 @@ export default function ApproveReimbursementPage() {
         )}
 
         <p className="text-center text-xs text-slate-400 mt-6">
-          Fin Control · Gestão Financeira
+          Hebron ASEEC · Financeiro
         </p>
       </div>
     </div>

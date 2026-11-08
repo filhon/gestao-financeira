@@ -136,7 +136,7 @@ export default function LandingPage() {
     <div className="fin-root">
       <header className="fin-header">
         <div className="fin-wrap fin-header-row">
-          <Link href="/" className="fin-logo" aria-label="FinControl, início">
+          <Link href="/" className="fin-logo" aria-label="Financeiro, início">
             <span className="fin-logo-mark" aria-hidden="true">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path
@@ -148,7 +148,7 @@ export default function LandingPage() {
                 />
               </svg>
             </span>
-            FinControl
+            Financeiro
           </Link>
           <nav className="fin-nav" aria-label="Principal">
             <a href="#como-funciona" className="fin-navlink fin-hide-sm">
@@ -323,7 +323,7 @@ export default function LandingPage() {
 
       <footer className="fin-footer">
         <div className="fin-wrap fin-footer-row">
-          <span>&copy; {new Date().getFullYear()} FinControl</span>
+          <span>&copy; {new Date().getFullYear()} Hebron ASEEC</span>
           <nav aria-label="Rodapé">
             <Link href="/login">Entrar</Link>
             <Link href="/termos-uso">Termos de uso</Link>

@@ -2,13 +2,13 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Fin Control",
-    short_name: "FinControl",
+    name: "Financeiro · Hebron ASEEC",
+    short_name: "Financeiro",
     description: "Sistema de Gestão Financeira",
     start_url: "/",
     display: "standalone",
-    background_color: "#000000",
-    theme_color: "#000000",
+    background_color: "#202C85",
+    theme_color: "#202C85",
     orientation: "portrait-primary",
     icons: [
       {
