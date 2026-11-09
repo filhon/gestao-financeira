@@ -21,10 +21,30 @@ import {
   subMonths,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import type { ChartAccount, CostCenter, Entity, Transaction } from "./types";
+import type {
+  ChartAccount,
+  CostCenter,
+  Entity,
+  RecurringTransactionTemplate,
+  Transaction,
+} from "./types";
 // Relativo: o script de verificação roda fora do Next, sem o alias "@/".
 import { dreAmount, dreMonth, type DreRegime } from "./chartOfAccounts";
-import { flowAmount, stageOf } from "./reports";
+import {
+  buildCashFlow,
+  flowAmount,
+  FORECAST_STAGES,
+  projectRecurrences,
+  stageOf,
+  type FlowStage,
+} from "./reports";
+import {
+  annotateWithSimulations,
+  negativeRuns,
+  type NegativeRun,
+  type SimulatedEntry,
+} from "./dashboardRules";
+import { formatCurrencyAbbr, formatPercent } from "./utils";
 
 export type Side = "receivable" | "payable";
 export const SIDES: Side[] = ["receivable", "payable"];
@@ -728,6 +748,385 @@ export function buildTiming(
   };
 }
 
+// ─── Projeção do caixa ────────────────────────────────────────────────────────
+
+export const PROJECTION_MONTHS = 24;
+export const PROJECTION_HORIZONS = [3, 6, 12, 24] as const;
+export type ForecastStage = Exclude<FlowStage, "realized">;
+
+/** Movimento previsto de um dia num estágio. */
+export interface ProjectionDay {
+  /** "yyyy-MM-dd". */
+  date: string;
+  stage: ForecastStage;
+  inflow: number;
+  outflow: number;
+}
+
+const fromDayKey = (key: string) => new Date(`${key}T12:00:00`);
+
+/**
+ * O que ainda não passou pelo banco, de hoje a `months` meses, por dia e
+ * estágio: o mesmo fluxo de caixa dos Relatórios, com as recorrências ainda
+ * não lançadas. Vencido e não baixado fica de fora (como em `openingFromToday`):
+ * não há data para pôr no futuro; a tela mostra o total à parte.
+ */
+export function buildProjectionDays(
+  transactions: Transaction[],
+  templates: RecurringTransactionTemplate[],
+  today: Date,
+  months = PROJECTION_MONTHS,
+): ProjectionDay[] {
+  const start = startOfDay(today);
+  const end = addMonths(start, months);
+  const flow = buildCashFlow(
+    [...transactions, ...projectRecurrences(templates, start, end)],
+    { start, end, stages: FORECAST_STAGES, granularity: "day" },
+  );
+  const rows = new Map<string, ProjectionDay>();
+  for (const l of flow.lines) {
+    const date = dayKey(l.date);
+    const key = `${date}|${l.stage}`;
+    const row = rows.get(key) ?? {
+      date,
+      stage: l.stage as ForecastStage,
+      inflow: 0,
+      outflow: 0,
+    };
+    if (l.tx.type === "receivable") row.inflow = add(row.inflow, l.amount);
+    else row.outflow = add(row.outflow, l.amount);
+    rows.set(key, row);
+  }
+  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Simulação "e se": nada é gravado, só desenha a linha tracejada. */
+export type Simulation =
+  | { id: string; kind: "once"; type: Side; amount: number; date: string }
+  | {
+      id: string;
+      kind: "monthly";
+      type: Side;
+      amount: number;
+      date: string;
+      months: number;
+    }
+  /** Receita ou despesa prevista variando `percent` (−0,1 = −10%). */
+  | { id: string; kind: "percent"; side: Side; percent: number };
+
+/** Uma simulação em lançamentos datados, dentro de [from, until]. */
+export function simulationEntries(
+  sims: Simulation[],
+  days: ProjectionDay[],
+  stages: readonly ForecastStage[],
+  from: string,
+  until: string,
+): SimulatedEntry[] {
+  const out: SimulatedEntry[] = [];
+  for (const s of sims) {
+    if (s.kind === "once") {
+      out.push({ id: s.id, type: s.type, amount: s.amount, date: s.date });
+    } else if (s.kind === "monthly") {
+      // Sempre a partir da data inicial: 31/01 vira 28/02 e volta a 31/03.
+      for (let i = 0; i < s.months; i++) {
+        out.push({
+          id: `${s.id}_${i}`,
+          type: s.type,
+          amount: s.amount,
+          date: dayKey(addMonths(fromDayKey(s.date), i)),
+        });
+      }
+    } else {
+      const wanted = new Set(stages);
+      for (const d of days) {
+        if (!wanted.has(d.stage)) continue;
+        const base = s.side === "receivable" ? d.inflow : d.outflow;
+        if (!base) continue;
+        out.push({
+          id: `${s.id}_${d.date}_${d.stage}`,
+          type: s.side,
+          amount: currency(base).multiply(s.percent).value,
+          date: d.date,
+        });
+      }
+    }
+  }
+  return out.filter((e) => e.amount && e.date >= from && e.date <= until);
+}
+
+export interface ProjectionPoint {
+  isoDate: string;
+  inflow: number;
+  outflow: number;
+  /** Saldo ao fim do dia. */
+  balance: number;
+  simulatedBalance?: number;
+}
+
+export interface Projection {
+  from: string;
+  until: string;
+  opening: number;
+  points: ProjectionPoint[];
+  closing: number;
+  lowest: ProjectionPoint;
+  runs: NegativeRun<ProjectionPoint>[];
+  /** Todos os estágios, escolhidos ou não, no horizonte. */
+  byStage: { stage: ForecastStage; inflow: number; outflow: number }[];
+  simulated: {
+    closing: number;
+    lowest: number;
+    runs: NegativeRun<ProjectionPoint>[];
+  } | null;
+}
+
+/**
+ * Saldo dia a dia de `from` a `until`, a partir do caixa de hoje, só com os
+ * estágios escolhidos. Um ponto por dia com movimento (o saldo muda em
+ * degrau), mais as pontas e as datas simuladas, para a linha tracejada
+ * descer no dia certo.
+ */
+export function projectBalance(o: {
+  days: ProjectionDay[];
+  opening: number;
+  stages: readonly ForecastStage[];
+  from: string;
+  until: string;
+  simulations?: Simulation[];
+}): Projection {
+  const wanted = new Set(o.stages);
+  const inHorizon = o.days.filter((d) => d.date >= o.from && d.date <= o.until);
+  const perDay = new Map<string, { inflow: number; outflow: number }>();
+  const stageTotals = new Map(
+    FORECAST_STAGES.map((stage) => [
+      stage as ForecastStage,
+      { stage: stage as ForecastStage, inflow: 0, outflow: 0 },
+    ]),
+  );
+  for (const d of inHorizon) {
+    const st = stageTotals.get(d.stage)!;
+    st.inflow = add(st.inflow, d.inflow);
+    st.outflow = add(st.outflow, d.outflow);
+    if (!wanted.has(d.stage)) continue;
+    const day = perDay.get(d.date) ?? { inflow: 0, outflow: 0 };
+    day.inflow = add(day.inflow, d.inflow);
+    day.outflow = add(day.outflow, d.outflow);
+    perDay.set(d.date, day);
+  }
+
+  const entries = simulationEntries(
+    o.simulations ?? [],
+    inHorizon,
+    o.stages,
+    o.from,
+    o.until,
+  );
+  const dates = [
+    ...new Set([
+      o.from,
+      ...perDay.keys(),
+      ...entries.map((e) => e.date),
+      o.until,
+    ]),
+  ].sort();
+
+  let running = currency(o.opening);
+  const base: ProjectionPoint[] = dates.map((isoDate) => {
+    const day = perDay.get(isoDate) ?? { inflow: 0, outflow: 0 };
+    running = running.add(day.inflow).subtract(day.outflow);
+    return { isoDate, ...day, balance: running.value };
+  });
+  const points = annotateWithSimulations(base, entries);
+  const lowestOf = (
+    ps: ProjectionPoint[],
+    key: "balance" | "simulatedBalance",
+  ) =>
+    ps.reduce((min, p) => ((p[key] ?? 0) < (min[key] ?? 0) ? p : min), ps[0]);
+  const lowest = lowestOf(points, "balance");
+  const simulated = entries.length
+    ? {
+        closing: points.at(-1)!.simulatedBalance!,
+        lowest: lowestOf(points, "simulatedBalance").simulatedBalance!,
+        runs: negativeRuns(
+          points.map((p) => ({ ...p, balance: p.simulatedBalance! })),
+        ),
+      }
+    : null;
+
+  return {
+    from: o.from,
+    until: o.until,
+    opening: currency(o.opening).value,
+    points,
+    closing: points.at(-1)!.balance,
+    lowest,
+    runs: negativeRuns(points),
+    byStage: [...stageTotals.values()],
+    simulated,
+  };
+}
+
+/** "yyyy-MM-dd" + n meses. */
+export const horizonEnd = (from: string, months: number) =>
+  dayKey(addMonths(fromDayKey(from), months));
+
+// ─── O que pede atenção ───────────────────────────────────────────────────────
+
+/** Limites das regras de destaque. */
+export const ATTENTION = {
+  /** Previsto × realizado + em aberto, no sentido ruim. */
+  planDeviation: 0.1,
+  /** Maior contraparte (fora a mantenedora) no total do lado. */
+  concentration: 0.3,
+  /** Horizonte da projeção que os destaques olham. */
+  projectionMonths: 12,
+  max: 5,
+} as const;
+
+export interface AttentionItem {
+  id: string;
+  tone: "danger" | "warning";
+  text: string;
+  /** Âncora da seção que explica o destaque. */
+  section: string;
+  sectionLabel: string;
+}
+
+export interface EnvelopeLeaf {
+  name: string;
+  status: "success" | "warning" | "danger" | "no-budget";
+  isLeaf: boolean;
+  tight: boolean;
+}
+
+const money = formatCurrencyAbbr;
+// Uma casa: "10,3% abaixo" não se confunde com o limite de 10%.
+const pct = (v: number) => formatPercent(v, 1);
+const dayText = (key: string) => format(fromDayKey(key), "dd/MM/yyyy");
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+/** "Obras", "Obras e Eventos", "Obras, Eventos e mais 2". */
+const names = (list: { name: string }[]) =>
+  list.length <= 2
+    ? list.map((l) => l.name).join(" e ")
+    : `${list[0].name}, ${list[1].name} e mais ${list.length - 2}`;
+
+/**
+ * Destaques por regra, sem IA: cada regra que dispara vira uma frase de
+ * modelo com os números e o link para a seção. Vermelho antes de âmbar; na
+ * mesma cor, a ordem das regras abaixo.
+ */
+export function buildAttention(i: {
+  report: AnalyticsReport;
+  /** "2026", "jan/26 a mar/26". */
+  periodLabel: string;
+  envelopes: EnvelopeLeaf[] | null;
+  exercise: number;
+  projection: Projection | null;
+}): AttentionItem[] {
+  const out: AttentionItem[] = [];
+
+  const p = i.projection;
+  if (p && p.runs.length) {
+    const first = p.runs[0];
+    const when = first.open
+      ? `a partir de ${dayText(first.start.isoDate)} e não volta ao positivo`
+      : p.runs.length > 1
+        ? `em ${p.runs.length} trechos, o primeiro a partir de ${dayText(first.start.isoDate)}`
+        : first.start === first.end
+          ? `em ${dayText(first.start.isoDate)}`
+          : `entre ${dayText(first.start.isoDate)} e ${dayText(first.end.isoDate)}`;
+    out.push({
+      id: "cash",
+      tone: "danger",
+      text: `O caixa fica negativo ${when}, no que já está lançado para os próximos ${ATTENTION.projectionMonths} meses. Menor saldo: ${money(p.lowest.balance)} em ${dayText(p.lowest.isoDate)}.`,
+      section: "projecao",
+      sectionLabel: "Projeção",
+    });
+  }
+
+  const leaves = (i.envelopes ?? []).filter((e) => e.isLeaf);
+  const over = leaves.filter((e) => e.status === "danger");
+  const pace = leaves.filter((e) => e.status === "warning" && !e.tight);
+  const tight = leaves.filter((e) => e.status === "warning" && e.tight);
+  if (over.length || pace.length || tight.length) {
+    const parts = [
+      over.length &&
+        `${names(over)} ${plural(over.length, "estourou", "estouraram")}`,
+      pace.length &&
+        `${names(pace)} ${plural(pace.length, "gasta", "gastam")} acima do ritmo`,
+      tight.length &&
+        `${names(tight)} ${plural(tight.length, "está", "estão")} sem folga`,
+    ].filter(Boolean);
+    out.push({
+      id: "envelope",
+      tone: over.length ? "danger" : "warning",
+      text: `Envelopes de ${i.exercise}: ${parts.join("; ")}.`,
+      section: "orcamento",
+      sectionLabel: "Orçamento",
+    });
+  }
+
+  for (const side of SIDES) {
+    const b = i.report.plan[side].bridge;
+    if (b.planned <= 0) continue;
+    const outlook = currency(b.realized)
+      .add(b.openOverdue)
+      .add(b.openFuture).value;
+    const r = sub(outlook, b.planned) / b.planned;
+    const bad =
+      side === "receivable"
+        ? r < -ATTENTION.planDeviation
+        : r > ATTENTION.planDeviation;
+    if (!bad) continue;
+    out.push({
+      id: `plan-${side}`,
+      tone: "warning",
+      text:
+        side === "receivable"
+          ? `Receitas de ${i.periodLabel}: ${money(outlook)} recebidas ou a receber, ${pct(-r)} abaixo dos ${money(b.planned)} previstos.`
+          : `Despesas de ${i.periodLabel}: ${money(outlook)} pagas ou a pagar, ${pct(r)} acima dos ${money(b.planned)} previstos.`,
+      section: "previsto",
+      sectionLabel: "Previsto e realizado",
+    });
+  }
+
+  const old = i.report.aging.receivable.find((b) => b.key === "d90p");
+  if (old && old.value > 0) {
+    out.push({
+      id: "aging",
+      tone: "warning",
+      text: `${money(old.value)} a receber vencidos há mais de 90 dias, em ${old.count} ${plural(old.count, "lançamento", "lançamentos")}.`,
+      section: "riscos",
+      sectionLabel: "Riscos",
+    });
+  }
+
+  for (const side of SIDES) {
+    const c = i.report.concentration[side];
+    if (c.total <= 0) continue;
+    // A mantenedora é a fonte da receita por definição: não é risco a apontar.
+    const top = c.top.find((t) => t.key !== i.report.anchorEntityId);
+    if (!top || top.value / c.total <= ATTENTION.concentration) continue;
+    out.push({
+      id: `concentration-${side}`,
+      tone: "warning",
+      text: `${top.name} concentra ${pct(top.value / c.total)} das ${side === "receivable" ? "receitas" : "despesas"} de ${i.periodLabel} (${money(top.value)}).`,
+      section: "riscos",
+      sectionLabel: "Riscos",
+    });
+  }
+
+  return out
+    .map((item, order) => ({ item, order }))
+    .sort(
+      (a, b) =>
+        (a.item.tone === "danger" ? 0 : 1) -
+          (b.item.tone === "danger" ? 0 : 1) || a.order - b.order,
+    )
+    .slice(0, ATTENTION.max)
+    .map((x) => x.item);
+}
+
 // ─── Relatório ────────────────────────────────────────────────────────────────
 
 export interface AnalyticsOptions {
@@ -756,6 +1155,8 @@ export interface AnalyticsReport {
   aging: Record<Side, AgingBucket[]>;
   timing: Record<Side, Timing>;
   anchorEntityId: string | null;
+  /** Previsto de hoje a 24 meses; não depende do período escolhido. */
+  projection: ProjectionDay[];
 }
 
 export function buildAnalytics(
@@ -764,6 +1165,7 @@ export function buildAnalytics(
     accounts: ChartAccount[];
     costCenters: CostCenter[];
     entities: Pick<Entity, "id" | "name">[];
+    templates?: RecurringTransactionTemplate[];
   },
   o: AnalyticsOptions,
 ): AnalyticsReport {
@@ -829,5 +1231,6 @@ export function buildAnalytics(
       payable: buildTiming(txs, "payable", o.range),
     },
     anchorEntityId: anchor,
+    projection: buildProjectionDays(txs, input.templates ?? [], o.today),
   };
 }

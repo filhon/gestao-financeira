@@ -17,6 +17,7 @@ import type {
   ChartAccount,
   CostCenter,
   Entity,
+  RecurringTransactionTemplate,
   Transaction,
   UserRole,
 } from "@/lib/types";
@@ -55,6 +56,7 @@ interface CompanyData {
   accounts: ChartAccount[];
   costCenters: CostCenter[];
   entities: Pick<Entity, "id" | "name">[];
+  templates: RecurringTransactionTemplate[];
   anchorEntityId: string | null;
   capped: boolean;
 }
@@ -62,13 +64,15 @@ interface CompanyData {
 async function load(companyId: string): Promise<CompanyData> {
   const byCompany = (name: string) =>
     adminDb.collection(name).where("companyId", "==", companyId);
-  const [txSnap, accSnap, ccSnap, entSnap, companySnap] = await Promise.all([
-    byCompany("transactions").limit(MAX_DOCS).get(),
-    byCompany("chart_of_accounts").get(),
-    byCompany("cost_centers").get(),
-    byCompany("entities").select("name").get(),
-    adminDb.collection("companies").doc(companyId).get(),
-  ]);
+  const [txSnap, accSnap, ccSnap, entSnap, companySnap, tplSnap] =
+    await Promise.all([
+      byCompany("transactions").limit(MAX_DOCS).get(),
+      byCompany("chart_of_accounts").get(),
+      byCompany("cost_centers").get(),
+      byCompany("entities").select("name").get(),
+      adminDb.collection("companies").doc(companyId).get(),
+      byCompany("recurring_templates").where("active", "==", true).get(),
+    ]);
 
   const transactions = txSnap.docs.flatMap((d) => {
     const data = d.data();
@@ -96,6 +100,17 @@ async function load(companyId: string): Promise<CompanyData> {
       (d) => ({ ...d.data(), id: d.id }) as CostCenter,
     ),
     entities: entSnap.docs.map((d) => ({ id: d.id, name: d.get("name") })),
+    templates: tplSnap.docs.map(
+      (d) =>
+        ({
+          ...d.data(),
+          id: d.id,
+          nextDueDate: toWall(d.get("nextDueDate")),
+          endDate: toWall(d.get("endDate")),
+          createdAt: toWall(d.get("createdAt")),
+          updatedAt: toWall(d.get("updatedAt")),
+        }) as RecurringTransactionTemplate,
+    ),
     anchorEntityId: companySnap.get("analyticsAnchorEntityId") ?? null,
     capped: txSnap.size >= MAX_DOCS,
   };

@@ -17,8 +17,21 @@ import {
   hasMovement,
   monthlyAverage,
   planRoles,
+  buildAnalytics,
+  buildAttention,
+  buildProjectionDays,
+  horizonEnd,
+  projectBalance,
+  simulationEntries,
+  type ForecastStage,
 } from "../src/lib/analytics";
-import type { ChartAccount, CostCenter, Transaction } from "../src/lib/types";
+import { DEFAULT_FORECAST } from "../src/lib/reports";
+import type {
+  ChartAccount,
+  CostCenter,
+  RecurringTransactionTemplate,
+  Transaction,
+} from "../src/lib/types";
 
 let n = 0;
 const d = (y: number, m: number, day: number) => new Date(y, m - 1, day);
@@ -403,5 +416,308 @@ assert.equal(
 );
 assert.equal(hasMovement({ inflow: 0, outflow: 1 }), true);
 assert.equal(hasMovement(null), false);
+
+// ── Projeção do caixa ───────────────────────────────────────────────────────
+const nov9 = d(2026, 11, 9);
+const projDays = buildProjectionDays(
+  [
+    tx({
+      type: "payable",
+      amount: 300,
+      status: "authorized",
+      dueDate: d(2026, 11, 20),
+    }),
+    tx({
+      type: "payable",
+      amount: 100,
+      status: "draft",
+      dueDate: d(2026, 11, 20),
+    }),
+    tx({ amount: 250, status: "pending_approval", dueDate: d(2026, 12, 10) }),
+    // Vencido e não baixado: fora (não há dia futuro para ele).
+    tx({
+      type: "payable",
+      amount: 999,
+      status: "approved",
+      dueDate: d(2026, 11, 1),
+    }),
+    // Já pago: está no caixa de hoje, não na projeção.
+    tx({
+      amount: 999,
+      status: "paid",
+      dueDate: d(2026, 11, 15),
+      paymentDate: d(2026, 11, 9),
+    }),
+    tx({ amount: 999, status: "rejected", dueDate: d(2026, 11, 15) }),
+  ],
+  [
+    {
+      id: "aluguel",
+      companyId: "c",
+      description: "Aluguel",
+      amount: 50,
+      type: "payable",
+      frequency: "monthly",
+      interval: 1,
+      nextDueDate: d(2026, 12, 5),
+      endDate: d(2027, 1, 31),
+      active: true,
+      baseTransactionData: {},
+    } as unknown as RecurringTransactionTemplate,
+  ],
+  nov9,
+);
+assert.deepEqual(
+  projDays.map((r) => [r.date, r.stage, r.inflow, r.outflow]),
+  [
+    ["2026-11-20", "confirmed", 0, 300],
+    ["2026-11-20", "draft", 0, 100],
+    ["2026-12-05", "recurring", 0, 50],
+    ["2026-12-10", "in_approval", 250, 0],
+    ["2027-01-05", "recurring", 0, 50],
+  ],
+  "por dia e estágio, sem vencidos, pagos nem rejeitados; recorrência até o fim",
+);
+
+const projected = projectBalance({
+  days: projDays,
+  opening: 200,
+  stages: DEFAULT_FORECAST as ForecastStage[],
+  from: "2026-11-09",
+  until: horizonEnd("2026-11-09", 3),
+});
+assert.equal(projected.until, "2027-02-09");
+assert.deepEqual(
+  projected.points.map((p) => [p.isoDate, p.balance]),
+  [
+    ["2026-11-09", 200],
+    ["2026-11-20", -100],
+    ["2026-12-05", -150],
+    ["2026-12-10", 100],
+    ["2027-01-05", 50],
+    ["2027-02-09", 50],
+  ],
+  "rascunho fica fora por padrão",
+);
+assert.equal(projected.lowest.balance, -150);
+assert.equal(projected.runs.length, 1);
+assert.equal(projected.runs[0].start.isoDate, "2026-11-20");
+assert.equal(projected.runs[0].end.isoDate, "2026-12-05");
+assert.equal(projected.simulated, null);
+const draftStage = projected.byStage.find((s) => s.stage === "draft")!;
+assert.equal(draftStage.outflow, 100, "estágio fora da linha ainda é somado");
+
+const short = projectBalance({
+  days: projDays,
+  opening: 200,
+  stages: DEFAULT_FORECAST as ForecastStage[],
+  from: "2026-11-09",
+  until: horizonEnd("2026-11-09", 1),
+});
+assert.equal(short.until, "2026-12-09");
+assert.equal(short.closing, -150, "horizonte corta a receita de 10/12");
+assert.equal(short.runs[0].open, true, "termina negativo");
+
+const sim = projectBalance({
+  days: projDays,
+  opening: 200,
+  stages: DEFAULT_FORECAST as ForecastStage[],
+  from: "2026-11-09",
+  until: "2027-02-09",
+  simulations: [
+    {
+      id: "a",
+      kind: "once",
+      type: "receivable",
+      amount: 200,
+      date: "2026-11-15",
+    },
+    {
+      id: "b",
+      kind: "monthly",
+      type: "payable",
+      amount: 10,
+      date: "2027-01-31",
+      months: 3,
+    },
+    { id: "c", kind: "percent", side: "receivable", percent: -0.1 },
+  ],
+});
+const simAt = (k: string) => sim.points.find((p) => p.isoDate === k)!;
+assert.equal(
+  simAt("2026-11-09").simulatedBalance,
+  200,
+  "antes da data simulada, igual",
+);
+assert.equal(simAt("2026-11-15").balance, 200, "data simulada vira ponto");
+assert.equal(simAt("2026-11-15").simulatedBalance, 400);
+// Real 100 + 200 simulado − 25 (10% dos 250 previstos).
+assert.equal(
+  simAt("2026-12-10").simulatedBalance,
+  275,
+  "receita prevista −10%",
+);
+assert.equal(simAt("2027-01-31").simulatedBalance, 215);
+// 31/01 + 1 mês = 28/02, fora do horizonte (09/02): só uma parcela entra.
+assert.equal(sim.simulated!.closing, 215);
+assert.equal(sim.simulated!.lowest, 50);
+assert.equal(
+  sim.simulated!.runs.length,
+  0,
+  "a entrada simulada cobre o buraco",
+);
+assert.deepEqual(
+  simulationEntries(
+    [
+      {
+        id: "m",
+        kind: "monthly",
+        type: "payable",
+        amount: 1,
+        date: "2027-01-31",
+        months: 3,
+      },
+    ],
+    [],
+    [],
+    "2027-01-01",
+    "2027-12-31",
+  ).map((e) => e.date),
+  ["2027-01-31", "2027-02-28", "2027-03-31"],
+  "mensal conta da data inicial, não da anterior",
+);
+
+// ── O que pede atenção ──────────────────────────────────────────────────────
+const attReport = buildAnalytics(
+  {
+    transactions: [
+      // Receita prevista 1000, revisada para 800: −20%.
+      tx({
+        amount: 800,
+        plannedAmount: 1000,
+        status: "approved",
+        dueDate: d(2026, 12, 1),
+      }),
+      // Despesa no previsto.
+      tx({
+        type: "payable",
+        amount: 500,
+        plannedAmount: 500,
+        status: "paid",
+        paymentDate: d(2026, 4, 5),
+        dueDate: d(2026, 4, 5),
+        supplierOrClient: "Construtora",
+      }),
+      tx({
+        type: "payable",
+        amount: 100,
+        plannedAmount: 100,
+        status: "paid",
+        paymentDate: d(2026, 4, 5),
+        dueDate: d(2026, 4, 5),
+        supplierOrClient: "Papelaria",
+      }),
+      // A receber vencido há mais de 90 dias.
+      tx({
+        amount: 70,
+        plannedAmount: 70,
+        status: "approved",
+        dueDate: d(2026, 6, 1),
+      }),
+    ],
+    accounts: [],
+    costCenters: [],
+    entities: [],
+  },
+  {
+    range: { from: "2026-01", to: "2026-12" },
+    compare: "none",
+    regime: "cash",
+    today: nov9,
+  },
+);
+const attention = buildAttention({
+  report: attReport,
+  periodLabel: "2026",
+  envelopes: [
+    { name: "Obras", status: "danger", isLeaf: true, tight: false },
+    { name: "Eventos", status: "warning", isLeaf: true, tight: false },
+    { name: "Raiz", status: "danger", isLeaf: false, tight: false },
+  ],
+  exercise: 2026,
+  projection: projected,
+});
+assert.deepEqual(
+  attention.map((a) => [a.id, a.tone, a.section]),
+  [
+    ["cash", "danger", "projecao"],
+    ["envelope", "danger", "orcamento"],
+    ["plan-receivable", "warning", "previsto"],
+    ["aging", "warning", "riscos"],
+    ["concentration-payable", "warning", "riscos"],
+  ],
+  "vermelho primeiro, no máximo cinco",
+);
+// Intl separa "R$" do número com espaço não separável.
+const text = (id: string) =>
+  attention.find((a) => a.id === id)!.text.replace(/\s/g, " ");
+assert.equal(
+  text("cash"),
+  "O caixa fica negativo entre 20/11/2026 e 05/12/2026, no que já está lançado para os próximos 12 meses. Menor saldo: -R$ 150,00 em 05/12/2026.",
+);
+assert.equal(
+  text("envelope"),
+  "Envelopes de 2026: Obras estourou; Eventos gasta acima do ritmo.",
+  "só folhas",
+);
+assert.match(
+  text("plan-receivable"),
+  /^Receitas de 2026: R\$ 870,00 recebidas ou a receber, 18,7% abaixo dos R\$ 1,1 mil previstos\.$/,
+);
+assert.equal(
+  text("aging"),
+  "R$ 70,00 a receber vencidos há mais de 90 dias, em 1 lançamento.",
+);
+assert.match(
+  text("concentration-payable"),
+  /^Construtora concentra 83,3% das despesas de 2026/,
+);
+
+// Mantenedora fixada não conta como concentração; nada a apontar = lista vazia.
+const quiet = buildAttention({
+  report: {
+    ...attReport,
+    plan: {
+      receivable: {
+        ...attReport.plan.receivable,
+        bridge: { ...attReport.plan.receivable.bridge, planned: 0 },
+      },
+      payable: attReport.plan.payable,
+    },
+    aging: { ...attReport.aging, receivable: [] },
+    concentration: {
+      receivable: {
+        total: 100,
+        top: [{ key: "mant", name: "Mantenedora", value: 95 }],
+        rest: 5,
+        restCount: 1,
+        anchor: null,
+      },
+      payable: {
+        total: 100,
+        top: [{ key: "x", name: "X", value: 30 }],
+        rest: 70,
+        restCount: 5,
+        anchor: null,
+      },
+    },
+    anchorEntityId: "mant",
+  },
+  periodLabel: "2026",
+  envelopes: null,
+  exercise: 2026,
+  projection: null,
+});
+assert.deepEqual(quiet, [], "30% exatos não passam do limite");
 
 console.log("check:analytics ok");

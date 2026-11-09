@@ -24,7 +24,7 @@ import {
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useAnalyticsReport } from "@/hooks/useAnalytics";
+import { useAnalyticsReport, useCashAvailable } from "@/hooks/useAnalytics";
 import { useBudgetProgress } from "@/hooks/useDashboardData";
 import { hasMovement, type MonthRange } from "@/lib/analytics";
 import type { DreRegime } from "@/lib/chartOfAccounts";
@@ -38,6 +38,8 @@ import { PlanSection } from "@/components/features/analytics/PlanSection";
 import { CompositionSection } from "@/components/features/analytics/CompositionSection";
 import { RiskSection } from "@/components/features/analytics/RiskSection";
 import { InvestmentsSection } from "@/components/features/analytics/InvestmentsSection";
+import { AttentionSection } from "@/components/features/analytics/AttentionSection";
+import { ProjectionSection } from "@/components/features/analytics/ProjectionSection";
 
 // ─── Período ──────────────────────────────────────────────────────────────────
 
@@ -107,7 +109,9 @@ const oneOf = <T extends string>(
 // ─── Índice ───────────────────────────────────────────────────────────────────
 
 const INDEX = [
+  { id: "atencao", label: "O que pede atenção" },
   { id: "posicao", label: "Posição agora" },
+  { id: "projecao", label: "Projeção" },
   { id: "resultado", label: "Resultado e tendência" },
   { id: "previsto", label: "Previsto e realizado" },
   { id: "orcamento", label: "Orçamento" },
@@ -204,6 +208,12 @@ function AnalyticsContent() {
 
   const exercise = Number(range.to.slice(0, 4));
   const budget = useBudgetProgress(exercise);
+  const cash = useCashAvailable();
+  const cashToday = {
+    balance: cash.data?.balance ?? null,
+    isLoading: cash.isLoading,
+    isError: cash.isError,
+  };
 
   if (user && selectedCompany && !canViewAnalytics) {
     return (
@@ -446,7 +456,16 @@ function AnalyticsContent() {
                 antigos podem ter ficado de fora.
               </p>
             )}
+            <AttentionSection
+              report={report}
+              periodLabel={rangeText(report.range)}
+              // Sem orçamento legível, a regra dos envelopes fica de fora.
+              envelopes={budget.isError ? [] : (budget.data ?? null)}
+              exercise={exercise}
+              cash={cashToday}
+            />
             <PositionSection report={report} compareLabel={compareLabel} />
+            <ProjectionSection report={report} cash={cashToday} />
             <TrendSection report={report} compareLabel={compareLabel} />
             <PlanSection report={report} />
             <Section
