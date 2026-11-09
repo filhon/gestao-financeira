@@ -494,7 +494,7 @@ export function BatchApprovalPanel({
       )}
 
       {/* Barra de decisão: fica à vista enquanto a lista rola */}
-      <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-between gap-3 border-t bg-background px-1 py-3">
+      <div className="sticky -bottom-4 z-10 -mx-1 flex flex-wrap items-center justify-between gap-3 border-t bg-background px-1 py-3 md:-bottom-6">
         <p className="text-sm">
           <span className="font-medium">
             {plural(kept.length, "transação", "transações")}

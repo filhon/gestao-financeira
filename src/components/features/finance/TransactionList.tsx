@@ -1887,8 +1887,12 @@ export function TransactionList({ type, onCreate }: TransactionListProps) {
         </div>
       )}
 
-      {/* ── Rodapé fixo: totais, seleção e ações em lote ──────────────── */}
-      <div className="sticky bottom-[max(calc(env(safe-area-inset-bottom)+4.5rem),5rem)] z-20 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-b-xl border-t bg-card/95 px-4 py-2.5 backdrop-blur-sm md:bottom-0">
+      {/* ── Rodapé fixo: totais, seleção e ações em lote ──────────────────
+          O `sticky` conta a partir do padding da área de rolagem
+          (DashboardShell: pb-6 no desktop, 5.5rem + safe-area no celular);
+          o deslocamento negativo encosta a barra na borda (ou no topo da
+          barra de navegação do celular), sem linhas passando por baixo. */}
+      <div className="sticky -bottom-4 z-20 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-b-xl border-t bg-card/95 px-4 py-2.5 backdrop-blur-sm md:-bottom-6">
         {selectedIds.size > 0 ? (
           <>
             <span className="flex items-center gap-1.5 text-sm">
