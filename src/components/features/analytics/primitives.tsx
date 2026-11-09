@@ -5,6 +5,7 @@ import { Table2, ChartColumn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, formatCurrency, formatCurrencyAbbr } from "@/lib/utils";
 import type { Side } from "@/lib/analytics";
+export { signedMoney } from "@/lib/analytics";
 
 /** Cores por papel (globals.css, validadas nos dois temas). */
 export const VIZ = {
@@ -28,10 +29,6 @@ export const SIDE_LABEL: Record<Side, string> = {
 
 export const money = formatCurrencyAbbr;
 export const fullMoney = formatCurrency;
-
-/** "+R$ 228,1 mil" / "−R$ 1,3 mi": sinal sempre visível em variações. */
-export const signedMoney = (v: number) =>
-  `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatCurrencyAbbr(Math.abs(v))}`;
 
 export const pct = (ratio: number, digits = 0) =>
   ratio.toLocaleString("pt-BR", {

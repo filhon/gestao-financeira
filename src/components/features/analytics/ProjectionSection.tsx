@@ -24,8 +24,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/components/features/dashboard/Segmented";
 import {
   horizonEnd,
+  overdueOf,
   PROJECTION_HORIZONS,
   projectBalance,
+  projectionTitle,
   type AnalyticsReport,
   type ForecastStage,
   type Side,
@@ -55,8 +57,6 @@ type SimKind = Simulation["kind"];
 
 const toDate = (key: string) => new Date(`${key}T12:00:00`);
 const dayText = (key: string) => format(toDate(key), "dd/MM/yyyy");
-const monthText = (key: string) =>
-  format(toDate(key), "MMM/yy", { locale: ptBR });
 const percentText = (p: number) =>
   `${p > 0 ? "+" : "−"}${Math.abs(p * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 
@@ -68,12 +68,6 @@ function describe(s: Simulation) {
     ? `${what} em ${dayText(s.date)}`
     : `${what} por mês, ${s.months} ${s.months === 1 ? "mês" : "meses"} desde ${dayText(s.date)}`;
 }
-
-/** Vencido e não baixado: fora da projeção, mostrado à parte. */
-const overdueOf = (report: AnalyticsReport, side: Side) =>
-  report.aging[side]
-    .filter((b) => b.key !== "due")
-    .reduce((s, b) => s + b.value, 0);
 
 export interface CashToday {
   balance: number | null;
@@ -123,8 +117,9 @@ export function ProjectionSection({
           ),
     );
 
-  const overdueIn = overdueOf(report, "receivable");
-  const overdueOut = overdueOf(report, "payable");
+  // Vencido e não baixado: fora da projeção, mostrado à parte.
+  const overdueIn = overdueOf(report, "receivable").value;
+  const overdueOut = overdueOf(report, "payable").value;
   const overdueNote =
     overdueIn || overdueOut
       ? ` Vencidos sem baixa ficam fora: ${money(overdueIn)} a receber e ${money(overdueOut)} a pagar.`
@@ -171,17 +166,8 @@ export function ProjectionSection({
     );
   }
 
-  const { runs, lowest, closing, simulated } = projection;
-  const first = runs[0];
-  const whenText = (key: string) => (key === from ? "hoje" : dayText(key));
-  const title =
-    runs.length === 0
-      ? `Caixa chega a ${monthText(until)} em ${money(closing)}, sem ficar negativo`
-      : runs.length > 1
-        ? `Caixa fica negativo em ${runs.length} trechos, o primeiro a partir de ${whenText(first.start.isoDate)}`
-        : first.open
-          ? `Caixa fica negativo a partir de ${whenText(first.start.isoDate)} e não se recupera até ${monthText(until)}`
-          : `Caixa fica negativo entre ${whenText(first.start.isoDate)} e ${dayText(first.end.isoDate)}`;
+  const { lowest, closing, simulated } = projection;
+  const title = projectionTitle(projection);
 
   return (
     <Section

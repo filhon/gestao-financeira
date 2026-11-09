@@ -12,6 +12,7 @@ import { GoogleGenAI } from "@google/genai";
 import { format } from "date-fns";
 import { authorizeCompany } from "@/lib/api/companyAccess";
 import { logger } from "@/lib/logger";
+import { limitAi } from "@/lib/api/aiRateLimit";
 import { sanitizeQuery } from "@/lib/search/query";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -54,6 +55,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  const limited = await limitAi("search-interpret", access.uid);
+  if (limited) return limited;
 
   try {
     const response = await ai.models.generateContent({

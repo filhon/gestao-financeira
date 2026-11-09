@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { AnalyticsReport, Concentration } from "@/lib/analytics";
+import {
+  riskTitle,
+  type AnalyticsReport,
+  type Concentration,
+} from "@/lib/analytics";
 import { analyticsService } from "@/lib/services/analyticsService";
 import { entityService } from "@/lib/services/entityService";
 import { useCompany } from "@/components/providers/CompanyProvider";
@@ -128,12 +132,7 @@ export function RiskSection({
     }
   }
 
-  const top = income.top[0];
-  const title = anchor
-    ? `${anchor.name} responde por ${pct(anchor.share)} da receita do período`
-    : top && income.total
-      ? `Maior fonte de receita: ${top.name}, com ${pct(top.value / income.total)}`
-      : "Sem receita no período";
+  const title = riskTitle(income);
 
   return (
     <Section

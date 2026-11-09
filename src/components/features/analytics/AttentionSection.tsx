@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -9,29 +10,66 @@ import {
 } from "lucide-react";
 import {
   ATTENTION,
+  attentionProjection,
   buildAttention,
-  horizonEnd,
-  projectBalance,
   type AnalyticsReport,
+  type AttentionItem,
   type EnvelopeLeaf,
-  type ForecastStage,
 } from "@/lib/analytics";
-import { DEFAULT_FORECAST } from "@/lib/reports";
+import {
+  analyticsService,
+  type AnalyticsParams,
+} from "@/lib/services/analyticsService";
+import { useCompany } from "@/components/providers/CompanyProvider";
 import type { CashToday } from "./ProjectionSection";
 import { cn } from "@/lib/utils";
 
+export type AiAttentionItem = AttentionItem & { ai: boolean };
+
+/** Destaques redigidos pela IA; a tela e o PDF usam a mesma chave de cache. */
+export const attentionAiQuery = (o: {
+  companyId: string | undefined;
+  params: AnalyticsParams;
+  items: AttentionItem[];
+  cash: number | null;
+  envelopes: EnvelopeLeaf[] | null;
+}) => ({
+  queryKey: [
+    "analytics-ai-attention",
+    o.companyId,
+    o.params.range.from,
+    o.params.range.to,
+    o.params.compare,
+    o.params.regime,
+    o.items.map((i) => i.text).join("|"),
+  ],
+  queryFn: ({ signal }: { signal?: AbortSignal }) =>
+    analyticsService.ai<{ items: AiAttentionItem[] }>(
+      o.companyId!,
+      o.params,
+      { kind: "attention", cash: o.cash, envelopes: o.envelopes },
+      signal,
+    ),
+  staleTime: Infinity,
+  retry: false,
+});
+
 /**
  * Abre a página: o que passou de algum limite, numa frase cada, com o link
- * para a seção que explica. Regras em `buildAttention`, sem IA.
+ * para a seção que explica. As regras de `buildAttention` decidem o que entra;
+ * a IA só redige, e cada destaque redigido é conferido no servidor contra o
+ * texto de modelo. Até a IA responder (ou se ela falhar), fica o modelo.
  */
 export function AttentionSection({
   report,
+  params,
   periodLabel,
   envelopes,
   exercise,
   cash,
 }: {
   report: AnalyticsReport;
+  params: AnalyticsParams;
   cash: CashToday;
   periodLabel: string;
   envelopes: EnvelopeLeaf[] | null;
@@ -47,20 +85,28 @@ export function AttentionSection({
         periodLabel,
         envelopes,
         exercise,
-        projection:
-          opening === null
-            ? null
-            : projectBalance({
-                days: report.projection,
-                opening,
-                stages: DEFAULT_FORECAST as ForecastStage[],
-                from: report.today,
-                until: horizonEnd(report.today, ATTENTION.projectionMonths),
-              }),
+        projection: attentionProjection(report, opening),
       }),
     [report, periodLabel, envelopes, exercise, opening],
   );
   const pending = cash.isLoading || envelopes === null;
+
+  const companyId = useCompany().selectedCompany?.id;
+  const written = useQuery({
+    ...attentionAiQuery({
+      companyId,
+      params,
+      items,
+      cash: opening,
+      envelopes,
+    }),
+    enabled: !!companyId && !pending && items.length > 0,
+  });
+  const shown = items.map((item) => {
+    const ai = written.data?.items.find((w) => w.id === item.id && w.ai);
+    return ai ? { ...item, text: ai.text, ai: true } : { ...item, ai: false };
+  });
+  const anyAi = shown.some((i) => i.ai);
 
   return (
     <section
@@ -91,7 +137,7 @@ export function AttentionSection({
         </p>
       ) : (
         <ol className="mt-2 divide-y border-t">
-          {items.map((item) => {
+          {shown.map((item) => {
             const Icon = item.tone === "danger" ? OctagonAlert : AlertTriangle;
             return (
               <li key={item.id}>
@@ -119,9 +165,15 @@ export function AttentionSection({
           })}
         </ol>
       )}
-      {pending && items.length > 0 && (
+      {items.length > 0 && (
         <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
-          Conferindo caixa projetado e envelopes…
+          {pending
+            ? "Conferindo caixa projetado e envelopes…"
+            : written.isFetching
+              ? "Redigindo os destaques…"
+              : anyAi
+                ? "Redação da IA, com cada número conferido no relatório. Destaque que não passou na conferência fica com o texto padrão."
+                : null}
         </p>
       )}
     </section>

@@ -20,6 +20,7 @@ import { extractControlNumber, matchComprovante } from "@/lib/matching";
 import type { Entity, ComprovanteMatchStatus } from "@/lib/types";
 import { GoogleGenAI } from "@google/genai";
 import { FieldValue } from "firebase-admin/firestore";
+import { limitAi } from "@/lib/api/aiRateLimit";
 import {
   commitAutoConfirm,
   evaluateAutoConfirm,
@@ -249,6 +250,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
     }
   }
+
+  const limited = await limitAi("comprovantes", decoded.uid);
+  if (limited) return limited;
 
   // ── Dedup: check if fileHash already exists ──────────────────────────────────
   const existing = await adminDb

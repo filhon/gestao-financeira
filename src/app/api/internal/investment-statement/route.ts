@@ -10,6 +10,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { authorizeCompany } from "@/lib/api/companyAccess";
+import { limitAi } from "@/lib/api/aiRateLimit";
 import { logger } from "@/lib/logger";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  const limited = await limitAi("investment-statement", access.uid);
+  if (limited) return limited;
 
   try {
     const response = await ai.models.generateContent({

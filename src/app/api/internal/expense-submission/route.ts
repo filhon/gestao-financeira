@@ -16,6 +16,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminDb, adminStorage } from "@/lib/firebase/admin";
 import { extractReceiptData } from "@/lib/services/documentExtractionService";
+import { limitAi } from "@/lib/api/aiRateLimit";
 import {
   normalizeAccessKey,
   receiptFlags,
@@ -244,6 +245,9 @@ export async function POST(request: Request) {
     ).length;
     if (today >= DAILY_LIMIT)
       return fail("Limite de envios do dia atingido. Tente amanhã.", 429);
+    // O limite do dia conta notas gravadas; este segura a rajada antes da IA.
+    const limited = await limitAi("expense-link", link.id);
+    if (limited) return limited;
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileId = randomUUID();

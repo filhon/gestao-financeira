@@ -9,6 +9,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { authorizeCompany } from "@/lib/api/companyAccess";
+import { limitAi } from "@/lib/api/aiRateLimit";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { PUBLIC_STATUSES } from "@/lib/roadmap";
@@ -37,6 +38,8 @@ export async function POST(request: NextRequest) {
   if (text.length < 8 || text.length > 1200) {
     return NextResponse.json({ ids: [] });
   }
+  const limited = await limitAi("roadmap-similar", access.uid);
+  if (limited) return limited;
 
   try {
     const ref = adminDb.collection("roadmap_items");

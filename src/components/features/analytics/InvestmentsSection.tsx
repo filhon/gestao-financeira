@@ -9,13 +9,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { format, subMonths } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import currency from "currency.js";
 import { Skeleton } from "@/components/ui/skeleton";
 import { niceTicks } from "@/lib/dashboardRules";
 import { curveGap, investmentLabel } from "@/lib/investment";
 import { useAccountPositions } from "@/hooks/useAnalytics";
+import { investmentsTitle, yieldSeries } from "@/lib/analytics";
 import { useCashReserve } from "@/hooks/useDashboardData";
 import {
   AXIS_PROPS,
@@ -43,16 +42,7 @@ export function InvestmentsSection() {
   const yields = accounts.data?.yields ?? {};
 
   // Doze meses até o mês passado: o rendimento é reconhecido ao fechar o mês.
-  const lastMonth = subMonths(new Date(), 1);
-  const series = Array.from({ length: 12 }, (_, i) => {
-    const d = subMonths(lastMonth, 11 - i);
-    const key = format(d, "yyyy-MM");
-    return {
-      key,
-      label: format(d, "MMM/yy", { locale: ptBR }),
-      value: yields[key] ?? 0,
-    };
-  });
+  const series = yieldSeries(yields, new Date());
   const yearTotal = series.reduce((s, m) => s.add(m.value), currency(0)).value;
   const ticks = niceTicks(0, Math.max(...series.map((m) => m.value), 0), 4);
   const last = [...series].reverse().find((m) => m.value > 0);
@@ -65,9 +55,11 @@ export function InvestmentsSection() {
   const loading = accounts.isLoading;
   const title = loading
     ? "Aplicações"
-    : positions.length === 0
-      ? "Nenhuma aplicação cadastrada"
-      : `${money(invested)} aplicados${last ? `; rendimento de ${money(last.value)} em ${last.label}` : ""}`;
+    : investmentsTitle({
+        count: positions.length,
+        invested,
+        last: last ?? null,
+      });
 
   return (
     <Section

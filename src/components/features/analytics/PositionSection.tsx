@@ -4,7 +4,11 @@ import { differenceInCalendarDays, format } from "date-fns";
 import { AlertTriangle } from "lucide-react";
 import currency from "currency.js";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AnalyticsReport } from "@/lib/analytics";
+import {
+  monthsText as months,
+  positionTitle,
+  type AnalyticsReport,
+} from "@/lib/analytics";
 import { variation } from "@/lib/reports";
 import { useAccountPositions, useCashAvailable } from "@/hooks/useAnalytics";
 import { useBankBalance, useCashReserve } from "@/hooks/useDashboardData";
@@ -21,9 +25,6 @@ import {
 
 /** Extrato com mais de uma semana: o saldo pode ter mudado. */
 const STALE_DAYS = 7;
-
-const months = (v: number) =>
-  `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${v < 2 ? "mês" : "meses"}`;
 
 export function PositionSection({
   report,
@@ -66,12 +67,7 @@ export function PositionSection({
       : 0;
   const today = new Date();
 
-  const title =
-    available === null
-      ? "Posição de caixa"
-      : runway !== null
-        ? `Caixa de ${money(available)} cobre ${months(runway)} de despesa`
-        : `Caixa disponível de ${money(available)}`;
+  const title = positionTitle(available, burn);
 
   return (
     <Section

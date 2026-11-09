@@ -4,8 +4,11 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import {
+  compositionLevel,
+  compositionTitle,
   hasMovement,
   type AnalyticsReport,
+  type CompositionMode,
   type CompositionNode,
   type Side,
 } from "@/lib/analytics";
@@ -31,7 +34,7 @@ import {
   type RankedItem,
 } from "./primitives";
 
-type Mode = "accounts" | "costCenters";
+type Mode = CompositionMode;
 const VISIBLE = 12;
 const SWATCHES = 5;
 const ALL = "__all__";
@@ -45,37 +48,22 @@ export function CompositionSection({ report }: { report: AnalyticsReport }) {
   // Receita credita sempre o centro raiz: por centro, só despesa diz algo.
   const side: Side = mode === "costCenters" ? "payable" : sideChoice;
   const comp = mode === "accounts" ? report.accounts : report.costCenters;
-  const byId = useMemo(
-    () => new Map(comp.nodes.map((n) => [n.id, n])),
-    [comp.nodes],
+  const level = useMemo(
+    () => compositionLevel(comp, side, path),
+    [comp, side, path],
   );
-  const childrenOf = (parentId: string | null) =>
-    comp.nodes
-      .filter(
-        (n) =>
-          n.parentId === parentId && (n.value[side] > 0 || n.compare[side] > 0),
-      )
-      .sort((a, b) => b.value[side] - a.value[side]);
-  const hasChildren = (id: string) => childrenOf(id).length > 0;
-
-  // Nível com um filho só (o centro raiz, "4 Despesas") não informa nada:
-  // desce até o primeiro nível que divide o valor.
-  const trail = [...path.filter((id) => byId.has(id))];
-  let parent: string | null = trail.at(-1) ?? null;
-  for (;;) {
-    const kids = childrenOf(parent);
-    const loose = parent === null && comp.unassigned[side] > 0;
-    if (kids.length !== 1 || loose || !hasChildren(kids[0].id)) break;
-    parent = kids[0].id;
-    trail.push(parent);
-  }
-  const kids = childrenOf(parent);
-  const unassigned = parent === null ? comp.unassigned[side] : 0;
-  const unassignedCompare = parent === null ? comp.unassignedCompare[side] : 0;
-  const total =
-    kids.reduce((s, k) => s + k.value[side], 0) + Math.max(0, unassigned);
+  const {
+    byId,
+    hasChildren,
+    trail,
+    parent,
+    parentNode,
+    kids,
+    unassigned,
+    unassignedCompare,
+    total,
+  } = level;
   const color = SIDE_COLOR[side];
-  const parentNode = parent ? byId.get(parent) : undefined;
   const nameOf = (n: CompositionNode) =>
     mode === "accounts" ? `${n.code} ${n.name}` : n.name;
   const looseLabel =
@@ -177,12 +165,7 @@ export function CompositionSection({ report }: { report: AnalyticsReport }) {
   };
 
   const sideWord = SIDE_LABEL[side].toLowerCase();
-  const top = kids[0];
-  const title = !total
-    ? `Sem ${sideWord} no período`
-    : top && top.value[side] >= unassigned
-      ? `${top.name} concentra ${pct(top.value[side] / total)} das ${sideWord}${parentNode ? ` de ${parentNode.name}` : ""}`
-      : `${pct(unassigned / total)} das ${sideWord} estão sem ${mode === "accounts" ? "conta contábil" : "centro de custo"}`;
+  const title = compositionTitle(level, side, mode);
 
   const coverageNote =
     comp.coverage < 0.95

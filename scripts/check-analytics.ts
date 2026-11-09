@@ -23,6 +23,19 @@ import {
   horizonEnd,
   projectBalance,
   simulationEntries,
+  analysisBrief,
+  budgetTitle,
+  citedMatches,
+  compositionLevel,
+  extractCited,
+  factsText,
+  monthsText,
+  NO_ANSWER,
+  ruleSummary,
+  splitSentences,
+  verifyAiText,
+  verifyAttention,
+  type EnvelopeLeaf,
   type ForecastStage,
 } from "../src/lib/analytics";
 import { DEFAULT_FORECAST } from "../src/lib/reports";
@@ -719,5 +732,188 @@ const quiet = buildAttention({
   projection: null,
 });
 assert.deepEqual(quiet, [], "30% exatos não passam do limite");
+
+// ── IA: números citados ─────────────────────────────────────────────────────
+const cite = (t: string) =>
+  extractCited(t).map((c) => `${c.kind}:${c.value}/${c.step}`);
+assert.deepEqual(
+  cite("Receitas de R$ 3,1 mi e −R$ 47,6 mil; R$ 1.840.942,72."),
+  ["money:3100000/100000", "money:47600/100", "money:1840942.72/0.01"],
+  "valor abreviado, negativo, com espaço fixo e cheio",
+);
+assert.deepEqual(
+  cite("10,3% abaixo em 15/04/2027, abr/26, março de 2026, julho, 01/12."),
+  [
+    "percent:10.3/0.1",
+    "date:20270415/0",
+    "month:202604/0",
+    "month:202603/0",
+    "monthName:7/0",
+    "daymonth:1201/0",
+  ],
+  "percentual, data, mês abreviado, mês por extenso, mês solto, dia/mês",
+);
+assert.deepEqual(
+  cite("4 lançamentos em 2026 somam 1.234"),
+  ["number:4/1", "number:2026/1", "number:1234/1"],
+  "contagem, ano e milhar",
+);
+assert.deepEqual(cite("R$ 1,8 milhão"), ["money:1800000/100000"]);
+assert.deepEqual(
+  cite("Três centros e duas contas; uma única fonte."),
+  ["number:3/1", "number:2/1"],
+  "contagem por extenso conta; artigo não",
+);
+assert.deepEqual(cite("R$ 1,8 milhões"), ["money:1800000/100000"]);
+
+const [fact] = extractCited("R$ 233,6 mil");
+const [c1] = extractCited("R$ 234 mil");
+const [c2] = extractCited("R$ 233.612,00");
+const [c3] = extractCited("R$ 235 mil");
+const [c4] = extractCited("−R$ 233,6 mil");
+const [c5] = extractCited("233,6%");
+assert.ok(citedMatches(c1, fact), "arredondar para menos casas vale");
+assert.ok(!citedMatches(c2, fact), "mais precisão que o fato não vale");
+assert.ok(!citedMatches(c3, fact), "outro valor não vale");
+assert.ok(!citedMatches(c4, fact), "menos citado exige fato negativo");
+const [negFact] = extractCited("resultado −R$ 47,6 mil");
+const [noSign] = extractCited("déficit de R$ 47,6 mil");
+const [hyphen] = extractCited("-R$ 47,6 mil");
+assert.ok(negFact.negative && hyphen.negative && !noSign.negative);
+assert.ok(citedMatches(noSign, negFact), "sem sinal vale para o negativo");
+assert.ok(citedMatches(hyphen, negFact), "hífen e menos são o mesmo sinal");
+assert.ok(!citedMatches(c5, fact), "percentual não é dinheiro");
+
+assert.deepEqual(
+  splitSentences(
+    "- Caixa de R$ 1,8 mi. Despesas de R$ 1.234,56 no mês.\n* **Outra** frase.",
+  ),
+  ["Caixa de R$ 1,8 mi.", "Despesas de R$ 1.234,56 no mês.", "Outra frase."],
+  "milhar e decimal não quebram a frase; marcador e negrito saem",
+);
+
+// Composição: raiz com um filho só e quase nada sem centro desce um nível.
+const levelNode = (id: string, parentId: string | null, v: number) => ({
+  id,
+  parentId,
+  code: id,
+  name: id,
+  value: { receivable: 0, payable: v },
+  compare: { receivable: 0, payable: 0 },
+});
+const globalComp = (loose: number) => ({
+  nodes: [
+    levelNode("Global", null, 1000),
+    levelNode("Missões", "Global", 700),
+    levelNode("Obras", "Global", 300),
+  ],
+  unassigned: { receivable: 0, payable: loose },
+  unassignedCompare: { receivable: 0, payable: 0 },
+  coverage: 1,
+});
+assert.deepEqual(
+  compositionLevel(globalComp(4), "payable").kids.map((k) => k.id),
+  ["Missões", "Obras"],
+  "0,4% sem centro não segura o nível de cima",
+);
+assert.deepEqual(
+  compositionLevel(globalComp(10), "payable").kids.map((k) => k.id),
+  ["Global"],
+  "1% sem centro fica à vista na raiz",
+);
+
+assert.equal(monthsText(0.01), "menos de 1 dia");
+assert.equal(monthsText(0.5), "15 dias");
+assert.equal(monthsText(1), "1 mês");
+assert.equal(monthsText(2.5), "2,5 meses");
+
+const leaf = (status: EnvelopeLeaf["status"], tight = false) => ({
+  name: "C",
+  status,
+  isLeaf: true,
+  tight,
+});
+assert.equal(
+  budgetTitle([leaf("warning", true), leaf("warning", true)], 2026),
+  "2 centros de custo estão sem folga no envelope de 2026",
+  "sem folga não é acima do ritmo",
+);
+assert.equal(
+  budgetTitle([leaf("warning", true), leaf("warning")], 2026),
+  "1 centro de custo gasta acima do ritmo do ano",
+);
+
+// ── IA: fatos e conferência sobre o relatório ───────────────────────────────
+const brief = analysisBrief(attReport, { cash: null, envelopes: null });
+assert.deepEqual(
+  brief.attention,
+  buildAttention({
+    report: attReport,
+    periodLabel: "2026",
+    envelopes: null,
+    exercise: 2026,
+    projection: null,
+  }),
+  "o resumo usa os mesmos destaques da tela",
+);
+const facts = factsText(attReport, brief, "Associação Teste");
+for (const item of brief.attention)
+  assert.ok(facts.includes(item.text), `fato traz o destaque ${item.id}`);
+// O texto de modelo é o que volta quando a IA falha: ele tem de passar.
+const templates = verifyAiText(
+  [...ruleSummary(brief), ...brief.attention.map((i) => i.text)].join("\n"),
+  facts,
+);
+assert.deepEqual(
+  templates.dropped,
+  [],
+  "resumo por regra e destaques passam na conferência",
+);
+
+const planned = brief.attention.find((i) => i.id === "plan-receivable")!;
+assert.ok(planned, "fixture tem o desvio de receita");
+const ai = verifyAiText(
+  [
+    "As receitas de 2026 ficaram 18,7% abaixo do previsto.",
+    "A Associação Teste recebeu R$ 999,00 a mais em março.",
+    "O resultado caiu 12% contra 2025.",
+    "A Prefeitura atrasou o repasse.",
+    NO_ANSWER,
+  ].join(" "),
+  facts,
+);
+assert.deepEqual(
+  ai.kept,
+  ["As receitas de 2026 ficaram 18,7% abaixo do previsto.", NO_ANSWER],
+  "fica o que cita fatos; a recusa padrão passa",
+);
+assert.deepEqual(
+  ai.dropped.map((d) => d.reason),
+  [
+    '"R$ 999,00" não está no relatório',
+    '"12%" não está no relatório',
+    '"Prefeitura" não está no relatório',
+  ],
+  "valor, percentual calculado e nome inventados derrubam a frase",
+);
+
+const written = verifyAttention(brief.attention, [
+  {
+    id: planned.id,
+    text: "As receitas de 2026 estão 18,7% abaixo dos R$ 1,1 mil previstos.",
+  },
+  { id: "aging", text: "Há R$ 80,00 vencidos há mais de 90 dias." },
+]);
+assert.equal(written.find((w) => w.id === planned.id)!.ai, true);
+const agingItem = written.find((w) => w.id === "aging")!;
+assert.equal(agingItem.ai, false, "número fora do destaque volta ao modelo");
+assert.equal(
+  agingItem.text,
+  brief.attention.find((i) => i.id === "aging")!.text,
+);
+assert.ok(
+  verifyAttention(brief.attention, []).every((w) => !w.ai),
+  "sem resposta da IA, todos ficam no modelo",
+);
 
 console.log("check:analytics ok");

@@ -13,10 +13,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import currency from "currency.js";
-import type { AnalyticsReport } from "@/lib/analytics";
+import {
+  cumulativeByYear,
+  trendTitle,
+  type AnalyticsReport,
+} from "@/lib/analytics";
 import { niceTicks } from "@/lib/dashboardRules";
-import { variation } from "@/lib/reports";
 import {
   AXIS_PROPS,
   axisMoney,
@@ -24,50 +26,10 @@ import {
   fullMoney,
   Legend,
   money,
-  pct,
   Section,
-  signedMoney,
   TooltipBox,
   VIZ,
 } from "./primitives";
-
-const MONTHS = [
-  "jan",
-  "fev",
-  "mar",
-  "abr",
-  "mai",
-  "jun",
-  "jul",
-  "ago",
-  "set",
-  "out",
-  "nov",
-  "dez",
-];
-
-/** Resultado acumulado mês a mês no ano e no anterior; o ano corrente para em `lastKey`. */
-function cumulativeByYear(
-  trend: AnalyticsReport["trend"],
-  year: number,
-  lastKey: string,
-) {
-  const byKey = new Map(trend.map((m) => [m.key, m]));
-  let acc = currency(0);
-  let accPrev = currency(0);
-  return MONTHS.map((label, i) => {
-    const mm = String(i + 1).padStart(2, "0");
-    const cur = byKey.get(`${year}-${mm}`);
-    const prev = byKey.get(`${year - 1}-${mm}`);
-    if (cur) acc = acc.add(cur.net);
-    if (prev) accPrev = accPrev.add(prev.net);
-    return {
-      label,
-      current: `${year}-${mm}` <= lastKey ? acc.value : null,
-      previous: prev ? accPrev.value : null,
-    };
-  });
-}
 
 export function TrendSection({
   report,
@@ -76,20 +38,14 @@ export function TrendSection({
   report: AnalyticsReport;
   compareLabel: string | null;
 }) {
-  const { range, totals, compareTotals, trend } = report;
+  const { range, totals, trend } = report;
   const inRange = (key: string) => key >= range.from && key <= range.to;
 
   const top = Math.max(...trend.map((m) => Math.max(m.inflow, m.outflow)), 0);
   const ticks = niceTicks(0, top, 5);
 
-  // Resultado acumulado no ano do fim do período contra o ano anterior. O ano
-  // corrente para no mês de hoje: mês futuro sem baixa não é resultado zero.
-  const year = Number(range.to.slice(0, 4));
-  const yoy = cumulativeByYear(
-    trend,
-    year,
-    [range.to, report.today.slice(0, 7)].sort()[0],
-  );
+  // Resultado acumulado no ano do fim do período contra o ano anterior.
+  const { year, points: yoy } = cumulativeByYear(report);
   const yoyValues = yoy.flatMap((p) =>
     [p.current, p.previous].filter((v): v is number => v !== null),
   );
@@ -101,14 +57,7 @@ export function TrendSection({
   const lastCurrent = [...yoy].reverse().find((p) => p.current !== null);
   const samePrev = lastCurrent ? yoy[yoy.indexOf(lastCurrent)].previous : null;
 
-  const delta = compareTotals ? variation(totals.net, compareTotals.net) : null;
-  const title =
-    `Resultado de ${signedMoney(totals.net)} no período` +
-    (compareTotals && compareLabel
-      ? delta === null
-        ? `, contra ${signedMoney(compareTotals.net)} em ${compareLabel}`
-        : `, ${pct(Math.abs(delta))} ${delta >= 0 ? "acima" : "abaixo"} do resultado de ${compareLabel}`
-      : "");
+  const title = trendTitle(report, compareLabel);
 
   return (
     <Section

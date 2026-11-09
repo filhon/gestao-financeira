@@ -18,7 +18,13 @@ import { ArrowDownRight, ArrowUpRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import type { AnalyticsReport, PlanBridge, Side } from "@/lib/analytics";
+import {
+  bridgeBars,
+  planSteps,
+  planTitle,
+  type AnalyticsReport,
+  type Side,
+} from "@/lib/analytics";
 import { niceTicks } from "@/lib/dashboardRules";
 import { transactionService } from "@/lib/services/transactionService";
 import { useTransactionDetailStore } from "@/lib/store/useTransactionDetailStore";
@@ -38,90 +44,6 @@ import {
   TooltipBox,
   VIZ,
 } from "./primitives";
-
-interface Step {
-  key: string;
-  label: string;
-  value: number;
-  total?: boolean;
-  hint: string;
-}
-
-const stepsOf = (b: PlanBridge, side: Side): Step[] =>
-  [
-    {
-      key: "planned",
-      label: "Previsto",
-      value: b.planned,
-      total: true,
-      hint: "Valor com que cada lançamento nasceu.",
-    },
-    {
-      key: "revisions",
-      label: "Revisões",
-      value: b.revisions,
-      hint: "Mudanças de valor depois de previsto, inclusive partes desdobradas e ajustes do aprovador do lote.",
-    },
-    {
-      key: "unplanned",
-      label: "Não previstos",
-      value: b.unplanned,
-      hint: "Lançados já pagos ou depois do vencimento.",
-    },
-    {
-      key: "cancelled",
-      label: "Rejeitados",
-      value: -b.cancelled,
-      hint: "Previstos e depois rejeitados.",
-    },
-    {
-      key: "settlement",
-      label: "Diferença na baixa",
-      value: b.settlement,
-      hint:
-        side === "payable"
-          ? "Juros, multa ou desconto no pagamento."
-          : "Desconto ou acréscimo no recebimento.",
-    },
-    {
-      key: "overdue",
-      label: "Vencido sem baixa",
-      value: -b.openOverdue,
-      hint: "Já venceu e ainda não foi baixado.",
-    },
-    {
-      key: "future",
-      label: "A vencer",
-      value: -b.openFuture,
-      hint: "Ainda dentro do prazo.",
-    },
-    {
-      key: "realized",
-      label: side === "payable" ? "Pago" : "Recebido",
-      value: b.realized,
-      total: true,
-      hint: "Baixado no período.",
-    },
-  ].filter((s) => s.total || s.value !== 0);
-
-/** Degrau da ponte: a barra flutua do saldo anterior até o novo. */
-function bridgeData(steps: Step[]) {
-  let running = 0;
-  return steps.map((s) => {
-    if (s.total) {
-      running = s.value;
-      return { ...s, base: 0, bar: s.value, text: money(s.value) };
-    }
-    const start = running;
-    running += s.value;
-    return {
-      ...s,
-      base: Math.min(start, running),
-      bar: Math.abs(s.value),
-      text: signedMoney(s.value),
-    };
-  });
-}
 
 /** Marca horizontal do valor revisado, atravessando o par de colunas do mês. */
 function RevisedTick(props: { cx?: number; cy?: number; value?: number }) {
@@ -149,8 +71,8 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
   const plan = report.plan[side];
   const b = plan.bridge;
   const color = SIDE_COLOR[side];
-  const steps = stepsOf(b, side);
-  const bridge = bridgeData(steps);
+  const steps = planSteps(b, side);
+  const bridge = bridgeBars(steps);
   const months = plan.months;
   const monthTicks = niceTicks(
     0,
@@ -166,11 +88,7 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
     5,
   );
 
-  const noun = side === "receivable" ? "Receita" : "Despesa";
-  const verb = side === "receivable" ? "recebida" : "paga";
-  const title = b.planned
-    ? `${noun} ${verb}: ${money(b.realized)} de ${money(b.planned)} previstos (${pct(b.realized / b.planned)})`
-    : `${noun} ${verb}: ${money(b.realized)}, sem previsão no período`;
+  const title = planTitle(b, side);
 
   async function open(id: string) {
     setOpening(id);

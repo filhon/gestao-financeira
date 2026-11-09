@@ -10,7 +10,6 @@ import {
   startOfQuarter,
   subMonths,
 } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { AlertCircle, AlertTriangle, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,7 +25,12 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAnalyticsReport, useCashAvailable } from "@/hooks/useAnalytics";
 import { useBudgetProgress } from "@/hooks/useDashboardData";
-import { hasMovement, type MonthRange } from "@/lib/analytics";
+import {
+  budgetTitle as envelopeTitle,
+  compareLabelOf,
+  rangeLabel as rangeText,
+  type MonthRange,
+} from "@/lib/analytics";
 import type { DreRegime } from "@/lib/chartOfAccounts";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/components/features/dashboard/Segmented";
@@ -40,6 +44,8 @@ import { RiskSection } from "@/components/features/analytics/RiskSection";
 import { InvestmentsSection } from "@/components/features/analytics/InvestmentsSection";
 import { AttentionSection } from "@/components/features/analytics/AttentionSection";
 import { ProjectionSection } from "@/components/features/analytics/ProjectionSection";
+import { AskSection } from "@/components/features/analytics/AskSection";
+import { PdfExportButton } from "@/components/features/analytics/PdfExportButton";
 
 // ─── Período ──────────────────────────────────────────────────────────────────
 
@@ -86,20 +92,6 @@ function presetRange(key: Exclude<PeriodKey, "custom">): MonthRange {
   }
 }
 
-/** "nov/2026", "2026", "jan/26 a mar/26". */
-function rangeText(r: MonthRange) {
-  const d = (key: string, pattern: string) =>
-    format(new Date(`${key}-01T12:00:00`), pattern, { locale: ptBR });
-  if (r.from === r.to) return d(r.from, "MMM/yyyy");
-  if (
-    r.from.endsWith("-01") &&
-    r.to.endsWith("-12") &&
-    r.from.slice(0, 4) === r.to.slice(0, 4)
-  )
-    return r.from.slice(0, 4);
-  return `${d(r.from, "MMM/yy")} a ${d(r.to, "MMM/yy")}`;
-}
-
 const oneOf = <T extends string>(
   v: string | null,
   options: readonly T[],
@@ -110,6 +102,7 @@ const oneOf = <T extends string>(
 
 const INDEX = [
   { id: "atencao", label: "O que pede atenção" },
+  { id: "perguntas", label: "Perguntas" },
   { id: "posicao", label: "Posição agora" },
   { id: "projecao", label: "Projeção" },
   { id: "resultado", label: "Resultado e tendência" },
@@ -201,7 +194,8 @@ function AnalyticsContent() {
     router.replace(`/analise?${next}`, { scroll: false });
   };
 
-  const query = useAnalyticsReport({ range, compare, regime });
+  const params = { range, compare, regime };
+  const query = useAnalyticsReport(params);
   const report = query.data?.report;
   const meta = query.data?.meta;
   const active = useActiveSection(!!report);
@@ -232,23 +226,12 @@ function AnalyticsContent() {
     );
   }
 
-  const compareLabel =
-    report?.compareRange && hasMovement(report.compareTotals)
-      ? rangeText(report.compareRange)
-      : null;
+  const compareLabel = report ? compareLabelOf(report) : null;
   const regimeText =
     regime === "cash" ? "regime de caixa" : "regime de competência";
-  const leaves = (budget.data ?? []).filter((b) => b.isLeaf);
-  const over = leaves.filter((b) => b.status === "danger").length;
-  const fast = leaves.filter((b) => b.status === "warning").length;
-  const budgetTitle =
-    budget.data === undefined
-      ? `Envelopes de ${exercise}`
-      : over > 0
-        ? `${over} ${over === 1 ? "centro de custo estourou" : "centros de custo estouraram"} o envelope de ${exercise}`
-        : fast > 0
-          ? `${fast} ${fast === 1 ? "centro de custo gasta" : "centros de custo gastam"} acima do ritmo do ano`
-          : `Todos os centros de custo dentro do envelope de ${exercise}`;
+  const budgetTitle = envelopeTitle(budget.data, exercise);
+  // Sem orçamento legível, a regra dos envelopes fica de fora.
+  const envelopes = budget.isError ? [] : (budget.data ?? null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -263,7 +246,7 @@ function AnalyticsContent() {
             {rangeText(range)} · {regimeText}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs text-muted-foreground" aria-live="polite">
             {query.isFetching
               ? "Recalculando…"
@@ -287,6 +270,15 @@ function AnalyticsContent() {
             />
             Atualizar
           </Button>
+          {report && meta && meta.transactionCount > 0 && (
+            <PdfExportButton
+              report={report}
+              meta={meta}
+              params={params}
+              cash={cashToday.balance}
+              budget={envelopes}
+            />
+          )}
         </div>
       </div>
 
@@ -458,11 +450,16 @@ function AnalyticsContent() {
             )}
             <AttentionSection
               report={report}
+              params={params}
               periodLabel={rangeText(report.range)}
-              // Sem orçamento legível, a regra dos envelopes fica de fora.
-              envelopes={budget.isError ? [] : (budget.data ?? null)}
+              envelopes={envelopes}
               exercise={exercise}
               cash={cashToday}
+            />
+            <AskSection
+              params={params}
+              cash={cashToday.balance}
+              envelopes={envelopes}
             />
             <PositionSection report={report} compareLabel={compareLabel} />
             <ProjectionSection report={report} cash={cashToday} />

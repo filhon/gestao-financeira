@@ -32,10 +32,12 @@ import type {
 import { dreAmount, dreMonth, type DreRegime } from "./chartOfAccounts";
 import {
   buildCashFlow,
+  DEFAULT_FORECAST,
   flowAmount,
   FORECAST_STAGES,
   projectRecurrences,
   stageOf,
+  variation,
   type FlowStage,
 } from "./reports";
 import {
@@ -1233,4 +1235,938 @@ export function buildAnalytics(
     anchorEntityId: anchor,
     projection: buildProjectionDays(txs, input.templates ?? [], o.today),
   };
+}
+
+// ─── Textos compartilhados: tela, PDF e IA ────────────────────────────────────
+// Os títulos afirmam a conclusão do bloco. A tela, o PDF e os fatos dados à IA
+// saem destas mesmas funções: o PDF não pode dizer outra coisa que a tela.
+
+/** "+R$ 228,1 mil" / "−R$ 1,3 mi": sinal sempre visível em variações. */
+export const signedMoney = (v: number) =>
+  `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatCurrencyAbbr(Math.abs(v))}`;
+const pct0 = (v: number) => formatPercent(v, 0);
+
+/** "nov/2026", "2026", "jan/26 a mar/26". */
+export function rangeLabel(r: MonthRange) {
+  const d = (key: string, pattern: string) =>
+    format(new Date(`${key}-01T12:00:00`), pattern, { locale: ptBR });
+  if (r.from === r.to) return d(r.from, "MMM/yyyy");
+  if (
+    r.from.endsWith("-01") &&
+    r.to.endsWith("-12") &&
+    r.from.slice(0, 4) === r.to.slice(0, 4)
+  )
+    return r.from.slice(0, 4);
+  return `${d(r.from, "MMM/yy")} a ${d(r.to, "MMM/yy")}`;
+}
+
+/** Rótulo da comparação; null quando o período comparado não teve movimento. */
+export const compareLabelOf = (report: AnalyticsReport) =>
+  report.compareRange && hasMovement(report.compareTotals)
+    ? rangeLabel(report.compareRange)
+    : null;
+
+/** Folga em meses; abaixo de um mês, em dias ("0 mês" não diz nada). */
+export function monthsText(v: number) {
+  if (v >= 1)
+    return `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${v < 2 ? "mês" : "meses"}`;
+  const days = Math.floor(v * 30);
+  return days < 1 ? "menos de 1 dia" : `${days} ${plural(days, "dia", "dias")}`;
+}
+
+export function positionTitle(available: number | null, burn: number) {
+  if (available === null) return "Posição de caixa";
+  return burn > 0
+    ? `Caixa de ${money(available)} cobre ${monthsText(available / burn)} de despesa`
+    : `Caixa disponível de ${money(available)}`;
+}
+
+export function projectionTitle(p: Projection) {
+  const { runs, closing, from, until } = p;
+  const first = runs[0];
+  const when = (key: string) => (key === from ? "hoje" : dayText(key));
+  const month = monthLabel(until.slice(0, 7));
+  if (runs.length === 0)
+    return `Caixa chega a ${month} em ${money(closing)}, sem ficar negativo`;
+  if (runs.length > 1)
+    return `Caixa fica negativo em ${runs.length} trechos, o primeiro a partir de ${when(first.start.isoDate)}`;
+  return first.open
+    ? `Caixa fica negativo a partir de ${when(first.start.isoDate)} e não se recupera até ${month}`
+    : `Caixa fica negativo entre ${when(first.start.isoDate)} e ${dayText(first.end.isoDate)}`;
+}
+
+export function trendTitle(
+  report: AnalyticsReport,
+  compareLabel: string | null,
+) {
+  const { totals, compareTotals } = report;
+  const delta = compareTotals ? variation(totals.net, compareTotals.net) : null;
+  return (
+    `Resultado de ${signedMoney(totals.net)} no período` +
+    (compareTotals && compareLabel
+      ? delta === null
+        ? `, contra ${signedMoney(compareTotals.net)} em ${compareLabel}`
+        : `, ${pct0(Math.abs(delta))} ${delta >= 0 ? "acima" : "abaixo"} do resultado de ${compareLabel}`
+      : "")
+  );
+}
+
+export function planTitle(b: PlanBridge, side: Side) {
+  const noun = side === "receivable" ? "Receita" : "Despesa";
+  const verb = side === "receivable" ? "recebida" : "paga";
+  return b.planned
+    ? `${noun} ${verb}: ${money(b.realized)} de ${money(b.planned)} previstos (${pct0(b.realized / b.planned)})`
+    : `${noun} ${verb}: ${money(b.realized)}, sem previsão no período`;
+}
+
+export function riskTitle(income: Concentration) {
+  const top = income.top[0];
+  if (income.anchor)
+    return `${income.anchor.name} responde por ${pct0(income.anchor.share)} da receita do período`;
+  return top && income.total
+    ? `Maior fonte de receita: ${top.name}, com ${pct0(top.value / income.total)}`
+    : "Sem receita no período";
+}
+
+export function budgetTitle(
+  envelopes: Pick<EnvelopeLeaf, "status" | "isLeaf" | "tight">[] | undefined,
+  exercise: number,
+) {
+  if (envelopes === undefined) return `Envelopes de ${exercise}`;
+  const leaves = envelopes.filter((b) => b.isLeaf);
+  const over = leaves.filter((b) => b.status === "danger").length;
+  // "Sem folga" (95% ou mais) não é "acima do ritmo": os destaques separam.
+  const warn = leaves.filter((b) => b.status === "warning");
+  const tight = warn.filter((b) => b.tight).length;
+  const fast = warn.length - tight;
+  if (over > 0)
+    return `${over} ${over === 1 ? "centro de custo estourou" : "centros de custo estouraram"} o envelope de ${exercise}`;
+  if (fast > 0)
+    return `${fast} ${fast === 1 ? "centro de custo gasta" : "centros de custo gastam"} acima do ritmo do ano`;
+  if (tight > 0)
+    return `${tight} ${tight === 1 ? "centro de custo está" : "centros de custo estão"} sem folga no envelope de ${exercise}`;
+  return `Todos os centros de custo dentro do envelope de ${exercise}`;
+}
+
+export function investmentsTitle(o: {
+  count: number;
+  invested: number;
+  last: { value: number; label: string } | null;
+}) {
+  if (o.count === 0) return "Nenhuma aplicação cadastrada";
+  return `${money(o.invested)} aplicados${o.last ? `; rendimento de ${money(o.last.value)} em ${o.last.label}` : ""}`;
+}
+
+/** Vencido e não baixado (fora da projeção). */
+export function overdueOf(report: AnalyticsReport, side: Side) {
+  return report.aging[side]
+    .filter((b) => b.key !== "due")
+    .reduce(
+      (s, b) => ({ value: add(s.value, b.value), count: s.count + b.count }),
+      { value: 0, count: 0 },
+    );
+}
+
+/** A projeção que os destaques olham: estágios padrão, 12 meses, sem simulação. */
+export const attentionProjection = (
+  report: AnalyticsReport,
+  opening: number | null,
+) =>
+  opening === null
+    ? null
+    : projectBalance({
+        days: report.projection,
+        opening,
+        stages: DEFAULT_FORECAST as ForecastStage[],
+        from: report.today,
+        until: horizonEnd(report.today, ATTENTION.projectionMonths),
+      });
+
+// Ponte do previsto ao realizado, degrau a degrau.
+
+export interface PlanStep {
+  key: string;
+  label: string;
+  value: number;
+  total?: boolean;
+  hint: string;
+}
+
+export const planSteps = (b: PlanBridge, side: Side): PlanStep[] =>
+  [
+    {
+      key: "planned",
+      label: "Previsto",
+      value: b.planned,
+      total: true,
+      hint: "Valor com que cada lançamento nasceu.",
+    },
+    {
+      key: "revisions",
+      label: "Revisões",
+      value: b.revisions,
+      hint: "Mudanças de valor depois de previsto, inclusive partes desdobradas e ajustes do aprovador do lote.",
+    },
+    {
+      key: "unplanned",
+      label: "Não previstos",
+      value: b.unplanned,
+      hint: "Lançados já pagos ou depois do vencimento.",
+    },
+    {
+      key: "cancelled",
+      label: "Rejeitados",
+      value: -b.cancelled,
+      hint: "Previstos e depois rejeitados.",
+    },
+    {
+      key: "settlement",
+      label: "Diferença na baixa",
+      value: b.settlement,
+      hint:
+        side === "payable"
+          ? "Juros, multa ou desconto no pagamento."
+          : "Desconto ou acréscimo no recebimento.",
+    },
+    {
+      key: "overdue",
+      label: "Vencido sem baixa",
+      value: -b.openOverdue,
+      hint: "Já venceu e ainda não foi baixado.",
+    },
+    {
+      key: "future",
+      label: "A vencer",
+      value: -b.openFuture,
+      hint: "Ainda dentro do prazo.",
+    },
+    {
+      key: "realized",
+      label: side === "payable" ? "Pago" : "Recebido",
+      value: b.realized,
+      total: true,
+      hint: "Baixado no período.",
+    },
+  ].filter((s) => s.total || s.value !== 0);
+
+/** Degrau da ponte: a barra flutua do saldo anterior até o novo. */
+export function bridgeBars(steps: PlanStep[]) {
+  let running = 0;
+  return steps.map((s) => {
+    if (s.total) {
+      running = s.value;
+      return { ...s, base: 0, bar: s.value, text: money(s.value) };
+    }
+    const start = running;
+    running += s.value;
+    return {
+      ...s,
+      base: Math.min(start, running),
+      bar: Math.abs(s.value),
+      text: signedMoney(s.value),
+    };
+  });
+}
+
+const SHORT_MONTHS = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+];
+
+/**
+ * Resultado acumulado mês a mês no ano do fim do período e no anterior. O ano
+ * corrente para no mês de hoje: mês futuro sem baixa não é resultado zero.
+ */
+export function cumulativeByYear(report: AnalyticsReport) {
+  const year = Number(report.range.to.slice(0, 4));
+  const lastKey = [report.range.to, report.today.slice(0, 7)].sort()[0];
+  const byKey = new Map(report.trend.map((m) => [m.key, m]));
+  let acc = currency(0);
+  let accPrev = currency(0);
+  const points = SHORT_MONTHS.map((label, i) => {
+    const mm = String(i + 1).padStart(2, "0");
+    const cur = byKey.get(`${year}-${mm}`);
+    const prev = byKey.get(`${year - 1}-${mm}`);
+    if (cur) acc = acc.add(cur.net);
+    if (prev) accPrev = accPrev.add(prev.net);
+    return {
+      label,
+      current: `${year}-${mm}` <= lastKey ? acc.value : null,
+      previous: prev ? accPrev.value : null,
+    };
+  });
+  return { year, points };
+}
+
+/** Rendimento reconhecido nos 12 meses até o mês passado. */
+export function yieldSeries(yields: Record<string, number>, today: Date) {
+  const lastMonth = subMonths(startOfMonth(today), 1);
+  return Array.from({ length: 12 }, (_, i) => {
+    const key = monthKey(subMonths(lastMonth, 11 - i));
+    return { key, label: monthLabel(key), value: yields[key] ?? 0 };
+  });
+}
+
+// Composição: o nível que a tela abre primeiro.
+
+export type CompositionMode = "accounts" | "costCenters";
+
+/**
+ * Filhos do nível escolhido, do maior para o menor. Nível com um filho só (o
+ * centro raiz, "4 Despesas") não informa nada: desce até o primeiro nível
+ * que divide o valor.
+ */
+export function compositionLevel(
+  comp: Composition,
+  side: Side,
+  path: string[] = [],
+) {
+  const byId = new Map(comp.nodes.map((n) => [n.id, n]));
+  const childrenOf = (parentId: string | null) =>
+    comp.nodes
+      .filter(
+        (n) =>
+          n.parentId === parentId && (n.value[side] > 0 || n.compare[side] > 0),
+      )
+      .sort((a, b) => b.value[side] - a.value[side]);
+  const hasChildren = (id: string) => childrenOf(id).length > 0;
+
+  const trail = path.filter((id) => byId.has(id));
+  let parent: string | null = trail.at(-1) ?? null;
+  // Sem conta/centro abaixo de 0,5% não segura o nível de cima: "Global
+  // concentra 100%" não diz nada.
+  const rootTotal =
+    childrenOf(null).reduce((s, k) => s + k.value[side], 0) +
+    Math.max(0, comp.unassigned[side]);
+  for (;;) {
+    const kids = childrenOf(parent);
+    const loose = parent === null && comp.unassigned[side] > rootTotal * 0.005;
+    if (kids.length !== 1 || loose || !hasChildren(kids[0].id)) break;
+    parent = kids[0].id;
+    trail.push(parent);
+  }
+  const kids = childrenOf(parent);
+  const unassigned = parent === null ? comp.unassigned[side] : 0;
+  const unassignedCompare = parent === null ? comp.unassignedCompare[side] : 0;
+  return {
+    byId,
+    childrenOf,
+    hasChildren,
+    trail,
+    parent,
+    parentNode: parent ? byId.get(parent) : undefined,
+    kids,
+    unassigned,
+    unassignedCompare,
+    total:
+      kids.reduce((s, k) => s + k.value[side], 0) + Math.max(0, unassigned),
+  };
+}
+
+export function compositionTitle(
+  level: ReturnType<typeof compositionLevel>,
+  side: Side,
+  mode: CompositionMode,
+) {
+  const word = side === "receivable" ? "receitas" : "despesas";
+  const { kids, total, unassigned, parentNode } = level;
+  const top = kids[0];
+  if (!total) return `Sem ${word} no período`;
+  return top && top.value[side] >= unassigned
+    ? `${top.name} concentra ${pct0(top.value[side] / total)} das ${word}${parentNode ? ` de ${parentNode.name}` : ""}`
+    : `${pct0(unassigned / total)} das ${word} estão sem ${mode === "accounts" ? "conta contábil" : "centro de custo"}`;
+}
+
+// ─── Resumo da análise: o que a tela, o PDF e a IA compartilham ───────────────
+
+export interface BriefContext {
+  /** Caixa disponível hoje; null sem contas correntes cadastradas. */
+  cash: number | null;
+  /** Envelopes do exercício; null enquanto não lidos. */
+  envelopes: EnvelopeLeaf[] | null;
+}
+
+export function analysisBrief(report: AnalyticsReport, ctx: BriefContext) {
+  const periodLabel = rangeLabel(report.range);
+  const compareLabel = compareLabelOf(report);
+  const exercise = Number(report.range.to.slice(0, 4));
+  const projection = attentionProjection(report, ctx.cash);
+  const attention = buildAttention({
+    report,
+    periodLabel,
+    envelopes: ctx.envelopes,
+    exercise,
+    projection,
+  });
+  return {
+    periodLabel,
+    compareLabel,
+    exercise,
+    cash: ctx.cash,
+    envelopes: ctx.envelopes,
+    projection,
+    attention,
+    headlines: {
+      posicao:
+        ctx.cash === null
+          ? null
+          : positionTitle(ctx.cash, report.average.outflow),
+      projecao: projection ? projectionTitle(projection) : null,
+      resultado: trendTitle(report, compareLabel),
+      previstoReceitas: planTitle(report.plan.receivable.bridge, "receivable"),
+      previstoDespesas: planTitle(report.plan.payable.bridge, "payable"),
+      orcamento: ctx.envelopes ? budgetTitle(ctx.envelopes, exercise) : null,
+      composicao: compositionTitle(
+        compositionLevel(report.accounts, "payable"),
+        "payable",
+        "accounts",
+      ),
+      riscos: riskTitle(report.concentration.receivable),
+    },
+  };
+}
+
+export type AnalysisBrief = ReturnType<typeof analysisBrief>;
+
+/** Resumo por regra, sem IA: as conclusões das seções principais. */
+export function ruleSummary(brief: AnalysisBrief): string[] {
+  const h = brief.headlines;
+  const n = brief.attention.length;
+  return [
+    h.posicao,
+    h.projecao,
+    h.resultado,
+    h.previstoReceitas,
+    h.previstoDespesas,
+    n
+      ? `${n} ${plural(n, "ponto pede", "pontos pedem")} atenção, listados a seguir`
+      : "Nenhum ponto passou dos limites de atenção",
+  ]
+    .filter((s): s is string => !!s)
+    .map((s) => `${s}.`);
+}
+
+/**
+ * Tudo o que a IA pode citar, em texto. A conferência usa este mesmo texto:
+ * número que não está aqui não aparece na resposta.
+ */
+export function factsText(
+  report: AnalyticsReport,
+  brief: AnalysisBrief,
+  companyName: string,
+): string {
+  const L: string[] = [];
+  const sideWord = (s: Side) => (s === "receivable" ? "receitas" : "despesas");
+  const regime =
+    report.regime === "cash" ? "regime de caixa" : "regime de competência";
+  const t = report.totals;
+  const count = (n: number) => `${n} ${plural(n, "lançamento", "lançamentos")}`;
+
+  L.push(`Empresa: ${companyName}.`);
+  L.push(
+    `Período analisado: ${brief.periodLabel}, ${regime}. Hoje: ${dayText(report.today)}.`,
+  );
+  L.push(
+    `No período: receitas ${money(t.inflow)}, despesas ${money(t.outflow)}, resultado ${signedMoney(t.net)}.`,
+  );
+  if (brief.compareLabel && report.compareTotals) {
+    const c = report.compareTotals;
+    L.push(
+      `Em ${brief.compareLabel} (comparação): receitas ${money(c.inflow)}, despesas ${money(c.outflow)}, resultado ${signedMoney(c.net)}.`,
+    );
+  } else {
+    L.push("Sem período de comparação com movimento.");
+  }
+  const a = report.average;
+  L.push(
+    `Média mensal dos ${a.months} meses fechados até ${monthLabel(a.range.to)}: receitas ${money(a.inflow)}, despesas ${money(a.outflow)}.`,
+  );
+  L.push(
+    brief.cash === null
+      ? "Caixa disponível hoje: não informado (sem contas correntes)."
+      : `Caixa disponível hoje, em contas correntes e aplicação automática: ${money(brief.cash)}.`,
+  );
+
+  const p = brief.projection;
+  if (p) {
+    L.push(
+      `Projeção de ${ATTENTION.projectionMonths} meses, de ${dayText(p.from)} a ${dayText(p.until)}, com o que está lançado e as recorrências: saldo final ${money(p.closing)}; menor saldo ${money(p.lowest.balance)} em ${dayText(p.lowest.isoDate)}; ${p.runs.length ? `negativo em ${p.runs.length} ${plural(p.runs.length, "trecho", "trechos")}, o primeiro a partir de ${dayText(p.runs[0].start.isoDate)}` : "não fica negativo"}.`,
+    );
+  }
+  const oin = overdueOf(report, "receivable");
+  const oout = overdueOf(report, "payable");
+  L.push(
+    `Vencidos sem baixa hoje, fora da projeção: ${money(oin.value)} a receber em ${count(oin.count)}; ${money(oout.value)} a pagar em ${count(oout.count)}.`,
+  );
+
+  for (const s of SIDES) {
+    const b = report.plan[s].bridge;
+    const done = s === "receivable" ? "recebido" : "pago";
+    L.push(
+      `Previsto e realizado, ${sideWord(s)} de ${brief.periodLabel}: previsto ${money(b.planned)}; revisões ${signedMoney(b.revisions)}; não previstos ${money(b.unplanned)}; rejeitados ${money(b.cancelled)}; diferença na baixa ${signedMoney(b.settlement)}; vencido sem baixa ${money(b.openOverdue)}; a vencer ${money(b.openFuture)}; ${done} ${money(b.realized)}${b.planned ? ` (${formatPercent(b.realized / b.planned, 1)} do previsto)` : ""}.`,
+    );
+    const devs = report.plan[s].deviations.slice(0, 5);
+    if (devs.length) {
+      L.push(
+        `Maiores desvios em ${sideWord(s)}, realizado e em aberto contra o previsto:`,
+      );
+      for (const d of devs)
+        L.push(
+          `- ${d.description} (${d.counterpart}, ${monthLabel(d.month)}): previsto ${money(d.planned)}, ${done} ${money(d.realized)}, em aberto ${money(d.open)}, desvio ${signedMoney(d.deviation)}.`,
+        );
+    }
+  }
+
+  const leaves = (brief.envelopes ?? []).filter((e) => e.isLeaf);
+  if (leaves.length) {
+    const names = (f: (e: EnvelopeLeaf) => boolean) =>
+      leaves
+        .filter(f)
+        .map((e) => e.name)
+        .join(", ") || "nenhum";
+    const group = (label: string, f: (e: EnvelopeLeaf) => boolean) =>
+      `${label}, ${leaves.filter(f).length}: ${names(f)}`;
+    L.push(
+      `Envelopes de ${brief.exercise}, ${leaves.length} centros de custo; ${group("estourados", (e) => e.status === "danger")}; ${group("acima do ritmo", (e) => e.status === "warning" && !e.tight)}; ${group("sem folga", (e) => e.status === "warning" && e.tight)}.`,
+    );
+  }
+
+  const composition = (
+    comp: Composition,
+    s: Side,
+    mode: CompositionMode,
+    title: string,
+  ) => {
+    const lv = compositionLevel(comp, s);
+    if (!lv.total) return;
+    L.push(`${title}:`);
+    for (const k of lv.kids.slice(0, 6))
+      L.push(
+        `- ${mode === "accounts" ? `${k.code} ${k.name}` : k.name}: ${money(k.value[s])} (${formatPercent(k.value[s] / lv.total, 1)}).`,
+      );
+    if (lv.unassigned > 0)
+      L.push(
+        `- ${mode === "accounts" ? "Sem conta contábil" : "Sem centro de custo"}: ${money(lv.unassigned)} (${formatPercent(lv.unassigned / lv.total, 1)}).`,
+      );
+  };
+  composition(
+    report.accounts,
+    "payable",
+    "accounts",
+    "Despesas por conta contábil",
+  );
+  composition(
+    report.accounts,
+    "receivable",
+    "accounts",
+    "Receitas por conta contábil",
+  );
+  L.push(
+    `Parte do movimento com conta contábil: ${formatPercent(report.accounts.coverage, 1)}; com centro de custo: ${formatPercent(report.costCenters.coverage, 1)}.`,
+  );
+  composition(
+    report.costCenters,
+    "payable",
+    "costCenters",
+    "Despesas por centro de custo",
+  );
+
+  for (const s of SIDES) {
+    const c = report.concentration[s];
+    if (!c.total) continue;
+    L.push(
+      `Maiores contrapartes em ${sideWord(s)} do período, de ${money(c.total)}:`,
+    );
+    for (const x of c.top.slice(0, 5))
+      L.push(
+        `- ${x.name}: ${money(x.value)} (${formatPercent(x.value / c.total, 1)})${x.key === report.anchorEntityId ? ", a mantenedora" : ""}.`,
+      );
+  }
+
+  for (const s of SIDES) {
+    L.push(
+      `Em aberto ${s === "receivable" ? "a receber" : "a pagar"} hoje, pelo atraso: ${report.aging[
+        s
+      ]
+        .map(
+          (b) =>
+            `${b.label.toLowerCase()}: ${money(b.value)} em ${count(b.count)}`,
+        )
+        .join("; ")}.`,
+    );
+    const tm = report.timing[s];
+    if (tm.avgDays !== null) {
+      const days = Math.round(Math.abs(tm.avgDays));
+      const verb = s === "receivable" ? "recebe" : "paga";
+      L.push(
+        `Pontualidade em ${sideWord(s)}: ${tm.count} baixas no período; em média ${verb} ${days === 0 ? "no vencimento" : `${days} ${plural(days, "dia", "dias")} ${tm.avgDays > 0 ? "depois do" : "antes do"} vencimento`}; ${formatPercent(tm.lateShare ?? 0, 1)} com atraso.`,
+      );
+    }
+  }
+
+  L.push("Resultado mês a mês no período:");
+  for (const m of report.trend)
+    if (m.key >= report.range.from && m.key <= report.range.to)
+      L.push(
+        `- ${m.label}: receitas ${money(m.inflow)}, despesas ${money(m.outflow)}, resultado ${signedMoney(m.net)}.`,
+      );
+
+  if (brief.attention.length) {
+    const n = brief.attention.length;
+    L.push(`O que pede atenção, ${n} ${plural(n, "ponto", "pontos")}:`);
+    for (const it of brief.attention) L.push(`- ${it.text}`);
+  }
+  L.push("Conclusões das seções:");
+  for (const h of Object.values(brief.headlines)) if (h) L.push(`- ${h}.`);
+  return L.join("\n");
+}
+
+// ─── IA: pedidos ──────────────────────────────────────────────────────────────
+
+const AI_RULES = `Regras:
+- Use somente os FATOS. Não use conhecimento de fora.
+- Copie cada número, valor, percentual e data exatamente como aparece nos FATOS. Não calcule, não some, não arredonde, não converta.
+- Não cite pessoa, empresa, conta, centro de custo ou mês que não esteja nos FATOS.
+- Português do Brasil, frases curtas e diretas, tom de relatório para a diretoria.
+- Sem markdown, sem listas, sem travessão.`;
+
+export const NO_ANSWER = "O relatório não traz esse dado.";
+
+/** Os três pedidos à IA; a rota e o script do PDF usam os mesmos. */
+export const aiPrompt = {
+  summary: (facts: string) =>
+    `Escreva o resumo executivo que abre o relatório financeiro para o conselho e a diretoria: um parágrafo de 4 a 6 frases. Comece pela conclusão mais importante (caixa, resultado e o que pede atenção) e termine com o principal risco. Não repita a lista de destaques; sintetize.
+
+${AI_RULES}
+
+FATOS:
+${facts}`,
+  attention: (items: AttentionItem[]) =>
+    `Reescreva cada destaque abaixo numa frase clara para a diretoria, dizendo primeiro o que importa. Mantenha todos os números, datas e nomes exatamente como estão em cada destaque e não acrescente nenhum outro. Responda só com JSON: [{"id": "...", "text": "..."}], um objeto por destaque, mesmo id.
+
+${AI_RULES}
+
+DESTAQUES:
+${JSON.stringify(items.map(({ id, text }) => ({ id, text })))}`,
+  question: (facts: string, question: string) =>
+    `Responda a pergunta da diretoria em até 4 frases, usando só os FATOS. Se os FATOS não trazem a resposta, responda exatamente: "${NO_ANSWER}"
+
+${AI_RULES}
+
+FATOS:
+${facts}
+
+PERGUNTA: ${JSON.stringify(question)}`,
+};
+
+// ─── IA: conferência dos números citados ──────────────────────────────────────
+
+export type CitedKind =
+  | "money"
+  | "percent"
+  | "date"
+  | "daymonth"
+  | "month"
+  | "monthName"
+  | "number";
+
+export interface Cited {
+  kind: CitedKind;
+  /** Reais, pontos percentuais, yyyymmdd, mmdd, yyyymm, mm ou o número. */
+  value: number;
+  /** Precisão com que foi escrito: "R$ 1,8 mi" = 100 mil. 0 = exato. */
+  step: number;
+  /** Escrito com sinal de menos ("−R$ 47,6 mil"). */
+  negative?: boolean;
+  raw: string;
+}
+
+const MONTH_NAMES = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+const NUM = String.raw`\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?`;
+const SCALE: Record<string, number> = {
+  mil: 1e3,
+  mi: 1e6,
+  milhão: 1e6,
+  milhões: 1e6,
+  bi: 1e9,
+  bilhão: 1e9,
+  bilhões: 1e9,
+};
+
+const NUMBER_WORDS: Record<string, number> = {
+  dois: 2,
+  duas: 2,
+  três: 3,
+  quatro: 4,
+  cinco: 5,
+  seis: 6,
+  sete: 7,
+  oito: 8,
+  nove: 9,
+  dez: 10,
+  onze: 11,
+  doze: 12,
+  treze: 13,
+  catorze: 14,
+  quatorze: 14,
+  quinze: 15,
+  dezesseis: 16,
+  dezessete: 17,
+  dezoito: 18,
+  dezenove: 19,
+  vinte: 20,
+};
+
+/** "1.840.942,72" → 1840942.72, escrito com precisão de centavo. */
+function readNum(s: string) {
+  const [int, dec = ""] = s.split(",");
+  return {
+    value: Number(`${int.replace(/\./g, "")}.${dec || "0"}`),
+    step: 10 ** -dec.length,
+  };
+}
+
+const CITE_RULES: {
+  kind: CitedKind;
+  re: RegExp;
+  read: (m: string[]) => { value: number; step: number; negative?: boolean };
+}[] = [
+  {
+    kind: "money",
+    re: new RegExp(
+      String.raw`([-−]\s*)?R\$\s*([-−])?\s*(${NUM})(?:\s*(milhões|milhão|mil|mi|bilhões|bilhão|bi)(?!\p{L}))?`,
+      "giu",
+    ),
+    read: (m) => {
+      const n = readNum(m[3]);
+      const scale = m[4] ? SCALE[m[4].toLowerCase()] : 1;
+      return {
+        value: n.value * scale,
+        step: n.step * scale,
+        negative: !!(m[1] || m[2]),
+      };
+    },
+  },
+  {
+    kind: "percent",
+    re: new RegExp(String.raw`(${NUM})\s*%`, "g"),
+    read: (m) => readNum(m[1]),
+  },
+  {
+    kind: "date",
+    re: /(?<!\d)(\d{1,2})\/(\d{1,2})\/(\d{4})(?!\d)/g,
+    read: (m) => ({ value: +m[3] * 1e4 + +m[2] * 100 + +m[1], step: 0 }),
+  },
+  {
+    kind: "month",
+    re: /(?<!\p{L})(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\/(\d{4}|\d{2})(?!\d)/giu,
+    read: (m) => ({
+      value:
+        (m[2].length === 2 ? 2000 + +m[2] : +m[2]) * 100 +
+        SHORT_MONTHS.indexOf(m[1].toLowerCase()) +
+        1,
+      step: 0,
+    }),
+  },
+  {
+    kind: "month",
+    re: new RegExp(
+      String.raw`(?<!\p{L})(${MONTH_NAMES.join("|")})\s+de\s+(\d{4})(?!\d)`,
+      "giu",
+    ),
+    read: (m) => ({
+      value: +m[2] * 100 + MONTH_NAMES.indexOf(m[1].toLowerCase()) + 1,
+      step: 0,
+    }),
+  },
+  {
+    kind: "monthName",
+    re: new RegExp(
+      String.raw`(?<!\p{L})(${MONTH_NAMES.join("|")})(?!\p{L})`,
+      "giu",
+    ),
+    read: (m) => ({
+      value: MONTH_NAMES.indexOf(m[1].toLowerCase()) + 1,
+      step: 0,
+    }),
+  },
+  {
+    kind: "daymonth",
+    re: /(?<!\d)(\d{1,2})\/(\d{1,2})(?![\d/])/g,
+    read: (m) => ({ value: +m[2] * 100 + +m[1], step: 0 }),
+  },
+  {
+    kind: "number",
+    re: new RegExp(String.raw`(?<![\d,.])(${NUM})(?!\d)`, "g"),
+    read: (m) => readNum(m[1]),
+  },
+  {
+    // "Três centros de custo": contagem por extenso também é número citado.
+    // "Um"/"uma" ficam de fora: são artigo na maior parte das frases.
+    kind: "number",
+    re: new RegExp(
+      String.raw`(?<!\p{L})(${Object.keys(NUMBER_WORDS).join("|")})(?!\p{L})`,
+      "giu",
+    ),
+    read: (m) => ({ value: NUMBER_WORDS[m[1].toLowerCase()], step: 1 }),
+  },
+];
+
+/**
+ * Números, datas e meses citados num texto em português. Cada regra apaga o
+ * trecho que leu antes da seguinte: "R$ 1,8 mi" não vira também "1,8".
+ */
+export function extractCited(text: string): Cited[] {
+  let rest = text.replace(/ /g, " ");
+  const out: Cited[] = [];
+  for (const rule of CITE_RULES) {
+    for (const m of [...rest.matchAll(rule.re)]) {
+      out.push({ kind: rule.kind, ...rule.read(m), raw: m[0] });
+      const at = m.index ?? 0;
+      rest =
+        rest.slice(0, at) +
+        " ".repeat(m[0].length) +
+        rest.slice(at + m[0].length);
+    }
+  }
+  return out;
+}
+
+/** Fatos citáveis: o que o texto traz, mais o ano de cada data e mês. */
+function knownCited(facts: string): Cited[] {
+  const cited = extractCited(facts);
+  const years: Cited[] = cited
+    .filter((c) => c.kind === "date" || c.kind === "month")
+    .map((c) => ({
+      kind: "number",
+      value: Math.floor(c.value / (c.kind === "date" ? 1e4 : 100)),
+      step: 1,
+      raw: "",
+    }));
+  return [...cited, ...years];
+}
+
+/**
+ * O número citado sai de algum fato: mesmo tipo e, na precisão com que foi
+ * escrito, o mesmo valor ("R$ 234 mil" de "R$ 233,6 mil"). Mais preciso que
+ * o fato não pode ser: "R$ 1.840.000" não sai de "R$ 1,8 mi". Sem sinal, vale
+ * para os dois lados ("déficit de R$ 47,6 mil" cita "−R$ 47,6 mil"); com
+ * sinal de menos, só um fato negativo.
+ */
+export function citedMatches(c: Cited, f: Cited) {
+  const monthOf = (x: Cited) =>
+    x.kind === "month"
+      ? x.value % 100
+      : x.kind === "date"
+        ? Math.floor(x.value / 100) % 100
+        : x.kind === "monthName"
+          ? x.value
+          : null;
+  if (c.kind === "monthName") return monthOf(f) === c.value;
+  if (c.kind === "daymonth")
+    return (
+      (f.kind === "date" && f.value % 1e4 === c.value) ||
+      (f.kind === "daymonth" && f.value === c.value)
+    );
+  if (c.kind !== f.kind) return false;
+  // Sem sinal vale para os dois ("déficit de R$ 47,6 mil"); com sinal de
+  // menos, só um fato negativo.
+  if (c.negative && !f.negative) return false;
+  if (c.step === 0) return c.value === f.value;
+  if (c.step < f.step - 1e-9) return false;
+  const q = (v: number) => Math.round(Math.abs(v) / c.step + 1e-9);
+  return q(c.value) === q(f.value);
+}
+
+/** Frases de um texto: quebra de linha, ou ponto seguido de maiúscula. */
+export function splitSentences(text: string): string[] {
+  return text
+    .replace(/\*\*|__|`/g, "")
+    .split(/\n+/)
+    .flatMap((line) =>
+      line
+        .replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "")
+        .split(/(?<=[.!?])\s+(?=[\p{Lu}\d"“(])/u),
+    )
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const wordsOf = (text: string) =>
+  new Set(text.toLocaleLowerCase("pt-BR").match(/\p{L}+/gu) ?? []);
+
+/**
+ * Por que a frase não pode aparecer, ou null se pode: todo número, data e mês
+ * citado sai dos fatos, e toda palavra com maiúscula fora do início da frase
+ * (nome de pessoa, empresa, conta) está nos fatos.
+ */
+export function sentenceProblem(
+  sentence: string,
+  known: Cited[],
+  factWords: Set<string>,
+): string | null {
+  for (const c of extractCited(sentence))
+    if (!known.some((f) => citedMatches(c, f)))
+      return `"${c.raw.trim()}" não está no relatório`;
+  const first = sentence.search(/\p{L}/u);
+  for (const m of sentence.matchAll(/(?<![\p{L}\d])\p{Lu}\p{L}+/gu)) {
+    if (m.index === first) continue;
+    if (!factWords.has(m[0].toLocaleLowerCase("pt-BR")))
+      return `"${m[0]}" não está no relatório`;
+  }
+  return null;
+}
+
+/** Separa as frases da IA que batem com os fatos das que não batem. */
+export function verifyAiText(text: string, facts: string) {
+  const known = knownCited(facts);
+  const words = wordsOf(facts);
+  const kept: string[] = [];
+  const dropped: { sentence: string; reason: string }[] = [];
+  for (const s of splitSentences(text)) {
+    const reason = sentenceProblem(s, known, words);
+    if (reason) dropped.push({ sentence: s, reason });
+    else kept.push(s);
+  }
+  return { kept, dropped };
+}
+
+/**
+ * Destaque redigido pela IA: só vale se cada frase cita apenas o que está no
+ * texto de modelo daquele destaque. Senão, volta o texto de modelo.
+ */
+export function verifyAttention(
+  items: AttentionItem[],
+  ai: { id: string; text: string }[],
+): (AttentionItem & { ai: boolean })[] {
+  return items.map((item) => {
+    const text = ai.find((a) => a.id === item.id)?.text?.trim() ?? "";
+    const check = verifyAiText(text, item.text);
+    return check.kept.length && !check.dropped.length
+      ? { ...item, text: check.kept.join(" "), ai: true }
+      : { ...item, ai: false };
+  });
 }

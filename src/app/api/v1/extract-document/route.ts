@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractDocumentData } from "@/lib/services/documentExtractionService";
 import { adminDb } from "@/lib/firebase/admin";
 import { authorizeCompany } from "@/lib/api/companyAccess";
+import { limitAi } from "@/lib/api/aiRateLimit";
 
 const ALLOWED_MIME_TYPES = [
   "application/pdf",
@@ -43,6 +44,8 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    const limited = await limitAi("extract-document", access.uid);
+    if (limited) return limited;
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const extractedData = await extractDocumentData(buffer, file.type);
