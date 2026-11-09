@@ -1256,6 +1256,11 @@ async function commitValidatedPatch(
   patch: Record<string, unknown>,
   opts: { enforce: boolean },
 ): Promise<PatchOutcome> {
+  // A previsão é carimbada uma vez pelo trigger de criação; nenhum patch,
+  // vindo de callable ou de lote, reescreve a linha de base da Análise.
+  delete patch.plannedAmount;
+  delete patch.plannedSource;
+  delete patch.unplanned;
   assertNotHeld(current, patch);
   if ("paymentDate" in patch)
     assertNotFuturePayment(patch.status ?? current.status, patch.paymentDate);

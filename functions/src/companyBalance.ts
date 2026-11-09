@@ -80,6 +80,32 @@ async function applyContribution(
   });
 }
 
+/** Dia (yyyy-MM-dd) no fuso da empresa; a função roda em UTC. */
+const dayKeyBrt = (d: Date) =>
+  d.toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });
+
+/**
+ * Valor previsto (linha de base da Análise): o valor com que o lançamento
+ * nasceu. Edição posterior de `amount` é revisão, não muda a previsão.
+ * Não previsto = nasceu já pago ou depois do vencimento: entrou no caixa sem
+ * ter sido planejado, e a Análise o soma à parte em vez de chamá-lo de
+ * previsto igual ao pago. Mesma regra no backfill
+ * (scripts/backfill-planned-amount.mjs), que só não sabe o status de origem.
+ */
+export function plannedStamp(
+  data: admin.firestore.DocumentData,
+  createdAt: Date,
+) {
+  const due = data.dueDate?.toDate?.() as Date | undefined;
+  return {
+    plannedAmount: Number(data.amount) || 0,
+    plannedSource: "create",
+    unplanned:
+      PAID.includes(data.status) ||
+      (!!due && dayKeyBrt(createdAt) > dayKeyBrt(due)),
+  };
+}
+
 export const onTransactionWrite = functions
   .runWith({ failurePolicy: true })
   .firestore.document("transactions/{transactionId}")
@@ -88,6 +114,22 @@ export const onTransactionWrite = functions
     const after = change.after.exists ? change.after.data() : null;
     const companyId = after?.companyId || before?.companyId;
     if (!companyId) return null;
+
+    // Criação: carimba o valor previsto a partir do próprio evento de criação,
+    // então uma edição que chegue antes deste trigger não vira a previsão.
+    // Este é o único lugar que grava os três campos (as rules barram o
+    // cliente e `commitValidatedPatch` os descarta). Repetir o evento grava
+    // o mesmo valor. Lançamento já apagado: nada a carimbar.
+    if (!before && after) {
+      const createdAt =
+        (after.createdAt?.toDate?.() as Date | undefined) ??
+        new Date(context.timestamp);
+      try {
+        await change.after.ref.update(plannedStamp(after, createdAt));
+      } catch (err) {
+        if ((err as { code?: number }).code !== 5) throw err; // 5 = NOT_FOUND
+      }
+    }
 
     // Escrita que não mexe no saldo (rascunho editado, descrição de paga).
     const target = contribution(after);

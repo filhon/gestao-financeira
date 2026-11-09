@@ -14,6 +14,7 @@ import {
   ListTree,
   Landmark,
   ChartColumn,
+  ChartSpline,
   Gavel,
   Settings,
   CalendarClock,
@@ -167,6 +168,13 @@ export const NAV: NavEntry[] = [
         visible: (p) => p.canViewBankAccounts,
       },
     ],
+  },
+  {
+    title: "Análise",
+    href: "/analise",
+    icon: ChartSpline,
+    visible: (p) => p.canViewAnalytics,
+    shortcut: "a",
   },
   {
     title: "Relatórios",

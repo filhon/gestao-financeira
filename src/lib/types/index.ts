@@ -65,6 +65,12 @@ export interface Company {
    * "Pagos sem comprovante". Ausente: o sistema sugere uma data.
    */
   receiptsStartDate?: Date;
+
+  /**
+   * Entidade de quem a receita mais depende (na Hebron, a mantenedora). A
+   * Análise mede a concentração da receita contra ela. Ausente: só ranking.
+   */
+  analyticsAnchorEntityId?: string;
 }
 
 export interface UserProfile {
@@ -456,6 +462,17 @@ export interface Transaction {
   documentNumber?: string;
   /** Mês de competência (yyyy-MM). Ausente: a DRE usa a data efetiva. */
   competence?: string;
+
+  /**
+   * Valor previsto: o valor com que o lançamento nasceu. Gravado só pelo
+   * trigger de criação (ou pelo backfill) e imutável; editar `amount` é
+   * revisão. Ausente: trigger ainda não rodou, a Análise usa `amount`.
+   */
+  plannedAmount?: number;
+  /** De onde veio a previsão: criação, auditoria (backfill) ou valor atual. */
+  plannedSource?: "create" | "audit" | "current";
+  /** Nasceu já pago ou depois do vencimento: não fazia parte da previsão. */
+  unplanned?: boolean;
 
   /**
    * Recorrência gerada pelo job noturno sem saldo no centro de custo.

@@ -23,6 +23,8 @@
     "check:receipt-checks": "jiti scripts/check-receipt-checks.ts",
     "check:search": "jiti scripts/check-search.ts",
     "check:reports": "jiti scripts/check-reports.ts",
+    "check:analytics": "jiti scripts/check-analytics.ts",
+    "backfill:planned": "node scripts/backfill-planned-amount.mjs",
     "check:list-placeholder": "jiti scripts/check-list-placeholder.ts",
     "check:transaction-action": "jiti scripts/check-transaction-action.ts",
     "check:batch-run": "jiti scripts/check-batch-run.ts",

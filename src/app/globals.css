@@ -81,6 +81,19 @@
   --chart-cash: oklch(0.347 0.148 270.5);
   --chart-sim: oklch(0.648 0.193 42.1);
 
+  /* Análise: séries por papel, não por posição. Matizes da marca re-escalonados
+     e validados (dataviz validate_palette, todos os pares, sobre o card):
+     CVD ΔE ≥ 8,8, visão normal ≥ 26. O verde fica abaixo de 3:1 no claro,
+     então só aparece com rótulo visível ou tabela ao lado.
+     entrada = receita, saída = despesa, extra = aplicações; contexto = previsto,
+     período de comparação, barras fora do recorte; passo = degraus da ponte. */
+  --viz-in: oklch(0.48 0.17 268);
+  --viz-out: oklch(0.6 0.18 42);
+  --viz-extra: oklch(0.7 0.17 130);
+  --viz-context: oklch(0.8 0.01 270);
+  --viz-step: oklch(0.6 0.015 270);
+  --viz-grid: oklch(0.93 0.005 270);
+
   /* Estados financeiros. Vocabulário único para valor monetário, segmento de
      barra e série de gráfico — antes cada tela escolhia o próprio tom.
      Escolhidos para passar WCAG AA (4.5:1) sobre --card em texto normal, que é
@@ -129,6 +142,13 @@
   --chart-5: oklch(0.78 0.12 42.1);
   --chart-cash: oklch(0.719 0.138 227.3);
   --chart-sim: oklch(0.648 0.193 42.1);
+  /* Mesmos papéis, escalonados para o card escuro (validados à parte). */
+  --viz-in: oklch(0.64 0.14 268);
+  --viz-out: oklch(0.53 0.15 40);
+  --viz-extra: oklch(0.66 0.15 128);
+  --viz-context: oklch(0.42 0.02 270);
+  --viz-step: oklch(0.58 0.02 270);
+  --viz-grid: oklch(1 0 0 / 8%);
 
   /* Mesmos papéis, claros o bastante para o card escuro (6.5:1 a 11:1). */
   --state-positive: oklch(0.765 0.177 163.223);

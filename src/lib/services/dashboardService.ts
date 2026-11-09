@@ -332,6 +332,10 @@ export const dashboardService = {
   getBankBalance: (companyId: string) =>
     readBankCash(companyId, new Date(), true),
 
+  /** Caixa disponível hoje (contas correntes + aplicação automática). */
+  getCashAvailable: (companyId: string) =>
+    readBankCash(companyId, new Date(), false),
+
   /**
    * O que espera ação hoje, com contagem e total reais (agregados no
    * servidor). Usa os mesmos filtros das abas das listas, então o número do

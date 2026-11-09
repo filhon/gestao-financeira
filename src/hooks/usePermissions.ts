@@ -52,6 +52,8 @@ export interface Permissions {
   canManageBankAccounts: boolean; // Create/Edit, reopen closed periods
 
   canViewReports: boolean;
+  /** Análise (BI da diretoria): a empresa inteira, só admin e gestor. */
+  canViewAnalytics: boolean;
 
   // Admin & Settings
   canManageUsers: boolean;
@@ -242,6 +244,8 @@ export function usePermissions(): Permissions {
         "releaser",
         "auditor",
       ]),
+      // Espelha ALLOWED em /api/internal/analytics.
+      canViewAnalytics: isAdminOrManager,
 
       // Admin & Settings
       canManageUsers: isAdminOrManager, // Manager manages company users

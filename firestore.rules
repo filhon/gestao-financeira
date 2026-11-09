@@ -91,7 +91,7 @@ service cloud.firestore {
         (hasCompanyRole(companyId, ['financial_manager', 'user']) &&
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rdCounter'])) ||
         (isManager(companyId) &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom', 'receiptsStartDate'])) ||
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chartOfAccountsRequiredFrom', 'receiptsStartDate', 'analyticsAnchorEntityId'])) ||
         // Numeração dos lotes (LP-0001…): quem cria lote só avança o contador, de 1 em 1.
         (hasCompanyRole(companyId, ['financial_manager', 'approver', 'releaser']) &&
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['batchCounter']) &&
@@ -223,7 +223,16 @@ service cloud.firestore {
       // UPDATE — numa despesa, tudo que não mexe em orçamento continua livre:
       // vínculo com lote, conciliação, comprovante, anexo, observação, token de
       // aprovação e as mudanças de status do fluxo.
+      // Valor previsto (linha de base da Análise): carimbado só pelo trigger
+      // de criação (onTransactionWrite). Na criação o cliente pode mandar o
+      // que quiser, o trigger sobrescreve; depois disso ninguém muda.
+      function keepsPlan() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['plannedAmount', 'plannedSource', 'unplanned']);
+      }
+
       allow update: if isAuthenticated() && canWrite() &&
+         keepsPlan() &&
          statusChangeAllowed() &&
          respectsHold() && canChangeHold() && (
          !isPayableWrite() || (keepsBudgetFields() && keepsRejection())
