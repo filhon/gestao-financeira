@@ -50,7 +50,7 @@ export const axisMoney = (v: number) =>
 
 export const AXIS_PROPS = {
   stroke: VIZ.axis,
-  fontSize: 11,
+  fontSize: 12,
   tickLine: false,
   axisLine: false,
 } as const;
@@ -213,7 +213,9 @@ export function ChartFrame({
         </div>
       )}
       {note && (
-        <p className="mt-2 text-xs text-muted-foreground text-pretty">{note}</p>
+        <p className="mt-2 text-[13px] text-muted-foreground text-pretty">
+          {note}
+        </p>
       )}
     </figure>
   );
@@ -290,39 +292,6 @@ export function TooltipBox({
   );
 }
 
-// ─── Números ──────────────────────────────────────────────────────────────────
-
-export function StatTile({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string;
-  value: ReactNode;
-  detail?: ReactNode;
-  tone?: "danger";
-}) {
-  return (
-    <div className="min-w-0 bg-card px-4 py-3.5 sm:px-5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p
-        className={cn(
-          "mt-1 font-financial text-xl font-semibold tracking-tight sm:text-2xl",
-          tone === "danger" && "text-destructive",
-        )}
-      >
-        {value}
-      </p>
-      {detail && (
-        <p className="mt-0.5 text-xs text-muted-foreground text-pretty">
-          {detail}
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ─── Barras ordenadas ─────────────────────────────────────────────────────────
 
 export interface RankedItem {
@@ -336,6 +305,8 @@ export interface RankedItem {
   muted?: boolean;
   /** Amostra de cor ligando a linha a um trecho da barra segmentada. */
   swatch?: string;
+  /** Cor própria da barra (rampa de atraso). */
+  barColor?: string;
   onClick?: () => void;
   actionLabel?: string;
 }
@@ -369,7 +340,12 @@ export function RankedBars({
                     style={{ background: it.swatch }}
                   />
                 )}
-                <span className="truncate text-sm">{it.label}</span>
+                <span
+                  className="truncate text-sm"
+                  title={typeof it.label === "string" ? it.label : undefined}
+                >
+                  {it.label}
+                </span>
                 {it.sublabel && (
                   <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
                     {it.sublabel}
@@ -392,7 +368,7 @@ export function RankedBars({
                 className="h-2 rounded-r-lg"
                 style={{
                   width,
-                  background: it.muted ? VIZ.context : color,
+                  background: it.barColor ?? (it.muted ? VIZ.context : color),
                 }}
               />
             </div>

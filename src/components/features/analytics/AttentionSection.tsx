@@ -116,11 +116,11 @@ export function AttentionSection({
     >
       <h2
         id="atencao-title"
-        className="flex items-baseline gap-2 text-sm font-semibold"
+        className="flex items-baseline gap-2 text-lg font-semibold tracking-tight md:text-xl"
       >
         O que pede atenção
         {items.length > 0 && (
-          <span className="font-financial text-xs font-normal text-muted-foreground">
+          <span className="font-financial text-sm font-normal text-muted-foreground">
             {items.length}
           </span>
         )}
@@ -136,7 +136,7 @@ export function AttentionSection({
             : `Nada passou dos limites: caixa projetado em ${ATTENTION.projectionMonths} meses, envelopes, previsto, recebíveis antigos e concentração.`}
         </p>
       ) : (
-        <ol className="mt-2 divide-y border-t">
+        <ol className="mt-3 divide-y border-t">
           {shown.map((item) => {
             const Icon = item.tone === "danger" ? OctagonAlert : AlertTriangle;
             return (
@@ -172,7 +172,7 @@ export function AttentionSection({
             : written.isFetching
               ? "Redigindo os destaques…"
               : anyAi
-                ? "Redação da IA, com cada número conferido no relatório. Destaque que não passou na conferência fica com o texto padrão."
+                ? "Redigido pela IA e conferido com os números do relatório."
                 : null}
         </p>
       )}

@@ -102,7 +102,6 @@ const oneOf = <T extends string>(
 
 const INDEX = [
   { id: "atencao", label: "O que pede atenção" },
-  { id: "perguntas", label: "Perguntas" },
   { id: "posicao", label: "Posição agora" },
   { id: "projecao", label: "Projeção" },
   { id: "resultado", label: "Resultado e tendência" },
@@ -111,6 +110,30 @@ const INDEX = [
   { id: "composicao", label: "Composição" },
   { id: "riscos", label: "Riscos" },
   { id: "aplicacoes", label: "Aplicações" },
+  { id: "perguntas", label: "Perguntas" },
+];
+
+/** Os termos que a página usa, para quem não é da área financeira. */
+const GLOSSARY: [string, string][] = [
+  [
+    "Caixa disponível",
+    "Contas correntes mais a aplicação de resgate automático: o que dá para pagar hoje.",
+  ],
+  ["Baixa", "O registro de que uma conta foi paga ou recebida."],
+  ["Vencido", "Passou da data e o pagamento ainda não foi registrado."],
+  [
+    "Previsto",
+    "O valor com que o lançamento foi criado. Se ele muda depois, a diferença aparece como valor alterado.",
+  ],
+  ["Envelope", "O teto de gasto do ano para cada centro de custo."],
+  [
+    "Esperado até hoje",
+    "Quanto do envelope seria normal já ter pago, pela parte do ano que passou.",
+  ],
+  [
+    "Regime de caixa",
+    "Conta no mês em que o dinheiro entrou ou saiu. Competência conta no mês a que o lançamento pertence.",
+  ],
 ];
 
 function useActiveSection(ready: boolean) {
@@ -380,6 +403,22 @@ function AnalyticsContent() {
           este ano.
         </p>
       )}
+      <details className="group -mt-2 text-sm">
+        <summary className="w-fit cursor-pointer rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          Como ler esta análise
+        </summary>
+        <dl className="mt-3 grid gap-x-8 gap-y-2 md:grid-cols-2">
+          {GLOSSARY.map(([term, text]) => (
+            <div
+              key={term}
+              className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3"
+            >
+              <dt className="font-medium">{term}</dt>
+              <dd className="text-muted-foreground text-pretty">{text}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
 
       {/* ── Conteúdo ────────────────────────────────────────────────── */}
       {query.isError && !report ? (
@@ -437,8 +476,8 @@ function AnalyticsContent() {
             )}
             {report.compareRange && !compareLabel && (
               <p className="text-xs text-muted-foreground">
-                Nenhum lançamento em {rangeText(report.compareRange)}: a
-                comparação fica de fora.
+                {rangeText(report.compareRange)} não tem lançamentos: a análise
+                segue sem comparação.
               </p>
             )}
             {meta?.capped && (
@@ -456,12 +495,7 @@ function AnalyticsContent() {
               exercise={exercise}
               cash={cashToday}
             />
-            <AskSection
-              params={params}
-              cash={cashToday.balance}
-              envelopes={envelopes}
-            />
-            <PositionSection report={report} compareLabel={compareLabel} />
+            <PositionSection report={report} />
             <ProjectionSection report={report} cash={cashToday} />
             <TrendSection report={report} compareLabel={compareLabel} />
             <PlanSection report={report} />
@@ -469,9 +503,9 @@ function AnalyticsContent() {
               id="orcamento"
               kicker="Orçamento por centro de custo"
               title={budgetTitle}
-              description="Envelope anual de cada centro contra o comprometido e o pago, com o ritmo esperado para a data. Mesmo cálculo de Centros de Custo."
+              description="Envelope do ano de cada centro contra o já comprometido e o pago. A marca na barra é o esperado até hoje. Mesmo cálculo de Centros de Custo."
             >
-              <CostCenterChart year={exercise} />
+              <CostCenterChart year={exercise} bare />
             </Section>
             <CompositionSection report={report} />
             <RiskSection
@@ -479,6 +513,11 @@ function AnalyticsContent() {
               onAnchorChange={() => query.refresh()}
             />
             <InvestmentsSection />
+            <AskSection
+              params={params}
+              cash={cashToday.balance}
+              envelopes={envelopes}
+            />
           </div>
 
           <nav aria-label="Seções da análise" className="hidden xl:block">

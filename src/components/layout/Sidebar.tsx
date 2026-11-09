@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  TrendingUp,
   ChevronRight,
   Star,
   PanelLeftClose,
@@ -377,9 +376,8 @@ export function Sidebar() {
       >
         {!collapsed && (
           <>
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
-              <TrendingUp className="h-4 w-4 text-primary-foreground" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/favicon.svg" alt="" className="h-7 w-7" />
             <span className="flex-1 text-base font-semibold tracking-tight">
               Financeiro
             </span>

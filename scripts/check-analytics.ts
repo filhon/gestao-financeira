@@ -4,7 +4,13 @@
  * Falha com exceção na primeira regra quebrada.
  */
 import assert from "node:assert/strict";
+import currency from "currency.js";
 import {
+  cashCover,
+  COVERAGE_MIN,
+  positionTitle,
+  projectionTitle,
+  thinOutflow,
   bridgeCloses,
   buildAccountComposition,
   buildAging,
@@ -600,6 +606,68 @@ assert.deepEqual(
   "mensal conta da data inicial, não da anterior",
 );
 
+// ── Cobertura do lançado e estimativa pela média ────────────────────────────
+// Média de 300 saídas/mês; lançado: 300 em nov (dias 9–30 = 22/30 → alvo 220),
+// 50 em dez, 50 em jan, nada em fev (9 dias de 28).
+const covered = projectBalance({
+  days: projDays,
+  opening: 200,
+  stages: DEFAULT_FORECAST as ForecastStage[],
+  from: "2026-11-09",
+  until: "2027-02-09",
+  average: { inflow: 0, outflow: 300 },
+});
+assert.equal(covered.coverage!.inflow, null, "sem média de receita");
+assert.equal(
+  covered.thinFrom,
+  "2026-12-01",
+  "novembro passa da metade da média; dezembro não",
+);
+assert.equal(covered.closing, projected.closing, "sem estimativa, mesma linha");
+assert.equal(thinOutflow(covered)! < COVERAGE_MIN, true);
+assert.match(
+  projectionTitle(covered),
+  /mesmo contando só \d+% da despesa média$/,
+);
+const filled = projectBalance({
+  days: projDays,
+  opening: 200,
+  stages: DEFAULT_FORECAST as ForecastStage[],
+  from: "2026-11-09",
+  until: "2027-02-09",
+  average: { inflow: 0, outflow: 300 },
+  estimate: true,
+});
+// Nov: 300 ≥ 220, nada. Dez: 250. Jan: 250. Fev: 9/28 × 300 = 96,43.
+assert.equal(filled.estimated.outflow, 596.43);
+assert.equal(
+  filled.closing,
+  currency(projected.closing).subtract(596.43).value,
+  "a estimativa sai do saldo",
+);
+assert.equal(
+  thinOutflow(filled),
+  null,
+  "com estimativa, o título não ressalva",
+);
+
+// ── Até a próxima entrada ───────────────────────────────────────────────────
+const coverReport = {
+  projection: projDays,
+  today: "2026-11-09",
+  average: { months: 6, range: { from: "", to: "" }, inflow: 0, outflow: 300 },
+};
+const cover = cashCover(coverReport, 200)!;
+assert.deepEqual(cover.next, { date: "2026-12-10", amount: 250 });
+assert.equal(cover.due, 350, "300 em 20/11 e 50 da recorrência de 05/12");
+assert.equal(cover.covered, false);
+assert.equal(
+  positionTitle(200, cover).replace(/\s/g, " "),
+  "Caixa de R$ 200,00 não cobre os R$ 350,00 a pagar até a próxima entrada, em 10/12/2026",
+);
+assert.equal(cashCover(coverReport, 400)!.covered, true);
+assert.equal(cashCover(coverReport, null), null);
+
 // ── O que pede atenção ──────────────────────────────────────────────────────
 const attReport = buildAnalytics(
   {
@@ -676,7 +744,8 @@ const text = (id: string) =>
   attention.find((a) => a.id === id)!.text.replace(/\s/g, " ");
 assert.equal(
   text("cash"),
-  "O caixa fica negativo entre 20/11/2026 e 05/12/2026, no que já está lançado para os próximos 12 meses. Menor saldo: -R$ 150,00 em 05/12/2026.",
+  "O caixa fica negativo entre 20/11/2026 e 05/12/2026, no que já está lançado para os próximos 12 meses. Menor saldo: -R$ 150,00 em 05/12/2026. Há R$ 70,00 a receber já vencidos.",
+  "o vencido a receber vai na mesma frase do buraco",
 );
 assert.equal(
   text("envelope"),

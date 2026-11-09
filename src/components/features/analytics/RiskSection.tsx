@@ -62,12 +62,35 @@ const days = (v: number) => {
   return `${n} ${n === 1 ? "dia" : "dias"}`;
 };
 
-function timingText(avg: number | null, verb: string) {
-  if (avg === null) return "Nenhuma baixa no período.";
-  if (Math.abs(avg) < 0.5) return `Em média, ${verb} no vencimento.`;
-  return avg > 0
-    ? `Em média, ${verb} ${days(avg)} depois do vencimento.`
-    : `Em média, ${verb} ${days(avg)} antes do vencimento.`;
+/** Atraso em rampa de alerta: em dia neutro, depois âmbar até vermelho. */
+const AMBER = "oklch(0.8 0.17 80)";
+const AGING_COLOR = [
+  VIZ.context,
+  `color-mix(in oklch, ${AMBER} 55%, var(--card))`,
+  AMBER,
+  `color-mix(in oklch, ${AMBER} 45%, var(--destructive))`,
+  "var(--destructive)",
+];
+
+/** A parte atrasada vem primeiro: a média ponderada a esconde. */
+function timingText(
+  t: { avgDays: number | null; lateShare: number | null; count: number },
+  noun: string,
+) {
+  if (t.avgDays === null)
+    return { main: "Nenhuma baixa no período.", sub: null };
+  const avg = t.avgDays;
+  const sub =
+    Math.abs(avg) < 0.5
+      ? "Na média ponderada pelo valor, no vencimento."
+      : `Na média ponderada pelo valor, ${days(avg)} ${avg > 0 ? "depois do" : "antes do"} vencimento.`;
+  return {
+    main:
+      t.lateShare === null
+        ? sub
+        : `${pct(t.lateShare)} dos ${t.count.toLocaleString("pt-BR")} ${noun} depois do vencimento.`,
+    sub: t.lateShare === null ? null : sub,
+  };
 }
 
 export function RiskSection({
@@ -147,28 +170,36 @@ export function RiskSection({
     >
       <div className="grid gap-x-10 gap-y-8 xl:grid-cols-2">
         <div className="min-w-0">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
             <p className="text-sm font-medium">De onde vem a receita</p>
-            <Select
-              value={report.anchorEntityId ?? NONE}
-              onValueChange={changeAnchor}
-              disabled={saving || entities.isLoading}
-            >
-              <SelectTrigger
-                className="h-8 w-60 text-xs"
-                aria-label="Entidade de referência da receita"
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="analise-mantenedora"
+                className="text-xs text-muted-foreground"
               >
-                <SelectValue placeholder="Referência…" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Sem referência</SelectItem>
-                {payers.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                Mantenedora (vale para toda a empresa)
+              </label>
+              <Select
+                value={report.anchorEntityId ?? NONE}
+                onValueChange={changeAnchor}
+                disabled={saving || entities.isLoading}
+              >
+                <SelectTrigger
+                  id="analise-mantenedora"
+                  className="h-8 w-72 text-xs"
+                >
+                  <SelectValue placeholder="Escolher…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Nenhuma</SelectItem>
+                  {payers.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.tradeName?.trim() || e.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           {anchor && income.total > 0 && (
             <div className="mb-3">
@@ -239,17 +270,17 @@ export function RiskSection({
               key: b.key,
               name: b.label,
               value: b.value,
-              color: b.key === "due" ? VIZ.context : rankShade(VIZ.in, 4 - i),
+              color: AGING_COLOR[i] ?? VIZ.context,
             }))}
           />
           <RankedBars
-            color={VIZ.in}
+            color={VIZ.context}
             items={aging.map((b, i) => ({
               key: b.key,
               label: b.label,
               value: b.value,
-              muted: b.key === "due",
-              swatch: b.key === "due" ? VIZ.context : rankShade(VIZ.in, 4 - i),
+              swatch: AGING_COLOR[i] ?? VIZ.context,
+              barColor: AGING_COLOR[i] ?? VIZ.context,
               aside: `${b.count} ${b.count === 1 ? "lançamento" : "lançamentos"}`,
             }))}
           />
@@ -263,29 +294,32 @@ export function RiskSection({
 
         <div className="min-w-0">
           <p className="mb-3 text-sm font-medium">Pontualidade no período</p>
-          <dl className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2">
+          <dl className="divide-y border-t">
             {(
               [
-                ["Recebimentos", report.timing.receivable, "recebemos"],
-                ["Pagamentos", report.timing.payable, "pagamos"],
+                ["Recebimentos", report.timing.receivable, "recebimentos"],
+                ["Pagamentos", report.timing.payable, "pagamentos"],
               ] as const
-            ).map(([label, t, verb]) => (
-              <div key={label} className="bg-card px-4 py-3.5">
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd className="mt-1 text-sm font-medium text-pretty">
-                  {timingText(t.avgDays, verb)}
-                </dd>
-                {t.lateShare !== null && (
-                  <dd className="mt-0.5 text-xs text-muted-foreground">
-                    {pct(t.lateShare)} de {t.count} baixas depois do vencimento.
+            ).map(([label, t, noun]) => {
+              const text = timingText(t, noun);
+              return (
+                <div
+                  key={label}
+                  className="grid gap-x-4 gap-y-0.5 px-2 py-2.5 sm:grid-cols-[8rem_minmax(0,1fr)]"
+                >
+                  <dt className="text-sm text-muted-foreground">{label}</dt>
+                  <dd className="text-sm text-pretty">
+                    {text.main}
+                    {text.sub && (
+                      <span className="block text-xs text-muted-foreground">
+                        {text.sub}
+                      </span>
+                    )}
                   </dd>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </dl>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Média de dias entre vencimento e baixa, ponderada pelo valor.
-          </p>
         </div>
       </div>
     </Section>

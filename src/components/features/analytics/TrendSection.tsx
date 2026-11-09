@@ -38,8 +38,13 @@ export function TrendSection({
   report: AnalyticsReport;
   compareLabel: string | null;
 }) {
-  const { range, totals, trend } = report;
+  const { range, totals } = report;
   const inRange = (key: string) => key >= range.from && key <= range.to;
+  // Meses vazios antes do primeiro lançamento não são "mês sem movimento":
+  // são antes de o sistema existir. Cortados, o gráfico não fica meio branco.
+  const firstMoving = report.trend.findIndex((m) => m.inflow || m.outflow);
+  const trend =
+    firstMoving > 0 ? report.trend.slice(firstMoving) : report.trend;
 
   const top = Math.max(...trend.map((m) => Math.max(m.inflow, m.outflow)), 0);
   const ticks = niceTicks(0, top, 5);
@@ -55,7 +60,10 @@ export function TrendSection({
     5,
   );
   const lastCurrent = [...yoy].reverse().find((p) => p.current !== null);
-  const samePrev = lastCurrent ? yoy[yoy.indexOf(lastCurrent)].previous : null;
+  // Ano anterior sem movimento: a linha no zero sugeriria um resultado.
+  const withPrevious = yoy.some((p) => p.previous);
+  const samePrev =
+    lastCurrent && withPrevious ? yoy[yoy.indexOf(lastCurrent)].previous : null;
 
   const title = trendTitle(report, compareLabel);
 
@@ -73,7 +81,7 @@ export function TrendSection({
       <div className="grid gap-8 xl:grid-cols-5">
         <ChartFrame
           className="xl:col-span-3"
-          title="Entradas e saídas, 24 meses"
+          title={`Entradas e saídas, ${trend.length} ${trend.length === 1 ? "mês" : "meses"}`}
           label={`Entradas e saídas mês a mês. No período: receitas ${fullMoney(totals.inflow)}, despesas ${fullMoney(totals.outflow)}.`}
           legend={
             <Legend
@@ -83,7 +91,11 @@ export function TrendSection({
               ]}
             />
           }
-          note="Meses fora do período escolhido aparecem esmaecidos."
+          note={
+            trend.some((m) => !inRange(m.key))
+              ? "Meses fora do período escolhido aparecem esmaecidos."
+              : undefined
+          }
           table={{
             columns: ["Mês", "Receitas", "Despesas", "Resultado"],
             rows: trend.map((m) => [
@@ -176,12 +188,18 @@ export function TrendSection({
               : `Sem resultado em ${year} até agora.`
           }
           legend={
-            <Legend
-              items={[
-                { label: String(year), color: VIZ.in, shape: "line" },
-                { label: String(year - 1), color: VIZ.context, shape: "line" },
-              ]}
-            />
+            withPrevious ? (
+              <Legend
+                items={[
+                  { label: String(year), color: VIZ.in, shape: "line" },
+                  {
+                    label: String(year - 1),
+                    color: VIZ.context,
+                    shape: "line",
+                  },
+                ]}
+              />
+            ) : undefined
           }
           note={
             lastCurrent && samePrev !== null
@@ -189,11 +207,17 @@ export function TrendSection({
               : undefined
           }
           table={{
-            columns: ["Mês", String(year), String(year - 1)],
+            columns: [
+              "Mês",
+              String(year),
+              ...(withPrevious ? [String(year - 1)] : []),
+            ],
             rows: yoy.map((p) => [
               p.label,
               p.current === null ? "—" : fullMoney(p.current),
-              p.previous === null ? "—" : fullMoney(p.previous),
+              ...(withPrevious
+                ? [p.previous === null ? "—" : fullMoney(p.previous)]
+                : []),
             ]),
           }}
         >
@@ -244,14 +268,16 @@ export function TrendSection({
                   );
                 }}
               />
-              <Line
-                dataKey="previous"
-                stroke={VIZ.context}
-                strokeWidth={2}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-              />
+              {withPrevious && (
+                <Line
+                  dataKey="previous"
+                  stroke={VIZ.context}
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              )}
               <Line
                 dataKey="current"
                 stroke={VIZ.in}

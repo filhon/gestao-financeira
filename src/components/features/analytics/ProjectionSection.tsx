@@ -23,16 +23,20 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/components/features/dashboard/Segmented";
 import {
+  attentionProjection,
   horizonEnd,
   overdueOf,
   PROJECTION_HORIZONS,
   projectBalance,
   projectionTitle,
+  thinOutflow,
   type AnalyticsReport,
   type ForecastStage,
+  type ProjectionPoint,
   type Side,
   type Simulation,
 } from "@/lib/analytics";
+import { differenceInCalendarDays } from "date-fns";
 import { niceTicks } from "@/lib/dashboardRules";
 import { DEFAULT_FORECAST, FORECAST_STAGES, STAGE_INFO } from "@/lib/reports";
 import { cn } from "@/lib/utils";
@@ -42,11 +46,14 @@ import {
   ChartFrame,
   fullMoney,
   money,
+  pct,
   Section,
-  StatTile,
   TooltipBox,
   VIZ,
 } from "./primitives";
+
+/** Negativo nos próximos 90 dias: o gráfico abre em 3 meses, onde ele se vê. */
+const NEAR_DAYS = 90;
 
 const BALANCE = "var(--chart-cash)";
 const SIMULATED = "var(--chart-sim)";
@@ -83,30 +90,43 @@ export function ProjectionSection({
   /** Caixa disponível hoje (contas correntes e aplicação automática). */
   cash: CashToday;
 }) {
-  const [months, setMonths] = useState<Horizon>(12);
+  const [chosen, setChosen] = useState<Horizon | null>(null);
   const [stages, setStages] = useState<ForecastStage[]>(
     DEFAULT_FORECAST as ForecastStage[],
   );
+  const [estimate, setEstimate] = useState(false);
   const [simulations, setSimulations] = useState<Simulation[]>([]);
 
   const from = report.today;
-  const until = horizonEnd(from, months);
   const opening = cash.balance;
 
-  const projection = useMemo(
-    () =>
-      opening === null
-        ? null
-        : projectBalance({
-            days: report.projection,
-            opening,
-            stages,
-            from,
-            until,
-            simulations,
-          }),
-    [report.projection, opening, stages, from, until, simulations],
-  );
+  // Até a pessoa escolher, o horizonte segue o perigo: buraco perto, 3 meses.
+  const auto = useMemo<Horizon>(() => {
+    const run = attentionProjection(report, opening)?.runs[0];
+    return run &&
+      differenceInCalendarDays(toDate(run.start.isoDate), toDate(from)) <=
+        NEAR_DAYS
+      ? 3
+      : 12;
+  }, [report, opening, from]);
+  const months = chosen ?? auto;
+  const until = horizonEnd(from, months);
+
+  // As duas versões: a linha usa uma, a lista mostra o que a média somaria.
+  const [plain, filled] = useMemo(() => {
+    if (opening === null) return [null, null];
+    const base = {
+      days: report.projection,
+      opening,
+      stages,
+      from,
+      until,
+      simulations,
+      average: report.average,
+    };
+    return [projectBalance(base), projectBalance({ ...base, estimate: true })];
+  }, [report, opening, stages, from, until, simulations]);
+  const projection = estimate ? filled : plain;
 
   const toggleStage = (s: ForecastStage) =>
     setStages((prev) =>
@@ -122,14 +142,14 @@ export function ProjectionSection({
   const overdueOut = overdueOf(report, "payable").value;
   const overdueNote =
     overdueIn || overdueOut
-      ? ` Vencidos sem baixa ficam fora: ${money(overdueIn)} a receber e ${money(overdueOut)} a pagar.`
+      ? ` Vencidos que ainda não entraram nem saíram ficam fora: ${money(overdueIn)} a receber e ${money(overdueOut)} a pagar.`
       : "";
 
   const horizonSwitch = (
     <Segmented
       label="Horizonte da projeção"
       value={String(months)}
-      onChange={(v) => setMonths(Number(v) as Horizon)}
+      onChange={(v) => setChosen(Number(v) as Horizon)}
       options={PROJECTION_HORIZONS.map((m) => ({
         value: String(m),
         label: `${m} meses`,
@@ -168,43 +188,63 @@ export function ProjectionSection({
 
   const { lowest, closing, simulated } = projection;
   const title = projectionTitle(projection);
+  const thin = thinOutflow(projection);
+  const avgMonths = report.average.months;
+  const draftOut =
+    projection.byStage.find((s) => s.stage === "draft")?.outflow ?? 0;
 
   return (
     <Section
       id="projecao"
       kicker="Projeção e simulação"
       title={title}
-      description={`A partir do caixa disponível de hoje, com o que já está lançado${stages.includes("recurring") ? " e as recorrências ainda não lançadas" : ""}.${overdueNote}`}
+      description={`A partir do caixa disponível de hoje (${money(projection.opening)}), com o que já está lançado${stages.includes("recurring") ? " e as recorrências ainda não lançadas" : ""}.${overdueNote}`}
       actions={horizonSwitch}
     >
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3">
-        <StatTile
-          label="Caixa hoje"
-          value={fullMoney(projection.opening)}
-          tone={projection.opening < 0 ? "danger" : undefined}
-          detail="Contas correntes e aplicação automática"
-        />
-        <StatTile
-          label="Menor saldo"
-          value={fullMoney(lowest.balance)}
-          tone={lowest.balance < 0 ? "danger" : undefined}
-          detail={
-            simulated
-              ? `Em ${dayText(lowest.isoDate)}. Com a simulação: ${fullMoney(simulated.lowest)}`
-              : `Em ${dayText(lowest.isoDate)}, ao fim do dia`
-          }
-        />
-        <StatTile
-          label={`Em ${dayText(until)}`}
-          value={fullMoney(closing)}
-          tone={closing < 0 ? "danger" : undefined}
-          detail={
-            simulated
-              ? `Com a simulação: ${fullMoney(simulated.closing)}`
-              : `${closing >= projection.opening ? "+" : "−"}${money(Math.abs(closing - projection.opening))} sobre hoje`
-          }
-        />
-      </div>
+      {/* Frases, não blocos de número: o fim do horizonte só faz sentido
+          ao lado do quanto dele está lançado. */}
+      <p className="max-w-3xl text-sm text-pretty">
+        Menor saldo{" "}
+        <strong className="font-financial font-semibold">
+          {fullMoney(lowest.balance)}
+        </strong>{" "}
+        em {dayText(lowest.isoDate)}
+        {simulated && (
+          <>
+            {" "}
+            (com a simulação,{" "}
+            <span className="font-financial">
+              {fullMoney(simulated.lowest)}
+            </span>
+            )
+          </>
+        )}
+        . Em {dayText(until)},{" "}
+        <span className="font-financial">{fullMoney(closing)}</span>
+        {thin !== null ? (
+          <>
+            , mas a linha conta só {pct(thin)} da despesa média dos últimos{" "}
+            {avgMonths} meses ({money(report.average.outflow)} por mês)
+            {draftOut > 0 && !stages.includes("draft") && (
+              <>
+                ; {money(draftOut)} em despesas ainda em rascunho ficam de fora
+              </>
+            )}
+            . Ela sobe porque faltam saídas, não porque o caixa vá sobrar.
+            Marque{" "}
+            {draftOut > 0 && !stages.includes("draft") ? "Rascunho ou " : ""}
+            &quot;Não lançado, pela média&quot; para ver com elas.
+          </>
+        ) : projection.estimated.outflow || projection.estimated.inflow ? (
+          <>
+            , com {money(projection.estimated.outflow)} de despesas e{" "}
+            {money(projection.estimated.inflow)} de receitas estimadas pela
+            média dos últimos {avgMonths} meses.
+          </>
+        ) : (
+          "."
+        )}
+      </p>
 
       <ProjectionChart
         projection={projection}
@@ -217,6 +257,13 @@ export function ProjectionSection({
           byStage={projection.byStage}
           stages={stages}
           onToggle={toggleStage}
+          estimate={{
+            on: estimate,
+            inflow: filled!.estimated.inflow,
+            outflow: filled!.estimated.outflow,
+            months: avgMonths,
+            onToggle: () => setEstimate((v) => !v),
+          }}
         />
         <SimulationPanel
           from={from}
@@ -245,7 +292,33 @@ function ProjectionChart({
   className?: string;
 }) {
   const { points, runs, lowest, simulated, from, until } = projection;
-  const data = points.map((p) => ({ ...p, t: toDate(p.isoDate).getTime() }));
+  // Depois do primeiro mês com menos da metade da despesa média na conta, a
+  // linha fica clara: dali em diante ela sobe por falta de saídas.
+  const thinFrom =
+    thinOutflow(projection) !== null ? projection.thinFrom : null;
+  const rows: (ProjectionPoint & {
+    t: number;
+    solid?: number;
+    loose?: number;
+  })[] = points.map((p) => ({ ...p, t: toDate(p.isoDate).getTime() }));
+  if (thinFrom) {
+    const j = rows.findIndex((p) => p.isoDate >= thinFrom);
+    // Ponto no dia da virada, para a troca de traço cair no dia certo.
+    if (j > 0 && rows[j].isoDate !== thinFrom)
+      rows.splice(j, 0, {
+        isoDate: thinFrom,
+        t: toDate(thinFrom).getTime(),
+        inflow: 0,
+        outflow: 0,
+        balance: rows[j - 1].balance,
+        simulatedBalance: rows[j - 1].simulatedBalance,
+      });
+  }
+  const data = rows.map((p) => ({
+    ...p,
+    solid: !thinFrom || p.isoDate <= thinFrom ? p.balance : undefined,
+    loose: thinFrom && p.isoDate >= thinFrom ? p.balance : undefined,
+  }));
   const start = data[0].t;
   const end = data.at(-1)!.t;
   const values = data.flatMap((p) => [
@@ -262,17 +335,29 @@ function ProjectionChart({
     .map((d) => Math.max(start, d.getTime()));
 
   // O traço troca de cor no zero (só quando cruza: numa linha reta a caixa
-  // do gradiente tem altura zero e o SVG o descartaria).
-  const balances = data.map((p) => p.balance);
-  const bMax = Math.max(...balances);
-  const bMin = Math.min(...balances);
-  const crosses = bMin < 0 && bMax > 0;
-  const zeroOffset = crosses ? bMax / (bMax - bMin) : 0;
-  const lineColor = crosses
-    ? "url(#projSplit)"
-    : bMax <= 0 && bMin < 0
-      ? NEGATIVE
-      : BALANCE;
+  // do gradiente tem altura zero e o SVG o descartaria). Cada trecho tem a
+  // própria caixa, então o próprio gradiente.
+  const split = (id: string, values: (number | undefined)[]) => {
+    const vs = values.filter((v): v is number => v !== undefined);
+    const max = Math.max(...vs);
+    const min = Math.min(...vs);
+    const crosses = min < 0 && max > 0;
+    return {
+      id,
+      offset: crosses ? max / (max - min) : 0,
+      crosses,
+      color: crosses ? `url(#${id})` : max <= 0 && min < 0 ? NEGATIVE : BALANCE,
+    };
+  };
+  const solidSplit = split(
+    "projSolid",
+    data.map((p) => p.solid),
+  );
+  const looseSplit = split(
+    "projLoose",
+    data.map((p) => p.loose),
+  );
+  const hasSolid = data.some((p) => p.solid !== undefined);
 
   // Trecho negativo vai do primeiro dia até a véspera do dia que sai dele.
   const bands = runs.map((r) => {
@@ -298,6 +383,10 @@ function ProjectionChart({
   const label = `Saldo projetado de ${dayText(from)} a ${dayText(until)}. ${
     runs.length === 0 ? "Não fica negativo." : `Negativo ${runsText}.`
   } Menor saldo ${fullMoney(lowest.balance)} em ${dayText(lowest.isoDate)}.${
+    thinFrom
+      ? ` A partir de ${dayText(thinFrom)}, saídas incompletas: a linha fica clara.`
+      : ""
+  }${
     simulated
       ? ` Com a simulação, termina em ${fullMoney(simulated.closing)}.`
       : ""
@@ -319,6 +408,16 @@ function ProjectionChart({
             />
             Saldo previsto
           </li>
+          {thinFrom && (
+            <li className="flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="h-0.5 w-3.5 rounded-full opacity-35"
+                style={{ background: BALANCE }}
+              />
+              Saídas incompletas
+            </li>
+          )}
           {runs.length > 0 && (
             <li className="flex items-center gap-1.5">
               <span
@@ -357,17 +456,9 @@ function ProjectionChart({
         ]),
       }}
       note={
-        runs.length || simulated ? (
-          <>
-            {runs.length > 0 && (
-              <span className="text-destructive">
-                Saldo negativo {runsText}.{" "}
-              </span>
-            )}
-            {simulated &&
-              `Com a simulação, ${simulated.runs.length ? `fica negativo ${textOf(simulated.runs)}` : "não fica negativo"}. A linha tracejada é só uma simulação: nada foi gravado.`}
-          </>
-        ) : undefined
+        simulated
+          ? `Com a simulação, ${simulated.runs.length ? `fica negativo ${textOf(simulated.runs)}` : "não fica negativo"}. A linha tracejada é só uma simulação: nada foi gravado.`
+          : undefined
       }
     >
       <ResponsiveContainer width="100%" height="100%">
@@ -376,22 +467,48 @@ function ProjectionChart({
           margin={{ top: 12, right: 12, left: 4, bottom: 0 }}
         >
           <defs>
-            <linearGradient id="projSplit" x1="0" y1="0" x2="0" y2="1">
-              <stop offset={zeroOffset} stopColor={BALANCE} />
-              <stop offset={zeroOffset} stopColor={NEGATIVE} />
-            </linearGradient>
+            {[solidSplit, looseSplit].map((s) => (
+              <linearGradient key={s.id} id={s.id} x1="0" y1="0" x2="0" y2="1">
+                <stop offset={s.offset} stopColor={BALANCE} />
+                <stop offset={s.offset} stopColor={NEGATIVE} />
+              </linearGradient>
+            ))}
           </defs>
           <CartesianGrid vertical={false} stroke={VIZ.grid} />
-          {bands.map((b) => (
+          {bands.map((b, i) => (
             <ReferenceArea
               key={b.key}
               x1={b.x1}
               x2={b.x2}
               fill={NEGATIVE}
-              fillOpacity={0.08}
+              fillOpacity={0.12}
               ifOverflow="hidden"
+              label={
+                i === 0
+                  ? {
+                      value: "Negativo",
+                      position: "insideTopLeft",
+                      fontSize: 12,
+                      fill: NEGATIVE,
+                    }
+                  : undefined
+              }
             />
           ))}
+          {thinFrom && thinFrom !== from && (
+            <ReferenceLine
+              x={toDate(thinFrom).getTime()}
+              stroke={VIZ.axis}
+              strokeDasharray="2 3"
+              strokeOpacity={0.6}
+              label={{
+                value: "Saídas incompletas →",
+                position: "insideTopRight",
+                fontSize: 12,
+                fill: "var(--muted-foreground)",
+              }}
+            />
+          )}
           <XAxis
             {...AXIS_PROPS}
             dataKey="t"
@@ -447,15 +564,29 @@ function ProjectionChart({
             }}
           />
           {/* O saldo muda no dia do vencimento: degrau, não curva. */}
-          <Line
-            type="stepAfter"
-            dataKey="balance"
-            stroke={lineColor}
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 4, stroke: "var(--background)", strokeWidth: 2 }}
-            isAnimationActive={false}
-          />
+          {hasSolid && (
+            <Line
+              type="stepAfter"
+              dataKey="solid"
+              stroke={solidSplit.color}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, stroke: "var(--background)", strokeWidth: 2 }}
+              isAnimationActive={false}
+            />
+          )}
+          {thinFrom && (
+            <Line
+              type="stepAfter"
+              dataKey="loose"
+              stroke={looseSplit.color}
+              strokeOpacity={0.35}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, stroke: "var(--background)", strokeWidth: 2 }}
+              isAnimationActive={false}
+            />
+          )}
           {simulated && (
             <Line
               type="stepAfter"
@@ -499,13 +630,45 @@ function StageList({
   byStage,
   stages,
   onToggle,
+  estimate,
 }: {
   byStage: { stage: ForecastStage; inflow: number; outflow: number }[];
   stages: ForecastStage[];
   onToggle: (s: ForecastStage) => void;
+  estimate: {
+    on: boolean;
+    inflow: number;
+    outflow: number;
+    months: number;
+    onToggle: () => void;
+  };
 }) {
   const cols =
     "grid grid-cols-[auto_minmax(0,1fr)_5.5rem_5.5rem] items-center gap-x-3 px-2";
+  const rows = [
+    ...byStage.map(({ stage, inflow, outflow }) => ({
+      key: stage,
+      label: STAGE_INFO[stage].label,
+      hint: STAGE_INFO[stage].hint,
+      inflow,
+      outflow,
+      on: stages.includes(stage),
+      toggle: () => onToggle(stage),
+    })),
+    ...(estimate.inflow || estimate.outflow
+      ? [
+          {
+            key: "estimate",
+            label: "Não lançado, pela média",
+            hint: `Completa cada mês até a média dos últimos ${estimate.months} meses`,
+            inflow: estimate.inflow,
+            outflow: estimate.outflow,
+            on: estimate.on,
+            toggle: estimate.onToggle,
+          },
+        ]
+      : []),
+  ];
   return (
     <div>
       <p className="mb-1 px-2 text-sm font-medium">O que entra na linha</p>
@@ -514,24 +677,26 @@ function StageList({
         className={cn(cols, "pb-1 text-xs text-muted-foreground")}
       >
         <span className="w-4" />
-        <span>Estágio, no horizonte</span>
+        <span>Situação do lançamento</span>
         <span className="text-right">Entradas</span>
         <span className="text-right">Saídas</span>
       </div>
       <ul
         className="divide-y border-t"
         role="group"
-        aria-label="Estágios da projeção"
+        aria-label="O que entra na projeção"
       >
-        {byStage.map(({ stage, inflow, outflow }) => {
-          const on = stages.includes(stage);
+        {rows.map(({ key, label, hint, inflow, outflow, on, toggle }) => {
           return (
-            <li key={stage}>
+            <li
+              key={key}
+              className={cn(key === "estimate" && "border-t-2 border-dashed")}
+            >
               <button
                 type="button"
                 aria-pressed={on}
-                aria-label={`${STAGE_INFO[stage].label}: entradas ${money(inflow)}, saídas ${money(outflow)}`}
-                onClick={() => onToggle(stage)}
+                aria-label={`${label}: entradas ${money(inflow)}, saídas ${money(outflow)}`}
+                onClick={toggle}
                 className={cn(
                   cols,
                   "w-full rounded-md py-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -555,10 +720,10 @@ function StageList({
                       !on && "text-muted-foreground",
                     )}
                   >
-                    {STAGE_INFO[stage].label}
+                    {label}
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {STAGE_INFO[stage].hint}
+                    {hint}
                   </span>
                 </span>
                 {[inflow, outflow].map((v, i) => (

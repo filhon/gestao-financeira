@@ -20,6 +20,7 @@ import {
   investmentBalance,
   isDuplicate,
   isInvestment,
+  isSweep,
 } from "@/lib/bankReconciliation";
 
 const STALE_MS = 60_000;
@@ -91,6 +92,8 @@ export interface AccountPosition {
   name: string;
   bankName?: string;
   investment: boolean;
+  /** Aplicação automática: conta no caixa disponível. */
+  sweep: boolean;
   balance: number;
   /** Data do saldo: último extrato, fechamento ou abertura. */
   date: Date;
@@ -119,6 +122,7 @@ export function useAccountPositions() {
             name: a.name,
             bankName: a.bankName,
             investment: isInvestment(a),
+            sweep: isSweep(a),
           };
           if (!isInvestment(a)) return { ...base, ...informedBalance(a) };
           const items = await reconciliationSessionService.getAccountItems(

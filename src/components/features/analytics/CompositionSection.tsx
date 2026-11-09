@@ -6,7 +6,9 @@ import { ChevronRight } from "lucide-react";
 import {
   compositionLevel,
   compositionTitle,
+  defaultCompositionMode,
   hasMovement,
+  tidyName,
   type AnalyticsReport,
   type CompositionMode,
   type CompositionNode,
@@ -40,7 +42,7 @@ const SWATCHES = 5;
 const ALL = "__all__";
 
 export function CompositionSection({ report }: { report: AnalyticsReport }) {
-  const [mode, setMode] = useState<Mode>("accounts");
+  const [mode, setMode] = useState<Mode>(() => defaultCompositionMode(report));
   const [sideChoice, setSide] = useState<Side>("payable");
   const [path, setPath] = useState<string[]>([]);
   const [showAll, setShowAll] = useState(false);
@@ -65,7 +67,7 @@ export function CompositionSection({ report }: { report: AnalyticsReport }) {
   } = level;
   const color = SIDE_COLOR[side];
   const nameOf = (n: CompositionNode) =>
-    mode === "accounts" ? `${n.code} ${n.name}` : n.name;
+    mode === "accounts" ? `${n.code} ${tidyName(n.name)}` : tidyName(n.name);
   const looseLabel =
     mode === "accounts" ? "Sem conta contábil" : "Sem centro de custo";
 
@@ -170,8 +172,8 @@ export function CompositionSection({ report }: { report: AnalyticsReport }) {
   const coverageNote =
     comp.coverage < 0.95
       ? mode === "accounts"
-        ? `Só ${pct(comp.coverage)} do movimento do período tem conta do plano de contas. O plano é obrigatório a partir do exercício definido em Plano de Contas; até lá, o restante aparece como "Sem conta contábil".`
-        : `Só ${pct(comp.coverage)} do movimento do período tem centro de custo.`
+        ? `Só ${pct(comp.coverage)} do movimento tem conta do plano de contas, obrigatório a partir do exercício definido em Plano de Contas.`
+        : `Só ${pct(comp.coverage)} do movimento tem centro de custo.`
       : null;
 
   return (

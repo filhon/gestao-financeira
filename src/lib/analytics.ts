@@ -11,11 +11,14 @@
  */
 import currency from "currency.js";
 import {
+  addDays,
   addMonths,
   differenceInCalendarDays,
+  eachDayOfInterval,
   eachMonthOfInterval,
   endOfMonth,
   format,
+  getDaysInMonth,
   startOfDay,
   startOfMonth,
   subMonths,
@@ -325,7 +328,11 @@ export function buildPlan(
         ...g,
         deviation: currency(g.realized).add(g.open).subtract(g.planned).value,
       }))
-      .filter((g) => g.deviation !== 0)
+      // ponytail: saldo de implantação não é desvio; casa pela descrição,
+      // trocar por uma marca no lançamento se aparecerem outras variações.
+      .filter(
+        (g) => g.deviation !== 0 && !/^saldo inicial/i.test(g.description),
+      )
       .sort((a, b) => Math.abs(b.deviation) - Math.abs(a.deviation))
       .slice(0, 10);
 
@@ -880,6 +887,37 @@ export interface Projection {
     lowest: number;
     runs: NegativeRun<ProjectionPoint>[];
   } | null;
+  /**
+   * Quanto da média mensal já está lançado no horizonte, por lado (null sem
+   * média). Receita lançada por um ano e despesa lançada por uma semana fazem
+   * a linha subir sem que o caixa vá subir.
+   */
+  coverage: { inflow: number | null; outflow: number | null } | null;
+  /** Primeiro dia do primeiro mês com menos de `COVERAGE_MIN` da média lançado. */
+  thinFrom: string | null;
+  /** O que a estimativa pela média acrescentou (zero sem ela). */
+  estimated: { inflow: number; outflow: number };
+}
+
+/** Mês com menos desta parte da média lançada é "pouco lançado". */
+export const COVERAGE_MIN = 0.5;
+
+/** Meses do horizonte, cortados nas pontas, com a fração do mês que cobrem. */
+function monthSegments(from: string, until: string) {
+  const out: { start: string; days: string[]; share: number }[] = [];
+  const last = fromDayKey(until);
+  for (let cur = fromDayKey(from); cur <= last; ) {
+    const monthEnd = fromDayKey(dayKey(endOfMonth(cur)));
+    const end = monthEnd < last ? monthEnd : last;
+    const days = eachDayOfInterval({ start: cur, end }).map(dayKey);
+    out.push({
+      start: dayKey(cur),
+      days,
+      share: days.length / getDaysInMonth(cur),
+    });
+    cur = addDays(end, 1);
+  }
+  return out;
 }
 
 /**
@@ -895,6 +933,10 @@ export function projectBalance(o: {
   from: string;
   until: string;
   simulations?: Simulation[];
+  /** Média mensal dos meses fechados: mede quanto do futuro está lançado. */
+  average?: { inflow: number; outflow: number };
+  /** Completa cada mês, nos dois lados, até a média. */
+  estimate?: boolean;
 }): Projection {
   const wanted = new Set(o.stages);
   const inHorizon = o.days.filter((d) => d.date >= o.from && d.date <= o.until);
@@ -914,6 +956,56 @@ export function projectBalance(o: {
     day.inflow = add(day.inflow, d.inflow);
     day.outflow = add(day.outflow, d.outflow);
     perDay.set(d.date, day);
+  }
+
+  // Cobertura antes da estimativa: mede o lançado, não o que a média pôs.
+  let coverage: Projection["coverage"] = null;
+  let thinFrom: string | null = null;
+  const estimated = { inflow: 0, outflow: 0 };
+  const avg = o.average;
+  if (avg && (avg.inflow > 0 || avg.outflow > 0)) {
+    const got = { inflow: 0, outflow: 0 };
+    const want = { inflow: 0, outflow: 0 };
+    for (const seg of monthSegments(o.from, o.until)) {
+      const lanc = { inflow: 0, outflow: 0 };
+      for (const k of seg.days) {
+        const day = perDay.get(k);
+        if (!day) continue;
+        lanc.inflow = add(lanc.inflow, day.inflow);
+        lanc.outflow = add(lanc.outflow, day.outflow);
+      }
+      const target = {
+        inflow: currency(avg.inflow).multiply(seg.share).value,
+        outflow: currency(avg.outflow).multiply(seg.share).value,
+      };
+      for (const s of ["inflow", "outflow"] as const) {
+        got[s] = add(got[s], lanc[s]);
+        want[s] = add(want[s], target[s]);
+      }
+      const thin = (["inflow", "outflow"] as const).some(
+        (s) => target[s] > 0 && lanc[s] < target[s] * COVERAGE_MIN,
+      );
+      if (thin && thinFrom === null) thinFrom = seg.start;
+      if (!o.estimate) continue;
+      // Espalhado por dia: a despesa do mês não sai toda num dia só.
+      for (const s of ["inflow", "outflow"] as const) {
+        const gap = sub(target[s], lanc[s]);
+        if (gap <= 0) continue;
+        estimated[s] = add(estimated[s], gap);
+        currency(gap)
+          .distribute(seg.days.length)
+          .forEach((part, idx) => {
+            const k = seg.days[idx];
+            const day = perDay.get(k) ?? { inflow: 0, outflow: 0 };
+            day[s] = add(day[s], part.value);
+            perDay.set(k, day);
+          });
+      }
+    }
+    coverage = {
+      inflow: want.inflow > 0 ? got.inflow / want.inflow : null,
+      outflow: want.outflow > 0 ? got.outflow / want.outflow : null,
+    };
   }
 
   const entries = simulationEntries(
@@ -965,6 +1057,54 @@ export function projectBalance(o: {
     runs: negativeRuns(points),
     byStage: [...stageTotals.values()],
     simulated,
+    coverage,
+    thinFrom,
+    estimated,
+  };
+}
+
+/**
+ * Até a próxima entrada: o que vence a pagar antes dela, contra o caixa de
+ * hoje. Para quem vive de repasse, "dias de despesa sem receita nova" daria
+ * alarme todo mês; o que importa é chegar ao próximo repasse.
+ */
+export interface CashCover {
+  /** Primeira entrada prevista depois de hoje com pelo menos 10% da despesa média. */
+  next: { date: string; amount: number } | null;
+  /** A pagar de hoje até a véspera dessa entrada (estágios padrão). */
+  due: number;
+  covered: boolean;
+}
+
+export function cashCover(
+  report: Pick<AnalyticsReport, "projection" | "today" | "average">,
+  available: number | null,
+): CashCover | null {
+  if (available === null) return null;
+  const wanted = new Set<string>(DEFAULT_FORECAST);
+  const byDate = new Map<string, { inflow: number; outflow: number }>();
+  for (const d of report.projection) {
+    if (!wanted.has(d.stage) || d.date < report.today) continue;
+    const day = byDate.get(d.date) ?? { inflow: 0, outflow: 0 };
+    day.inflow = add(day.inflow, d.inflow);
+    day.outflow = add(day.outflow, d.outflow);
+    byDate.set(d.date, day);
+  }
+  // ponytail: "repasse" = entrada de 10% da despesa média ou mais; trocar pela
+  // entidade mantenedora se a projeção passar a carregar a contraparte.
+  const floor = Math.max(0.01, report.average.outflow * 0.1);
+  const dates = [...byDate.keys()].sort();
+  const nextDate = dates.find(
+    (k) => k > report.today && byDate.get(k)!.inflow >= floor,
+  );
+  if (!nextDate) return { next: null, due: 0, covered: true };
+  const due = dates
+    .filter((k) => k < nextDate)
+    .reduce((s, k) => add(s, byDate.get(k)!.outflow), 0);
+  return {
+    next: { date: nextDate, amount: byDate.get(nextDate)!.inflow },
+    due,
+    covered: available >= due,
   };
 }
 
@@ -1037,10 +1177,16 @@ export function buildAttention(i: {
         : first.start === first.end
           ? `em ${dayText(first.start.isoDate)}`
           : `entre ${dayText(first.start.isoDate)} e ${dayText(first.end.isoDate)}`;
+    // O buraco e o que já devia ter entrado ficam na mesma frase: é a mesma decisão.
+    const owed = overdueOf(i.report, "receivable").value;
+    const owedText =
+      owed > 0
+        ? ` Há ${money(owed)} a receber já vencidos${owed >= Math.abs(p.lowest.balance) ? ", o bastante para cobrir o menor saldo" : ""}.`
+        : "";
     out.push({
       id: "cash",
       tone: "danger",
-      text: `O caixa fica negativo ${when}, no que já está lançado para os próximos ${ATTENTION.projectionMonths} meses. Menor saldo: ${money(p.lowest.balance)} em ${dayText(p.lowest.isoDate)}.`,
+      text: `O caixa fica negativo ${when}, no que já está lançado para os próximos ${ATTENTION.projectionMonths} meses. Menor saldo: ${money(p.lowest.balance)} em ${dayText(p.lowest.isoDate)}.${owedText}`,
       section: "projecao",
       sectionLabel: "Projeção",
     });
@@ -1274,25 +1420,51 @@ export function monthsText(v: number) {
   return days < 1 ? "menos de 1 dia" : `${days} ${plural(days, "dia", "dias")}`;
 }
 
-export function positionTitle(available: number | null, burn: number) {
+export function positionTitle(
+  available: number | null,
+  cover: CashCover | null,
+) {
   if (available === null) return "Posição de caixa";
-  return burn > 0
-    ? `Caixa de ${money(available)} cobre ${monthsText(available / burn)} de despesa`
-    : `Caixa disponível de ${money(available)}`;
+  if (!cover?.next)
+    return `Caixa disponível de ${money(available)}, sem entrada prevista à frente`;
+  const when = dayText(cover.next.date);
+  if (!cover.due)
+    return `Caixa de ${money(available)}, sem nada a pagar até a próxima entrada, em ${when}`;
+  return `Caixa de ${money(available)} ${cover.covered ? "cobre" : "não cobre"} os ${money(cover.due)} a pagar até a próxima entrada, em ${when}`;
 }
+
+/** "5%", "menos de 1%": parte da média já lançada. */
+const shareText = (v: number) => (v < 0.005 ? "menos de 1%" : pct0(v));
+
+/** Despesa lançada abaixo do mínimo no horizonte, sem estimativa ligada. */
+export const thinOutflow = (p: Projection) =>
+  !p.estimated.inflow &&
+  !p.estimated.outflow &&
+  p.coverage?.outflow != null &&
+  p.coverage.outflow < COVERAGE_MIN
+    ? p.coverage.outflow
+    : null;
 
 export function projectionTitle(p: Projection) {
   const { runs, closing, from, until } = p;
   const first = runs[0];
   const when = (key: string) => (key === from ? "hoje" : dayText(key));
   const month = monthLabel(until.slice(0, 7));
+  const thin = thinOutflow(p);
+  const estimated = p.estimated.inflow > 0 || p.estimated.outflow > 0;
   if (runs.length === 0)
-    return `Caixa chega a ${month} em ${money(closing)}, sem ficar negativo`;
-  if (runs.length > 1)
-    return `Caixa fica negativo em ${runs.length} trechos, o primeiro a partir de ${when(first.start.isoDate)}`;
-  return first.open
-    ? `Caixa fica negativo a partir de ${when(first.start.isoDate)} e não se recupera até ${month}`
-    : `Caixa fica negativo entre ${when(first.start.isoDate)} e ${dayText(first.end.isoDate)}`;
+    return thin !== null
+      ? `Caixa não fica negativo até ${month}, mas a linha conta só ${shareText(thin)} da despesa média`
+      : `Caixa chega a ${month} em ${money(closing)}, sem ficar negativo${estimated ? ", com o não lançado pela média" : ""}`;
+  const base =
+    runs.length > 1
+      ? `Caixa fica negativo em ${runs.length} trechos, o primeiro a partir de ${when(first.start.isoDate)}`
+      : first.open
+        ? `Caixa fica negativo a partir de ${when(first.start.isoDate)} e não se recupera até ${month}`
+        : `Caixa fica negativo entre ${when(first.start.isoDate)} e ${dayText(first.end.isoDate)}`;
+  return thin !== null
+    ? `${base}, mesmo contando só ${shareText(thin)} da despesa média`
+    : base;
 }
 
 export function trendTitle(
@@ -1301,8 +1473,27 @@ export function trendTitle(
 ) {
   const { totals, compareTotals } = report;
   const delta = compareTotals ? variation(totals.net, compareTotals.net) : null;
+  // No ano corrido, um pico que se desfez é a história, não o saldo final.
+  let peak = "";
+  if (!compareLabel && report.range.from.endsWith("-01")) {
+    const pts = cumulativeByYear(report).points.filter(
+      (p): p is typeof p & { current: number } => p.current !== null,
+    );
+    const top = pts.reduce<(typeof pts)[number] | null>(
+      (m, p) => (!m || p.current > m.current ? p : m),
+      null,
+    );
+    if (
+      top &&
+      top !== pts.at(-1) &&
+      top.current > 0 &&
+      top.current - totals.net >
+        Math.max(Math.abs(totals.net), top.current * 0.2)
+    )
+      peak = `, depois de chegar a ${signedMoney(top.current)} em ${format(new Date(2000, SHORT_MONTHS.indexOf(top.label), 1), "MMMM", { locale: ptBR })}`;
+  }
   return (
-    `Resultado de ${signedMoney(totals.net)} no período` +
+    `Resultado de ${signedMoney(totals.net)} no período${peak}` +
     (compareTotals && compareLabel
       ? delta === null
         ? `, contra ${signedMoney(compareTotals.net)} em ${compareLabel}`
@@ -1380,6 +1571,7 @@ export const attentionProjection = (
         stages: DEFAULT_FORECAST as ForecastStage[],
         from: report.today,
         until: horizonEnd(report.today, ATTENTION.projectionMonths),
+        average: report.average,
       });
 
 // Ponte do previsto ao realizado, degrau a degrau.
@@ -1403,7 +1595,7 @@ export const planSteps = (b: PlanBridge, side: Side): PlanStep[] =>
     },
     {
       key: "revisions",
-      label: "Revisões",
+      label: "Valor alterado",
       value: b.revisions,
       hint: "Mudanças de valor depois de previsto, inclusive partes desdobradas e ajustes do aprovador do lote.",
     },
@@ -1430,9 +1622,9 @@ export const planSteps = (b: PlanBridge, side: Side): PlanStep[] =>
     },
     {
       key: "overdue",
-      label: "Vencido sem baixa",
+      label: side === "payable" ? "Vencido, não pago" : "Vencido, não recebido",
       value: -b.openOverdue,
-      hint: "Já venceu e ainda não foi baixado.",
+      hint: "Já venceu e o pagamento ainda não foi registrado.",
     },
     {
       key: "future",
@@ -1573,6 +1765,24 @@ export function compositionLevel(
   };
 }
 
+/**
+ * "MISSÕES E PROJETOS" → "Missões e projetos". ponytail: sigla em nome todo
+ * maiúsculo vira minúscula ("INSS" → "Inss"); lista de siglas se incomodar.
+ */
+export const tidyName = (name: string) =>
+  /[a-zà-ú]/.test(name) || !/[A-ZÀ-Ú]/.test(name)
+    ? name
+    : name.charAt(0) + name.slice(1).toLocaleLowerCase("pt-BR");
+
+/**
+ * Plano de contas com menos da metade do movimento classificado vira manchete
+ * de cadastro ("98% sem conta"): abre por centro de custo até ele valer.
+ */
+export const defaultCompositionMode = (
+  report: Pick<AnalyticsReport, "accounts">,
+): CompositionMode =>
+  report.accounts.coverage < 0.5 ? "costCenters" : "accounts";
+
 export function compositionTitle(
   level: ReturnType<typeof compositionLevel>,
   side: Side,
@@ -1582,8 +1792,10 @@ export function compositionTitle(
   const { kids, total, unassigned, parentNode } = level;
   const top = kids[0];
   if (!total) return `Sem ${word} no período`;
+  // A raiz ("Global") é o todo: "das despesas de Global" não diz nada.
+  const of = parentNode?.parentId ? ` de ${tidyName(parentNode.name)}` : "";
   return top && top.value[side] >= unassigned
-    ? `${top.name} concentra ${pct0(top.value[side] / total)} das ${word}${parentNode ? ` de ${parentNode.name}` : ""}`
+    ? `${tidyName(top.name)} concentra ${pct0(top.value[side] / total)} das ${word}${of}`
     : `${pct0(unassigned / total)} das ${word} estão sem ${mode === "accounts" ? "conta contábil" : "centro de custo"}`;
 }
 
@@ -1620,16 +1832,16 @@ export function analysisBrief(report: AnalyticsReport, ctx: BriefContext) {
       posicao:
         ctx.cash === null
           ? null
-          : positionTitle(ctx.cash, report.average.outflow),
+          : positionTitle(ctx.cash, cashCover(report, ctx.cash)),
       projecao: projection ? projectionTitle(projection) : null,
       resultado: trendTitle(report, compareLabel),
       previstoReceitas: planTitle(report.plan.receivable.bridge, "receivable"),
       previstoDespesas: planTitle(report.plan.payable.bridge, "payable"),
       orcamento: ctx.envelopes ? budgetTitle(ctx.envelopes, exercise) : null,
       composicao: compositionTitle(
-        compositionLevel(report.accounts, "payable"),
+        compositionLevel(report[defaultCompositionMode(report)], "payable"),
         "payable",
-        "accounts",
+        defaultCompositionMode(report),
       ),
       riscos: riskTitle(report.concentration.receivable),
     },
@@ -1702,7 +1914,16 @@ export function factsText(
     L.push(
       `Projeção de ${ATTENTION.projectionMonths} meses, de ${dayText(p.from)} a ${dayText(p.until)}, com o que está lançado e as recorrências: saldo final ${money(p.closing)}; menor saldo ${money(p.lowest.balance)} em ${dayText(p.lowest.isoDate)}; ${p.runs.length ? `negativo em ${p.runs.length} ${plural(p.runs.length, "trecho", "trechos")}, o primeiro a partir de ${dayText(p.runs[0].start.isoDate)}` : "não fica negativo"}.`,
     );
+    if (p.coverage)
+      L.push(
+        `Parte da média mensal que a projeção conta no horizonte (estágios padrão, sem rascunhos): receitas ${p.coverage.inflow === null ? "sem média" : shareText(p.coverage.inflow)}, despesas ${p.coverage.outflow === null ? "sem média" : shareText(p.coverage.outflow)}. O que não está lançado não entra na projeção.`,
+      );
   }
+  const cover = cashCover(report, brief.cash);
+  if (cover?.next)
+    L.push(
+      `Próxima entrada prevista: ${money(cover.next.amount)} em ${dayText(cover.next.date)}; a pagar até lá: ${money(cover.due)}; o caixa de hoje ${cover.covered ? "cobre" : "não cobre"}.`,
+    );
   const oin = overdueOf(report, "receivable");
   const oout = overdueOf(report, "payable");
   L.push(
@@ -1713,7 +1934,7 @@ export function factsText(
     const b = report.plan[s].bridge;
     const done = s === "receivable" ? "recebido" : "pago";
     L.push(
-      `Previsto e realizado, ${sideWord(s)} de ${brief.periodLabel}: previsto ${money(b.planned)}; revisões ${signedMoney(b.revisions)}; não previstos ${money(b.unplanned)}; rejeitados ${money(b.cancelled)}; diferença na baixa ${signedMoney(b.settlement)}; vencido sem baixa ${money(b.openOverdue)}; a vencer ${money(b.openFuture)}; ${done} ${money(b.realized)}${b.planned ? ` (${formatPercent(b.realized / b.planned, 1)} do previsto)` : ""}.`,
+      `Previsto e realizado, ${sideWord(s)} de ${brief.periodLabel}: previsto ${money(b.planned)}; valor alterado ${signedMoney(b.revisions)}; não previstos ${money(b.unplanned)}; rejeitados ${money(b.cancelled)}; diferença na baixa ${signedMoney(b.settlement)}; vencido e não ${done} ${money(b.openOverdue)}; a vencer ${money(b.openFuture)}; ${done} ${money(b.realized)}${b.planned ? ` (${formatPercent(b.realized / b.planned, 1)} do previsto)` : ""}.`,
     );
     const devs = report.plan[s].deviations.slice(0, 5);
     if (devs.length) {

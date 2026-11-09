@@ -10,7 +10,6 @@ import {
   User,
   Inbox,
   MessageSquare,
-  TrendingUp,
   Building2,
   Sun,
   Moon,
@@ -89,9 +88,8 @@ export function Header() {
     <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:px-5 gap-3">
       {/* Mobile: Compact logo | Desktop: Search bar */}
       <div className="flex items-center gap-2 md:hidden">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shrink-0">
-          <TrendingUp className="h-4 w-4 text-primary-foreground" />
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
         <span className="text-sm font-semibold tracking-tight">Financeiro</span>
       </div>
 

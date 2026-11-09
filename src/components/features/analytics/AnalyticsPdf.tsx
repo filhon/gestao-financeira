@@ -32,7 +32,8 @@ import {
   compositionLevel,
   cumulativeByYear,
   investmentsTitle,
-  monthsText,
+  cashCover,
+  thinOutflow,
   overdueOf,
   planSteps,
   planTitle,
@@ -735,11 +736,8 @@ function buildSections(input: AnalyticsPdfInput): SectionModel[] {
   // ── Posição ──
   {
     const cash = brief.cash;
-    const burn = report.average.outflow;
-    const runway = cash !== null && burn > 0 ? cash / burn : null;
+    const cover = cashCover(report, cash);
     const liquid = input.liquidReserve ?? 0;
-    const withReserve =
-      cash !== null && burn > 0 && liquid > 0 ? (cash + liquid) / burn : null;
     const net = report.totals.net;
     const plan = report.plan.receivable.bridge;
     const delta = report.compareTotals
@@ -768,13 +766,16 @@ function buildSections(input: AnalyticsPdfInput): SectionModel[] {
                 : `Receitas ${money(report.totals.inflow)}, despesas ${money(report.totals.outflow)}`,
           },
           {
-            label: "Folga de caixa",
-            value: runway === null ? "—" : monthsText(runway),
-            danger: runway !== null && runway < 1,
-            detail:
-              withReserve !== null
-                ? `${monthsText(withReserve)} com as aplicações de liquidez diária`
-                : "Sem aplicações de liquidez diária",
+            label: "Até a próxima entrada",
+            value: !cover?.next
+              ? "—"
+              : cover.covered
+                ? "Coberto"
+                : `Faltam ${money(cover.due - (cash ?? 0))}`,
+            danger: !!cover && !cover.covered,
+            detail: cover?.next
+              ? `${money(cover.due)} a pagar até ${dayText(cover.next.date)}${!cover.covered && liquid > 0 && (cash ?? 0) + liquid >= cover.due ? "; cobre resgatando as aplicações de liquidez diária" : ""}`
+              : "Nenhuma entrada prevista",
           },
           {
             label: "Receita realizada da prevista",
@@ -841,10 +842,9 @@ function buildSections(input: AnalyticsPdfInput): SectionModel[] {
       id: "posicao",
       kicker: "Posição agora",
       title: brief.headlines.posicao ?? "Posição de caixa",
-      description:
-        runway !== null
-          ? `Despesa média paga nos últimos ${report.average.months} meses: ${money(burn)} por mês. Sem nenhuma receita nova, é por quanto tempo o caixa paga as contas.`
-          : undefined,
+      description: cover?.next
+        ? `Próxima entrada prevista: ${money(cover.next.amount)} em ${dayText(cover.next.date)}. Até lá vencem ${money(cover.due)} a pagar já lançados.`
+        : undefined,
       blocks,
     });
   }
@@ -878,12 +878,6 @@ function buildSections(input: AnalyticsPdfInput): SectionModel[] {
           type: "kpis",
           items: [
             {
-              label: "Caixa hoje",
-              value: full(p.opening),
-              danger: p.opening < 0,
-              detail: "Contas correntes e aplicação automática",
-            },
-            {
               label: "Menor saldo",
               value: full(p.lowest.balance),
               danger: p.lowest.balance < 0,
@@ -893,7 +887,10 @@ function buildSections(input: AnalyticsPdfInput): SectionModel[] {
               label: `Em ${dayText(p.until)}`,
               value: full(p.closing),
               danger: p.closing < 0,
-              detail: `${p.closing >= p.opening ? "+" : "−"}${money(Math.abs(p.closing - p.opening))} sobre hoje`,
+              detail:
+                thinOutflow(p) !== null
+                  ? `Só ${pct(thinOutflow(p)!)} da despesa média está lançada até lá`
+                  : `${p.closing >= p.opening ? "+" : "−"}${money(Math.abs(p.closing - p.opening))} sobre hoje`,
             },
           ],
         },
@@ -975,7 +972,7 @@ function buildSections(input: AnalyticsPdfInput): SectionModel[] {
       id: "projecao",
       kicker: "Projeção",
       title: brief.headlines.projecao ?? "Projeção do caixa",
-      description: `A partir do caixa disponível de hoje, com o que já está lançado e as recorrências ainda não lançadas.${oin || oout ? ` Vencidos sem baixa ficam fora: ${money(oin)} a receber e ${money(oout)} a pagar.` : ""}`,
+      description: `A partir do caixa disponível de hoje${p ? ` (${money(p.opening)})` : ""}, com o que já está lançado e as recorrências ainda não lançadas. O que não está lançado não entra.${oin || oout ? ` Vencidos que ainda não entraram nem saíram ficam fora: ${money(oin)} a receber e ${money(oout)} a pagar.` : ""}`,
       blocks,
     });
   }

@@ -66,7 +66,7 @@ async function load(companyId: string): Promise<CompanyData> {
       byCompany("transactions").limit(MAX_DOCS).get(),
       byCompany("chart_of_accounts").get(),
       byCompany("cost_centers").get(),
-      byCompany("entities").select("name").get(),
+      byCompany("entities").select("name", "tradeName").get(),
       adminDb.collection("companies").doc(companyId).get(),
       byCompany("recurring_templates").where("active", "==", true).get(),
     ]);
@@ -97,7 +97,11 @@ async function load(companyId: string): Promise<CompanyData> {
     costCenters: ccSnap.docs.map(
       (d) => ({ ...d.data(), id: d.id }) as CostCenter,
     ),
-    entities: entSnap.docs.map((d) => ({ id: d.id, name: d.get("name") })),
+    // Nome fantasia quando há: a razão social inteira não cabe num título.
+    entities: entSnap.docs.map((d) => ({
+      id: d.id,
+      name: (d.get("tradeName") as string | undefined)?.trim() || d.get("name"),
+    })),
     templates: tplSnap.docs.map(
       (d) =>
         ({

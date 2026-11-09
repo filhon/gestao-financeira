@@ -193,7 +193,12 @@ async function main() {
   const yields = new Map<string, number>();
   const positions = await Promise.all(
     accounts.map(async (a) => {
-      const base = { id: a.id, name: a.name, investment: isInvestment(a) };
+      const base = {
+        id: a.id,
+        name: a.name,
+        investment: isInvestment(a),
+        sweep: isSweep(a),
+      };
       if (!isInvestment(a)) return { ...base, ...informedBalance(a) };
       const items = await itemsOf(a.id);
       for (const it of items) {

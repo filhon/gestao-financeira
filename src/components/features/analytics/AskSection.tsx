@@ -11,8 +11,15 @@ import {
   type AnalyticsParams,
 } from "@/lib/services/analyticsService";
 import { useCompany } from "@/components/providers/CompanyProvider";
+import { Section } from "./primitives";
 
 const MAX = 300;
+const SUGGESTIONS = [
+  "Quanto da receita veio da mantenedora?",
+  "Quanto há a receber vencido?",
+  "Quais centros de custo estão sem folga?",
+  "Em que mês o resultado foi pior?",
+];
 
 interface Answer {
   id: number;
@@ -59,16 +66,36 @@ export function AskSection({
     if (q && !ask.isPending) ask.mutate(q);
   }
 
+  // Erro de rede chega em inglês técnico; o do servidor já vem escrito.
+  const errorText = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : "";
+    return !msg || /fetch|network|failed|abort/i.test(msg)
+      ? "Não foi possível consultar agora. Tente de novo em instantes."
+      : msg;
+  };
+
   return (
-    <section
+    <Section
       id="perguntas"
-      aria-labelledby="perguntas-title"
-      className="scroll-mt-24"
+      kicker="Perguntas"
+      title="Pergunte à análise"
+      description="A IA responde só com os números deste relatório; frase com número, data ou nome que não está nele é descartada."
     >
-      <h2 id="perguntas-title" className="text-sm font-semibold">
-        Pergunte à análise
-      </h2>
-      <form onSubmit={submit} className="mt-2 flex max-w-3xl gap-2">
+      <ul className="mb-3 flex flex-wrap gap-1.5" aria-label="Sugestões">
+        {SUGGESTIONS.map((s) => (
+          <li key={s}>
+            <button
+              type="button"
+              disabled={ask.isPending || !companyId}
+              onClick={() => ask.mutate(s)}
+              className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              {s}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form onSubmit={submit} className="flex max-w-3xl gap-2">
         <label htmlFor="analise-pergunta" className="sr-only">
           Pergunta sobre a análise
         </label>
@@ -95,12 +122,15 @@ export function AskSection({
           Perguntar
         </Button>
       </form>
-      <p className="mt-1.5 text-xs text-muted-foreground" aria-live="polite">
+      <p
+        className="mt-1.5 min-h-4 text-xs text-muted-foreground"
+        aria-live="polite"
+      >
         {ask.isPending
           ? "Consultando o relatório…"
           : ask.isError
-            ? (ask.error as Error).message
-            : "A IA responde só com os números deste relatório; frase com número, data ou nome que não está nele é descartada."}
+            ? errorText(ask.error)
+            : null}
       </p>
 
       {answers.length > 0 && (
@@ -140,6 +170,6 @@ export function AskSection({
           ))}
         </ol>
       )}
-    </section>
+    </Section>
   );
 }

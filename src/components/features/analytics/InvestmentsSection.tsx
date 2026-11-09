@@ -46,6 +46,9 @@ export function InvestmentsSection() {
   const yearTotal = series.reduce((s, m) => s.add(m.value), currency(0)).value;
   const ticks = niceTicks(0, Math.max(...series.map((m) => m.value), 0), 4);
   const last = [...series].reverse().find((m) => m.value > 0);
+  // Com menos de três meses de rendimento, um gráfico de doze é quase vazio.
+  const yieldMonths = series.filter((m) => m.value > 0);
+  const chartWorthIt = yieldMonths.length >= 3;
 
   const rows = (reserve.data ?? []).map(({ account, position }) => {
     const bank = positions.find((p) => p.id === account.id)?.balance ?? null;
@@ -76,66 +79,83 @@ export function InvestmentsSection() {
         <Skeleton className="h-48 w-full" />
       ) : positions.length === 0 ? null : (
         <div className="grid gap-8 xl:grid-cols-5">
-          <ChartFrame
-            className="xl:col-span-3"
-            title="Rendimento reconhecido por mês"
-            label={`Rendimento reconhecido nos últimos 12 meses: ${fullMoney(yearTotal)}.`}
-            height={240}
-            note={`Nos 12 meses: ${fullMoney(yearTotal)}.`}
-            table={{
-              columns: ["Mês", "Rendimento"],
-              rows: series.map((m) => [m.label, fullMoney(m.value)]),
-            }}
-          >
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={series}
-                margin={{ top: 8, right: 4, left: 4, bottom: 0 }}
-                accessibilityLayer
-              >
-                <CartesianGrid vertical={false} stroke={VIZ.grid} />
-                <XAxis
-                  dataKey="label"
-                  {...AXIS_PROPS}
-                  interval="preserveStartEnd"
-                  minTickGap={12}
-                />
-                <YAxis
-                  {...AXIS_PROPS}
-                  width={64}
-                  ticks={ticks}
-                  domain={[0, ticks[ticks.length - 1]]}
-                  tickFormatter={axisMoney}
-                />
-                <Tooltip
-                  cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const m = payload[0].payload as (typeof series)[number];
-                    return (
-                      <TooltipBox
-                        title={m.label}
-                        rows={[
-                          {
-                            label: "Rendimento",
-                            value: fullMoney(m.value),
-                            color: VIZ.extra,
-                          },
-                        ]}
-                      />
-                    );
-                  }}
-                />
-                <Bar
-                  dataKey="value"
-                  fill={VIZ.extra}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={24}
-                  isAnimationActive={false}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartFrame>
+          {!chartWorthIt ? (
+            <div className="min-w-0 xl:col-span-3">
+              <p className="mb-3 text-sm font-medium">Rendimento reconhecido</p>
+              <p className="text-sm text-pretty">
+                {yieldMonths.length === 0
+                  ? "Nenhum rendimento reconhecido nos últimos 12 meses."
+                  : `${yieldMonths
+                      .map((m) => `${fullMoney(m.value)} em ${m.label}`)
+                      .join(" e ")}.`}
+              </p>
+              <p className="mt-1 text-[13px] text-muted-foreground text-pretty">
+                O rendimento entra quando a conciliação do mês da aplicação é
+                fechada; o gráfico mês a mês aparece a partir de três meses.
+              </p>
+            </div>
+          ) : (
+            <ChartFrame
+              className="xl:col-span-3"
+              title="Rendimento reconhecido por mês"
+              label={`Rendimento reconhecido nos últimos 12 meses: ${fullMoney(yearTotal)}.`}
+              height={240}
+              note={`Nos 12 meses: ${fullMoney(yearTotal)}.`}
+              table={{
+                columns: ["Mês", "Rendimento"],
+                rows: series.map((m) => [m.label, fullMoney(m.value)]),
+              }}
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={series}
+                  margin={{ top: 8, right: 4, left: 4, bottom: 0 }}
+                  accessibilityLayer
+                >
+                  <CartesianGrid vertical={false} stroke={VIZ.grid} />
+                  <XAxis
+                    dataKey="label"
+                    {...AXIS_PROPS}
+                    interval="preserveStartEnd"
+                    minTickGap={12}
+                  />
+                  <YAxis
+                    {...AXIS_PROPS}
+                    width={64}
+                    ticks={ticks}
+                    domain={[0, ticks[ticks.length - 1]]}
+                    tickFormatter={axisMoney}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "var(--muted)", opacity: 0.5 }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const m = payload[0].payload as (typeof series)[number];
+                      return (
+                        <TooltipBox
+                          title={m.label}
+                          rows={[
+                            {
+                              label: "Rendimento",
+                              value: fullMoney(m.value),
+                              color: VIZ.extra,
+                            },
+                          ]}
+                        />
+                      );
+                    }}
+                  />
+                  <Bar
+                    dataKey="value"
+                    fill={VIZ.extra}
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={24}
+                    isAnimationActive={false}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartFrame>
+          )}
 
           <div className="min-w-0 xl:col-span-2">
             <p className="mb-3 text-sm font-medium">
@@ -169,6 +189,11 @@ export function InvestmentsSection() {
                       <tr key={p.id} className="border-t align-top">
                         <td className="px-3 py-2">
                           <span className="block">{p.name}</span>
+                          {p.sweep && (
+                            <span className="block text-xs text-muted-foreground">
+                              Resgate automático: já conta no caixa disponível
+                            </span>
+                          )}
                           {r && (
                             <span className="block text-xs text-muted-foreground">
                               {investmentLabel(r.account)}
@@ -187,7 +212,11 @@ export function InvestmentsSection() {
                           {fullMoney(p.balance)}
                         </td>
                         <td className="px-3 py-2 text-right font-financial">
-                          {r ? fullMoney(r.position.net) : "—"}
+                          {r
+                            ? fullMoney(r.position.net)
+                            : p.sweep
+                              ? fullMoney(p.balance)
+                              : "—"}
                           {r && r.position.ir + r.position.iof > 0 && (
                             <span className="block text-xs text-muted-foreground">
                               IR e IOF {money(r.position.ir + r.position.iof)}
@@ -201,8 +230,8 @@ export function InvestmentsSection() {
               </table>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              &quot;Se resgatar hoje&quot; só para aplicações de liquidez diária
-              com saldo informado.
+              &quot;Se resgatar hoje&quot;: aplicações de liquidez diária com
+              saldo informado, já sem IR e IOF.
             </p>
           </div>
         </div>

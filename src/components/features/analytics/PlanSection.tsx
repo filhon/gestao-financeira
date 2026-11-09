@@ -82,11 +82,10 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
     ),
     5,
   );
-  const bridgeTicks = niceTicks(
-    0,
-    Math.max(...bridge.map((s) => s.base + s.bar), 0),
-    5,
-  );
+  // Escala até o maior degrau, não até o próximo número redondo: com 20,7 mi
+  // o eixo iria a 30 mi e um terço da largura ficaria vazio.
+  const bridgeMax = Math.max(...bridge.map((s) => s.base + s.bar), 0);
+  const bridgeTicks = niceTicks(0, bridgeMax, 5).filter((t) => t <= bridgeMax);
 
   const title = planTitle(b, side);
 
@@ -113,11 +112,11 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
       title={title}
       description={
         <>
-          Por mês de vencimento. A previsão é o valor com que o lançamento
-          nasceu; quando ele é editado depois (o faturamento consolidado da
-          mantenedora, por exemplo), a diferença vira revisão.
+          Por mês de vencimento. A previsão é o valor com que o lançamento foi
+          criado; quando ele é editado depois (o faturamento consolidado da
+          mantenedora, por exemplo), a diferença aparece como valor alterado.
           {b.openOverdue > 0 &&
-            ` ${money(b.openOverdue)} já venceram sem baixa.`}
+            ` ${money(b.openOverdue)} já venceram e não foram ${side === "payable" ? "pagos" : "recebidos"}.`}
         </>
       }
       actions={
@@ -162,7 +161,7 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
                 type="number"
                 {...AXIS_PROPS}
                 ticks={bridgeTicks}
-                domain={[0, bridgeTicks[bridgeTicks.length - 1]]}
+                domain={[0, bridgeMax || 1]}
                 tickFormatter={axisMoney}
               />
               <YAxis
@@ -234,7 +233,7 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
           label={months
             .map(
               (m) =>
-                `${m.label}: previsto ${fullMoney(m.planned)}, revisado ${fullMoney(m.revised)}, realizado ${fullMoney(m.realized)}`,
+                `${m.label}: previsto ${fullMoney(m.planned)}, com alterações ${fullMoney(m.revised)}, realizado ${fullMoney(m.realized)}`,
             )
             .join("; ")}
           legend={
@@ -242,7 +241,7 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
               items={[
                 { label: "Previsto", color: VIZ.context },
                 {
-                  label: "Revisado",
+                  label: "Com alterações",
                   color: "var(--foreground)",
                   shape: "tick",
                 },
@@ -254,7 +253,7 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
             columns: [
               "Mês",
               "Previsto",
-              "Revisado",
+              "Com alterações",
               side === "payable" ? "Pago" : "Recebido",
             ],
             rows: months.map((m) => [
@@ -301,7 +300,10 @@ export function PlanSection({ report }: { report: AnalyticsReport }) {
                           value: fullMoney(m.planned),
                           color: VIZ.context,
                         },
-                        { label: "Revisado", value: fullMoney(m.revised) },
+                        {
+                          label: "Com alterações",
+                          value: fullMoney(m.revised),
+                        },
                         {
                           label: side === "payable" ? "Pago" : "Recebido",
                           value: fullMoney(m.realized),

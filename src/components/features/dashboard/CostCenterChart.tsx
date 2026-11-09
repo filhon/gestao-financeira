@@ -37,7 +37,8 @@ const barColor = (item: BudgetProgressData) =>
   item.status === "danger"
     ? "bg-red-500"
     : item.status === "warning"
-      ? "bg-amber-500"
+      ? // Âmbar mais amarelo: o laranja dos gráficos é "despesa", não alerta.
+        "bg-amber-400"
       : item.status === "no-budget"
         ? "bg-muted-foreground/30"
         : item.isLeaf
@@ -237,7 +238,14 @@ function EnvelopeRow({
   );
 }
 
-export function CostCenterChart({ year }: { year?: number }) {
+export function CostCenterChart({
+  year,
+  bare = false,
+}: {
+  year?: number;
+  /** Sem cartão nem título: a página que embute já dá o título (Análise). */
+  bare?: boolean;
+}) {
   const exercise = year ?? new Date().getFullYear();
   const { data, isLoading, isError, error, refetch } =
     useBudgetProgress(exercise);
@@ -256,20 +264,33 @@ export function CostCenterChart({ year }: { year?: number }) {
     .sort((a, b) => b.spent - a.spent)
     .slice(0, 8);
 
+  const Shell = bare ? "div" : Card;
+  const Head = bare ? "div" : CardHeader;
+  const Body = bare ? "div" : CardContent;
+
   return (
-    <Card
-      id="envelopes"
-      className="col-span-full flex scroll-mt-20 flex-col md:col-span-3"
+    <Shell
+      id={bare ? undefined : "envelopes"}
+      className={cn(
+        "flex flex-col",
+        !bare && "col-span-full scroll-mt-20 md:col-span-3",
+      )}
     >
-      <CardHeader className="pb-2">
+      <Head className={cn("pb-2", bare && "space-y-1.5")}>
         <div className="flex items-center justify-between gap-2">
-          <CardTitle
-            role="heading"
-            aria-level={2}
-            className="text-sm md:text-base font-medium leading-tight"
-          >
-            Envelope por centro de custo
-          </CardTitle>
+          {bare ? (
+            <span className="text-xs text-muted-foreground">
+              Exercício {exercise}
+            </span>
+          ) : (
+            <CardTitle
+              role="heading"
+              aria-level={2}
+              className="text-sm md:text-base font-medium leading-tight"
+            >
+              Envelope por centro de custo
+            </CardTitle>
+          )}
           <Segmented
             label="Visão do envelope"
             value={view}
@@ -281,7 +302,7 @@ export function CostCenterChart({ year }: { year?: number }) {
           />
         </div>
         <div className="flex min-h-4 items-center justify-between text-xs text-muted-foreground">
-          <span>Exercício {exercise}</span>
+          <span>{bare ? "" : `Exercício ${exercise}`}</span>
           {view === "risk" && (
             <span className="flex items-center gap-3" aria-hidden>
               <span className="flex items-center gap-1">
@@ -295,14 +316,14 @@ export function CostCenterChart({ year }: { year?: number }) {
               {pace !== null && pace < 100 && (
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-3 w-0.5 bg-foreground/70" />
-                  ritmo {Math.round(pace)}%
+                  esperado até hoje {Math.round(pace)}%
                 </span>
               )}
             </span>
           )}
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col">
+      </Head>
+      <Body className="flex flex-1 flex-col">
         {isLoading ? (
           <div className="space-y-4">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -459,7 +480,7 @@ export function CostCenterChart({ year }: { year?: number }) {
             </Link>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </Body>
+    </Shell>
   );
 }
