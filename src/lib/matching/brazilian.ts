@@ -166,8 +166,19 @@ export function normalizePixKey(key: string): string {
   return trimmed;
 }
 
+/**
+ * O comprovante Pix do Itaú imprime a chave e-mail com espaço no lugar do
+ * ponto do domínio ("fulano@gmail com"); o texto do PDF traz isso literal.
+ */
+const EMAIL_SPACED_TLD_RE =
+  /(@[a-z0-9-]+(?:\.[a-z0-9-]+)*) (com|net|org|edu|gov|br)\b/g;
+
 export function extractPixKeys(folded: string): string[] {
   const keys = new Set<string>();
+  // Duas passadas: "@empresa com br" vira "@empresa.com.br".
+  folded = folded
+    .replace(EMAIL_SPACED_TLD_RE, "$1.$2")
+    .replace(EMAIL_SPACED_TLD_RE, "$1.$2");
   for (const re of [UUID_RE, EMAIL_RE, PHONE_KEY_RE]) {
     const scanner = new RegExp(re.source, re.flags);
     let match: RegExpExecArray | null;

@@ -561,5 +561,94 @@ console.log("=== 15. Consolidação sem CNPJ ainda funciona (por nome) ===");
   );
 }
 
+console.log(
+  "\n=== 16. Duas somas iguais com um título em comum: data decide ou empata ===",
+);
+{
+  // Caso real (10/11/2026): Pix de R$ 7.000 em 26/05 = R$ 5.000 + R$ 2.000,
+  // ambos de 26/05; havia outra parcela de R$ 2.000 do mesmo fornecedor em
+  // 29/05. O grupo com a de 29/05 era escolhido e confirmado sozinho.
+  const same = {
+    supplierOrClient: "ACME Distribuidora de Alimentos LTDA",
+    entityId: "e-acme",
+  };
+  const transactions = [
+    tx({
+      id: "g5000",
+      amount: 5000,
+      description: "Gestão de Obra",
+      ...same,
+      dueDate: brt(2026, 5, 25),
+      paymentDate: brt(2026, 5, 26),
+    }),
+    tx({
+      id: "g2000b",
+      amount: 2000,
+      description: "SOS viúva (1/12)",
+      ...same,
+      dueDate: brt(2026, 5, 30),
+      paymentDate: brt(2026, 5, 29),
+    }),
+    tx({
+      id: "g2000a",
+      amount: 2000,
+      description: "Projeto arquitetônico (1/2)",
+      ...same,
+      dueDate: brt(2026, 5, 25),
+      paymentDate: brt(2026, 5, 26),
+    }),
+  ];
+  const out = matchComprovante(
+    [
+      "Comprovante de Transferência",
+      "nome do recebedor: ACME DISTRIBUIDORA",
+      "chave: 11444777000161",
+      "CPF / CNPJ do recebedor: 11.444.777/0001-61",
+      "valor: R$ 7.000,00",
+      "data da transferência: 26/05/2026",
+    ].join("\n"),
+    transactions,
+    { entities },
+  );
+  const ids = [...(out.best?.transactionIds ?? [])].sort().join(",");
+  check(
+    "fica com o grupo todo de 26/05, ou não decide sozinho",
+    ids === "g2000a,g5000" || out.best?.isAmbiguous === true,
+    { ids, score: out.best?.score, level: out.best?.confidenceLevel },
+  );
+  check(
+    "nunca confia alto no grupo com a parcela de 29/05",
+    !(ids === "g2000b,g5000" && out.best?.confidenceLevel === "HIGH"),
+    { ids, level: out.best?.confidenceLevel },
+  );
+
+  // As duas de R$ 2.000 no mesmo dia: nada no comprovante decide qual foi.
+  const tie = transactions.map((t) =>
+    t.id === "g2000b"
+      ? { ...t, paymentDate: brt(2026, 5, 26), dueDate: brt(2026, 5, 25) }
+      : t,
+  );
+  const tied = matchComprovante(
+    [
+      "Comprovante de Transferência",
+      "CPF / CNPJ do recebedor: 11.444.777/0001-61",
+      "valor: R$ 7.000,00",
+      "data da transferência: 26/05/2026",
+    ].join("\n"),
+    tie,
+    { entities },
+  );
+  check(
+    "gêmeos de mesmo valor e data: sem confiança alta",
+    tied.best?.confidenceLevel !== "HIGH" &&
+      (tied.best?.signals.penalties.includes("soma_ambigua") ?? true),
+    {
+      ids: tied.best?.transactionIds,
+      level: tied.best?.confidenceLevel,
+      penalties: tied.best?.signals.penalties,
+    },
+  );
+}
+
 console.log(`\n${passed} passaram, ${failed} falharam\n`);
 process.exit(failed > 0 ? 1 : 0);

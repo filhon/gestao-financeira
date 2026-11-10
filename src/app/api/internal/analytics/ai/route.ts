@@ -18,6 +18,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { GEMINI_MODEL } from "@/lib/gemini";
 import { logger } from "@/lib/logger";
 import { limitAi } from "@/lib/api/aiRateLimit";
 import {
@@ -36,7 +37,7 @@ import {
 } from "@/lib/analytics";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-const MODEL = "gemini-2.5-flash";
+const MODEL = GEMINI_MODEL;
 const MAX_QUESTION = 300;
 
 async function generate(prompt: string, json = false) {

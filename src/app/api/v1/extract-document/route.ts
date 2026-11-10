@@ -9,6 +9,8 @@ const ALLOWED_MIME_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
+  "text/xml",
+  "application/xml",
 ];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -33,7 +35,10 @@ export async function POST(request: NextRequest) {
 
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       return NextResponse.json(
-        { error: "Tipo de arquivo não suportado. Use PDF, PNG, JPEG ou WebP." },
+        {
+          error:
+            "Tipo de arquivo não suportado. Use PDF, PNG, JPEG, WebP ou o XML da nota.",
+        },
         { status: 400 },
       );
     }
@@ -47,25 +52,33 @@ export async function POST(request: NextRequest) {
     const limited = await limitAi("extract-document", access.uid);
     if (limited) return limited;
 
+    const type =
+      formData.get("type") === "receivable" ? "receivable" : "payable";
+    // Com o CNPJ da empresa, a leitura não confunde a própria empresa com o
+    // fornecedor ou o cliente.
+    const company = await adminDb.collection("companies").doc(companyId).get();
+    const companyDocument =
+      String(company.get("cnpj") ?? "").replace(/\D/g, "") || null;
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    const extractedData = await extractDocumentData(buffer, file.type);
+    const extractedData = await extractDocumentData(buffer, file.type, {
+      type,
+      companyDocument,
+    });
 
-    // Buscar entidade pelo CNPJ/CPF extraído
+    // Buscar entidade pelo CNPJ/CPF lido (já conferido pelo dígito verificador)
     let matchedEntity = null;
-    if (extractedData.supplierDocument) {
-      const cleanDoc = extractedData.supplierDocument.replace(/\D/g, "");
-      if (cleanDoc.length >= 11) {
-        const entitiesSnapshot = await adminDb
-          .collection("entities")
-          .where("companyId", "==", companyId)
-          .where("document", "==", cleanDoc)
-          .limit(1)
-          .get();
+    if (extractedData.counterpartyDocument) {
+      const entitiesSnapshot = await adminDb
+        .collection("entities")
+        .where("companyId", "==", companyId)
+        .where("document", "==", extractedData.counterpartyDocument)
+        .limit(1)
+        .get();
 
-        if (!entitiesSnapshot.empty) {
-          const doc = entitiesSnapshot.docs[0];
-          matchedEntity = { id: doc.id, ...doc.data() };
-        }
+      if (!entitiesSnapshot.empty) {
+        const doc = entitiesSnapshot.docs[0];
+        matchedEntity = { id: doc.id, ...doc.data() };
       }
     }
 

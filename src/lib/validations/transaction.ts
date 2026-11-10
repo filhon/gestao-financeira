@@ -129,6 +129,12 @@ export const transactionSchema = z.object({
     .optional(),
 
   isReimbursement: z.boolean().optional(),
+
+  /**
+   * O que a leitura do documento devolveu (`readingSnapshot`): comparado com
+   * o que foi gravado, mede o acerto da leitura por campo.
+   */
+  aiExtraction: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type TransactionFormData = z.infer<typeof transactionSchema>;

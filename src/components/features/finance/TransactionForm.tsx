@@ -90,6 +90,7 @@ import { entityService } from "@/lib/services/entityService";
 import { transactionService } from "@/lib/services/transactionService";
 import { getHierarchicalCostCenters } from "@/lib/services/costCenterService";
 import { formatBoletoLine, parseBoleto } from "@/lib/boleto";
+import { readingSnapshot, type DocumentReading } from "@/lib/documentReading";
 import { amountsFromPercent, evenPercentages } from "@/lib/allocation";
 import { Entity, Transaction } from "@/lib/types";
 import {
@@ -165,8 +166,9 @@ const TYPED_DATE_MESSAGE: Record<TypedDateField, string> = {
 };
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const isXmlFile = (f: File) => f.type.includes("xml") || /\.xml$/i.test(f.name);
 const isAcceptedFile = (f: File) =>
-  f.type === "application/pdf" || f.type.startsWith("image/");
+  f.type === "application/pdf" || f.type.startsWith("image/") || isXmlFile(f);
 
 const onlyDigits = (s: string) => s.replace(/\D/g, "");
 
@@ -429,9 +431,10 @@ export function TransactionForm({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [extraction, setExtraction] = useState<{ confidence: number } | null>(
-    null,
-  );
+  const [extraction, setExtraction] = useState<Pick<
+    DocumentReading,
+    "source" | "checks"
+  > | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [useEntity, setUseEntity] = useState(
     () => !(defaultValues?.supplierOrClient && !defaultValues?.entityId),
@@ -1243,20 +1246,24 @@ export function TransactionForm({
       });
       return;
     }
-    // Só o primeiro anexo de despesa é lido: os seguintes costumam ser
-    // comprovantes de demanda, não o documento de cobrança.
-    const canExtract = isPayable && attachmentFields.length === 0;
+    // Só o primeiro anexo é lido: os seguintes costumam ser comprovantes de
+    // demanda, não o documento de cobrança.
+    const canExtract = attachmentFields.length === 0;
+    // O Storage aceita XML só como text/*; o navegador às vezes diz application/xml.
+    const upload = isXmlFile(file)
+      ? new File([file], file.name, { type: "text/xml" })
+      : file;
     setIsUploading(true);
     setUploadPercent(0);
     try {
       const [uploaded, result] = await Promise.all([
         storageService.uploadFile(
-          file,
+          upload,
           `transactions/${selectedCompany.id}`,
           setUploadPercent,
         ),
         canExtract
-          ? extractFromFile(file, selectedCompany.id)
+          ? extractFromFile(upload, selectedCompany.id, type)
           : Promise.resolve(null),
       ]);
 
@@ -1278,6 +1285,7 @@ export function TransactionForm({
 
       const { data, matchedEntity } = result;
       const filled: string[] = [];
+      const recurring = form.getValues("recurrence.isRecurring");
 
       if (!form.getValues("supplierOrClient")) {
         if (matchedEntity) {
@@ -1288,24 +1296,29 @@ export function TransactionForm({
           });
           filled.push("supplierOrClient");
           void applyEntityDefaults(matchedEntity as Entity);
-        } else if (data.supplierName) {
+        } else if (data.counterpartyName) {
           setUseEntity(false);
-          form.setValue("supplierOrClient", data.supplierName, {
+          form.setValue("supplierOrClient", data.counterpartyName, {
             shouldValidate: submitCount > 0,
           });
           filled.push("supplierOrClient");
         }
       }
-      if (data.description && !form.getValues("description")) {
-        form.setValue("description", data.description);
-        filled.push("description");
-      }
-      if (data.barcode && !form.getValues("barcode")) {
-        form.setValue("barcode", parseBoleto(data.barcode).digits);
-        filled.push("barcode");
-        if (!form.getValues("paymentMethod")) {
-          form.setValue("paymentMethod", "boleto");
-          filled.push("paymentMethod");
+      // A descrição fica com o padrão "Fornecedor · nº 123", que o formulário
+      // monta. Nº, competência e linha digitável são de uma ocorrência só.
+      if (!recurring) {
+        if (data.documentNumber && !form.getValues("documentNumber")) {
+          form.setValue("documentNumber", data.documentNumber);
+          filled.push("documentNumber");
+        }
+        if (data.competence && !form.getValues("competence")) {
+          form.setValue("competence", data.competence);
+          filled.push("competence");
+        }
+        // Já conferida no servidor pelos dígitos verificadores.
+        if (data.barcode && !form.getValues("barcode")) {
+          form.setValue("barcode", data.barcode);
+          filled.push("barcode");
         }
       }
       if (data.paymentMethod) {
@@ -1329,11 +1342,31 @@ export function TransactionForm({
       if (data.notes && !form.getValues("notes")) {
         form.setValue("notes", data.notes);
       }
+
+      // Duplicatas: parcelamento com o total e o 1º vencimento. O serviço gera
+      // parcelas mensais iguais; se o documento foge disso, avisa.
+      const parts = recurring ? [] : data.installments;
+      let irregularParts = false;
+      if (parts.length >= 2) {
+        setRepetition("installment");
+        form.setValue("installmentsCount", parts.length);
+        filled.push("installmentsCount");
+        const at = (iso: string) => new Date(iso + "T12:00:00");
+        const even = currency(data.amount ?? 0).distribute(parts.length);
+        irregularParts = !parts.every(
+          (p, i) =>
+            Math.abs(currency(p.amount).intValue - even[i].intValue) <= 1 &&
+            differenceInCalendarDays(
+              at(p.dueDate),
+              addMonths(at(parts[0].dueDate), i),
+            ) === 0,
+        );
+      }
       markFilled(filled, "document");
 
       const { filled: dated, divergent } = offerAmountAndDate(
         {
-          amount: data.amount || undefined,
+          amount: data.amount ?? undefined,
           dueDate: data.dueDate
             ? new Date(data.dueDate + "T12:00:00")
             : undefined,
@@ -1342,14 +1375,22 @@ export function TransactionForm({
         "no documento",
       );
 
-      setExtraction({ confidence: data.confidence });
+      form.setValue("aiExtraction", readingSnapshot(data));
+      setExtraction({ source: data.source, checks: data.checks });
+      const failed = data.checks.filter((c) => !c.ok).map((c) => c.label);
+      if (irregularParts) {
+        toast.warning("Parcelas fora do padrão", {
+          description:
+            "O documento não traz parcelas mensais iguais. Confira valor e vencimento de cada parcela depois de salvar.",
+        });
+      }
       if (filled.length + dated === 0 && divergent === 0) {
         toast.info("Documento lido", {
           description: "Os campos já estavam preenchidos.",
         });
-      } else if (data.confidence < 50) {
-        toast.warning("Leitura com baixa confiança", {
-          description: `Confiança de ${data.confidence}%. Confira todos os campos.`,
+      } else if (failed.length > 0) {
+        toast.warning("Confira a leitura", {
+          description: failed.slice(0, 3).join(" · "),
         });
       } else if (divergent > 0) {
         toast.warning("O documento diverge do que foi digitado", {
@@ -1388,6 +1429,7 @@ export function TransactionForm({
       ),
     );
     setExtraction(null);
+    form.setValue("aiExtraction", undefined);
     if (fromDocument.length === 0) return;
     toast("Os campos lidos do documento foram mantidos", {
       action: {
@@ -1593,7 +1635,7 @@ export function TransactionForm({
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/pdf,image/*"
+            accept="application/pdf,image/*,.xml,text/xml,application/xml"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -1638,9 +1680,7 @@ export function TransactionForm({
                   </span>
                   {!isUploading && !isExtracting && (
                     <span className="block text-xs text-muted-foreground">
-                      {isPayable
-                        ? "PDF ou imagem. A leitura preenche fornecedor, valor e vencimento."
-                        : "PDF ou imagem, até 15 MB."}
+                      {`PDF, imagem ou XML da nota. A leitura preenche ${isPayable ? "fornecedor" : "cliente"}, valor e vencimento.`}
                     </span>
                   )}
                 </span>
@@ -1684,7 +1724,9 @@ export function TransactionForm({
                     {isExtracting
                       ? "Lendo o documento…"
                       : extraction
-                        ? `Lido automaticamente, confiança de ${extraction.confidence}%.`
+                        ? extraction.source === "xml"
+                          ? "Lido do XML da nota, sem IA."
+                          : `Lido por IA · ${extraction.checks.filter((c) => c.ok).length} de ${extraction.checks.length} conferências ok.`
                         : "Arraste outro arquivo para anexar."}
                   </span>
                   <Button
@@ -1700,6 +1742,15 @@ export function TransactionForm({
                     Anexar outro
                   </Button>
                 </div>
+                {extraction?.checks.some((c) => !c.ok) && (
+                  <ul className="space-y-0.5 border-t px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                    {extraction.checks
+                      .filter((c) => !c.ok)
+                      .map((c) => (
+                        <li key={c.label}>{c.label}</li>
+                      ))}
+                  </ul>
+                )}
               </div>
             )}
           </div>

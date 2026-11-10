@@ -8,6 +8,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { GEMINI_MODEL } from "@/lib/gemini";
 import { authorizeCompany } from "@/lib/api/companyAccess";
 import { limitAi } from "@/lib/api/aiRateLimit";
 import { adminDb } from "@/lib/firebase/admin";
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     // ponytail: manda tudo no prompt; passa a filtrar por embeddings se o roadmap passar de algumas centenas de itens
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: GEMINI_MODEL,
       contents: [
         {
           role: "user",

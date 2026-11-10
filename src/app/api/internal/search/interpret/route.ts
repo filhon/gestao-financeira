@@ -9,6 +9,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { GEMINI_MODEL } from "@/lib/gemini";
 import { format } from "date-fns";
 import { authorizeCompany } from "@/lib/api/companyAccess";
 import { logger } from "@/lib/logger";
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: GEMINI_MODEL,
       contents: [
         {
           role: "user",

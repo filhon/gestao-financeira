@@ -18,7 +18,8 @@ import { cookies } from "next/headers";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
 import { extractControlNumber, matchComprovante } from "@/lib/matching";
 import type { Entity, ComprovanteMatchStatus } from "@/lib/types";
-import { GoogleGenAI } from "@google/genai";
+import { ocrComprovante } from "@/lib/comprovanteOcr";
+import { pdfText } from "@/lib/pdfText";
 import { FieldValue } from "firebase-admin/firestore";
 import { limitAi } from "@/lib/api/aiRateLimit";
 import {
@@ -61,25 +62,7 @@ async function extractTextViaGenAI(
   if (!apiKey) return "";
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const base64 = fileBuffer.toString("base64");
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { inlineData: { mimeType, data: base64 } },
-            {
-              text: `Extraia TODO o texto deste documento financeiro exatamente como aparece.
-Preservar números, datas no formato dd/mm/aaaa, valores monetários no formato R$ e nomes de empresas/pessoas.
-Retorne APENAS o texto extraído, sem comentários, sem markdown.`,
-            },
-          ],
-        },
-      ],
-    });
-    return response.text?.trim() ?? "";
+    return await ocrComprovante(fileBuffer, mimeType, apiKey);
   } catch (err) {
     console.error("[process-comprovante] OCR GenAI falhou:", err);
     return "";
@@ -92,35 +75,25 @@ async function extractText(
   fileBuffer: Buffer,
   mimeType: string,
 ): Promise<string> {
-  // Images always go through GenAI OCR
-  if (mimeType.startsWith("image/")) {
-    return extractTextViaGenAI(fileBuffer, mimeType);
-  }
-
-  // PDFs: try pdfjs text layer first; fall back to GenAI if result is too short
+  // PDF do banco traz o texto exato: dígitos completos e cada rótulo ao lado
+  // do valor. Medido em 10/11/2026 contra 1.266 comprovantes confirmados
+  // (scripts/eval-comprovante-text.ts): mesmos acertos que o OCR, 33
+  // confirmações automáticas certas a mais, número de controle idêntico.
+  // Digitalização sem texto ou falha do pdfjs: OCR da IA, como antes.
   if (mimeType === "application/pdf") {
     try {
-      const pdfjsLib = await import(
-        "pdfjs-dist/legacy/build/pdf.mjs" as string
-      ).catch(() => import("pdfjs-dist"));
-      const pdf = await (pdfjsLib as typeof import("pdfjs-dist")).getDocument({
-        data: fileBuffer,
-      }).promise;
-      const page = await pdf.getPage(1);
-      const content = await page.getTextContent();
-      const text = content.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
+      const text = await pdfText(fileBuffer, 1);
       if (text.length >= 20) return text;
-    } catch {
-      // pdfjs not available server-side — fall through to GenAI
+    } catch (err) {
+      console.error(
+        "[process-comprovante] texto do PDF falhou, segue pelo OCR:",
+        err,
+      );
     }
-    // Fallback: GenAI OCR for scan PDFs
-    return extractTextViaGenAI(fileBuffer, "application/pdf");
   }
-
+  if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
+    return extractTextViaGenAI(fileBuffer, mimeType);
+  }
   return "";
 }
 

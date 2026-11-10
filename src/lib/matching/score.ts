@@ -354,6 +354,24 @@ function evaluateDate(facts: ReceiptFacts, dates: Date[]): DateEvaluation {
   return best;
 }
 
+/**
+ * Data de um grupo: vale o membro mais longe do comprovante. Um pagamento só
+ * quita títulos daquela data; um membro perto não pode carregar os outros
+ * (R$ 5.000 de 26/05 + R$ 2.000 de 29/05 não é o Pix de R$ 7.000 de 26/05).
+ */
+function weakestDate(
+  facts: ReceiptFacts,
+  members: PreparedTransaction[],
+): DateEvaluation {
+  const each = members.map((m) => evaluateDate(facts, m.dates));
+  const worst = each.reduce((a, b) => (b.score < a.score ? b : a));
+  return {
+    ...worst,
+    matchedDate:
+      worst.matchedDate ?? each.find((e) => e.matchedDate)?.matchedDate,
+  };
+}
+
 interface EntityEvaluation {
   score: number;
   evidence: EntityEvidence;
@@ -968,18 +986,34 @@ export function scoreCandidates(
         );
         if (solutions.length === 0) continue;
 
+        // A busca trata valores iguais como uma coisa só, mas dois títulos de
+        // R$ 2.000 não são o mesmo título: fica o que está mais perto da data
+        // do comprovante, e empate ali é chute.
+        const chosen = solutions[0].map((i) => cluster[i]);
+        let twinTie = false;
+        for (let k = 0; k < chosen.length; k++) {
+          const options = cluster
+            .filter(
+              (c) =>
+                c.cents === chosen[k].cents &&
+                (c === chosen[k] || !chosen.includes(c)),
+            )
+            .map((c) => ({ c, s: evaluateDate(facts, c.dates).score }))
+            .sort((a, b) => b.s - a.s);
+          if (options.length < 2) continue;
+          if (options[0].s === options[1].s) twinTie = true;
+          chosen[k] = options[0].c;
+        }
+
         // Muitos subconjuntos com a mesma soma ⇒ a escolha é chute.
         const ambiguityPenalty =
-          solutions.length > 1
+          solutions.length > 1 || twinTie
             ? { factor: 0.72, label: "soma_ambigua" }
             : undefined;
 
-        const members = solutions[0]
-          .map((i) => cluster[i])
-          .sort(
-            (a, b) =>
-              (a.dates[0]?.getTime() ?? 0) - (b.dates[0]?.getTime() ?? 0),
-          );
+        const members = chosen.sort(
+          (a, b) => (a.dates[0]?.getTime() ?? 0) - (b.dates[0]?.getTime() ?? 0),
+        );
 
         const entity =
           entityEvaluations.get(members[0].tx.id) ??
@@ -1002,10 +1036,7 @@ export function scoreCandidates(
               delta: 0,
               kind: "final",
             },
-            date: evaluateDate(
-              facts,
-              members.flatMap((m) => m.dates),
-            ),
+            date: weakestDate(facts, members),
             entity,
             description,
             barcodeMatch: false,
@@ -1046,12 +1077,12 @@ export function scoreCandidates(
   });
 
   const best = unique[0];
-  const bestIds = new Set(best.transactionIds);
-  const rival = unique.find(
-    (candidate) =>
-      !candidate.transactionIds.some((id) => bestIds.has(id)) &&
-      (!barcodeDecides(best) || barcodeDecides(candidate)),
-  );
+  // Qualquer outro conjunto disputa, inclusive um que divide títulos com o
+  // vencedor: duas somas iguais com um membro em comum continuam sendo um
+  // empate que só uma pessoa resolve.
+  const rival = unique
+    .slice(1)
+    .find((candidate) => !barcodeDecides(best) || barcodeDecides(candidate));
 
   const margin = rival ? best.score - rival.score : best.score;
   const isAmbiguous = !!rival && margin < AMBIGUITY_MARGIN;

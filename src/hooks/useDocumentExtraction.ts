@@ -1,9 +1,9 @@
 import { useState } from "react";
-import type { ExtractedDocumentData } from "@/lib/services/documentExtractionService";
+import type { DocumentReading } from "@/lib/documentReading";
 import type { Entity } from "@/lib/types";
 
 interface ExtractionResult {
-  data: ExtractedDocumentData;
+  data: DocumentReading;
   matchedEntity: Entity | null;
 }
 
@@ -14,6 +14,7 @@ export function useDocumentExtraction() {
   const extractFromFile = async (
     file: File,
     companyId: string,
+    type: "payable" | "receivable",
   ): Promise<ExtractionResult | null> => {
     setIsExtracting(true);
     setError(null);
@@ -22,6 +23,7 @@ export function useDocumentExtraction() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("companyId", companyId);
+      formData.append("type", type);
 
       const response = await fetch("/api/v1/extract-document", {
         method: "POST",
