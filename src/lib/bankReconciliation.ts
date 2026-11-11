@@ -259,13 +259,32 @@ export function pickStatementBalance(
   return fromFile;
 }
 
+/**
+ * Saldo da aplicação automática no extrato da conta corrente: o Itaú manda o
+ * principal todo dia ("SDO APLIC AUT MAIS AP", "SALDO APLIC. AUT."). É o
+ * número a conferir na conta da aplicação, sem PDF e sem digitar o bruto.
+ */
+export function sweepStatementBalance(
+  checkingId: string,
+  items: BankTransaction[],
+): { balance: number; date: Date } | null {
+  const last = items
+    .filter(
+      (tx) =>
+        tx.bankAccountId === checkingId &&
+        /^(saldo|sdo) aplic/.test(normalizeText(tx.description.trim())),
+    )
+    .sort((a, b) => day(a.date).localeCompare(day(b.date)))
+    .at(-1);
+  return last ? { balance: last.amount, date: new Date(last.date) } : null;
+}
+
+const movementKey = (tx: BankTransaction) =>
+  [tx.bankAccountId ?? "", day(tx.date), currency(tx.amount).intValue].join(
+    "|",
+  );
 const lineKey = (tx: BankTransaction) =>
-  [
-    tx.bankAccountId ?? "",
-    day(tx.date),
-    currency(tx.amount).intValue,
-    normalizeText(tx.description.trim()),
-  ].join("|");
+  `${movementKey(tx)}|${normalizeText(tx.description.trim())}`;
 
 /**
  * Linhas do arquivo que ainda não estão na sessão. Duplicata é o mesmo
@@ -273,6 +292,11 @@ const lineKey = (tx: BankTransaction) =>
  * FITID pela posição no arquivo, e outro recorte do mesmo dia repete o número
  * para outro movimento. Id já usado por outra linha ganha sufixo. Movimentos
  * iguais no mesmo dia (duas tarifas de R$ 12) contam pela quantidade.
+ *
+ * O Itaú também troca o histórico de um dia já fechado no recorte seguinte
+ * ("RES APLIC AUT MAIS AP" → "RES APLIC AUT MAIS", "REND PAGO APLIC AUT APR" →
+ * "RENDIMENTOS REND PAGO…"): o que sobra depois do histórico igual ainda casa
+ * por conta, dia e valor.
  */
 export function newStatementLines(
   existing: BankTransaction[],
@@ -280,16 +304,26 @@ export function newStatementLines(
 ): BankTransaction[] {
   const ids = new Set(existing.map((tx) => tx.id));
   const left = new Map<string, number>();
+  const movementLeft = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string, by: number) =>
+    m.set(k, (m.get(k) ?? 0) + by);
   for (const tx of existing) {
-    const k = lineKey(tx);
-    left.set(k, (left.get(k) ?? 0) + 1);
+    bump(left, lineKey(tx), 1);
+    bump(movementLeft, movementKey(tx), 1);
   }
-  const added: BankTransaction[] = [];
+  const rest: BankTransaction[] = [];
   for (const tx of incoming) {
     const k = lineKey(tx);
-    const n = left.get(k) ?? 0;
-    if (n > 0) {
-      left.set(k, n - 1);
+    if ((left.get(k) ?? 0) > 0) {
+      bump(left, k, -1);
+      bump(movementLeft, movementKey(tx), -1);
+    } else rest.push(tx);
+  }
+  const added: BankTransaction[] = [];
+  for (const tx of rest) {
+    const m = movementKey(tx);
+    if ((movementLeft.get(m) ?? 0) > 0) {
+      bump(movementLeft, m, -1);
       continue;
     }
     let id = tx.id;
@@ -431,7 +465,16 @@ export function yieldToRecognize(
   s: ReturnType<typeof summarizeAccount>,
   tax = 0,
 ) {
-  if (!isInvestment(account) || s.pending !== 0 || !s.hasMovement) return 0;
+  // Aplicação automática paga o rendimento na conta corrente ("REND PAGO APLIC
+  // AUT", já líquido) e o saldo dela é o principal: reconhecer aqui contaria
+  // duas vezes (auditoria 11/11/2026: +0,45 em 30/10, −0,36 em 09/11).
+  if (
+    !isInvestment(account) ||
+    isSweep(account) ||
+    s.pending !== 0 ||
+    !s.hasMovement
+  )
+    return 0;
   const gross = currency(s.projectedDifference ?? 0).add(tax).value;
   return gross > 0 ? gross : 0;
 }

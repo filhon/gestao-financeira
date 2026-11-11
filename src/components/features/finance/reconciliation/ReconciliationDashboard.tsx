@@ -120,6 +120,7 @@ import {
   isBalanceLine,
   isBeforeBase,
   isInvestment,
+  isSweep,
   isLocked,
   lastClosing,
   lineTransaction,
@@ -2327,10 +2328,17 @@ export function ReconciliationDashboard() {
   const pendingYield = summary
     ? yieldToRecognize(account, summary, closeTax)
     : 0;
+  const taxEditable =
+    investment &&
+    !isSweep(account) &&
+    periodRedemptions > 0 &&
+    !account.taxExempt;
   const closeTaxBlocker =
     closeTax > 0 && pendingYield > 0 && !account.taxCostCenterId
       ? `Escolha o centro de custo do IR retido no cadastro de ${account.name} para lançar o imposto.`
-      : null;
+      : !pendingYield && !summary?.canClose
+        ? `Informe o IR/IOF da nota de resgate: o banco tem ${formatCurrency(Math.abs(summary?.projectedDifference ?? 0))} a menos que o sistema.`
+        : null;
   const yieldChart = chartAccounts.find((a) => a.id === account.yieldAccountId);
   const yieldAccountName = yieldChart
     ? `${yieldChart.code} · ${yieldChart.name}`
@@ -2373,8 +2381,10 @@ export function ReconciliationDashboard() {
           position={position}
           // Com IR no período também nasce despesa: precisa poder lançar as duas.
           canRecognizeYield={
-            canCreateReceivables && (periodTax === 0 || canCreatePayables)
+            canCreateReceivables &&
+            ((periodTax === 0 && !taxEditable) || canCreatePayables)
           }
+          taxEditable={taxEditable}
           onSetStatementBalance={handleStatementBalance}
           onClose={() => {
             setCloseTax(periodTax);
@@ -2748,7 +2758,7 @@ export function ReconciliationDashboard() {
         workingLabel={closePhase}
         onConfirm={handleClosePeriod}
       >
-        {investment && periodRedemptions > 0 && !account.taxExempt && (
+        {taxEditable && (
           <div className="space-y-1.5">
             <Label htmlFor="close-tax">IR/IOF retido nos resgates</Label>
             <CurrencyInput

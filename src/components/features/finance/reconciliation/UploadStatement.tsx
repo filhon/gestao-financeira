@@ -9,7 +9,11 @@ import { ReconciliationService } from "@/lib/services/reconciliationService";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import { bankAccountService } from "@/lib/services/bankAccountService";
 import { useReconciliationStore } from "@/lib/store/useReconciliationStore";
-import { pickStatementBalance } from "@/lib/bankReconciliation";
+import {
+  isSweep,
+  pickStatementBalance,
+  sweepStatementBalance,
+} from "@/lib/bankReconciliation";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { BankAccount } from "@/lib/types";
 import { toast } from "sonner";
@@ -148,8 +152,29 @@ export function UploadStatement({
           picked.balance,
           picked.date,
         );
-        await queryClient.invalidateQueries({ queryKey: ["bank-accounts"] });
       }
+      // A aplicação automática ligada a esta conta confere pelo principal que
+      // o próprio OFX traz, em vez de um bruto digitado do PDF.
+      const sweepBalance = sweepStatementBalance(target.id, [
+        ...known,
+        ...items,
+      ]);
+      for (const sweep of accounts.filter(
+        (a) => isSweep(a) && a.linkedAccountId === target.id,
+      )) {
+        if (
+          sweepBalance &&
+          (!sweep.statementBalanceDate ||
+            sweepBalance.date >= new Date(sweep.statementBalanceDate))
+        ) {
+          await bankAccountService.setStatementBalance(
+            sweep.id,
+            sweepBalance.balance,
+            sweepBalance.date,
+          );
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ["bank-accounts"] });
 
       if (target.id !== account.id) {
         onAccountDetected(target.id);

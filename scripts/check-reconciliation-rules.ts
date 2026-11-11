@@ -17,6 +17,7 @@ import {
   pickStatementBalance,
   rulePattern,
   summarizeAccount,
+  sweepStatementBalance,
   taxLine,
   transferPair,
   yieldLine,
@@ -251,6 +252,34 @@ assert.equal(newStatementLines([...first, ...merged], second).length, 0);
 const fee = fit("9", "TARIFA", -12);
 assert.equal(newStatementLines([], [fee, { ...fee, id: "x" }]).length, 2);
 assert.equal(newStatementLines([fee], [fee, { ...fee, id: "x" }]).length, 1);
+// Caso real de 09/11/2026: o recorte seguinte trouxe o mesmo dia com outro
+// histórico. Nada entra de novo; um movimento novo do mesmo valor entra.
+const renamed = newStatementLines(
+  [
+    fit("4", "RES APLIC AUT MAIS AP", 4979.36),
+    fit("5", "REND PAGO APLIC AUT APR", 0.04),
+    fit("8", "SDO APLIC AUT MAIS AP", 4797.98),
+  ],
+  [
+    fit("4", "RES APLIC AUT MAIS", 4979.36),
+    fit("5", "RENDIMENTOS REND PAGO APLIC AUT MAIS", 0.04),
+    fit("6", "PIX RECEBIDO", 0.04),
+    fit("8", "SALDO APLIC. AUT.", 4797.98),
+  ],
+);
+assert.deepEqual(
+  renamed.map((t) => t.description),
+  ["PIX RECEBIDO"],
+);
+// Saldo da aplicação automática: o último "SDO/SALDO APLIC" da conta corrente.
+assert.deepEqual(
+  sweepStatementBalance("a1", [
+    fit("8", "SDO APLIC AUT MAIS AP", 4797.98),
+    { ...at(30, "SALDO APLIC. AUT.", 525.09), bankAccountId: "a1" },
+    { ...at(30, "SALDO MOVIMENTAÇÃO CONTA", 1), bankAccountId: "a1" },
+  ]),
+  { balance: 525.09, date: new Date(2026, 9, 30) },
+);
 
 assert.ok(isBeforeBase(statement[0], account));
 assert.ok(!isBeforeBase(statement[1], account));
@@ -370,6 +399,24 @@ assert.equal(
   1,
 );
 assert.equal(taxLine(cdb, 3, new Date(2026, 9, 31)).amount, -3);
+// Aplicação automática: o rendimento cai na conta corrente; fechar não lança.
+assert.equal(
+  yieldToRecognize({ ...cdbAt(11012.34), product: "auto" }, cdbSummary, 3),
+  0,
+);
+// Resgate total do CDB (caso real de 05/11/2026): 29.382,29 no fechamento,
+// 28.914,36 líquido, IR 511,83 → rendimento bruto 43,90.
+const cdbOut = { ...cdbAt(0), openingBalance: 29382.29 };
+assert.equal(
+  yieldToRecognize(
+    cdbOut,
+    summarizeAccount(cdbOut, [
+      { ...at(25, "Resgate", -28914.36, "matched"), bankAccountId: "cdb" },
+    ]),
+    511.83,
+  ),
+  43.9,
+);
 
 // ── Aplicação: curva CDI, lotes PEPS, IR/IOF ──────────────────────────────────
 assert.equal(irRate(180), 0.225);

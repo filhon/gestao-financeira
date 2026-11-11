@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { BankAccount } from "@/lib/types";
 import {
   isInvestment,
+  isSweep,
   lastClosing,
   summarizeAccount,
 } from "@/lib/bankReconciliation";
@@ -43,6 +44,8 @@ interface BalanceStripProps {
   position: Position | null;
   /** Lançar o rendimento cria receita: só quem pode criar receitas. */
   canRecognizeYield: boolean;
+  /** Aplicação com resgate no período: o IR real vem da nota e se digita ao fechar. */
+  taxEditable: boolean;
   onSetStatementBalance: (balance: number, date: Date) => Promise<void>;
   onClose: () => void;
   onShowPending: () => void;
@@ -62,6 +65,7 @@ export function BalanceStrip({
   taxAmount,
   position,
   canRecognizeYield,
+  taxEditable,
   onSetStatementBalance,
   onClose,
   onShowPending,
@@ -76,7 +80,16 @@ export function BalanceStrip({
     summary.base.balance,
   ).value;
   const withYield = yieldAmount > 0;
-  const canClose = withYield ? canRecognizeYield : summary.canClose;
+  // Banco abaixo do sistema depois de um resgate: a estimativa de IR pelos
+  // lotes pode ficar curta (lote de abertura datado na abertura). O IR da nota
+  // de resgate, digitado ao fechar, completa o rendimento (caso real 05/11/2026).
+  const needsTax =
+    !withYield &&
+    taxEditable &&
+    summary.pending === 0 &&
+    projected !== null &&
+    projected < 0;
+  const canClose = withYield || needsTax ? canRecognizeYield : summary.canClose;
   const closeBlocker = canClose
     ? null
     : withYield
@@ -130,7 +143,13 @@ export function BalanceStrip({
         </Figure>
 
         <Figure
-          label={investment ? "Saldo bruto no banco" : "Saldo do extrato"}
+          label={
+            isSweep(account)
+              ? "Saldo principal no banco"
+              : investment
+                ? "Saldo bruto no banco"
+                : "Saldo do extrato"
+          }
           action={
             canManage &&
             summary.statementBalance !== null && (
@@ -282,7 +301,9 @@ export function BalanceStrip({
                 <CheckCircle2 className="h-4 w-4" />
                 {withYield
                   ? `Lançar rendimento e fechar até ${d(summary.statementDate)}`
-                  : `Fechar até ${d(summary.statementDate)}`}
+                  : needsTax
+                    ? `Informar IR e fechar até ${d(summary.statementDate)}`
+                    : `Fechar até ${d(summary.statementDate)}`}
               </Button>
               {closeBlocker && (
                 <span
@@ -427,11 +448,19 @@ function StatementBalanceEditor({
       </PopoverTrigger>
       <PopoverContent className="w-72 space-y-3" align="start">
         <p className="text-sm font-medium">
-          {isInvestment(account)
-            ? "Saldo bruto no banco"
-            : "Saldo final do extrato"}
+          {isSweep(account)
+            ? "Saldo principal no banco"
+            : isInvestment(account)
+              ? "Saldo bruto no banco"
+              : "Saldo final do extrato"}
         </p>
-        {isInvestment(account) && (
+        {isSweep(account) && (
+          <p className="text-xs text-muted-foreground">
+            Vem sozinho do OFX da conta corrente (linha &ldquo;SDO APLIC
+            AUT&rdquo;). O rendimento cai na conta corrente.
+          </p>
+        )}
+        {isInvestment(account) && !isSweep(account) && (
           <>
             <p className="text-xs text-muted-foreground">
               Atualize quando quiser. O rendimento só é lançado ao fechar.
