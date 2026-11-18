@@ -198,8 +198,9 @@ const bankFormValues = (e: EntityBankDetails) => ({
   bankName: e.bankName ?? "",
   agency: e.agency ?? "",
   account: e.account ?? "",
-  accountType: e.accountType,
-  pixKeyType: e.pixKeyType,
+  // Escolha vazia é gravada como null; o schema só aceita undefined.
+  accountType: e.accountType ?? undefined,
+  pixKeyType: e.pixKeyType ?? undefined,
   pixKey: e.pixKey ?? "",
 });
 
@@ -211,7 +212,7 @@ function toFormValues(e: Partial<Entity>): EntityFormData {
     name: e.name ?? "",
     tradeName: e.tradeName ?? "",
     category: e.category ?? "supplier",
-    taxRegime: e.taxRegime,
+    taxRegime: e.taxRegime ?? undefined,
     stateRegistration: e.stateRegistration ?? "",
     municipalRegistration: e.municipalRegistration ?? "",
     email: e.email ?? "",
@@ -230,9 +231,9 @@ function toFormValues(e: Partial<Entity>): EntityFormData {
       id: a.id,
       bankAccountName: a.bankAccountName ?? "",
     })),
-    defaultAccountId: e.defaultAccountId,
-    defaultCostCenterId: e.defaultCostCenterId,
-    defaultPaymentMethod: e.defaultPaymentMethod,
+    defaultAccountId: e.defaultAccountId ?? undefined,
+    defaultCostCenterId: e.defaultCostCenterId ?? undefined,
+    defaultPaymentMethod: e.defaultPaymentMethod ?? undefined,
     paymentTermDays: e.paymentTermDays ?? null,
     lateFeePercent: e.lateFeePercent ?? null,
     monthlyInterestPercent: e.monthlyInterestPercent ?? null,
@@ -544,7 +545,10 @@ export function EntityForm({
   return (
     <Form {...form}>
       <form
-        onSubmit={form.handleSubmit(onSubmit)}
+        onSubmit={form.handleSubmit(onSubmit, (errors) => {
+          console.error("EntityForm inválido:", errors);
+          toast.error("Revise os campos destacados antes de salvar.");
+        })}
         className="@container flex min-h-full flex-col"
       >
         <div className="grid grid-cols-12 gap-x-4 gap-y-4 pb-5">

@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "gestao-financeira-799e6"
-  }
+    "default": "gestao-financeira-799e6",
+    "dev": "hebron-financeiro-dev"
+  },
+  "targets": {},
+  "etags": {}
 }
