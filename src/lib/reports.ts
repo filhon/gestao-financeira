@@ -136,7 +136,15 @@ export interface FlowLine {
   date: Date;
   /** Sempre positivo; `tx.type` diz o sentido. */
   amount: number;
+  /** Já venceu e segue sem baixa. */
+  late?: boolean;
 }
+
+/** Situação da linha, com o vencimento quando ele já passou sem baixa. */
+export const lineSituation = (l: Pick<FlowLine, "tx" | "late">) =>
+  l.late
+    ? `${situationOf(l.tx)} · venceu em ${format(l.tx.dueDate, "dd/MM/yyyy")}`
+    : situationOf(l.tx);
 
 export interface FlowBucket {
   key: string;
@@ -169,11 +177,18 @@ export interface CashFlowReport {
   buckets: FlowBucket[];
   byStage: StageTotal[];
   lines: FlowLine[];
+  /**
+   * Vencidos sem baixa que ficam fora do saldo: num período encerrado, os que
+   * venceram nele; no período de hoje, os a receber (podem não entrar nunca).
+   */
+  pending: { inflow: number; outflow: number; lines: FlowLine[] };
 }
 
 export interface FlowOptions {
   start: Date;
   end: Date;
+  /** Separa o que já aconteceu do que ainda é previsão. */
+  today: Date;
   opening?: number;
   stages: readonly FlowStage[];
   costCenterIds?: readonly string[];
@@ -193,17 +208,32 @@ export function buildCashFlow(
   const wanted = new Set(o.stages);
   const opening = currency(o.opening ?? 0);
 
+  const today = startOfDay(o.today);
+  const closed = to < today;
+
   const lines: FlowLine[] = [];
+  const pending: FlowLine[] = [];
   for (const tx of transactions) {
     const stage = stageOf(tx);
     if (!stage || !wanted.has(stage)) continue;
-    const date = effectiveDate(tx);
-    if (date < from || date > to) continue;
+    let date = effectiveDate(tx);
+    // O dinheiro não se moveu no vencimento que passou. A mesma regra do
+    // painel: a pagar vencido é dívida certa e sai do caixa hoje; a receber
+    // vencido pode não entrar nunca e fica fora do saldo.
+    const late = stage !== "realized" && date < today;
+    const out = late && (closed || tx.type === "receivable");
+    if (late && !out) date = today;
+    // Recebível vencido antes do período de hoje continua em aberto hoje.
+    const stillOpen = out && !closed && from <= today;
+    if (!stillOpen && (date < from || date > to)) continue;
     const amount = flowAmount(tx, o.costCenterIds);
     if (!amount) continue;
-    lines.push({ tx, stage, date, amount });
+    (out ? pending : lines).push({ tx, stage, date, amount, late });
   }
-  lines.sort((a, b) => a.date.getTime() - b.date.getTime());
+  const byDate = (a: FlowLine, b: FlowLine) =>
+    a.date.getTime() - b.date.getTime();
+  lines.sort(byDate);
+  pending.sort(byDate);
 
   const keyOf = (d: Date) =>
     format(d, o.granularity === "day" ? "yyyy-MM-dd" : "yyyy-MM");
@@ -297,8 +327,18 @@ export function buildCashFlow(
         ["realized", ...FORECAST_STAGES].indexOf(b.stage),
     ),
     lines,
+    pending: {
+      inflow: sumOf(pending, "receivable"),
+      outflow: sumOf(pending, "payable"),
+      lines: pending,
+    },
   };
 }
+
+const sumOf = (lines: FlowLine[], type: Transaction["type"]) =>
+  lines
+    .filter((l) => l.tx.type === type)
+    .reduce((s, l) => s.add(l.amount), currency(0)).value;
 
 /** Menor saldo de fim de dia; um pagamento e um recebimento no mesmo dia se compensam. */
 function lowestAtDayEnd(lines: FlowLine[], opening: number, from: Date) {
@@ -377,10 +417,10 @@ export function projectRecurrences(
  * Saldo no início do período a partir do saldo de hoje.
  *
  * Período que começa no passado: desfaz o que foi pago ou recebido do início
- * até hoje. Período futuro: soma o previsto de hoje até a véspera do início.
- * `movements` precisa cobrir esse intervalo.
- * ponytail: contas vencidas e não pagas antes de hoje não entram no saldo de
- * um período futuro; o dashboard as trata à parte, aqui ficam de fora.
+ * até hoje. Período futuro: soma o previsto de hoje até a véspera do início e
+ * tira o que já venceu a pagar, com a mesma regra de `buildCashFlow`: o saldo
+ * final de um período é o inicial do seguinte. `movements` precisa cobrir esse
+ * intervalo e, no período futuro, os vencidos a pagar em aberto.
  */
 export function openingFromToday(
   todayBalance: number,
@@ -403,13 +443,13 @@ export function openingFromToday(
     return balance.value;
   }
   const wanted = new Set(stages);
-  const tomorrow = startOfDay(addDays(today, 1));
+  const todayStart = startOfDay(today);
   for (const t of movements) {
     const stage = stageOf(t);
     if (!stage || stage === "realized" || !wanted.has(stage)) continue;
-    if (t.dueDate >= tomorrow && t.dueDate < from) {
-      balance = balance.add(signed(t, flowAmount(t)));
-    }
+    if (t.dueDate >= from) continue;
+    if (t.dueDate < todayStart && t.type === "receivable") continue;
+    balance = balance.add(signed(t, flowAmount(t)));
   }
   return balance.value;
 }

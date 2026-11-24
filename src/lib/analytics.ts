@@ -777,8 +777,8 @@ const fromDayKey = (key: string) => new Date(`${key}T12:00:00`);
 /**
  * O que ainda não passou pelo banco, de hoje a `months` meses, por dia e
  * estágio: o mesmo fluxo de caixa dos Relatórios, com as recorrências ainda
- * não lançadas. Vencido e não baixado fica de fora (como em `openingFromToday`):
- * não há data para pôr no futuro; a tela mostra o total à parte.
+ * não lançadas. Vencido e não baixado fica de fora: não há data para pôr no
+ * futuro; a tela mostra o total à parte.
  */
 export function buildProjectionDays(
   transactions: Transaction[],
@@ -789,8 +789,11 @@ export function buildProjectionDays(
   const start = startOfDay(today);
   const end = addMonths(start, months);
   const flow = buildCashFlow(
-    [...transactions, ...projectRecurrences(templates, start, end)],
-    { start, end, stages: FORECAST_STAGES, granularity: "day" },
+    [
+      ...transactions.filter((t) => t.dueDate >= start),
+      ...projectRecurrences(templates, start, end),
+    ],
+    { start, end, today: start, stages: FORECAST_STAGES, granularity: "day" },
   );
   const rows = new Map<string, ProjectionDay>();
   for (const l of flow.lines) {

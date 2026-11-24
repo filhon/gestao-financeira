@@ -6,15 +6,20 @@
  *
  * Segurança:
  *   - Requer cookie `auth_token` válido (Firebase ID Token).
- *   - `path` deve começar com "comprovantes/<companyId>/" para evitar
- *     path traversal.
+ *   - `path` deve começar com uma das pastas por empresa ("comprovantes/",
+ *     "transactions/", "attachments/" + <companyId>) para evitar path
+ *     traversal. São as mesmas que as storage.rules liberam para leitura.
  *   - Acesso verificado via custom claims do token; se claims negam o acesso
  *     (ausentes ou desatualizadas), cai back para consulta no Firestore.
  */
+import { once } from "node:events";
+import { Readable } from "node:stream";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
+
+const COMPANY_FOLDERS = ["comprovantes/", "transactions/", "attachments/"];
 
 export async function GET(req: NextRequest) {
   // ?inline=1 → serve inline (para <iframe> preview); default → attachment
@@ -37,11 +42,14 @@ export async function GET(req: NextRequest) {
 
   // ── Path validation ───────────────────────────────────────────────────────
   const storagePath = req.nextUrl.searchParams.get("path");
-  if (!storagePath || !storagePath.startsWith("comprovantes/")) {
+  if (
+    !storagePath ||
+    !COMPANY_FOLDERS.some((folder) => storagePath.startsWith(folder))
+  ) {
     return NextResponse.json({ error: "Caminho inválido." }, { status: 400 });
   }
 
-  // Path format: comprovantes/<companyId>/<filename>
+  // Path format: <folder>/<companyId>/...
   const companyId = storagePath.split("/")[1];
   if (!companyId) {
     return NextResponse.json({ error: "Caminho inválido." }, { status: 400 });
@@ -99,7 +107,10 @@ export async function GET(req: NextRequest) {
 
     const bucket = adminStorage.bucket(bucketName);
     const file = bucket.file(storagePath);
-    const [contents] = await file.download();
+    // Em fluxo: a função da Vercel recusa corpo inteiro acima de 4,5 MB, e os
+    // anexos chegam a 10 MB. Espera o primeiro pedaço para o 404 virar resposta.
+    const stream = file.createReadStream();
+    await once(stream, "readable");
 
     const rawName = storagePath.split("/").pop() ?? "comprovante";
     // Sanitise filename: strip CR/LF/quotes that would break the header
@@ -121,7 +132,7 @@ export async function GET(req: NextRequest) {
       ? `inline; filename="${safeName}"`
       : `attachment; filename="${safeName}"`;
 
-    return new NextResponse(contents as unknown as BodyInit, {
+    return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
       status: 200,
       headers: {
         "Content-Type": mimeType,

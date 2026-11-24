@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { addDays, format, isValid, parse, startOfDay, subDays } from "date-fns";
+import { format, isValid, parse, startOfDay, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import {
@@ -106,13 +106,18 @@ import {
 
 type ReportKind = "cash_flow" | "dre" | "payments";
 type FlowMode = "realized" | "forecast" | "both";
-type ExportFormat = "pdf" | "pdf_receipts" | "excel" | "csv";
+type ExportFormat = "pdf" | "pdf_receipts" | "package" | "excel" | "csv";
 
 const EXPORTS: Record<
   ReportKind,
   { format: ExportFormat; label: string; hint: string }[]
 > = {
   cash_flow: [
+    {
+      format: "package",
+      label: "Pacote para a contabilidade",
+      hint: "ZIP com a planilha, as notas e os comprovantes",
+    },
     { format: "pdf", label: "PDF", hint: "Extrato dia a dia com saldo" },
     {
       format: "excel",
@@ -147,6 +152,15 @@ const MODE_LABEL: Record<FlowMode, string> = {
   forecast: "Previsto",
   both: "Realizado + previsto",
 };
+
+/** Ainda esperando pagamento ou recebimento. */
+const OPEN_STATUSES = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "pending_authorization",
+  "authorized",
+];
 
 /** Junta as consultas (vencimento, pagamento, competência) sem repetir. */
 function dedupe(lists: Transaction[][]) {
@@ -342,7 +356,18 @@ function Reports() {
   // Saldo da empresa não vale para um recorte (centro de custo ou só os
   // próprios lançamentos): aí o fluxo mostra o acumulado do recorte.
   const isPayments = kind === "payments";
-  const hasOpening = isFlow && !ccIds && !onlyOwnPayables && !entity;
+  // Só o previsto, com o período já começado, também não forma saldo: falta o
+  // que já passou pelo banco.
+  const todayStart = +startOfDay(new Date());
+  const hasOpening =
+    isFlow &&
+    !ccIds &&
+    !onlyOwnPayables &&
+    !entity &&
+    (mode !== "forecast" || +range.start > todayStart);
+  /** Período encerrado: só o realizado conta; vencido sem baixa vai à parte. */
+  const closedPeriod = +range.end < todayStart;
+  const wantsOverdue = isFlow && mode !== "realized" && !closedPeriod;
   const compRange = useMemo(
     () =>
       isPayments ? null : comparisonRange(range.start, range.end, comparison),
@@ -423,10 +448,26 @@ function Reports() {
     [templatesQuery.data, createdBy],
   );
 
+  // Vencidos em aberto de qualquer data: os a pagar saem do caixa hoje.
+  const overdueQuery = useQuery({
+    queryKey: ["report-overdue", companyId, createdBy ?? "", todayStart],
+    queryFn: () =>
+      transactionService.getAll({
+        companyId: companyId!,
+        statuses: OPEN_STATUSES,
+        endDate: subDays(new Date(todayStart), 1),
+        // O papel "user" só lê as próprias contas a pagar.
+        ...(createdBy ? { createdBy, type: "payable" } : {}),
+      }),
+    enabled: !!companyId && canViewReports && wantsOverdue,
+    staleTime: 60_000,
+  });
+
   const openingQuery = useQuery({
     queryKey: [
       "report-opening",
       companyId,
+      todayStart,
       +range.start,
       stages.join(","),
       templates.length,
@@ -444,7 +485,7 @@ function Reports() {
           endDate: today,
         });
       } else {
-        const from = addDays(startOfDay(today), 1);
+        const from = startOfDay(today);
         const eve = subDays(range.start, 1);
         movements = [
           ...(await transactionService.getAll({
@@ -453,6 +494,7 @@ function Reports() {
             endDate: eve,
           })),
           ...(wantsRecurring ? projectRecurrences(templates, from, eve) : []),
+          ...(wantsOverdue ? (overdueQuery.data ?? []) : []),
         ];
       }
       return {
@@ -463,13 +505,17 @@ function Reports() {
     enabled:
       !!companyId &&
       hasOpening &&
-      (!wantsRecurring || templatesQuery.isSuccess),
+      (!wantsRecurring || templatesQuery.isSuccess) &&
+      (!wantsOverdue || overdueQuery.isSuccess),
     staleTime: 60_000,
   });
 
   const openingTyped =
     openingOverride?.start === +range.start ? openingOverride.value : null;
-  const opening = hasOpening
+  /** Sem saldo calculado nem digitado, o fluxo mostra o acumulado. */
+  const openingKnown =
+    hasOpening && (openingTyped !== null || !!openingQuery.data);
+  const opening = openingKnown
     ? (openingTyped ?? openingQuery.data?.value ?? 0)
     : 0;
 
@@ -484,9 +530,17 @@ function Reports() {
     const projected = wantsRecurring
       ? projectRecurrences(templates, range.start, range.end)
       : [];
-    return buildCashFlow(scoped([...current.data.transactions, ...projected]), {
+    const all = [
+      ...dedupe([
+        current.data.transactions,
+        wantsOverdue ? (overdueQuery.data ?? []) : [],
+      ]),
+      ...projected,
+    ];
+    return buildCashFlow(scoped(all), {
       start: range.start,
       end: range.end,
+      today: new Date(todayStart),
       opening,
       stages,
       costCenterIds: ccIds,
@@ -496,6 +550,9 @@ function Reports() {
   }, [
     isFlow,
     current.data,
+    overdueQuery.data,
+    wantsOverdue,
+    todayStart,
     templates,
     wantsRecurring,
     range,
@@ -515,6 +572,7 @@ function Reports() {
     return buildCashFlow(scoped([...prior.data.transactions, ...projected]), {
       start: compRange.start,
       end: compRange.end,
+      today: new Date(todayStart),
       stages,
       costCenterIds: ccIds,
       granularity: gran,
@@ -523,6 +581,7 @@ function Reports() {
   }, [
     isFlow,
     prior.data,
+    todayStart,
     templates,
     wantsRecurring,
     compRange,
@@ -591,7 +650,7 @@ function Reports() {
   });
 
   const isEmpty = isFlow
-    ? !!flow && flow.lines.length === 0
+    ? !!flow && flow.lines.length === 0 && flow.pending.lines.length === 0
     : isPayments
       ? !!payments && payments.lines.length === 0
       : !!dre && !dre.rows.some((r) => r.total !== 0);
@@ -601,8 +660,10 @@ function Reports() {
     isPayments
       ? null
       : isFlow
-        ? MODE_LABEL[mode] +
-          (mode !== "realized" && forecast.length < FORECAST_STAGES.length
+        ? (closedPeriod ? "Realizado (período encerrado)" : MODE_LABEL[mode]) +
+          (!closedPeriod &&
+          mode !== "realized" &&
+          forecast.length < FORECAST_STAGES.length
             ? ` (previsto: ${forecast.map((s) => STAGE_INFO[s].label.toLowerCase()).join(", ")})`
             : "")
         : regime === "cash"
@@ -665,9 +726,45 @@ function Reports() {
           await reportService.exportPaymentsExcel(payments, pctx);
         if (fmt === "csv") reportService.exportPaymentsCSV(payments, pctx);
       } else if (isFlow && flow) {
-        if (fmt === "pdf") await reportService.generateCashFlowPDF(flow, ctx);
-        if (fmt === "excel") await reportService.exportCashFlowExcel(flow, ctx);
+        const fctx = {
+          ...ctx,
+          granularity: gran,
+          opening: !openingKnown
+            ? ({ source: "none" } as const)
+            : openingTyped !== null
+              ? ({
+                  source: "typed",
+                  calculated: openingQuery.data?.value ?? null,
+                } as const)
+              : ({ source: "calculated" } as const),
+        };
+        if (fmt === "pdf") await reportService.generateCashFlowPDF(flow, fctx);
+        if (fmt === "excel")
+          await reportService.exportCashFlowExcel(flow, fctx);
         if (fmt === "csv") reportService.exportCashFlowCSV(flow, ctx);
+        if (fmt === "package") {
+          const { failed } = await reportService.exportCashFlowPackage(
+            flow,
+            fctx,
+            (done, total) => setReceiptProgress(`Baixando ${done} de ${total}`),
+          );
+          if (failed.length > 0) {
+            toast.warning(
+              `${failed.length} arquivo(s) ficaram fora do pacote. A planilha marca cada um como "não baixado".`,
+              {
+                description: [
+                  ...failed.slice(0, 5),
+                  ...(failed.length > 5 ? [`e mais ${failed.length - 5}`] : []),
+                ].join("\n"),
+                duration: 15_000,
+                action: {
+                  label: "Gerar de novo",
+                  onClick: () => void handleExport(fmt),
+                },
+              },
+            );
+          }
+        }
       } else if (dre) {
         const dreCtx = {
           ...ctx,
@@ -721,7 +818,12 @@ function Reports() {
   if (!canViewReports) return null;
 
   const loading =
-    current.isLoading || (wantsRecurring && templatesQuery.isLoading);
+    current.isLoading ||
+    (wantsRecurring && templatesQuery.isLoading) ||
+    (wantsOverdue && overdueQuery.isLoading) ||
+    // Sem o saldo inicial a tabela e o arquivo sairiam com zero no lugar dele.
+    (hasOpening && openingTyped === null && openingQuery.isLoading);
+  const loadError = current.error ?? (wantsOverdue ? overdueQuery.error : null);
 
   return (
     <div className="flex flex-col gap-5">
@@ -752,9 +854,7 @@ function Reports() {
             <Button
               variant="outline"
               loading={exporting !== null}
-              disabled={
-                exporting !== null || loading || isEmpty || !!current.error
-              }
+              disabled={exporting !== null || loading || isEmpty || !!loadError}
             >
               {exporting === null && <Download className="h-4 w-4" />}
               {receiptProgress ?? "Exportar"}
@@ -1026,7 +1126,7 @@ function Reports() {
           )}
         </div>
 
-        {isFlow && mode !== "realized" && (
+        {isFlow && mode !== "realized" && !closedPeriod && (
           <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
             <span className="mr-1 text-xs text-muted-foreground">
               Previsto inclui
@@ -1084,18 +1184,28 @@ function Reports() {
                 do período. Pode ajustar.
               </span>
             ) : (
-              <span>Sem saldo de referência: digite o saldo das contas.</span>
+              <span>
+                Sem saldo de referência: o relatório mostra só o acumulado. Para
+                ver o saldo, digite o valor das contas.
+              </span>
             )}
           </div>
         )}
       </section>
 
       {/* ── Relatório ─────────────────────────────────────────────────── */}
-      {current.error ? (
+      {loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border py-16 text-center">
           <AlertCircle className="h-6 w-6 text-muted-foreground" />
           <p className="text-sm">Não foi possível carregar os lançamentos.</p>
-          <Button size="sm" variant="outline" onClick={() => current.refetch()}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (current.error) void current.refetch();
+              if (overdueQuery.error) void overdueQuery.refetch();
+            }}
+          >
             Tentar de novo
           </Button>
         </div>
@@ -1122,8 +1232,9 @@ function Reports() {
         <CashFlowView
           report={flow}
           previous={flowPrev}
-          showStages={mode !== "realized"}
-          hasOpening={hasOpening}
+          showStages={mode !== "realized" && !closedPeriod}
+          hasOpening={openingKnown}
+          closedPeriod={closedPeriod}
           granularity={gran}
           onDrill={setDrill}
         />

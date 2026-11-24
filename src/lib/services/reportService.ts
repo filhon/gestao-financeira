@@ -1,4 +1,5 @@
 import type jsPDF from "jspdf";
+import type { Row } from "exceljs";
 
 // jspdf + autotable pesam ~150 KB gz: carregam só quando um PDF é gerado,
 // fora do bundle inicial da página.
@@ -12,7 +13,7 @@ const loadPdf = async () => {
 import currency from "currency.js";
 import { Transaction, Entity, ChartAccount, CostCenter } from "@/lib/types";
 import { withPayeeAccount } from "@/lib/entityBankAccounts";
-import { format } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { comprovanteProxyUrl, formatCurrency } from "@/lib/utils";
 import { formatCpfCnpj } from "@/lib/validations/cnpj";
@@ -29,10 +30,12 @@ import {
 import {
   CashFlowReport,
   FlowLine,
+  Granularity,
   PaymentLine,
   PaymentsReport,
   STAGE_INFO,
   isProjection,
+  lineSituation,
   periodSlug,
   periodText,
   situationOf,
@@ -55,6 +58,16 @@ export interface ReportContext {
   costCenterIds?: string[];
 }
 
+/** O que o arquivo do fluxo precisa dizer sobre o saldo inicial. */
+export type CashFlowContext = ReportContext & {
+  granularity: Granularity;
+  opening:
+    | { source: "calculated" }
+    | { source: "typed"; calculated: number | null }
+    /** Recorte ou sem saldo de referência: o saldo é só o acumulado. */
+    | { source: "none" };
+};
+
 const filterSuffix = (ctx: ReportContext) =>
   ctx.filters ? `  ·  ${ctx.filters}` : "";
 
@@ -72,7 +85,112 @@ const downloadBlob = (blob: Blob, filename: string) => {
 const XLSX_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-const lineStatus = (line: FlowLine) => situationOf(line.tx);
+const PAYMENT_METHOD_TEXT: Record<string, string> = {
+  pix: "PIX",
+  boleto: "Boleto",
+  transfer: "Transferência",
+  credit_card: "Cartão de crédito",
+  cash: "Dinheiro",
+};
+
+/** Cadastros do arquivo, resolvidos uma vez: nomes em vez de códigos. */
+const lineLookups = (ctx: ReportContext) => {
+  const entityById = new Map((ctx.entities ?? []).map((e) => [e.id, e]));
+  const accountById = new Map((ctx.accounts ?? []).map((a) => [a.id, a]));
+  const ccName = new Map((ctx.costCenters ?? []).map((c) => [c.id, c.name]));
+  const entityOf = (t: Transaction) =>
+    t.entityId ? entityById.get(t.entityId) : undefined;
+  const partyOf = (t: Transaction) =>
+    entityOf(t)?.name || t.supplierOrClient || "";
+  return {
+    partyOf,
+    documentOf: (t: Transaction) => formatCpfCnpj(entityOf(t)?.document ?? ""),
+    accountOf: (t: Transaction) => {
+      const a = t.accountId ? accountById.get(t.accountId) : undefined;
+      return a ? `${a.code} ${a.name}` : "";
+    },
+    costCentersOf: (t: Transaction) => {
+      const split = t.costCenterAllocation ?? [];
+      if (split.length > 1) {
+        return split
+          .map(
+            (a) =>
+              `${ccName.get(a.costCenterId) ?? a.costCenterId} (${a.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%)`,
+          )
+          .join(", ");
+      }
+      const id = split[0]?.costCenterId ?? t.costCenterId;
+      return id ? (ccName.get(id) ?? id) : "";
+    },
+    competenceOf: (t: Transaction) =>
+      t.competence
+        ? `${t.competence.slice(5)}/${t.competence.slice(0, 4)}`
+        : "",
+    methodOf: (t: Transaction) =>
+      t.paymentMethod ? (PAYMENT_METHOD_TEXT[t.paymentMethod] ?? "") : "",
+    /** Por dia e, no dia, por favorecido: a mesma ordem em PDF e Excel. */
+    sort: (lines: FlowLine[]) =>
+      [...lines].sort(
+        (a, b) =>
+          startOfDay(a.date).getTime() - startOfDay(b.date).getTime() ||
+          partyOf(a.tx).localeCompare(partyOf(b.tx), "pt-BR", {
+            sensitivity: "base",
+          }),
+      ),
+  };
+};
+
+/** Avisos impressos no arquivo: quem recebe não viu a tela. */
+const cashFlowNotes = (report: CashFlowReport, ctx: CashFlowContext) => {
+  const { inflow, outflow, lines } = report.pending;
+  const pendingText = [
+    outflow > 0 ? `${formatCurrency(outflow)} a pagar` : null,
+    inflow > 0 ? `${formatCurrency(inflow)} a receber` : null,
+  ]
+    .filter(Boolean)
+    .join(" e ");
+  return [
+    ...(ctx.opening.source === "typed"
+      ? [
+          `Saldo inicial informado manualmente${
+            ctx.opening.calculated !== null
+              ? `; o calculado pelo sistema é ${formatCurrency(ctx.opening.calculated)}`
+              : ""
+          }.`,
+        ]
+      : []),
+    ...(ctx.opening.source === "none"
+      ? [
+          "Sem saldo inicial: os valores mostram o acumulado deste recorte, não o saldo das contas.",
+        ]
+      : []),
+    ...(lines.length > 0
+      ? [
+          `Fora do saldo: ${lines.length} ${lines.length === 1 ? "lançamento vencido" : "lançamentos vencidos"} sem baixa (${pendingText}).`,
+        ]
+      : []),
+    ...(report.lines.some((l) => l.late)
+      ? ["Vencidos a pagar em aberto entram na data de hoje."]
+      : []),
+  ];
+};
+
+// ── Documentos do lançamento ────────────────────────────────────────────────
+
+const invoicesOf = (t: Transaction) =>
+  (t.attachments ?? []).filter((a) => a.category === "invoice" && !!a.url);
+
+/** Caminho no Storage dentro da URL pública de download. */
+const storagePathOf = (url: string) => {
+  const m = url.match(/\/o\/([^?]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+};
+
+/** Arquivos do lançamento dentro do pacote; null = o download falhou. */
+interface PackagedFiles {
+  invoices: (string | null)[];
+  receipt?: string | null;
+}
 
 const lineDescription = (line: FlowLine) =>
   isProjection(line.tx)
@@ -147,7 +265,7 @@ const dreRowLabel = (r: DreRow<unknown>) => {
   return r.label;
 };
 
-let interFontCache: string | null = null;
+const fontCache = new Map<string, string>();
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   let binary = "";
@@ -160,44 +278,32 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   return btoa(binary);
 };
 
-type ReportFont = "Inter" | "helvetica";
+const REPORT_FONT = "IBMPlexSans";
+const FONT_FILES = {
+  normal: "IBMPlexSans-Regular.ttf",
+  bold: "IBMPlexSans-SemiBold.ttf",
+} as const;
 
-const getDocFontList = (doc: jsPDF): Record<string, string[]> => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const list = (doc as any).getFontList?.();
-  return (list ?? {}) as Record<string, string[]>;
-};
-
-const ensureInterFont = async (doc: jsPDF): Promise<boolean> => {
-  try {
-    const fontList = getDocFontList(doc);
-    if (fontList.Inter) return true;
-
-    if (!interFontCache) {
-      const res = await fetch("/fonts/Inter-Regular.ttf?v=4.1", {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("Falha ao carregar a fonte Inter");
-      const buffer = await res.arrayBuffer();
-      interFontCache = arrayBufferToBase64(buffer);
-    }
-
-    doc.addFileToVFS("Inter-Regular.ttf", interFontCache);
-    doc.addFont("Inter-Regular.ttf", "Inter", "normal", "Identity-H");
-    // Registrar também como bold para evitar fallback para Times (serifada)
-    doc.addFont("Inter-Regular.ttf", "Inter", "bold", "Identity-H");
-
-    const updatedFontList = getDocFontList(doc);
-    return !!updatedFontList.Inter;
-  } catch (error) {
-    console.warn("Falha ao carregar a fonte Inter. Usando padrão.", error);
-    return false;
-  }
-};
+type ReportFont = typeof REPORT_FONT | "helvetica";
 
 export const ensureReportFont = async (doc: jsPDF): Promise<ReportFont> => {
-  const interOk = await ensureInterFont(doc);
-  const font: ReportFont = interOk ? "Inter" : "helvetica";
+  let font: ReportFont = REPORT_FONT;
+  try {
+    await Promise.all(
+      Object.entries(FONT_FILES).map(async ([style, file]) => {
+        if (!fontCache.has(file)) {
+          const res = await fetch(`/fonts/pdf/${file}`);
+          if (!res.ok) throw new Error(`Falha ao carregar a fonte ${file}`);
+          fontCache.set(file, arrayBufferToBase64(await res.arrayBuffer()));
+        }
+        doc.addFileToVFS(file, fontCache.get(file)!);
+        doc.addFont(file, REPORT_FONT, style, "Identity-H");
+      }),
+    );
+  } catch (error) {
+    console.warn("Fonte do relatório indisponível. Usando a padrão.", error);
+    font = "helvetica";
+  }
   doc.setFont(font, "normal");
   doc.setCharSpace(0);
   return font;
@@ -382,851 +488,714 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejeitado",
 };
 
+/**
+ * Planilha do fluxo: datas e fórmulas de verdade, para filtrar e conferir.
+ * Com `files`, as colunas de documento apontam para os arquivos do pacote;
+ * sem, só dizem se o documento existe (um link pediria login).
+ */
+async function buildCashFlowWorkbook(
+  report: CashFlowReport,
+  ctx: CashFlowContext,
+  files?: Map<string, PackagedFiles>,
+) {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Hebron ASEEC · Financeiro";
+  workbook.created = new Date();
+
+  const BRL = '"R$" #,##0.00;[Red]-"R$" #,##0.00';
+  const DATE = "dd/mm/yyyy";
+  /** O ExcelJS grava em UTC: meia-noite daqui viraria 03:00 na célula. */
+  const day = (d: Date) =>
+    new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const formula = (f: string, result: number) => ({ formula: f, result });
+  const known = ctx.opening.source !== "none";
+  const balanceLabel = known ? "Saldo" : "Acumulado";
+  const look = lineLookups(ctx);
+  const landscape = {
+    orientation: "landscape" as const,
+    paperSize: 9,
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+  };
+  const headStyle = (row: Row) => {
+    row.height = 20;
+    row.eachCell((c) => {
+      c.font = { bold: true, size: 10, color: { argb: "FF12161F" } };
+      c.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF3F5F9" },
+      };
+      c.border = { bottom: { style: "thin", color: { argb: "FF12161F" } } };
+      c.alignment = { vertical: "middle", wrapText: true };
+    });
+  };
+
+  // ── Extrato ───────────────────────────────────────────────────────────────
+  const HEAD = 4;
+  const sheet = workbook.addWorksheet("Extrato", {
+    views: [{ state: "frozen", ySplit: HEAD, xSplit: 2 }],
+    pageSetup: { ...landscape, printTitlesRow: `${HEAD}:${HEAD}` },
+  });
+  const columns: { header: string; width: number; numFmt?: string }[] = [
+    { header: "Nº", width: 6 },
+    { header: "Data", width: 12, numFmt: DATE },
+    { header: "Vencimento", width: 12, numFmt: DATE },
+    { header: "Descrição", width: 46 },
+    { header: "Favorecido ou pagador", width: 38 },
+    { header: "CNPJ/CPF", width: 20 },
+    { header: "Nº documento", width: 16 },
+    { header: "Centro de custo", width: 28 },
+    { header: "Conta contábil", width: 28 },
+    { header: "Competência", width: 13 },
+    { header: "Situação", width: 22 },
+    { header: "Forma de pagamento", width: 18 },
+    { header: "Valor original", width: 16, numFmt: BRL },
+    { header: "Entrada", width: 16, numFmt: BRL },
+    { header: "Saída", width: 16, numFmt: BRL },
+    { header: balanceLabel, width: 16, numFmt: BRL },
+    { header: "Nota fiscal", width: 14 },
+    { header: "Comprovante", width: 14 },
+  ];
+  columns.forEach((c, i) => {
+    sheet.getColumn(i + 1).width = c.width;
+  });
+  sheet.getCell("A1").value = ctx.companyName;
+  sheet.getCell("A1").font = { bold: true, size: 13 };
+  sheet.getCell("A2").value =
+    `Fluxo de caixa  ·  ${periodText(ctx.start, ctx.end)}${filterSuffix(ctx)}  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
+  sheet.getCell("A2").font = { size: 9, color: { argb: "FF60636C" } };
+  sheet.getCell("O3").value = known ? "Saldo inicial" : "Sem saldo inicial";
+  sheet.getCell("O3").alignment = { horizontal: "right" };
+  sheet.getCell("P3").value = report.opening;
+  sheet.getCell("P3").numFmt = BRL;
+  sheet.getRow(HEAD).values = columns.map((c) => c.header);
+  headStyle(sheet.getRow(HEAD));
+
+  const link = (path: string | null | undefined, label: string) =>
+    path ? { text: label, hyperlink: path } : "não baixado";
+  const first = HEAD + 1;
+  let running = currency(report.opening);
+  const sorted = look.sort(report.lines);
+  sorted.forEach((line, i) => {
+    const t = line.tx;
+    const n = first + i;
+    const income = t.type === "receivable";
+    running = income ? running.add(line.amount) : running.subtract(line.amount);
+    const invoices = invoicesOf(t);
+    const packed = files?.get(t.id);
+    const row = sheet.addRow([
+      i + 1,
+      day(line.date),
+      day(t.dueDate),
+      lineDescription(line),
+      look.partyOf(t),
+      look.documentOf(t),
+      t.documentNumber ?? "",
+      look.costCentersOf(t),
+      look.accountOf(t),
+      look.competenceOf(t),
+      lineSituation(line),
+      look.methodOf(t),
+      t.amount,
+      income ? line.amount : null,
+      income ? null : line.amount,
+      formula(
+        `$P$3+SUM(N$${first}:N${n})-SUM(O$${first}:O${n})`,
+        running.value,
+      ),
+      invoices.length === 0
+        ? ""
+        : packed
+          ? link(
+              packed.invoices.find(Boolean),
+              invoices.length > 1 ? `${invoices.length} notas` : "Abrir",
+            )
+          : "Sim",
+      !receiptUrl(t) ? "" : packed ? link(packed.receipt, "Abrir") : "Sim",
+    ]);
+    columns.forEach((c, k) => {
+      const cell = row.getCell(k + 1);
+      if (c.numFmt) cell.numFmt = c.numFmt;
+      cell.border = { bottom: { style: "hair", color: { argb: "FFD5D7DD" } } };
+      if (
+        typeof cell.value === "object" &&
+        cell.value &&
+        "hyperlink" in cell.value
+      )
+        cell.font = { color: { argb: "FF202C85" }, underline: true };
+    });
+  });
+  const last = HEAD + sorted.length;
+  if (sorted.length > 0) {
+    sheet.autoFilter = {
+      from: { row: HEAD, column: 1 },
+      to: { row: last, column: columns.length },
+    };
+    // SUBTOTAL: o total acompanha o filtro.
+    const total = sheet.addRow([]);
+    total.getCell(13).value = "Total";
+    total.getCell(14).value = formula(
+      `SUBTOTAL(9,N${first}:N${last})`,
+      report.inflow,
+    );
+    total.getCell(15).value = formula(
+      `SUBTOTAL(9,O${first}:O${last})`,
+      report.outflow,
+    );
+    total.getCell(16).value = formula(
+      `P3+N${last + 1}-O${last + 1}`,
+      report.closing,
+    );
+    total.font = { bold: true };
+    [14, 15, 16].forEach((c) => {
+      total.getCell(c).numFmt = BRL;
+      total.getCell(c).border = { top: { style: "thin" } };
+    });
+  }
+
+  // ── Fluxo: a tabela da tela ───────────────────────────────────────────────
+  const flow = workbook.addWorksheet("Fluxo", {
+    views: [{ state: "frozen", ySplit: 1 }],
+    pageSetup: { ...landscape, printTitlesRow: "1:1" },
+  });
+  flow.columns = [
+    { header: ctx.granularity === "day" ? "Data" : "Mês", width: 16 },
+    { header: "Entradas", width: 18 },
+    { header: "Saídas", width: 18 },
+    { header: "Resultado", width: 18 },
+    { header: balanceLabel, width: 18 },
+    { header: "Tem previsto", width: 14 },
+  ];
+  headStyle(flow.getRow(1));
+  flow.addRow([
+    known ? "Saldo inicial" : "Sem saldo inicial",
+    null,
+    null,
+    null,
+    report.opening,
+  ]);
+  report.buckets.forEach((b, i) => {
+    const n = i + 3;
+    const [yy, mm, dd = 1] = b.key.split("-").map(Number);
+    const row = flow.addRow([
+      new Date(Date.UTC(yy, mm - 1, dd)),
+      b.inflow,
+      b.outflow,
+      formula(`B${n}-C${n}`, b.net),
+      formula(`E${n - 1}+D${n}`, b.balance),
+      b.forecast ? "sim" : "",
+    ]);
+    row.getCell(1).numFmt = ctx.granularity === "day" ? DATE : "mmm/yyyy";
+    row.getCell(1).alignment = { horizontal: "left" };
+  });
+  const lastBucket = report.buckets.length + 2;
+  if (report.buckets.length > 0) {
+    flow.addRow([
+      "Total",
+      formula(`SUM(B3:B${lastBucket})`, report.inflow),
+      formula(`SUM(C3:C${lastBucket})`, report.outflow),
+      formula(`B${lastBucket + 1}-C${lastBucket + 1}`, report.net),
+      formula(`E${lastBucket}`, report.closing),
+    ]).font = { bold: true };
+  }
+  flow.eachRow((row, n) => {
+    if (n > 1) for (let c = 2; c <= 5; c++) row.getCell(c).numFmt = BRL;
+  });
+
+  // ── Resumo ────────────────────────────────────────────────────────────────
+  const summary = workbook.addWorksheet("Resumo");
+  summary.columns = [{ width: 34 }, { width: 24 }];
+  const heading = (t: string) => {
+    summary.addRow([]);
+    summary.addRow([t]).font = { bold: true, size: 11 };
+  };
+  const item = (label: string, value: string | number | object) => {
+    const row = summary.addRow([label, value]);
+    if (typeof value !== "string") row.getCell(2).numFmt = BRL;
+    return row;
+  };
+  summary.addRow([ctx.companyName]).font = { bold: true, size: 13 };
+  item("Período", periodText(ctx.start, ctx.end));
+  if (ctx.filters) item("Recorte", ctx.filters);
+  item("Gerado em", format(new Date(), "dd/MM/yyyy HH:mm"));
+  item("Lançamentos", String(sorted.length));
+  heading("Resultado");
+  const open = item("Saldo inicial", known ? report.opening : 0).number;
+  item("Entradas", report.inflow);
+  item("Saídas", report.outflow);
+  item(
+    known ? "Saldo final" : "Acumulado",
+    formula(`B${open}+B${open + 1}-B${open + 2}`, report.closing),
+  ).font = { bold: true };
+  if (known) {
+    item(
+      `Menor saldo (${format(report.lowest.date, "dd/MM/yyyy")})`,
+      report.lowest.balance,
+    );
+  }
+  heading("Por situação (entradas menos saídas)");
+  for (const s of report.byStage) {
+    if (s.lines.length === 0) continue;
+    item(
+      STAGE_INFO[s.stage].label,
+      currency(s.inflow).subtract(s.outflow).value,
+    );
+  }
+  const notes = [
+    ...cashFlowNotes(report, ctx),
+    files
+      ? "Notas e comprovantes estão nas pastas ao lado desta planilha: extraia o ZIP inteiro antes de abrir os links."
+      : "As colunas Nota fiscal e Comprovante só indicam que o documento existe no sistema.",
+    "Contém dados pessoais e bancários: envie só a quem precisa deles.",
+  ];
+  heading("Observações");
+  notes.forEach((note) => {
+    const row = summary.addRow([note]);
+    summary.mergeCells(row.number, 1, row.number, 2);
+    row.getCell(1).alignment = { wrapText: true, vertical: "top" };
+    row.height = 15 * Math.ceil(note.length / 60);
+  });
+
+  // ── Vencidos sem baixa ────────────────────────────────────────────────────
+  if (report.pending.lines.length > 0) {
+    const late = workbook.addWorksheet("Vencidos sem baixa", {
+      views: [{ state: "frozen", ySplit: 1 }],
+      pageSetup: { ...landscape, printTitlesRow: "1:1" },
+    });
+    late.columns = [
+      { header: "Vencimento", width: 12 },
+      { header: "Descrição", width: 46 },
+      { header: "Favorecido ou pagador", width: 38 },
+      { header: "CNPJ/CPF", width: 20 },
+      { header: "Centro de custo", width: 28 },
+      { header: "Situação", width: 22 },
+      { header: "A receber", width: 16 },
+      { header: "A pagar", width: 16 },
+    ];
+    headStyle(late.getRow(1));
+    for (const l of look.sort(report.pending.lines)) {
+      const income = l.tx.type === "receivable";
+      const row = late.addRow([
+        day(l.tx.dueDate),
+        lineDescription(l),
+        look.partyOf(l.tx),
+        look.documentOf(l.tx),
+        look.costCentersOf(l.tx),
+        situationOf(l.tx),
+        income ? l.amount : null,
+        income ? null : l.amount,
+      ]);
+      row.getCell(1).numFmt = DATE;
+      row.getCell(7).numFmt = BRL;
+      row.getCell(8).numFmt = BRL;
+    }
+  }
+  return workbook;
+}
+
 export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
-  // EXTRATO DE FLUXO DE CAIXA — redesign profissional
+  // FLUXO DE CAIXA
   // ─────────────────────────────────────────────────────────────────────────
-  generateCashFlowPDF: async (report: CashFlowReport, ctx: ReportContext) => {
-    const { start: startDate, end: endDate, companyName } = ctx;
-    const entities = ctx.entities ?? [];
+  generateCashFlowPDF: async (report: CashFlowReport, ctx: CashFlowContext) => {
     const { jsPDF, autoTable } = await loadPdf();
     const doc = new jsPDF({
       orientation: "landscape",
       unit: "mm",
       format: "a4",
+      compress: true,
     });
-    const reportFont = await ensureReportFont(doc);
+    const font = await ensureReportFont(doc);
+    const title = `Fluxo de caixa, ${periodText(ctx.start, ctx.end)}`;
+    doc.setProperties({ title, author: ctx.companyName });
+    doc.setLanguage("pt-BR");
 
-    const PAGE_W = doc.internal.pageSize.getWidth(); // 297mm
-    const PAGE_H = doc.internal.pageSize.getHeight(); // 210mm
+    const PAGE_W = doc.internal.pageSize.getWidth(); // 297 mm
+    const PAGE_H = doc.internal.pageSize.getHeight(); // 210 mm
     const MARGIN = 14;
+    const RIGHT = PAGE_W - MARGIN;
     const USABLE_W = PAGE_W - MARGIN * 2;
 
-    // ── Paleta de cores ──────────────────────────────────────────────────
-    const NAVY = [15, 23, 42] as [number, number, number];
-    const GREEN_600 = [22, 163, 74] as [number, number, number];
-    const RED_600 = [220, 38, 38] as [number, number, number];
-    const GREEN_50 = [240, 253, 244] as [number, number, number];
-    const RED_50 = [254, 242, 242] as [number, number, number];
-    const GREEN_200 = [187, 247, 208] as [number, number, number];
-    const RED_200 = [254, 202, 202] as [number, number, number];
-    const SLATE_50 = [248, 250, 252] as [number, number, number];
-    const SLATE_100 = [241, 245, 249] as [number, number, number];
-    const SLATE_300 = [203, 213, 225] as [number, number, number];
-    const SLATE_600 = [71, 85, 105] as [number, number, number];
-    const WHITE = [255, 255, 255] as [number, number, number];
-    const GRAY_400 = [156, 163, 175] as [number, number, number];
-    const GRAY_300 = [209, 213, 219] as [number, number, number];
+    // A paleta do PDF da Análise.
+    type RGB = [number, number, number];
+    const INK: RGB = [18, 22, 31];
+    const MUTED: RGB = [96, 99, 108];
+    const PRIMARY: RGB = [32, 44, 133];
+    const RULE: RGB = [213, 215, 221];
+    const WASH: RGB = [243, 245, 249];
+    const DANGER: RGB = [200, 0, 10];
 
-    // Atalhos para setters de cor
-    const fillRGB = (c: [number, number, number]) =>
-      doc.setFillColor(c[0], c[1], c[2]);
-    const drawRGB = (c: [number, number, number]) =>
-      doc.setDrawColor(c[0], c[1], c[2]);
-    const textRGB = (c: [number, number, number]) =>
-      doc.setTextColor(c[0], c[1], c[2]);
-
-    // ── Totais: os mesmos da tela ─────────────────────────────────────────
-    const totalIn = report.inflow;
-    const totalOut = report.outflow;
-    const closing = report.closing;
-
-    // ── Função de rodapé (chamada depois de todas as páginas serem geradas) ──
-    const drawFooter = (pageNum: number, totalPages: number) => {
-      doc.setFont(reportFont, "normal");
-      doc.setFontSize(7);
-      textRGB(GRAY_400);
-      drawRGB(SLATE_300);
+    const text = (
+      value: string,
+      x: number,
+      y: number,
+      o: { size: number; bold?: boolean; color?: RGB; align?: "right" },
+    ) => {
+      doc.setFont(font, o.bold ? "bold" : "normal");
+      doc.setFontSize(o.size);
+      doc.setTextColor(...(o.color ?? INK));
+      doc.text(value, x, y, { align: o.align });
+    };
+    const rule = (y: number) => {
+      doc.setDrawColor(...RULE);
       doc.setLineWidth(0.2);
-      doc.line(MARGIN, PAGE_H - 12, PAGE_W - MARGIN, PAGE_H - 12);
-      doc.text(
-        "Hebron ASEEC · Financeiro • Documento Confidencial",
-        MARGIN,
-        PAGE_H - 7,
-      );
-      doc.text(companyName, PAGE_W / 2, PAGE_H - 7, { align: "center" });
-      doc.text(
-        `Página ${pageNum} de ${totalPages}`,
-        PAGE_W - MARGIN,
-        PAGE_H - 7,
-        { align: "right" },
-      );
+      doc.line(MARGIN, y, RIGHT, y);
     };
 
-    // ════════════════════════════════════════════════════════════════════════
-    // CABEÇALHO (primeira página)
-    // ════════════════════════════════════════════════════════════════════════
-    fillRGB(NAVY);
-    doc.rect(0, 0, PAGE_W, 36, "F");
+    const known = ctx.opening.source !== "none";
+    const look = lineLookups(ctx);
 
-    // Faixa de destaque verde na base do cabeçalho
-    fillRGB(GREEN_600);
-    doc.rect(0, 34, PAGE_W, 2, "F");
-
-    // Nome da empresa (topo esquerdo)
-    doc.setFont(reportFont, "normal");
-    doc.setFontSize(7.5);
-    textRGB(GRAY_400);
-    doc.text(companyName.toUpperCase(), MARGIN, 10);
-
-    // Título do relatório
-    doc.setFont(reportFont, "bold");
-    doc.setFontSize(15);
-    textRGB(WHITE);
-    doc.text("EXTRATO DE FLUXO DE CAIXA", MARGIN, 22);
-
-    // Período — lado direito
-    doc.setFont(reportFont, "normal");
-    doc.setFontSize(7.5);
-    textRGB(GRAY_300);
-    doc.text(
-      `Período: ${periodText(startDate, endDate)}`,
-      PAGE_W - MARGIN,
-      15,
-      { align: "right" },
-    );
-    doc.text(
-      `Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
-      PAGE_W - MARGIN,
-      23,
-      { align: "right" },
+    // ── Cabeçalho ─────────────────────────────────────────────────────────
+    text(ctx.companyName, MARGIN, 15, { size: 8, color: MUTED });
+    text("Fluxo de caixa", MARGIN, 23, {
+      size: 16,
+      bold: true,
+      color: PRIMARY,
+    });
+    text(periodText(ctx.start, ctx.end), RIGHT, 15, {
+      size: 9,
+      bold: true,
+      align: "right",
+    });
+    text(
+      `Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+      RIGHT,
+      20,
+      { size: 7.5, color: MUTED, align: "right" },
     );
     if (ctx.filters) {
-      doc.text(ctx.filters, PAGE_W - MARGIN, 31, { align: "right" });
+      text(ctx.filters, RIGHT, 25, { size: 7.5, color: MUTED, align: "right" });
     }
+    rule(29);
 
-    // ════════════════════════════════════════════════════════════════════════
-    // KPI CARDS (4 caixas de resumo)
-    // ════════════════════════════════════════════════════════════════════════
-    const kpiY = 42;
-    const kpiH = 22;
-    const kpiGap = 5;
-    const kpiW = (USABLE_W - kpiGap * 3) / 4;
-
-    const kpis: {
-      label: string;
-      value: string;
-      accent: [number, number, number];
-      bg: [number, number, number];
-      border: [number, number, number];
-    }[] = [
+    // ── A conta que fecha: inicial + entradas − saídas = final ────────────
+    const sums: { label: string; value: number }[] = [
+      ...(known ? [{ label: "Saldo inicial", value: report.opening }] : []),
+      { label: "+ Entradas", value: report.inflow },
+      { label: "− Saídas", value: report.outflow },
       {
-        label: "SALDO INICIAL",
-        value: formatCurrency(report.opening),
-        accent: SLATE_600,
-        bg: SLATE_50,
-        border: SLATE_300,
-      },
-      {
-        label: "TOTAL ENTRADAS",
-        value: formatCurrency(totalIn),
-        accent: GREEN_600,
-        bg: GREEN_50,
-        border: GREEN_200,
-      },
-      {
-        label: "TOTAL SAÍDAS",
-        value: formatCurrency(totalOut),
-        accent: RED_600,
-        bg: RED_50,
-        border: RED_200,
-      },
-      {
-        label: "SALDO FINAL",
-        value: formatCurrency(closing),
-        accent: closing >= 0 ? GREEN_600 : RED_600,
-        bg: closing >= 0 ? GREEN_50 : RED_50,
-        border: closing >= 0 ? GREEN_200 : RED_200,
+        label: known ? "= Saldo final" : "= Acumulado",
+        value: report.closing,
       },
     ];
-
-    kpis.forEach((kpi, i) => {
-      const x = MARGIN + i * (kpiW + kpiGap);
-
-      fillRGB(kpi.bg);
-      drawRGB(kpi.border);
-      doc.setLineWidth(0.3);
-      doc.roundedRect(x, kpiY, kpiW, kpiH, 2, 2, "FD");
-
-      // Barra de destaque à esquerda
-      fillRGB(kpi.accent);
-      doc.rect(x, kpiY, 2.5, kpiH, "F");
-
-      // Label
-      doc.setFont(reportFont, "normal");
-      doc.setFontSize(6.5);
-      textRGB(SLATE_600);
-      doc.text(kpi.label, x + 6, kpiY + 7);
-
-      // Valor
-      doc.setFont(reportFont, "bold");
-      doc.setFontSize(10.5);
-      textRGB(kpi.accent);
-      doc.text(kpi.value, x + 6, kpiY + 17);
-    });
-
-    // ════════════════════════════════════════════════════════════════════════
-    // CONSTRUÇÃO DA TABELA
-    // ════════════════════════════════════════════════════════════════════════
-    const entitiesMap = entities.reduce(
-      (acc, e) => {
-        acc[e.id] = e;
-        return acc;
-      },
-      {} as Record<string, Entity>,
-    );
-
-    // Agrupar por dia (as linhas já vêm em ordem de data efetiva)
-    const dayMap = new Map<string, { date: Date; lines: FlowLine[] }>();
-    for (const line of report.lines) {
-      const key = format(line.date, "yyyy-MM-dd");
-      if (!dayMap.has(key)) dayMap.set(key, { date: line.date, lines: [] });
-      dayMap.get(key)!.lines.push(line);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tableBody: any[][] = [];
-    let running = currency(report.opening);
-
-    dayMap.forEach(({ date, lines }) => {
-      // ── Ordenar por favorecido dentro do mesmo dia ───────────────────────
-      const nameOf = (t: Transaction) =>
-        (
-          (t.entityId ? entitiesMap[t.entityId]?.name : undefined) ||
-          t.supplierOrClient ||
-          ""
-        ).toLowerCase();
-      const linesSorted = [...lines].sort((a, b) =>
-        nameOf(a.tx).localeCompare(nameOf(b.tx), "pt-BR", {
-          sensitivity: "base",
-        }),
-      );
-
-      const sumOf = (type: Transaction["type"]) =>
-        lines
-          .filter((l) => l.tx.type === type)
-          .reduce((s, l) => s.add(l.amount), currency(0)).value;
-      const dayIn = sumOf("receivable");
-      const dayOut = sumOf("payable");
-      running = running.add(dayIn).subtract(dayOut);
-      const daySummary = [
-        dayIn > 0 ? `+${formatCurrency(dayIn)}` : null,
-        dayOut > 0 ? `-${formatCurrency(dayOut)}` : null,
-        `Saldo ${formatCurrency(running.value)}`,
-      ]
-        .filter(Boolean)
-        .join("  ");
-
-      // ── Linha separadora de data ─────────────────────────────────────────
-      tableBody.push([
-        {
-          content: format(date, "EEEE, dd 'de' MMMM 'de' yyyy", {
-            locale: ptBR,
-          }).toUpperCase(),
-          colSpan: 5,
-          styles: {
-            fillColor: SLATE_100,
-            textColor: SLATE_600,
-            fontStyle: "bold",
-            fontSize: 7.5,
-            cellPadding: { top: 3, bottom: 3, left: 4, right: 2 },
-          },
-        },
-        {
-          content: daySummary,
-          styles: {
-            fillColor: SLATE_100,
-            textColor: SLATE_600,
-            fontStyle: "bold",
-            fontSize: 7,
-            halign: "right",
-            cellPadding: { top: 3, bottom: 3, left: 2, right: 4 },
-          },
-        },
-      ]);
-
-      // ── Linhas de transação (já ordenadas por favorecido) ────────────────
-      linesSorted.forEach((line) => {
-        const t = line.tx;
-        const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
-        const entityName = entity?.name || t.supplierOrClient || "-";
-        const entityDoc = entity?.document || "-";
-        const isIncome = t.type === "receivable";
-        const statusColor: [number, number, number] =
-          line.stage === "realized" ? GREEN_600 : SLATE_600;
-
-        tableBody.push([
-          {
-            content: format(line.date, "dd/MM"),
-            styles: { halign: "center" },
-          },
-          lineDescription(line),
-          entityName,
-          entityDoc,
-          {
-            content: lineStatus(line),
-            styles: { textColor: statusColor, halign: "center" },
-          },
-          {
-            content: `${isIncome ? "+" : "-"}${formatCurrency(line.amount)}`,
-            styles: {
-              textColor: isIncome ? GREEN_600 : RED_600,
-              fontStyle: "bold",
-              halign: "right",
-            },
-          },
-        ]);
+    const colW = USABLE_W / sums.length;
+    sums.forEach((s, i) => {
+      const x = MARGIN + i * colW;
+      text(s.label, x, 36, { size: 8, color: MUTED });
+      text(formatCurrency(s.value), x, 43, {
+        size: 13,
+        bold: true,
+        color: s.value < 0 ? DANGER : INK,
       });
     });
 
-    // ── Larguras das colunas (landscape A4 = 297mm, usable ~269mm) ─────────
-    const col0 = 20; // Data (aumentado para evitar quebra de "dd/MM")
-    const col3 = 38; // CNPJ/CPF
-    const col4 = 26; // Status
-    const col5 = 36; // Valor
-    const col1 = 68; // Descrição
-    const col2 = Math.max(46, USABLE_W - col0 - col1 - col3 - col4 - col5); // Favorecido
+    let y = 49;
+    for (const note of cashFlowNotes(report, ctx)) {
+      doc.setFont(font, "normal");
+      doc.setFontSize(8);
+      const wrapped = doc.splitTextToSize(note, USABLE_W) as string[];
+      wrapped.forEach((l) => {
+        text(l, MARGIN, y, { size: 8, color: MUTED });
+        y += 4;
+      });
+    }
 
-    autoTable(doc, {
-      startY: kpiY + kpiH + 6,
-      head: [
-        ["Data", "Descrição", "Favorecido", "CNPJ/CPF", "Status", "Valor (R$)"],
-      ],
-      body: tableBody,
-      theme: "plain",
-      columnStyles: {
-        0: { cellWidth: col0 },
-        1: { cellWidth: col1 },
-        2: { cellWidth: col2 },
-        3: { cellWidth: col3 },
-        4: { cellWidth: col4 },
-        5: { cellWidth: col5, halign: "right" },
-      },
+    // ── Tabela ────────────────────────────────────────────────────────────
+    const COLUMNS = [
+      { header: "Data", width: 14 },
+      { header: "Descrição", width: 86 },
+      { header: "Favorecido ou pagador", width: 66 },
+      { header: "CNPJ/CPF", width: 33 },
+      { header: "Situação", width: 38 },
+      { header: "Valor (R$)", width: 32 },
+    ];
+    const columnStyles = Object.fromEntries(
+      COLUMNS.map((c, i) => [
+        i,
+        {
+          cellWidth: c.width,
+          ...(i === COLUMNS.length - 1 ? { halign: "right" as const } : {}),
+        },
+      ]),
+    );
+    const rowOf = (line: FlowLine, dated: string) => {
+      const sign = line.tx.type === "receivable" ? "+" : "-";
+      return [
+        dated,
+        lineDescription(line),
+        look.partyOf(line.tx) || "-",
+        look.documentOf(line.tx) || "-",
+        lineSituation(line),
+        {
+          content: `${sign}${formatCurrency(line.amount)}`,
+          styles: {
+            fontStyle:
+              line.tx.type === "receivable"
+                ? ("bold" as const)
+                : ("normal" as const),
+          },
+        },
+      ];
+    };
+
+    const days = new Map<string, FlowLine[]>();
+    for (const line of look.sort(report.lines)) {
+      const key = format(line.date, "yyyy-MM-dd");
+      days.set(key, [...(days.get(key) ?? []), line]);
+    }
+
+    let running = currency(report.opening);
+    const body = [...days.values()].flatMap((lines) => {
+      const of = (type: Transaction["type"]) =>
+        lines
+          .filter((l) => l.tx.type === type)
+          .reduce((s, l) => s.add(l.amount), currency(0)).value;
+      const dayIn = of("receivable");
+      const dayOut = of("payable");
+      running = running.add(dayIn).subtract(dayOut);
+      const styles = {
+        fillColor: WASH,
+        fontStyle: "bold" as const,
+        cellPadding: { top: 2, bottom: 2, left: 1.5, right: 1.5 },
+      };
+      return [
+        [
+          {
+            content: format(lines[0].date, "EEEE, dd/MM/yyyy", {
+              locale: ptBR,
+            }).replace(/^./, (c) => c.toUpperCase()),
+            colSpan: 2,
+            styles,
+          },
+          {
+            content: [
+              dayIn > 0 ? `entradas ${formatCurrency(dayIn)}` : null,
+              dayOut > 0 ? `saídas ${formatCurrency(dayOut)}` : null,
+              `${known ? "saldo" : "acumulado"} ${formatCurrency(running.value)}`,
+            ]
+              .filter(Boolean)
+              .join("   ·   "),
+            colSpan: 4,
+            styles: {
+              ...styles,
+              halign: "right" as const,
+              ...(running.value < 0 ? { textColor: DANGER } : {}),
+            },
+          },
+        ],
+        ...lines.map((l) => rowOf(l, format(l.date, "dd/MM"))),
+      ];
+    });
+
+    const table = {
+      theme: "plain" as const,
       styles: {
-        font: reportFont,
-        fontSize: 8.5,
-        cellPadding: { top: 2.5, bottom: 2.5, left: 4, right: 4 },
-        lineColor: SLATE_300,
-        lineWidth: 0.15,
-        overflow: "linebreak",
+        font,
+        fontSize: 8,
+        textColor: INK,
+        cellPadding: { top: 1.3, bottom: 1.3, left: 1.5, right: 1.5 },
+        lineColor: RULE,
+        lineWidth: { bottom: 0.1 },
+        overflow: "linebreak" as const,
       },
       headStyles: {
-        font: reportFont,
-        fontStyle: "bold",
-        fontSize: 8,
-        fillColor: NAVY,
-        textColor: WHITE,
-        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
-        lineWidth: 0,
+        font,
+        fontStyle: "bold" as const,
+        fontSize: 7.5,
+        textColor: MUTED,
+        lineColor: INK,
+        lineWidth: { bottom: 0.3 },
       },
-      alternateRowStyles: { fillColor: SLATE_50 },
-      showHead: "everyPage",
-      rowPageBreak: "auto",
+      columnStyles,
+      showHead: "everyPage" as const,
+      rowPageBreak: "avoid" as const,
       didDrawPage: () => {
         doc.setCharSpace(0);
-        doc.setFont(reportFont, "normal");
+      },
+      // O cabeçalho do valor acompanha a coluna.
+      didParseCell: (data: {
+        section: string;
+        column: { index: number };
+        cell: { styles: { halign?: string } };
+      }) => {
+        if (
+          data.section === "head" &&
+          data.column.index === COLUMNS.length - 1
+        ) {
+          data.cell.styles.halign = "right";
+        }
       },
       margin: { top: 15, left: MARGIN, right: MARGIN, bottom: 18 },
-    });
+    };
 
-    // ════════════════════════════════════════════════════════════════════════
-    // RODAPÉ EM TODAS AS PÁGINAS
-    // ════════════════════════════════════════════════════════════════════════
-    const totalPages = doc.getNumberOfPages();
-    for (let p = 1; p <= totalPages; p++) {
+    if (body.length > 0) {
+      autoTable(doc, {
+        ...table,
+        startY: y + 1,
+        head: [COLUMNS.map((c) => c.header)],
+        body,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      y = (doc as any).lastAutoTable.finalY + 8;
+    }
+
+    // ── Vencidos sem baixa, fora do saldo ─────────────────────────────────
+    if (report.pending.lines.length > 0) {
+      if (y > PAGE_H - 45) {
+        doc.addPage();
+        y = 18;
+      }
+      text("Vencidos sem baixa (fora do saldo)", MARGIN, y, {
+        size: 10,
+        bold: true,
+      });
+      autoTable(doc, {
+        ...table,
+        startY: y + 3,
+        head: [["Venc.", ...COLUMNS.slice(1).map((c) => c.header)]],
+        body: look
+          .sort(report.pending.lines)
+          .map((l) => rowOf(l, format(l.tx.dueDate, "dd/MM"))),
+      });
+    }
+
+    // ── Rodapé ────────────────────────────────────────────────────────────
+    const pages = doc.getNumberOfPages();
+    for (let p = 1; p <= pages; p++) {
       doc.setPage(p);
-      drawFooter(p, totalPages);
+      rule(PAGE_H - 12);
+      text(`${title} · documento confidencial`, MARGIN, PAGE_H - 7, {
+        size: 7,
+        color: MUTED,
+      });
+      text(`Página ${p} de ${pages}`, RIGHT, PAGE_H - 7, {
+        size: 7,
+        color: MUTED,
+        align: "right",
+      });
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // CAIXA DE RESUMO FINAL
-    // ════════════════════════════════════════════════════════════════════════
-    doc.setPage(totalPages);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let finalY = (doc as any).lastAutoTable.finalY + 8;
-
-    if (finalY + 22 > PAGE_H - 20) {
-      doc.addPage();
-      finalY = 20;
-      drawFooter(totalPages + 1, totalPages + 1);
-    }
-
-    const summaryH = 20;
-    fillRGB(NAVY);
-    doc.setLineWidth(0);
-    doc.roundedRect(MARGIN, finalY, USABLE_W, summaryH, 2, 2, "F");
-
-    // Label "RESUMO"
-    doc.setFont(reportFont, "bold");
-    doc.setFontSize(7.5);
-    textRGB(GRAY_400);
-    doc.text("RESUMO DO PERÍODO", MARGIN + 5, finalY + 8);
-
-    const summaryItems = [
-      {
-        label: "Saldo Inicial",
-        value: formatCurrency(report.opening),
-        color: GRAY_300,
-      },
-      {
-        label: "Total Entradas",
-        value: formatCurrency(totalIn),
-        color: [134, 239, 172] as [number, number, number],
-      },
-      {
-        label: "Total Saídas",
-        value: formatCurrency(totalOut),
-        color: [252, 165, 165] as [number, number, number],
-      },
-      {
-        label: "Saldo Final",
-        value: formatCurrency(closing),
-        color:
-          closing >= 0
-            ? ([134, 239, 172] as [number, number, number])
-            : ([252, 165, 165] as [number, number, number]),
-      },
-    ];
-
-    const blockW = USABLE_W / (summaryItems.length + 1);
-    summaryItems.forEach((item, i) => {
-      const x = MARGIN + (i + 1) * blockW;
-      doc.setFont(reportFont, "normal");
-      doc.setFontSize(7);
-      textRGB(GRAY_400);
-      doc.text(item.label, x, finalY + 8);
-      doc.setFont(reportFont, "bold");
-      doc.setFontSize(9.5);
-      textRGB(item.color);
-      doc.text(item.value, x, finalY + 16);
-    });
-
-    doc.save(`fluxo_caixa_${periodSlug(startDate, endDate)}.pdf`);
+    doc.save(`fluxo_caixa_${periodSlug(ctx.start, ctx.end)}.pdf`);
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // EXPORTAR EXCEL — workbook profissional
-  // ─────────────────────────────────────────────────────────────────────────
-  exportCashFlowExcel: async (report: CashFlowReport, ctx: ReportContext) => {
-    const { start: startDate, end: endDate, companyName } = ctx;
-    const entities = ctx.entities ?? [];
-    const ExcelJS = (await import("exceljs")).default;
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Hebron ASEEC · Financeiro";
-    workbook.created = new Date();
-
-    // ── Mapa de entidades ─────────────────────────────────────────────────
-    const entitiesMap = entities.reduce(
-      (acc, e) => {
-        acc[e.id] = e;
-        return acc;
-      },
-      {} as Record<string, Entity>,
-    );
-
-    const nameOf = (t: Transaction) =>
-      (
-        (t.entityId ? entitiesMap[t.entityId]?.name : undefined) ||
-        t.supplierOrClient ||
-        ""
-      ).toLowerCase();
-    const sorted = [...report.lines].sort(
-      (a, b) =>
-        a.date.getTime() - b.date.getTime() ||
-        // Ordenação secundária por favorecido (mesmo critério do PDF)
-        nameOf(a.tx).localeCompare(nameOf(b.tx), "pt-BR", {
-          sensitivity: "base",
-        }),
-    );
-
-    // ── Totais: os mesmos da tela ─────────────────────────────────────────
-    const totalIn = report.inflow;
-    const totalOut = report.outflow;
-    const netBal = report.net;
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ABA "Extrato"
-    // ══════════════════════════════════════════════════════════════════════
-    const sheet = workbook.addWorksheet("Extrato", {
-      views: [{ state: "frozen", ySplit: 4 }],
-    });
-
-    sheet.columns = [
-      { width: 14 }, // A: Data
-      { width: 14 }, // B: Vencimento
-      { width: 38 }, // C: Descrição
-      { width: 30 }, // D: Favorecido
-      { width: 20 }, // E: CNPJ/CPF
-      { width: 12 }, // F: Tipo
-      { width: 18 }, // G: Status
-      { width: 18 }, // H: Valor Original
-      { width: 18 }, // I: Valor Final
-      { width: 24 }, // J: Forma de Pagamento
-      { width: 30 }, // K: Observações
-      { width: 18 }, // L: NF
-      { width: 18 }, // M: Comprovante
-    ];
-
-    // ── Linha 1: Empresa ──────────────────────────────────────────────────
-    sheet.mergeCells("A1:M1");
-    const r1 = sheet.getCell("A1");
-    r1.value = companyName;
-    r1.font = { bold: true, size: 13, color: { argb: "FF0F172A" } };
-    r1.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFF1F5F9" },
-    };
-    r1.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-    sheet.getRow(1).height = 22;
-
-    // ── Linha 2: Subtítulo ────────────────────────────────────────────────
-    sheet.mergeCells("A2:M2");
-    const r2 = sheet.getCell("A2");
-    r2.value = `Extrato de Fluxo de Caixa  ·  ${periodText(startDate, endDate)}${filterSuffix(ctx)}  ·  Gerado em ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
-    r2.font = { size: 9, color: { argb: "FF64748B" } };
-    r2.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFF1F5F9" },
-    };
-    r2.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-    sheet.getRow(2).height = 16;
-
-    // ── Linha 3: Espaço separador ─────────────────────────────────────────
-    sheet.getRow(3).height = 4;
-
-    // ── Linha 4: Cabeçalho das colunas ───────────────────────────────────
-    const headers = [
-      "Data Efetiva",
-      "Vencimento",
-      "Descrição",
-      "Favorecido",
-      "CNPJ/CPF",
-      "Tipo",
-      "Situação",
-      "Valor Original (R$)",
-      "Valor no Fluxo (R$)",
-      "Forma de Pagamento",
-      "Observações",
-      "NF",
-      "Comprovante",
-    ];
-    const headerRow = sheet.addRow(headers);
-    headerRow.height = 22;
-    headerRow.eachCell((cell) => {
-      cell.font = { bold: true, size: 9, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF0F172A" },
-      };
-      cell.alignment = {
-        vertical: "middle",
-        horizontal: "center",
-        wrapText: false,
-      };
-      cell.border = {
-        bottom: { style: "medium", color: { argb: "FF16A34A" } },
-      };
-    });
-
-    // ── Linhas de dados ───────────────────────────────────────────────────
-    const BRL_FMT = '"R$" #,##0.00';
-
-    sorted.forEach((line, idx) => {
-      const t = line.tx;
-      const entity = t.entityId ? entitiesMap[t.entityId] : undefined;
-      const isIncome = t.type === "receivable";
-      const effAmount = line.amount;
-
-      // Localizar URL da NF (anexo com categoria "invoice")
-      const invoiceAttachment = t.attachments?.find(
-        (a) => a.category === "invoice",
-      );
-      const nfUrl = invoiceAttachment?.url || "";
-      const comprovanteUrl = t.comprovanteUrl || "";
-
-      const row = sheet.addRow([
-        format(line.date, "dd/MM/yyyy"),
-        format(t.dueDate, "dd/MM/yyyy"),
-        lineDescription(line),
-        entity?.name || t.supplierOrClient || "",
-        entity?.document || "",
-        isIncome ? "Receita" : "Despesa",
-        lineStatus(line),
-        t.amount,
-        isIncome ? effAmount : -effAmount,
-        t.paymentMethod || "",
-        t.notes || "",
-        "", // NF (preenchido abaixo como hyperlink)
-        "", // Comprovante (preenchido abaixo como hyperlink)
-      ]);
-
-      row.height = 18;
-
-      // Hyperlink da NF
-      const cellNF = row.getCell(12);
-      if (nfUrl) {
-        cellNF.value = { text: "Baixar NF", hyperlink: nfUrl };
-        cellNF.font = {
-          color: { argb: "FF2563EB" },
-          underline: true,
-          size: 9,
-        };
-      } else {
-        cellNF.value = "-";
-        cellNF.font = { color: { argb: "FF94A3B8" }, size: 9 };
-      }
-      cellNF.alignment = { horizontal: "center", vertical: "middle" };
-
-      // Hyperlink do Comprovante
-      const cellComp = row.getCell(13);
-      if (comprovanteUrl) {
-        cellComp.value = {
-          text: "Baixar Comprovante",
-          hyperlink: comprovanteUrl,
-        };
-        cellComp.font = {
-          color: { argb: "FF2563EB" },
-          underline: true,
-          size: 9,
-        };
-      } else {
-        cellComp.value = "-";
-        cellComp.font = { color: { argb: "FF94A3B8" }, size: 9 };
-      }
-      cellComp.alignment = { horizontal: "center", vertical: "middle" };
-
-      // Formatação das células de valor
-      const cellOrig = row.getCell(8);
-      const cellFinal = row.getCell(9);
-      cellOrig.numFmt = BRL_FMT;
-      cellFinal.numFmt = BRL_FMT;
-      cellOrig.alignment = { horizontal: "right" };
-      cellFinal.alignment = { horizontal: "right" };
-
-      // Cor do valor final
-      cellFinal.font = {
-        bold: true,
-        color: { argb: isIncome ? "FF16A34A" : "FFDC2626" },
-      };
-
-      // Zebra striping alternado por linha
-      if (idx % 2 === 0) {
-        const bgColor = { argb: isIncome ? "FFF0FDF4" : "FFFEF2F2" };
-        for (let c = 1; c <= 13; c++) {
-          const cell = row.getCell(c);
-          if (
-            !cell.fill ||
-            (cell.fill as { type: string }).type !== "pattern"
-          ) {
-            cell.fill = { type: "pattern", pattern: "solid", fgColor: bgColor };
-          }
-        }
-      }
-
-      // Borda inferior suave
-      for (let c = 1; c <= 13; c++) {
-        row.getCell(c).border = {
-          bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
-        };
-      }
-    });
-
-    // ── Linha de totais: resultado do período na coluna do valor no fluxo ─
-    const totalsRow = sheet.addRow([
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "RESULTADO",
-      netBal,
-      "",
-      "",
-      "",
-      "",
-    ]);
-    totalsRow.height = 20;
-
-    const tLabel = totalsRow.getCell(8);
-    tLabel.font = { bold: true, size: 9, color: { argb: "FF0F172A" } };
-    tLabel.alignment = { horizontal: "right" };
-    tLabel.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
-
-    const tBal = totalsRow.getCell(9);
-    tBal.numFmt = BRL_FMT;
-    tBal.font = {
-      bold: true,
-      color: { argb: netBal >= 0 ? "FF16A34A" : "FFDC2626" },
-    };
-    tBal.alignment = { horizontal: "right" };
-    tBal.border = { top: { style: "medium", color: { argb: "FF0F172A" } } };
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ABA "Fluxo" — a mesma tabela da tela, com saldo acumulado
-    // ══════════════════════════════════════════════════════════════════════
-    const flow = workbook.addWorksheet("Fluxo", {
-      views: [{ state: "frozen", ySplit: 1 }],
-    });
-    flow.columns = [
-      { header: "Período", width: 16 },
-      { header: "Entradas", width: 18 },
-      { header: "Saídas", width: 18 },
-      { header: "Resultado", width: 18 },
-      { header: "Saldo", width: 18 },
-      { header: "Tem previsto", width: 14 },
-    ];
-    flow.getRow(1).font = { bold: true };
-    const openingRow = flow.addRow([
-      "Saldo inicial",
-      null,
-      null,
-      null,
-      report.opening,
-      "",
-    ]);
-    openingRow.font = { italic: true };
-    for (const b of report.buckets) {
-      flow.addRow([
-        b.label,
-        b.inflow,
-        -b.outflow,
-        b.net,
-        b.balance,
-        b.forecast ? "sim" : "",
-      ]);
-    }
-    const flowTotal = flow.addRow([
-      "Total",
-      totalIn,
-      -totalOut,
-      netBal,
-      report.closing,
-      "",
-    ]);
-    flowTotal.font = { bold: true };
-    flow.eachRow((row, n) => {
-      if (n === 1) return;
-      for (let c = 2; c <= 5; c++) row.getCell(c).numFmt = BRL_FMT;
-    });
-
-    // ══════════════════════════════════════════════════════════════════════
-    // ABA "Resumo"
-    // ══════════════════════════════════════════════════════════════════════
-    const summary = workbook.addWorksheet("Resumo");
-    summary.columns = [{ width: 28 }, { width: 22 }];
-
-    const addSummaryTitle = (text: string) => {
-      summary.mergeCells(`A${summary.rowCount + 1}:B${summary.rowCount + 1}`);
-      const row = summary.lastRow!;
-      row.getCell(1).value = text;
-      row.getCell(1).font = {
-        bold: true,
-        size: 11,
-        color: { argb: "FF0F172A" },
-      };
-      row.getCell(1).fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFF1F5F9" },
-      };
-      row.height = 20;
-    };
-
-    const addSummaryRow = (
-      label: string,
-      value: string | number,
-      numFmt?: string,
-      color?: string,
-    ) => {
-      const row = summary.addRow([label, value]);
-      row.height = 18;
-      row.getCell(1).font = { color: { argb: "FF475569" } };
-      if (numFmt) {
-        row.getCell(2).numFmt = numFmt;
-        row.getCell(2).alignment = { horizontal: "right" };
-      }
-      if (color) row.getCell(2).font = { bold: true, color: { argb: color } };
-      row.getCell(1).border = {
-        bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
-      };
-      row.getCell(2).border = {
-        bottom: { style: "hair", color: { argb: "FFE2E8F0" } },
-      };
-    };
-
-    addSummaryTitle("Informações do Relatório");
-    addSummaryRow("Empresa", companyName);
-    addSummaryRow("Período", periodText(startDate, endDate));
-    if (ctx.filters) addSummaryRow("Recorte", ctx.filters);
-    addSummaryRow("Gerado em", format(new Date(), "dd/MM/yyyy HH:mm"));
-    addSummaryRow("Total de lançamentos", sorted.length);
-    summary.addRow([]);
-
-    addSummaryTitle("Resultado Financeiro");
-    addSummaryRow("Saldo Inicial", report.opening, BRL_FMT);
-    addSummaryRow("Total Entradas", totalIn, BRL_FMT, "FF16A34A");
-    addSummaryRow("Total Saídas", totalOut, BRL_FMT, "FFDC2626");
-    addSummaryRow(
-      "Saldo Final",
-      report.closing,
-      BRL_FMT,
-      report.closing >= 0 ? "FF16A34A" : "FFDC2626",
-    );
-    addSummaryRow(
-      `Menor saldo (${format(report.lowest.date, "dd/MM/yyyy")})`,
-      report.lowest.balance,
-      BRL_FMT,
-      report.lowest.balance >= 0 ? undefined : "FFDC2626",
-    );
-    summary.addRow([]);
-
-    addSummaryTitle("Por Situação (entradas − saídas)");
-    for (const s of report.byStage) {
-      if (s.lines.length === 0) continue;
-      addSummaryRow(
-        STAGE_INFO[s.stage].label,
-        currency(s.inflow).subtract(s.outflow).value,
-        BRL_FMT,
-      );
-    }
-    summary.addRow([]);
-
-    // ── Aviso de confidencialidade ────────────────────────────────────────
-    addSummaryTitle("Aviso de Confidencialidade");
-    const warningRow = summary.addRow([
-      "Este documento contém links de acesso direto a notas fiscais e comprovantes de pagamento. " +
-        "Qualquer pessoa com acesso a esta planilha poderá baixar os arquivos através dos links " +
-        "nas colunas NF e Comprovante da aba Extrato. Não compartilhe este arquivo com pessoas " +
-        "não autorizadas.",
-    ]);
-    summary.mergeCells(`A${warningRow.number}:B${warningRow.number}`);
-    warningRow.getCell(1).font = {
-      color: { argb: "FFDC2626" },
-      size: 9,
-      italic: true,
-    };
-    warningRow.getCell(1).fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFEF2F2" },
-    };
-    warningRow.getCell(1).alignment = {
-      wrapText: true,
-      vertical: "top",
-    };
-    warningRow.height = 48;
-
-    // ── Gerar arquivo e disparar download ─────────────────────────────────
-    const buffer = await workbook.xlsx.writeBuffer();
+  exportCashFlowExcel: async (report: CashFlowReport, ctx: CashFlowContext) => {
+    const workbook = await buildCashFlowWorkbook(report, ctx);
     downloadBlob(
-      new Blob([buffer], { type: XLSX_TYPE }),
-      `fluxo_caixa_${periodSlug(startDate, endDate)}.xlsx`,
+      new Blob([await workbook.xlsx.writeBuffer()], { type: XLSX_TYPE }),
+      `fluxo_caixa_${periodSlug(ctx.start, ctx.end)}.xlsx`,
     );
+  },
+
+  /**
+   * O que a contabilidade externa recebe: a planilha com as notas e os
+   * comprovantes em pastas, ligados por caminho relativo. Nenhum link do
+   * arquivo abre documento pela internet.
+   */
+  exportCashFlowPackage: async (
+    report: CashFlowReport,
+    ctx: CashFlowContext,
+    onProgress?: (done: number, total: number) => void,
+  ) => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const look = lineLookups(ctx);
+    const slug = (s: string) =>
+      s
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase()
+        .slice(0, 40);
+
+    const files = new Map<string, PackagedFiles>();
+    const failed: string[] = [];
+    const jobs: (() => Promise<void>)[] = [];
+    /** O mesmo arquivo em vários lançamentos entra uma vez só. */
+    const fetched = new Map<string, Promise<string | null>>();
+
+    const enqueue = (
+      path: string | null,
+      name: string,
+      label: string,
+      done: (saved: string | null) => void,
+    ) =>
+      jobs.push(async () => {
+        const load = async () => {
+          if (!path) return null;
+          try {
+            const res = await fetch(comprovanteProxyUrl(path));
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const ext = path.match(/\.([a-zA-Z0-9]{2,5})$/)?.[1] ?? "pdf";
+            const saved = `${name}.${ext.toLowerCase()}`;
+            zip.file(saved, await res.arrayBuffer());
+            return saved;
+          } catch (error) {
+            console.warn("Documento fora do pacote", path, error);
+            return null;
+          }
+        };
+        const pending = (path && fetched.get(path)) || load();
+        if (path) fetched.set(path, pending);
+        const saved = await pending;
+        if (!saved) failed.push(label);
+        done(saved);
+      });
+
+    look.sort(report.lines).forEach((line, i) => {
+      const t = line.tx;
+      const n = String(i + 1).padStart(3, "0");
+      const who = slug(look.partyOf(t)) || "sem-nome";
+      const invoices = invoicesOf(t);
+      const entry: PackagedFiles = { invoices: invoices.map(() => null) };
+      files.set(t.id, entry);
+      invoices.forEach((a, k) =>
+        enqueue(
+          storagePathOf(a.url),
+          `notas/${n}${invoices.length > 1 ? `-${k + 1}` : ""}_${who}`,
+          `Nota da linha ${i + 1}: ${t.description}`,
+          (saved) => {
+            entry.invoices[k] = saved;
+          },
+        ),
+      );
+      const receipt =
+        t.comprovanteStoragePath ??
+        (t.comprovanteUrl ? storagePathOf(t.comprovanteUrl) : undefined);
+      if (receipt !== undefined) {
+        entry.receipt = null;
+        enqueue(
+          receipt,
+          `comprovantes/${n}_${who}`,
+          `Comprovante da linha ${i + 1}: ${t.description}`,
+          (saved) => {
+            entry.receipt = saved;
+          },
+        );
+      }
+    });
+
+    let done = 0;
+    let next = 0;
+    onProgress?.(0, jobs.length);
+    await Promise.all(
+      Array.from({ length: 6 }, async () => {
+        while (next < jobs.length) {
+          await jobs[next++]();
+          onProgress?.(++done, jobs.length);
+        }
+      }),
+    );
+
+    const base = `fluxo_caixa_${periodSlug(ctx.start, ctx.end)}`;
+    const workbook = await buildCashFlowWorkbook(report, ctx, files);
+    zip.file(`${base}.xlsx`, await workbook.xlsx.writeBuffer());
+    // Os documentos já são comprimidos: só empacotar.
+    downloadBlob(await zip.generateAsync({ type: "blob" }), `${base}.zip`);
+    return { failed };
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2512,19 +2481,8 @@ export const reportService = {
    * o valor que entrou no fluxo, nomes em vez de códigos internos.
    */
   exportCashFlowCSV: (report: CashFlowReport, ctx: ReportContext) => {
-    const accountById = new Map((ctx.accounts ?? []).map((a) => [a.id, a]));
-    const ccName = new Map((ctx.costCenters ?? []).map((c) => [c.id, c.name]));
-    const entityById = new Map((ctx.entities ?? []).map((e) => [e.id, e]));
-    const costCentersOf = (t: Transaction) =>
-      (t.costCenterAllocation?.length
-        ? t.costCenterAllocation.map((a) => a.costCenterId)
-        : t.costCenterId
-          ? [t.costCenterId]
-          : []
-      )
-        .map((id) => ccName.get(id) ?? id)
-        .join(", ");
-
+    const { partyOf, documentOf, accountOf, costCentersOf, ...look } =
+      lineLookups(ctx);
     const rows = [
       [
         "Data Efetiva",
@@ -2545,25 +2503,21 @@ export const reportService = {
       ],
       ...report.lines.map((line) => {
         const t = line.tx;
-        const entity = t.entityId ? entityById.get(t.entityId) : undefined;
-        const account = t.accountId ? accountById.get(t.accountId) : undefined;
         return [
           line.date,
           t.dueDate,
           t.paymentDate,
           lineDescription(line),
           t.type === "payable" ? "Despesa" : "Receita",
-          entity?.name ?? t.supplierOrClient ?? "",
-          entity?.document ?? "",
-          lineStatus(line),
+          partyOf(t),
+          documentOf(t),
+          lineSituation(line),
           t.amount,
           t.type === "payable" ? -line.amount : line.amount,
           costCentersOf(t),
-          account ? `${account.code} ${account.name}` : "",
-          t.competence
-            ? `${t.competence.slice(5)}/${t.competence.slice(0, 4)}`
-            : "",
-          t.paymentMethod ? (PAYMENT_METHOD_TEXT[t.paymentMethod] ?? "") : "",
+          accountOf(t),
+          look.competenceOf(t),
+          look.methodOf(t),
           t.details ?? "",
         ];
       }),
@@ -2573,12 +2527,4 @@ export const reportService = {
       `fluxo_caixa_${periodSlug(ctx.start, ctx.end)}.csv`,
     );
   },
-};
-
-const PAYMENT_METHOD_TEXT: Record<string, string> = {
-  pix: "PIX",
-  boleto: "Boleto",
-  transfer: "Transferência",
-  credit_card: "Cartão de crédito",
-  cash: "Dinheiro",
 };

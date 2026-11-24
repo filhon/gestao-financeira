@@ -42,3 +42,8 @@ next-env.d.ts
 serviceAccountKey.json
 # matching eval build output
 /scripts/matching-eval/out/
+
+# dados reais da empresa: o repositório é público
+/data/
+/docs/*.pdf
+/docs/*.xlsx

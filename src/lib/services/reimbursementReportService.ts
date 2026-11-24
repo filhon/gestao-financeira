@@ -1,3 +1,4 @@
+import { ensureReportFont } from "@/lib/services/reportService";
 import {
   collection,
   updateDoc,
@@ -29,7 +30,6 @@ import {
   transactionService,
   convertDates as convertTransaction,
 } from "@/lib/services/transactionService";
-import type jsPDF from "jspdf";
 
 // jspdf + autotable pesam ~150 KB gz: carregam só quando um PDF é gerado,
 // fora do bundle inicial da página.
@@ -61,44 +61,6 @@ const convertDates = (data: DocumentData): ReimbursementReport => {
     createdAt: (data.createdAt as Timestamp)?.toDate(),
     updatedAt: (data.updatedAt as Timestamp)?.toDate(),
   } as ReimbursementReport;
-};
-
-// ─── Font cache (Inter, same as reportService) ────────────────────────────────
-
-let interFontCache: string | null = null;
-
-const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
-};
-
-const ensureInterFont = async (doc: jsPDF): Promise<boolean> => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fontList = (doc as any).getFontList?.() ?? {};
-    if (fontList.Inter) return true;
-
-    if (!interFontCache) {
-      const res = await fetch("/fonts/Inter-Regular.ttf?v=4.1", {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("Font load failed");
-      interFontCache = arrayBufferToBase64(await res.arrayBuffer());
-    }
-
-    doc.addFileToVFS("Inter-Regular.ttf", interFontCache);
-    doc.addFont("Inter-Regular.ttf", "Inter", "normal", "Identity-H");
-    doc.addFont("Inter-Regular.ttf", "Inter", "bold", "Identity-H");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return !!((doc as any).getFontList?.() ?? {}).Inter;
-  } catch {
-    return false;
-  }
 };
 
 // ─── Status labels ────────────────────────────────────────────────────────────
@@ -413,8 +375,7 @@ export const reimbursementReportService = {
       unit: "mm",
       format: "a4",
     });
-    const useInter = await ensureInterFont(doc);
-    const font = useInter ? "Inter" : "helvetica";
+    const font = await ensureReportFont(doc);
 
     const PAGE_W = doc.internal.pageSize.getWidth(); // 210
     const PAGE_H = doc.internal.pageSize.getHeight(); // 297

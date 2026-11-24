@@ -56,7 +56,11 @@ const txs = [
     dueDate: new Date(2027, 0, 7),
   }),
 ];
-const jan = { start: new Date(2027, 0, 1), end: new Date(2027, 0, 31) };
+const jan = {
+  start: new Date(2027, 0, 1),
+  end: new Date(2027, 0, 31),
+  today: new Date(2027, 0, 1),
+};
 
 const both = buildCashFlow(txs, {
   ...jan,
@@ -121,6 +125,46 @@ assert.equal(
   ]),
   4700,
 );
+
+// Vencido sem baixa: fora do saldo de período encerrado, e o final de um
+// período é o inicial do seguinte.
+const allStages = ["realized", ...DEFAULT_FORECAST] as const;
+const lateTxs = [
+  tx({ status: "paid", amount: 100, paymentDate: new Date(2027, 0, 4) }),
+  tx({ status: "authorized", amount: 40, dueDate: new Date(2027, 0, 30) }),
+  tx({ type: "receivable", amount: 70, dueDate: new Date(2027, 0, 29) }),
+  tx({ amount: 15, dueDate: new Date(2027, 1, 20) }),
+  tx({ amount: 5, dueDate: new Date(2027, 1, 10) }),
+];
+const feb10 = new Date(2027, 1, 10, 15);
+const period = (month: number) =>
+  buildCashFlow(lateTxs, {
+    start: new Date(2027, month, 1),
+    end: new Date(2027, month + 1, 0),
+    today: feb10,
+    // Saldo de hoje 900: janeiro começou com 1000.
+    opening: openingFromToday(
+      900,
+      new Date(2027, month, 1),
+      feb10,
+      lateTxs,
+      allStages,
+    ),
+    stages: allStages,
+    granularity: "day",
+  });
+const [closedJan, openFeb, nextMar] = [period(0), period(1), period(2)];
+assert.equal(closedJan.opening, 1000);
+assert.equal(closedJan.closing, 900, "período encerrado é só o realizado");
+assert.equal(closedJan.pending.outflow, 40);
+assert.equal(closedJan.pending.inflow, 70);
+assert.equal(openFeb.opening, closedJan.closing);
+assert.equal(openFeb.closing, 840, "a pagar vencido sai hoje; a receber, não");
+assert.equal(openFeb.pending.inflow, 70);
+assert.equal(openFeb.pending.outflow, 0);
+assert.equal(openFeb.lines.find((l) => l.late)!.date.getDate(), 10);
+assert.equal(nextMar.opening, openFeb.closing);
+assert.equal(nextMar.pending.lines.length, 0);
 
 // Recorrências: só as ocorrências dentro do período.
 const projected = projectRecurrences(

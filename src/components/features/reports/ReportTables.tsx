@@ -14,7 +14,7 @@ import {
   STAGE_INFO,
   formatPercent,
   isProjection,
-  situationOf,
+  lineSituation,
   variation,
 } from "@/lib/reports";
 import type { DreReport, DreRow } from "@/lib/chartOfAccounts";
@@ -275,6 +275,7 @@ export function CashFlowView({
   previous,
   showStages,
   hasOpening,
+  closedPeriod,
   granularity,
   onDrill,
 }: {
@@ -283,6 +284,8 @@ export function CashFlowView({
   showStages: boolean;
   /** Sem saldo de referência (filtro de centro de custo), o saldo é só o acumulado. */
   hasOpening: boolean;
+  /** Período encerrado: só o realizado entra no saldo. */
+  closedPeriod: boolean;
   granularity: Granularity;
   onDrill: (d: Drill) => void;
 }) {
@@ -298,7 +301,7 @@ export function CashFlowView({
         tx: l.tx,
         date: l.date,
         amount: l.amount,
-        status: situationOf(l.tx),
+        status: lineSituation(l),
       })),
     });
   const ins = (lines: CashFlowReport["lines"]) =>
@@ -405,6 +408,47 @@ export function CashFlowView({
         ) : null}
       </dl>
 
+      {report.pending.lines.length > 0 && (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          <p className="font-medium">
+            {closedPeriod
+              ? "Venceram neste período e seguem sem baixa: fora do saldo."
+              : "Recebíveis vencidos sem baixa: fora do saldo."}
+          </p>
+          <p className="mt-1 text-amber-900 dark:text-amber-200">
+            {[
+              report.pending.outflow > 0
+                ? `${money(report.pending.outflow)} a pagar`
+                : null,
+              report.pending.inflow > 0
+                ? `${money(report.pending.inflow)} a receber`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" e ")}
+            .{" "}
+            <button
+              type="button"
+              onClick={() =>
+                drill(
+                  "Vencidos sem baixa",
+                  "Não entram no saldo até a baixa",
+                  report.pending.lines,
+                )
+              }
+              className="font-medium underline underline-offset-2 hover:no-underline"
+            >
+              {report.pending.lines.length === 1
+                ? "Ver o lançamento"
+                : `Ver os ${report.pending.lines.length} lançamentos`}
+            </button>
+          </p>
+        </div>
+      )}
+
       <div className={SCROLL}>
         <table className="w-full text-sm">
           <thead className={HEAD}>
@@ -454,7 +498,9 @@ export function CashFlowView({
                   )}
                   {b.forecast && (
                     <span className="ml-2 font-sans text-[11px] text-muted-foreground">
-                      inclui previsto
+                      {b.lines.some((l) => l.late)
+                        ? "inclui previsto e vencidos a pagar"
+                        : "inclui previsto"}
                     </span>
                   )}
                 </td>
