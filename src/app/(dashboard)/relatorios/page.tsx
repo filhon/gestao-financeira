@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { format, isValid, parse, startOfDay, subDays } from "date-fns";
+import { addDays, format, isValid, parse, startOfDay, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import {
@@ -47,6 +47,8 @@ import {
   FORECAST_STAGES,
   formatPercent,
   Granularity,
+  GRANULARITY_LABEL,
+  matrixGranularity,
   openingFromToday,
   periodText,
   projectRecurrences,
@@ -55,6 +57,12 @@ import {
   STAGE_INFO,
 } from "@/lib/reports";
 import { proveBalance, type ProofState } from "@/lib/cashSynthesis";
+import {
+  buildMatrix,
+  MATRIX_ROWS,
+  planLines,
+  type MatrixRows,
+} from "@/lib/cashMatrix";
 import { bankAccountService } from "@/lib/services/bankAccountService";
 import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import { Transaction } from "@/lib/types";
@@ -97,6 +105,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CashMatrixView } from "@/components/features/reports/CashMatrix";
 import {
   CashFlowView,
   Drill,
@@ -129,7 +138,7 @@ const EXPORTS: Record<
     {
       format: "excel",
       label: "Excel",
-      hint: "Resumo, extrato, centros de custo e pendências",
+      hint: "Resumo, extrato, pendências e a matriz aberta na tela",
     },
     { format: "csv", label: "CSV", hint: "Um lançamento por linha" },
   ],
@@ -251,7 +260,23 @@ function Reports() {
     ),
   );
   const [forecast, setForecast] = useState<FlowStage[]>(DEFAULT_FORECAST);
-  const [granularity, setGranularity] = useState<Granularity | "auto">("auto");
+  const [granularity, setGranularity] = useState<Granularity | "auto">(() =>
+    oneOf(
+      searchParams.get("agrupar"),
+      ["auto", "day", "week", "month", "quarter"],
+      "auto",
+    ),
+  );
+  const [detail, setDetail] = useState<MatrixRows | "none">(() =>
+    oneOf(
+      searchParams.get("detalhar"),
+      ["none", "costCenter", "account", "entity", "bank"],
+      "none",
+    ),
+  );
+  const [againstPlan, setAgainstPlan] = useState(
+    () => searchParams.get("medida") === "previsto",
+  );
   const [openingOverride, setOpeningOverride] = useState<{
     start: number;
     value: number;
@@ -278,6 +303,11 @@ function Reports() {
     if (costCenterFilter !== "all") params.set("cc", costCenterFilter);
     if (comparison !== "none") params.set("comparar", comparison);
     if (kind === "cash_flow" && mode !== "both") params.set("situacao", mode);
+    if (kind === "cash_flow") {
+      if (granularity !== "auto") params.set("agrupar", granularity);
+      if (detail !== "none") params.set("detalhar", detail);
+      if (detail !== "none" && againstPlan) params.set("medida", "previsto");
+    }
     if (kind === "dre" && regime !== "competence") params.set("regime", regime);
     if (entityFilter) params.set("entidade", entityFilter);
     if (entityFilter && entityAccount) params.set("conta", entityAccount);
@@ -298,6 +328,9 @@ function Reports() {
     entityFilter,
     entityAccount,
     direction,
+    granularity,
+    detail,
+    againstPlan,
     router,
   ]);
 
@@ -529,7 +562,10 @@ function Reports() {
   // ── Relatórios (os mesmos números vão para a tela e para os arquivos) ────
   const gran =
     granularity === "auto"
-      ? defaultGranularity(range.start, range.end)
+      ? (detail === "none" ? defaultGranularity : matrixGranularity)(
+          range.start,
+          range.end,
+        )
       : granularity;
 
   const flow = useMemo(() => {
@@ -595,6 +631,91 @@ function Reports() {
     stages,
     ccIds,
     gran,
+    entity,
+    accountIndex,
+  ]);
+
+  // ── Matriz: o mesmo fluxo, aberto por centro, conta, entidade ou banco ────
+  const hasMatrix = isFlow && detail !== "none";
+  const wantsPlan = hasMatrix && againstPlan;
+  const planQuery = useQuery({
+    queryKey: ["report-plan", ...scopeKey, +range.start, +range.end],
+    // ponytail: 90 dias além do período bastam para reconhecer as partes de um
+    // recebimento dividido; partes mais distantes contariam como previsão nova.
+    queryFn: () =>
+      transactionService.getAll({
+        companyId: companyId!,
+        startDate: subDays(range.start, 90),
+        endDate: addDays(range.end, 90),
+        createdBy,
+        costCenterIds: ccIds,
+      }),
+    enabled: !!companyId && canViewReports && wantsPlan,
+    staleTime: 5 * 60_000,
+  });
+  const banksQuery = useQuery({
+    queryKey: ["report-banks", companyId],
+    queryFn: () => bankAccountService.getAll(companyId!),
+    enabled: !!companyId && canViewReports && hasMatrix && detail === "bank",
+    staleTime: 5 * 60_000,
+  });
+  const matrixError =
+    (wantsPlan && planQuery.error) ||
+    (detail === "bank" && hasMatrix && banksQuery.error);
+  const matrix = useMemo(() => {
+    if (detail === "none" || !flow || !current.data) return null;
+    if (wantsPlan && !planQuery.data) return null;
+    if (detail === "bank" && !banksQuery.data) return null;
+    const shared = {
+      rows: detail,
+      start: range.start,
+      end: range.end,
+      today: new Date(todayStart),
+      granularity: gran,
+      costCenters,
+      accounts,
+      entities,
+      banks: banksQuery.data,
+      costCenterIds: ccIds,
+    };
+    if (wantsPlan) {
+      // O realizado inteiro, qualquer que seja a situação escolhida acima.
+      const realized = buildCashFlow(scoped(current.data.transactions), {
+        ...shared,
+        stages: ["realized"],
+      });
+      return buildMatrix({
+        ...shared,
+        opening: null,
+        lines: realized.lines,
+        plan: planLines(scoped(planQuery.data!), range.start, range.end, ccIds),
+      });
+    }
+    return buildMatrix({
+      ...shared,
+      opening: openingKnown ? opening : null,
+      lines: flow.lines,
+      previous: flowPrev?.lines,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasMatrix,
+    wantsPlan,
+    detail,
+    flow,
+    flowPrev,
+    current.data,
+    planQuery.data,
+    banksQuery.data,
+    range,
+    todayStart,
+    gran,
+    costCenters,
+    accounts,
+    entities,
+    ccIds,
+    openingKnown,
+    opening,
     entity,
     accountIndex,
   ]);
@@ -756,6 +877,7 @@ function Reports() {
           ...ctx,
           companyCnpj: selectedCompany.cnpj,
           granularity: gran,
+          matrix: matrix ?? undefined,
           // O CSV é só a lista de lançamentos: não leva a conferência.
           proof:
             fmt === "csv"
@@ -886,7 +1008,13 @@ function Reports() {
             <Button
               variant="outline"
               loading={exporting !== null}
-              disabled={exporting !== null || loading || isEmpty || !!loadError}
+              disabled={
+                exporting !== null ||
+                loading ||
+                isEmpty ||
+                !!loadError ||
+                (hasMatrix && !matrix && !matrixError)
+              }
             >
               {exporting === null && <Download className="h-4 w-4" />}
               {receiptProgress ?? "Exportar"}
@@ -1106,10 +1234,9 @@ function Reports() {
                 label="Agrupar por"
                 value={granularity === "auto" ? gran : granularity}
                 onChange={setGranularity}
-                options={[
-                  { value: "day", label: "Dia" },
-                  { value: "month", label: "Mês" },
-                ]}
+                options={(
+                  Object.entries(GRANULARITY_LABEL) as [Granularity, string][]
+                ).map(([value, label]) => ({ value, label }))}
               />
             </>
           ) : (
@@ -1268,6 +1395,62 @@ function Reports() {
           hasOpening={openingKnown}
           closedPeriod={closedPeriod}
           granularity={gran}
+          toolbar={
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <Segmented
+                label="Detalhar por"
+                value={detail}
+                onChange={setDetail}
+                options={[
+                  { value: "none", label: "Só o período" },
+                  ...(
+                    Object.entries(MATRIX_ROWS) as [MatrixRows, string][]
+                  ).map(([value, label]) => ({ value, label })),
+                ]}
+              />
+              {hasMatrix && (
+                <Segmented
+                  label="Mostrar"
+                  value={againstPlan ? "plan" : "flow"}
+                  onChange={(v) => setAgainstPlan(v === "plan")}
+                  options={[
+                    { value: "flow", label: "Fluxo" },
+                    { value: "plan", label: "Previsto × realizado" },
+                  ]}
+                />
+              )}
+            </div>
+          }
+          table={
+            !hasMatrix ? undefined : matrixError ? (
+              <div className="flex flex-col items-center gap-3 rounded-lg border py-12 text-center">
+                <AlertCircle className="h-6 w-6 text-muted-foreground" />
+                <p className="text-sm">
+                  Não foi possível carregar os dados da matriz.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (planQuery.error) void planQuery.refetch();
+                    if (banksQuery.error) void banksQuery.refetch();
+                  }}
+                >
+                  Tentar de novo
+                </Button>
+              </div>
+            ) : matrix ? (
+              <CashMatrixView
+                key={`${matrix.rows}:${matrix.hasPlan}`}
+                matrix={matrix}
+                today={new Date(todayStart)}
+                closedPeriod={closedPeriod}
+                onDrill={setDrill}
+              />
+            ) : (
+              <Skeleton className="h-72 w-full" />
+            )
+          }
           onDrill={setDrill}
         />
       ) : dre ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { format } from "date-fns";
 import { ArrowUpRight, Paperclip } from "lucide-react";
 import currency from "currency.js";
@@ -11,6 +11,7 @@ import {
   PaymentsReport,
   FlowBucket,
   Granularity,
+  GRANULARITY_LABEL,
   STAGE_INFO,
   formatPercent,
   isProjection,
@@ -81,9 +82,9 @@ export function Segmented<T extends string>({
  * Tabela com rolagem própria: cabeçalho e totais ficam presos enquanto as
  * linhas rolam, e os filtros acima continuam à vista numa DRE longa.
  */
-const SCROLL =
+export const SCROLL =
   "max-h-[calc(100dvh-14rem)] min-h-64 overflow-auto rounded-lg border";
-const HEAD = "sticky top-0 z-10 bg-muted";
+export const HEAD = "sticky top-0 z-10 bg-muted";
 const FOOT = "sticky bottom-0 z-10 bg-muted";
 
 const money = (v: number) => formatCurrency(v);
@@ -92,10 +93,11 @@ const money = (v: number) => formatCurrency(v);
 const dreMoney = (v: number) =>
   v < 0 ? `(${formatCurrency(-v)})` : formatCurrency(v);
 
-const tone = (v: number) => (v < 0 ? "text-red-700 dark:text-red-400" : "");
+export const tone = (v: number) =>
+  v < 0 ? "text-red-700 dark:text-red-400" : "";
 
 /** Valor que abre os lançamentos que o formam. */
-function DrillValue({
+export function DrillValue({
   value,
   display,
   onOpen,
@@ -143,9 +145,9 @@ function Delta({ current, previous }: { current: number; previous: number }) {
   );
 }
 
-const TH =
+export const TH =
   "px-3 py-2 text-xs font-medium text-muted-foreground whitespace-nowrap";
-const TD = "px-3 py-1.5 whitespace-nowrap";
+export const TD = "px-3 py-1.5 whitespace-nowrap";
 
 // ─── Drill-down ───────────────────────────────────────────────────────────────
 
@@ -247,6 +249,18 @@ export function DrillSheet({
                     </td>
                     <td className={cn(TD, "text-xs text-muted-foreground")}>
                       {l.status}
+                      {receiptUrl(l.tx) && (
+                        <a
+                          href={receiptUrl(l.tx)}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Comprovante de ${l.tx.description}`}
+                          title="Abrir comprovante"
+                          className="ml-2 inline-flex align-middle text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                        </a>
+                      )}
                     </td>
                     <td
                       className={cn(
@@ -277,6 +291,8 @@ export function CashFlowView({
   hasOpening,
   closedPeriod,
   granularity,
+  toolbar,
+  table,
   onDrill,
 }: {
   report: CashFlowReport;
@@ -287,6 +303,9 @@ export function CashFlowView({
   /** Período encerrado: só o realizado entra no saldo. */
   closedPeriod: boolean;
   granularity: Granularity;
+  toolbar?: ReactNode;
+  /** A matriz no lugar da tabela por período. */
+  table?: ReactNode;
   onDrill: (d: Drill) => void;
 }) {
   const drill = (
@@ -449,103 +468,113 @@ export function CashFlowView({
         </div>
       )}
 
-      <div className={SCROLL}>
-        <table className="w-full text-sm">
-          <thead className={HEAD}>
-            <tr className="border-b text-left">
-              <th className={TH}>{granularity === "day" ? "Data" : "Mês"}</th>
-              <th className={cn(TH, "text-right")}>Entradas</th>
-              <th className={cn(TH, "text-right")}>Saídas</th>
-              <th className={cn(TH, "text-right")}>Resultado</th>
-              <th className={cn(TH, "text-right")}>
-                {hasOpening ? "Saldo" : "Acumulado"}
-              </th>
-            </tr>
-          </thead>
-          <tbody className="font-financial">
-            {hasOpening && (
-              <tr className="border-b border-border/60 text-muted-foreground">
-                <td className={TD}>Saldo inicial</td>
-                <td className={TD} />
-                <td className={TD} />
-                <td className={TD} />
-                <td className={cn(TD, "text-right", tone(report.opening))}>
-                  {money(report.opening)}
-                </td>
+      {toolbar}
+
+      {table ?? (
+        <div className={SCROLL}>
+          <table className="w-full text-sm">
+            <thead className={HEAD}>
+              <tr className="border-b text-left">
+                <th className={TH}>
+                  {granularity === "day"
+                    ? "Data"
+                    : GRANULARITY_LABEL[granularity]}
+                </th>
+                <th className={cn(TH, "text-right")}>Entradas</th>
+                <th className={cn(TH, "text-right")}>Saídas</th>
+                <th className={cn(TH, "text-right")}>Resultado</th>
+                <th className={cn(TH, "text-right")}>
+                  {hasOpening ? "Saldo" : "Acumulado"}
+                </th>
               </tr>
-            )}
-            {report.buckets.map((b) => (
-              <tr
-                key={b.key}
-                className={cn(
-                  "border-b border-border/60 last:border-0 hover:bg-muted/30",
-                  b === standout && "bg-muted/50",
-                )}
-              >
-                <td className={TD}>
-                  <span
-                    className={cn(
-                      "font-sans capitalize",
-                      b === standout && "font-semibold",
+            </thead>
+            <tbody className="font-financial">
+              {hasOpening && (
+                <tr className="border-b border-border/60 text-muted-foreground">
+                  <td className={TD}>Saldo inicial</td>
+                  <td className={TD} />
+                  <td className={TD} />
+                  <td className={TD} />
+                  <td className={cn(TD, "text-right", tone(report.opening))}>
+                    {money(report.opening)}
+                  </td>
+                </tr>
+              )}
+              {report.buckets.map((b) => (
+                <tr
+                  key={b.key}
+                  className={cn(
+                    "border-b border-border/60 last:border-0 hover:bg-muted/30",
+                    b === standout && "bg-muted/50",
+                  )}
+                >
+                  <td className={TD}>
+                    <span
+                      className={cn(
+                        "font-sans capitalize",
+                        b === standout && "font-semibold",
+                      )}
+                    >
+                      {b.label}
+                    </span>
+                    {b === standout && (
+                      <span className="ml-2 font-sans text-[11px] text-muted-foreground">
+                        maior saída · {formatPercent(biggestShare)} das saídas
+                      </span>
                     )}
-                  >
-                    {b.label}
-                  </span>
-                  {b === standout && (
-                    <span className="ml-2 font-sans text-[11px] text-muted-foreground">
-                      maior saída · {formatPercent(biggestShare)} das saídas
-                    </span>
-                  )}
-                  {b.forecast && (
-                    <span className="ml-2 font-sans text-[11px] text-muted-foreground">
-                      {b.lines.some((l) => l.late)
-                        ? "inclui previsto e vencidos a pagar"
-                        : "inclui previsto"}
-                    </span>
-                  )}
-                </td>
+                    {b.forecast && (
+                      <span className="ml-2 font-sans text-[11px] text-muted-foreground">
+                        {b.lines.some((l) => l.late)
+                          ? "inclui previsto e vencidos a pagar"
+                          : "inclui previsto"}
+                      </span>
+                    )}
+                  </td>
+                  <td className={cn(TD, "text-right")}>
+                    <DrillValue
+                      label={`Entradas ${b.label}`}
+                      value={b.inflow}
+                      onOpen={() => drill("Entradas", b.label, ins(b.lines))}
+                    />
+                  </td>
+                  <td className={cn(TD, "text-right")}>
+                    <DrillValue
+                      label={`Saídas ${b.label}`}
+                      value={b.outflow}
+                      onOpen={() => drill("Saídas", b.label, outs(b.lines))}
+                    />
+                  </td>
+                  <td className={cn(TD, "text-right", tone(b.net))}>
+                    <DrillValue
+                      label={`Resultado ${b.label}`}
+                      value={b.net}
+                      onOpen={() => drill("Movimento", b.label, b.lines)}
+                    />
+                  </td>
+                  <td className={cn(TD, "text-right", tone(b.balance))}>
+                    {money(b.balance)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className={cn(FOOT, "font-financial")}>
+              <tr className="border-t font-semibold">
+                <td className={cn(TD, "font-sans")}>Total</td>
+                <td className={cn(TD, "text-right")}>{money(report.inflow)}</td>
                 <td className={cn(TD, "text-right")}>
-                  <DrillValue
-                    label={`Entradas ${b.label}`}
-                    value={b.inflow}
-                    onOpen={() => drill("Entradas", b.label, ins(b.lines))}
-                  />
+                  {money(report.outflow)}
                 </td>
-                <td className={cn(TD, "text-right")}>
-                  <DrillValue
-                    label={`Saídas ${b.label}`}
-                    value={b.outflow}
-                    onOpen={() => drill("Saídas", b.label, outs(b.lines))}
-                  />
+                <td className={cn(TD, "text-right", tone(report.net))}>
+                  {money(report.net)}
                 </td>
-                <td className={cn(TD, "text-right", tone(b.net))}>
-                  <DrillValue
-                    label={`Resultado ${b.label}`}
-                    value={b.net}
-                    onOpen={() => drill("Movimento", b.label, b.lines)}
-                  />
-                </td>
-                <td className={cn(TD, "text-right", tone(b.balance))}>
-                  {money(b.balance)}
+                <td className={cn(TD, "text-right", tone(report.closing))}>
+                  {money(report.closing)}
                 </td>
               </tr>
-            ))}
-          </tbody>
-          <tfoot className={cn(FOOT, "font-financial")}>
-            <tr className="border-t font-semibold">
-              <td className={cn(TD, "font-sans")}>Total</td>
-              <td className={cn(TD, "text-right")}>{money(report.inflow)}</td>
-              <td className={cn(TD, "text-right")}>{money(report.outflow)}</td>
-              <td className={cn(TD, "text-right", tone(report.net))}>
-                {money(report.net)}
-              </td>
-              <td className={cn(TD, "text-right", tone(report.closing))}>
-                {money(report.closing)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+            </tfoot>
+          </table>
+        </div>
+      )}
 
       {showStages && (
         <section className="space-y-2">

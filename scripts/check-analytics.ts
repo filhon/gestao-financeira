@@ -22,7 +22,6 @@ import {
   compareRange,
   hasMovement,
   monthlyAverage,
-  planRoles,
   buildAnalytics,
   buildAttention,
   buildProjectionDays,
@@ -44,6 +43,7 @@ import {
   type EnvelopeLeaf,
   type ForecastStage,
 } from "../src/lib/analytics";
+import { planRoles } from "../src/lib/plan";
 import { DEFAULT_FORECAST } from "../src/lib/reports";
 import type {
   ChartAccount,

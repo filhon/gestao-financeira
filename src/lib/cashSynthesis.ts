@@ -193,8 +193,8 @@ const groupBy = <T>(items: T[], key: (item: T) => string) => {
 };
 
 /** O valor da linha por centro; a sobra do arredondamento fica no último. */
-function splitByCostCenter(
-  line: FlowLine,
+export function splitByCostCenter(
+  line: Pick<FlowLine, "tx" | "amount">,
   costCenterIds?: readonly string[],
 ): { id: string; amount: number }[] {
   const parts = (line.tx.costCenterAllocation ?? []).filter(

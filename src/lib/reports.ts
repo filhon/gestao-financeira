@@ -25,6 +25,7 @@ import {
   startOfDay,
   startOfMonth,
   startOfQuarter,
+  startOfWeek,
   startOfYear,
   subDays,
   subMonths,
@@ -128,7 +129,80 @@ const signed = (t: Transaction, amount: number) =>
 
 // ─── Fluxo de caixa ───────────────────────────────────────────────────────────
 
-export type Granularity = "day" | "month";
+export type Granularity = "day" | "week" | "month" | "quarter";
+
+export const GRANULARITY_LABEL: Record<Granularity, string> = {
+  day: "Dia",
+  week: "Semana",
+  month: "Mês",
+  quarter: "Trimestre",
+};
+
+export interface PeriodBucket {
+  key: string;
+  label: string;
+  /** Primeiro dia do balde, já dentro do período. */
+  start: Date;
+}
+
+/**
+ * Baldes do período. Semana, mês e trimestre sem movimento também aparecem (a
+ * lacuna é informação); por dia, só os dias com movimento. A semana vai de
+ * segunda a domingo, cortada nas pontas do período.
+ */
+export function bucketsOf(
+  start: Date,
+  end: Date,
+  granularity: Granularity,
+  dates: Date[],
+): { keyOf: (d: Date) => string; buckets: PeriodBucket[] } {
+  const from = startOfDay(start);
+  const to = endOfDay(end);
+  const first = (d: Date) =>
+    granularity === "day"
+      ? startOfDay(d)
+      : granularity === "week"
+        ? startOfWeek(d, { weekStartsOn: 1 })
+        : granularity === "month"
+          ? startOfMonth(d)
+          : startOfQuarter(d);
+  const keyOf = (d: Date) =>
+    format(first(d), granularity === "month" ? "yyyy-MM" : "yyyy-MM-dd");
+  const labelOf = (d: Date) => {
+    if (granularity === "day") return format(d, "dd/MM/yyyy");
+    if (granularity === "month") return format(d, "MMM/yyyy", { locale: ptBR });
+    if (granularity === "quarter")
+      return format(d, "Qo 'tri/'yyyy", { locale: ptBR });
+    const a = d < from ? from : d;
+    const last = addDays(d, 6);
+    const b = last > to ? to : last;
+    return isSameDay(a, b)
+      ? format(a, "dd/MM")
+      : `${format(a, "dd/MM")} a ${format(b, "dd/MM")}`;
+  };
+  const starts = new Map<string, Date>();
+  if (granularity === "day") {
+    for (const d of dates) {
+      if (d >= from && d <= to) starts.set(keyOf(d), first(d));
+    }
+  } else {
+    const next = (d: Date) =>
+      granularity === "week"
+        ? addWeeks(d, 1)
+        : addMonths(d, granularity === "month" ? 1 : 3);
+    for (let d = first(from); d <= to; d = next(d)) starts.set(keyOf(d), d);
+  }
+  return {
+    keyOf,
+    buckets: [...starts]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, d]) => ({
+        key,
+        label: labelOf(d),
+        start: d < from ? from : d,
+      })),
+  };
+}
 
 export interface FlowLine {
   tx: Transaction;
@@ -146,9 +220,7 @@ export const lineSituation = (l: Pick<FlowLine, "tx" | "late">) =>
     ? `${situationOf(l.tx)} · venceu em ${format(l.tx.dueDate, "dd/MM/yyyy")}`
     : situationOf(l.tx);
 
-export interface FlowBucket {
-  key: string;
-  label: string;
+export interface FlowBucket extends PeriodBucket {
   inflow: number;
   outflow: number;
   net: number;
@@ -199,6 +271,12 @@ export interface FlowOptions {
 export const defaultGranularity = (start: Date, end: Date): Granularity =>
   differenceInCalendarDays(end, start) <= 62 ? "day" : "month";
 
+/** Na matriz cada período é uma coluna: até ~2 meses cabem as semanas. */
+export const matrixGranularity = (start: Date, end: Date): Granularity => {
+  const days = differenceInCalendarDays(end, start);
+  return days <= 62 ? "week" : days <= 400 ? "month" : "quarter";
+};
+
 export function buildCashFlow(
   transactions: Transaction[],
   o: FlowOptions,
@@ -235,29 +313,26 @@ export function buildCashFlow(
   lines.sort(byDate);
   pending.sort(byDate);
 
-  const keyOf = (d: Date) =>
-    format(d, o.granularity === "day" ? "yyyy-MM-dd" : "yyyy-MM");
-  const labelOf = (d: Date) =>
-    o.granularity === "day"
-      ? format(d, "dd/MM/yyyy")
-      : format(d, "MMM/yyyy", { locale: ptBR });
-
-  const buckets = new Map<string, FlowBucket>();
-  if (o.granularity === "month") {
-    // Mês sem movimento também aparece: a lacuna é informação.
-    for (let d = startOfMonth(from); d <= to; d = addMonths(d, 1)) {
-      buckets.set(keyOf(d), {
-        key: keyOf(d),
-        label: labelOf(d),
+  const { keyOf, buckets: periods } = bucketsOf(
+    o.start,
+    o.end,
+    o.granularity,
+    lines.map((l) => l.date),
+  );
+  const buckets = new Map<string, FlowBucket>(
+    periods.map((p) => [
+      p.key,
+      {
+        ...p,
         inflow: 0,
         outflow: 0,
         net: 0,
         balance: 0,
         lines: [],
         forecast: false,
-      });
-    }
-  }
+      },
+    ]),
+  );
 
   const stageTotals = new Map<FlowStage, StageTotal>(
     [...wanted].map((stage) => [
@@ -270,21 +345,7 @@ export function buildCashFlow(
   let outflow = currency(0);
 
   for (const line of lines) {
-    const key = keyOf(line.date);
-    let b = buckets.get(key);
-    if (!b) {
-      b = {
-        key,
-        label: labelOf(line.date),
-        inflow: 0,
-        outflow: 0,
-        net: 0,
-        balance: 0,
-        lines: [],
-        forecast: false,
-      };
-      buckets.set(key, b);
-    }
+    const b = buckets.get(keyOf(line.date))!;
     const isIn = line.tx.type === "receivable";
     if (isIn) {
       b.inflow = currency(b.inflow).add(line.amount).value;

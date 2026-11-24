@@ -4,8 +4,10 @@
  * Falha com exceção na primeira regra quebrada.
  */
 import assert from "node:assert/strict";
+import currency from "currency.js";
 import {
   belongsTo,
+  bucketsOf,
   buildCashFlow,
   buildPayments,
   comparisonRange,
@@ -21,6 +23,13 @@ import {
   proveBalance,
   synthesisTitle,
 } from "../src/lib/cashSynthesis";
+import {
+  buildMatrix,
+  isUnfavorable,
+  mergeLines,
+  planLines,
+  type MatrixRows,
+} from "../src/lib/cashMatrix";
 import type {
   BankAccount,
   BankTransaction,
@@ -447,5 +456,133 @@ assert.match(
   ),
   /^Janeiro de 2027 fechou com R\$\s360,00, ainda sem conferência/,
 );
+
+// ─── Baldes: semana de segunda a domingo, cortada nas pontas ─────────────────
+const weeks = bucketsOf(
+  new Date(2026, 9, 1),
+  new Date(2026, 9, 31),
+  "week",
+  [],
+).buckets;
+assert.deepEqual(
+  weeks.map((w) => w.label),
+  [
+    "01/10 a 04/10",
+    "05/10 a 11/10",
+    "12/10 a 18/10",
+    "19/10 a 25/10",
+    "26/10 a 31/10",
+  ],
+);
+assert.deepEqual(
+  bucketsOf(
+    new Date(2026, 0, 1),
+    new Date(2026, 11, 31),
+    "quarter",
+    [],
+  ).buckets.map((b) => b.label),
+  ["1º tri/2026", "2º tri/2026", "3º tri/2026", "4º tri/2026"],
+);
+
+// ─── Matriz: cada dimensão fecha com o fluxo, em toda granularidade ──────────
+const matrixBase = {
+  start: new Date(2027, 0, 1),
+  end: new Date(2027, 0, 31),
+  today: new Date(2027, 1, 10),
+  granularity: "week" as const,
+  opening: 10,
+  lines: synthFlow.lines,
+  costCenters: ccs,
+  accounts: [
+    { id: "s", code: "3", name: "Receitas" },
+    { id: "a1", code: "3.1", name: "Doações" },
+  ] as ChartAccount[],
+  entities: [{ id: "pf", name: "Ana" }] as Entity[],
+  banks: [],
+};
+const matrixOf = (rows: MatrixRows, extra = {}) =>
+  buildMatrix({ ...matrixBase, rows, ...extra });
+for (const rows of ["costCenter", "account", "entity", "bank"] as const) {
+  for (const granularity of ["day", "week", "month", "quarter"] as const) {
+    const m = matrixOf(rows, { granularity });
+    for (const s of [m.inflow, m.outflow]) {
+      const tops = s.nodes.filter((x) => x.depth === 0);
+      const sum = (pick: (x: (typeof tops)[number]) => number) =>
+        currency(0).add(tops.reduce((t, x) => t + pick(x), 0)).value;
+      assert.equal(
+        sum((x) => x.total),
+        s.total,
+        `${rows} ${granularity}`,
+      );
+      s.values.forEach((v, i) =>
+        assert.equal(
+          sum((x) => x.values[i]),
+          v,
+        ),
+      );
+    }
+    assert.equal(m.inflow.total, synthFlow.inflow);
+    assert.equal(m.outflow.total, synthFlow.outflow);
+    assert.equal(m.closing!.at(-1), synthFlow.closing);
+  }
+}
+const byCenter = matrixOf("costCenter").outflow.nodes;
+assert.deepEqual(
+  byCenter.map((x) => [x.label, x.depth, x.hasChildren]),
+  [
+    ["Sede", 0, false],
+    ["Ofertas", 0, true],
+    ["Obras", 1, false],
+    ["Saúde", 1, false],
+  ],
+);
+// O pagamento rateado entre dois centros aparece uma vez na lista da área.
+const ofertas = byCenter[1].lines.flat();
+assert.equal(ofertas.length, 2);
+assert.deepEqual(
+  mergeLines(ofertas).map((l) => l.amount),
+  [66.66],
+);
+assert.deepEqual(
+  matrixOf("account").inflow.nodes.map((x) => [x.label, x.depth]),
+  [
+    ["3 Receitas", 0],
+    ["3.1 Doações", 1],
+  ],
+);
+assert.equal(matrixOf("account").outflow.nodes[0].label, "Sem conta contábil");
+
+// Previsto × realizado: o valor de origem no vencimento; parte desdobrada não
+// é previsão nova; o total só conta o que já venceu.
+const born = (day: number) => new Date(2026, 11, day);
+const planned = planLines(
+  [
+    tx({ amount: 130, plannedAmount: 100, createdAt: born(1) }),
+    tx({ amount: 40, unplanned: true, createdAt: born(1) }),
+    tx({ description: "Obra (1/2)", amount: 60, createdAt: born(1) }),
+    tx({ description: "Obra (2/2)", amount: 60, createdAt: born(5) }),
+    tx({ amount: 7, dueDate: new Date(2027, 0, 31, 15), createdAt: born(1) }),
+    tx({ amount: 9, dueDate: new Date(2027, 1, 1), createdAt: born(1) }),
+  ],
+  matrixBase.start,
+  matrixBase.end,
+);
+assert.deepEqual(
+  planned.map((l) => l.amount),
+  [100, 60, 7],
+);
+const versus = matrixOf("costCenter", {
+  plan: planned,
+  opening: null,
+  today: new Date(2027, 0, 20),
+});
+assert.equal(
+  versus.outflow.plan.reduce((a, b) => a + b, 0),
+  167,
+);
+assert.equal(versus.outflow.planTotal, 160, "31/01 ainda não venceu em 20/01");
+assert.equal(versus.closing, null);
+assert.equal(isUnfavorable("payable", 5), true);
+assert.equal(isUnfavorable("receivable", 5), false);
 
 console.log("relatórios: ok");

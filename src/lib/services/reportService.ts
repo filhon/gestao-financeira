@@ -30,6 +30,7 @@ import {
   CashFlowReport,
   FlowLine,
   Granularity,
+  GRANULARITY_LABEL,
   PaymentLine,
   PaymentsReport,
   STAGE_INFO,
@@ -40,6 +41,13 @@ import {
   situationOf,
   toCsv,
 } from "@/lib/reports";
+import {
+  MATRIX_ROWS,
+  shownNodes,
+  type CashMatrix,
+  type MatrixNode,
+  type MatrixSection,
+} from "@/lib/cashMatrix";
 import {
   buildSynthesis,
   proofNote,
@@ -68,6 +76,8 @@ export type CashFlowContext = ReportContext & {
   granularity: Granularity;
   /** Conferência do saldo final com o banco. */
   proof: ProofState;
+  /** A matriz aberta na tela, se houver. */
+  matrix?: CashMatrix;
   opening:
     | { source: "calculated" }
     | { source: "typed"; calculated: number | null }
@@ -683,7 +693,11 @@ async function buildCashFlowWorkbook(
     pageSetup: { ...landscape, printTitlesRow: "1:1" },
   });
   flow.columns = [
-    { header: ctx.granularity === "day" ? "Data" : "Mês", width: 16 },
+    {
+      header:
+        ctx.granularity === "day" ? "Data" : GRANULARITY_LABEL[ctx.granularity],
+      width: 18,
+    },
     { header: "Entradas", width: 18 },
     { header: "Saídas", width: 18 },
     { header: "Resultado", width: 18 },
@@ -700,9 +714,11 @@ async function buildCashFlowWorkbook(
   ]);
   report.buckets.forEach((b, i) => {
     const n = i + 3;
-    const [yy, mm, dd = 1] = b.key.split("-").map(Number);
     const row = flow.addRow([
-      new Date(Date.UTC(yy, mm - 1, dd)),
+      // Semana e trimestre não são uma data: vão como texto.
+      ctx.granularity === "day" || ctx.granularity === "month"
+        ? day(b.start)
+        : b.label,
       b.inflow,
       b.outflow,
       formula(`B${n}-C${n}`, b.net),
@@ -812,6 +828,202 @@ async function buildCashFlowWorkbook(
     row.getCell(1).alignment = { wrapText: true, vertical: "top" };
     row.height = 15 * Math.ceil(note.length / 60);
   });
+
+  // ── Matriz: a da tela, com fórmulas e níveis que recolhem ─────────────────
+  if (ctx.matrix) addMatrixSheet(ctx.matrix);
+
+  function addMatrixSheet(m: CashMatrix) {
+    const ws = workbook.addWorksheet("Matriz", {
+      views: [{ state: "frozen", xSplit: 1, ySplit: 2 }],
+      pageSetup: { ...landscape, printTitlesRow: "1:2" },
+      // O total de um grupo fica acima das linhas dele.
+      properties: { outlineLevelRow: 1 },
+    });
+    ws.properties.outlineProperties = {
+      summaryBelow: false,
+      summaryRight: false,
+    };
+    const step = m.hasPlan ? 2 : 1;
+    /** Coluna do período i: previsto e realizado, ou só o fluxo. */
+    const colOf = (i: number) => 2 + i * step;
+    const totalCol = colOf(m.buckets.length);
+    const L = (c: number) => ws.getColumn(c).letter;
+    const width = totalCol + (m.hasPlan ? 3 : m.hasPrevious ? 2 : 0);
+    ws.getColumn(1).width = 46;
+    for (let c = 2; c <= width; c++) ws.getColumn(c).width = 16;
+
+    const h1 = ws.getRow(1);
+    const h2 = ws.getRow(2);
+    h1.getCell(1).value = MATRIX_ROWS[m.rows];
+    m.buckets.forEach((b, i) => {
+      h1.getCell(colOf(i)).value = b.label;
+      if (m.hasPlan) {
+        h2.getCell(colOf(i)).value = "Previsto";
+        h2.getCell(colOf(i) + 1).value = "Realizado";
+      }
+    });
+    if (m.hasPlan) {
+      h1.getCell(totalCol).value = "Total";
+      ["Previsto", "Realizado", "Desvio", "Desvio %"].forEach((t, k) => {
+        h2.getCell(totalCol + k).value = t;
+      });
+      h1.getCell(totalCol).note =
+        "O previsto do total vai até a data em que o arquivo foi gerado.";
+    } else {
+      h1.getCell(totalCol).value = "Total";
+      if (m.hasPrevious) {
+        h1.getCell(totalCol + 1).value = "Anterior";
+        h1.getCell(totalCol + 2).value = "Variação";
+      }
+    }
+    headStyle(h1);
+    headStyle(h2);
+
+    const finish = (row: Row, strong: boolean) => {
+      for (let c = 2; c <= width; c++) row.getCell(c).numFmt = BRL;
+      if (m.hasPlan) row.getCell(width).numFmt = "0.0%";
+      else if (m.hasPrevious) row.getCell(width).numFmt = "0.0%";
+      if (strong) row.font = { bold: true };
+    };
+    const totals = (
+      row: Row,
+      v: { total: number; planTotal: number; previous: number },
+    ) => {
+      const n = row.number;
+      if (m.hasPlan) {
+        row.getCell(totalCol).value = v.planTotal;
+        row.getCell(totalCol + 1).value = formula(
+          m.buckets.map((_, i) => `${L(colOf(i) + 1)}${n}`).join("+"),
+          v.total,
+        );
+        const dev = currency(v.total).subtract(v.planTotal).value;
+        row.getCell(totalCol + 2).value = formula(
+          `${L(totalCol + 1)}${n}-${L(totalCol)}${n}`,
+          dev,
+        );
+        row.getCell(totalCol + 3).value = v.planTotal
+          ? formula(
+              `${L(totalCol + 2)}${n}/ABS(${L(totalCol)}${n})`,
+              dev / Math.abs(v.planTotal),
+            )
+          : null;
+      } else {
+        row.getCell(totalCol).value = formula(
+          `SUM(${L(2)}${n}:${L(totalCol - 1)}${n})`,
+          v.total,
+        );
+        if (m.hasPrevious) {
+          row.getCell(totalCol + 1).value = v.previous;
+          row.getCell(totalCol + 2).value = v.previous
+            ? formula(
+                `(${L(totalCol)}${n}-${L(totalCol + 1)}${n})/ABS(${L(totalCol + 1)}${n})`,
+                (v.total - v.previous) / Math.abs(v.previous),
+              )
+            : null;
+        }
+      }
+    };
+    const numbersOf = (r: MatrixNode | MatrixSection) =>
+      m.buckets.flatMap((_, i) =>
+        m.hasPlan ? [r.plan[i], r.values[i]] : [r.values[i]],
+      );
+    const sum = (xs: number[]) =>
+      xs.reduce((s, x) => s.add(x), currency(0)).value;
+
+    if (m.buckets.length === 0) return;
+    let openingRow: Row | null = null;
+    if (m.closing) {
+      openingRow = ws.addRow(["Saldo inicial"]);
+      finish(openingRow, false);
+    }
+
+    const write = (s: MatrixSection, name: string) => {
+      const head = ws.addRow([name, ...numbersOf(s)]);
+      const rowOf = new Map<string, number>();
+      const shown = shownNodes(m, s);
+      for (const n of shown) {
+        const row = ws.addRow([n.label, ...numbersOf(n)]);
+        row.outlineLevel = Math.min(7, n.depth + 1);
+        row.getCell(1).alignment = { indent: n.depth + 1 };
+        rowOf.set(n.key, row.number);
+        totals(row, n);
+        finish(row, false);
+      }
+      // Pai por fórmula só quando os filhos somam tudo: um centro com
+      // lançamento próprio mantém o valor.
+      const link = (
+        row: Row,
+        r: MatrixNode | MatrixSection,
+        kids: MatrixNode[],
+      ) => {
+        if (kids.length === 0 || kids.length > 200) return;
+        const cells = numbersOf(r);
+        const parts = kids.map(numbersOf);
+        cells.forEach((v, k) => {
+          if (sum(parts.map((p) => p[k])) !== v) return;
+          row.getCell(2 + k).value = formula(
+            `SUM(${kids.map((c) => `${L(2 + k)}${rowOf.get(c.key)}`).join(",")})`,
+            v,
+          );
+        });
+      };
+      link(
+        head,
+        s,
+        shown.filter((n) => n.depth === 0),
+      );
+      for (const n of shown.filter((x) => x.hasChildren)) {
+        link(
+          ws.getRow(rowOf.get(n.key)!),
+          n,
+          shown.filter((x) => x.parent === n.key),
+        );
+      }
+      totals(head, s);
+      finish(head, true);
+      return head.number;
+    };
+    const inRow = write(m.inflow, "Entradas");
+    const outRow = write(m.outflow, "Saídas");
+
+    const netOf = (a: number, b: number) => currency(a).subtract(b).value;
+    const net = ws.addRow(["Resultado"]);
+    const ins = numbersOf(m.inflow);
+    const outs = numbersOf(m.outflow);
+    ins.forEach((v, k) => {
+      net.getCell(2 + k).value = formula(
+        `${L(2 + k)}${inRow}-${L(2 + k)}${outRow}`,
+        netOf(v, outs[k]),
+      );
+    });
+    totals(net, {
+      total: m.netTotal,
+      planTotal: netOf(m.inflow.planTotal, m.outflow.planTotal),
+      previous: netOf(m.inflow.previous, m.outflow.previous),
+    });
+    finish(net, true);
+
+    if (m.closing && openingRow) {
+      const close = ws.addRow(["Saldo final"]);
+      m.closing.forEach((v, i) => {
+        const c = L(colOf(i));
+        openingRow!.getCell(colOf(i)).value =
+          i === 0
+            ? m.opening
+            : formula(`${L(colOf(i - 1))}${close.number}`, m.closing![i - 1]);
+        close.getCell(colOf(i)).value = formula(
+          `${c}${openingRow!.number}+${c}${net.number}`,
+          v,
+        );
+      });
+      openingRow.getCell(totalCol).value = m.opening;
+      close.getCell(totalCol).value = formula(
+        `${L(totalCol - 1)}${close.number}`,
+        m.closing.at(-1) ?? m.opening,
+      );
+      finish(close, true);
+    }
+  }
 
   // ── Para onde foi ─────────────────────────────────────────────────────────
   const plain = (
