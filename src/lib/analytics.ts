@@ -43,6 +43,7 @@ import {
   variation,
   type FlowStage,
 } from "./reports";
+import { tidyName } from "./costCenterTree";
 import {
   annotateWithSimulations,
   negativeRuns,
@@ -1767,15 +1768,6 @@ export function compositionLevel(
       kids.reduce((s, k) => s + k.value[side], 0) + Math.max(0, unassigned),
   };
 }
-
-/**
- * "MISSÕES E PROJETOS" → "Missões e projetos". ponytail: sigla em nome todo
- * maiúsculo vira minúscula ("INSS" → "Inss"); lista de siglas se incomodar.
- */
-export const tidyName = (name: string) =>
-  /[a-zà-ú]/.test(name) || !/[A-ZÀ-Ú]/.test(name)
-    ? name
-    : name.charAt(0) + name.slice(1).toLocaleLowerCase("pt-BR");
 
 /**
  * Plano de contas com menos da metade do movimento classificado vira manchete

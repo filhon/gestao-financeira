@@ -6,7 +6,7 @@
  * única é a mesma para os dois. Duplicá-la deixaria uma das pontas aceitar uma
  * árvore que a outra recusa.
  */
-import { CostCenter } from "@/lib/types";
+import type { CostCenter } from "@/lib/types";
 
 export interface CostCenterTree {
   byId: Map<string, CostCenter>;
@@ -109,3 +109,12 @@ export function buildCostCenterTree(costCenters: CostCenter[]): CostCenterTree {
     chainOf: (id) => [id, ...ancestorsOf(id)],
   };
 }
+
+/**
+ * "MISSÕES E PROJETOS" → "Missões e projetos". ponytail: sigla em nome todo
+ * maiúsculo vira minúscula ("INSS" → "Inss"); lista de siglas se incomodar.
+ */
+export const tidyName = (name: string) =>
+  /[a-zà-ú]/.test(name) || !/[A-ZÀ-Ú]/.test(name)
+    ? name
+    : name.charAt(0) + name.slice(1).toLocaleLowerCase("pt-BR");

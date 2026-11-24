@@ -3,7 +3,7 @@ import type { Row } from "exceljs";
 
 // jspdf + autotable pesam ~150 KB gz: carregam só quando um PDF é gerado,
 // fora do bundle inicial da página.
-const loadPdf = async () => {
+export const loadPdf = async () => {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
@@ -14,7 +14,6 @@ import currency from "currency.js";
 import { Transaction, Entity, ChartAccount, CostCenter } from "@/lib/types";
 import { withPayeeAccount } from "@/lib/entityBankAccounts";
 import { format, startOfDay } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { comprovanteProxyUrl, formatCurrency } from "@/lib/utils";
 import { formatCpfCnpj } from "@/lib/validations/cnpj";
 import {
@@ -41,6 +40,11 @@ import {
   situationOf,
   toCsv,
 } from "@/lib/reports";
+import {
+  buildSynthesis,
+  proofNote,
+  type ProofState,
+} from "@/lib/cashSynthesis";
 
 /**
  * O que a tela mostrava quando o arquivo foi gerado. `filters` vai impresso
@@ -60,7 +64,10 @@ export interface ReportContext {
 
 /** O que o arquivo do fluxo precisa dizer sobre o saldo inicial. */
 export type CashFlowContext = ReportContext & {
+  companyCnpj?: string;
   granularity: Granularity;
+  /** Conferência do saldo final com o banco. */
+  proof: ProofState;
   opening:
     | { source: "calculated" }
     | { source: "typed"; calculated: number | null }
@@ -94,7 +101,7 @@ const PAYMENT_METHOD_TEXT: Record<string, string> = {
 };
 
 /** Cadastros do arquivo, resolvidos uma vez: nomes em vez de códigos. */
-const lineLookups = (ctx: ReportContext) => {
+export const lineLookups = (ctx: ReportContext) => {
   const entityById = new Map((ctx.entities ?? []).map((e) => [e.id, e]));
   const accountById = new Map((ctx.accounts ?? []).map((a) => [a.id, a]));
   const ccName = new Map((ctx.costCenters ?? []).map((c) => [c.id, c.name]));
@@ -141,7 +148,7 @@ const lineLookups = (ctx: ReportContext) => {
 };
 
 /** Avisos impressos no arquivo: quem recebe não viu a tela. */
-const cashFlowNotes = (report: CashFlowReport, ctx: CashFlowContext) => {
+export const cashFlowNotes = (report: CashFlowReport, ctx: CashFlowContext) => {
   const { inflow, outflow, lines } = report.pending;
   const pendingText = [
     outflow > 0 ? `${formatCurrency(outflow)} a pagar` : null,
@@ -175,6 +182,16 @@ const cashFlowNotes = (report: CashFlowReport, ctx: CashFlowContext) => {
   ];
 };
 
+/** A síntese que PDF e Excel mostram, com os mesmos números. */
+export const synthesisOf = (report: CashFlowReport, ctx: CashFlowContext) =>
+  buildSynthesis(report, {
+    costCenters: ctx.costCenters ?? [],
+    accounts: ctx.accounts ?? [],
+    entities: ctx.entities ?? [],
+    costCenterIds: ctx.costCenterIds,
+    hasReceipt: (t) => !!receiptUrl(t),
+  });
+
 // ── Documentos do lançamento ────────────────────────────────────────────────
 
 const invoicesOf = (t: Transaction) =>
@@ -192,7 +209,7 @@ interface PackagedFiles {
   receipt?: string | null;
 }
 
-const lineDescription = (line: FlowLine) =>
+export const lineDescription = (line: FlowLine) =>
   isProjection(line.tx)
     ? `${line.tx.description} (recorrência)`
     : line.tx.description || "-";
@@ -533,6 +550,10 @@ async function buildCashFlowWorkbook(
     });
   };
 
+  // A ordem das abas é a da leitura: a conclusão antes dos lançamentos.
+  const summary = workbook.addWorksheet("Resumo");
+  const data = synthesisOf(report, ctx);
+
   // ── Extrato ───────────────────────────────────────────────────────────────
   const HEAD = 4;
   const sheet = workbook.addWorksheet("Extrato", {
@@ -706,8 +727,7 @@ async function buildCashFlowWorkbook(
   });
 
   // ── Resumo ────────────────────────────────────────────────────────────────
-  const summary = workbook.addWorksheet("Resumo");
-  summary.columns = [{ width: 34 }, { width: 24 }];
+  summary.columns = [{ width: 38 }, { width: 24 }, { width: 18 }];
   const heading = (t: string) => {
     summary.addRow([]);
     summary.addRow([t]).font = { bold: true, size: 11 };
@@ -736,6 +756,40 @@ async function buildCashFlowWorkbook(
       report.lowest.balance,
     );
   }
+  heading("Conferência com o banco");
+  const proof = ctx.proof;
+  if ("rows" in proof) {
+    for (const r of proof.rows) {
+      const row = item(r.name, r.balance ?? "sem extrato");
+      if (r.date) {
+        row.getCell(3).value = day(r.date);
+        row.getCell(3).numFmt = DATE;
+      }
+    }
+    if (proof.total !== null && proof.rows.length > 0) {
+      const lastRow = summary.lastRow!.number;
+      const firstRow = lastRow - proof.rows.length + 1;
+      const bank = item(
+        "Saldo no banco",
+        formula(`SUM(B${firstRow}:B${lastRow})`, proof.total),
+      );
+      bank.font = { bold: true };
+      item(
+        "Diferença (sistema menos banco)",
+        formula(`B${open + 3}-B${bank.number}`, proof.difference!),
+      ).font = { bold: true };
+    }
+  }
+  const proofText = proofNote(proof);
+  if (proofText) summary.addRow([proofText]);
+
+  heading("O que falta");
+  if (data.gaps.length === 0) summary.addRow(["Nada pendente."]);
+  for (const g of data.gaps) {
+    const row = item(g.label, g.value);
+    row.getCell(3).value = g.lines.length;
+    row.getCell(3).numFmt = '0 "lanç."';
+  }
   heading("Por situação (entradas menos saídas)");
   for (const s of report.byStage) {
     if (s.lines.length === 0) continue;
@@ -754,10 +808,121 @@ async function buildCashFlowWorkbook(
   heading("Observações");
   notes.forEach((note) => {
     const row = summary.addRow([note]);
-    summary.mergeCells(row.number, 1, row.number, 2);
+    summary.mergeCells(row.number, 1, row.number, 3);
     row.getCell(1).alignment = { wrapText: true, vertical: "top" };
     row.height = 15 * Math.ceil(note.length / 60);
   });
+
+  // ── Para onde foi ─────────────────────────────────────────────────────────
+  const plain = (
+    name: string,
+    cols: { header: string; width: number; numFmt?: string }[],
+    rows: (string | number | Date | null)[][],
+    /** Colunas (1 = A) que fecham em total por fórmula. */
+    totals: number[],
+  ) => {
+    const ws = workbook.addWorksheet(name, {
+      views: [{ state: "frozen", ySplit: 1 }],
+      pageSetup: { ...landscape, printTitlesRow: "1:1" },
+    });
+    ws.columns = cols.map(({ header, width }) => ({ header, width }));
+    headStyle(ws.getRow(1));
+    const format = (row: Row) =>
+      cols.forEach((c, i) => {
+        if (c.numFmt) row.getCell(i + 1).numFmt = c.numFmt;
+      });
+    rows.forEach((r) => format(ws.addRow(r)));
+    const end = rows.length + 1;
+    ws.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: end, column: cols.length },
+    };
+    const total = ws.addRow(["Total"]);
+    for (const c of totals) {
+      const letter = ws.getColumn(c).letter;
+      total.getCell(c).value = formula(
+        `SUBTOTAL(9,${letter}2:${letter}${end})`,
+        rows.reduce((s, r) => s.add(Number(r[c - 1] ?? 0)), currency(0)).value,
+      );
+    }
+    format(total);
+    total.font = { bold: true };
+  };
+
+  if (data.areas.length > 0) {
+    plain(
+      "Centros de custo",
+      [
+        { header: "Área", width: 34 },
+        { header: "Centro de custo", width: 38 },
+        { header: "Lançamentos", width: 14 },
+        { header: "Saídas", width: 18, numFmt: BRL },
+      ],
+      data.areas.flatMap((a) =>
+        (a.children ?? [a]).map((c) => [a.label, c.label, c.count, c.value]),
+      ),
+      [3, 4],
+    );
+  }
+  if (data.accounts.length > 0) {
+    plain(
+      "Contas contábeis",
+      [
+        { header: "Conta", width: 50 },
+        { header: "Lançamentos", width: 14 },
+        { header: "Entradas", width: 18, numFmt: BRL },
+        { header: "Saídas", width: 18, numFmt: BRL },
+      ],
+      data.accounts.map((a) => [a.label, a.count, a.inflow, a.outflow]),
+      [2, 3, 4],
+    );
+  }
+  if (data.people.length > 0) {
+    plain(
+      "Pessoas físicas",
+      [
+        { header: "Nome", width: 44 },
+        { header: "CPF", width: 18 },
+        { header: "Pagamentos", width: 14 },
+        { header: "Total pago", width: 18, numFmt: BRL },
+        { header: "Do que se trata", width: 80 },
+      ],
+      data.people.map((p) => [
+        p.name,
+        formatCpfCnpj(p.document),
+        p.count,
+        p.value,
+        p.what,
+      ]),
+      [3, 4],
+    );
+  }
+  if (data.undocumented.length > 0) {
+    plain(
+      "Pendências",
+      [
+        { header: "Data", width: 12, numFmt: DATE },
+        { header: "Descrição", width: 46 },
+        { header: "Favorecido", width: 38 },
+        { header: "CNPJ/CPF", width: 20 },
+        { header: "Centro de custo", width: 28 },
+        { header: "Falta", width: 24 },
+        { header: "Valor", width: 16, numFmt: BRL },
+      ],
+      look
+        .sort(data.undocumented)
+        .map((l) => [
+          day(l.date),
+          lineDescription(l),
+          look.partyOf(l.tx),
+          look.documentOf(l.tx),
+          look.costCentersOf(l.tx),
+          "nota e comprovante",
+          l.amount,
+        ]),
+      [7],
+    );
+  }
 
   // ── Vencidos sem baixa ────────────────────────────────────────────────────
   if (report.pending.lines.length > 0) {
@@ -800,285 +965,11 @@ export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
   // FLUXO DE CAIXA
   // ─────────────────────────────────────────────────────────────────────────
+  /** Síntese do período e, em anexo, as pendências e o extrato. */
   generateCashFlowPDF: async (report: CashFlowReport, ctx: CashFlowContext) => {
-    const { jsPDF, autoTable } = await loadPdf();
-    const doc = new jsPDF({
-      orientation: "landscape",
-      unit: "mm",
-      format: "a4",
-      compress: true,
-    });
-    const font = await ensureReportFont(doc);
-    const title = `Fluxo de caixa, ${periodText(ctx.start, ctx.end)}`;
-    doc.setProperties({ title, author: ctx.companyName });
-    doc.setLanguage("pt-BR");
-
-    const PAGE_W = doc.internal.pageSize.getWidth(); // 297 mm
-    const PAGE_H = doc.internal.pageSize.getHeight(); // 210 mm
-    const MARGIN = 14;
-    const RIGHT = PAGE_W - MARGIN;
-    const USABLE_W = PAGE_W - MARGIN * 2;
-
-    // A paleta do PDF da Análise.
-    type RGB = [number, number, number];
-    const INK: RGB = [18, 22, 31];
-    const MUTED: RGB = [96, 99, 108];
-    const PRIMARY: RGB = [32, 44, 133];
-    const RULE: RGB = [213, 215, 221];
-    const WASH: RGB = [243, 245, 249];
-    const DANGER: RGB = [200, 0, 10];
-
-    const text = (
-      value: string,
-      x: number,
-      y: number,
-      o: { size: number; bold?: boolean; color?: RGB; align?: "right" },
-    ) => {
-      doc.setFont(font, o.bold ? "bold" : "normal");
-      doc.setFontSize(o.size);
-      doc.setTextColor(...(o.color ?? INK));
-      doc.text(value, x, y, { align: o.align });
-    };
-    const rule = (y: number) => {
-      doc.setDrawColor(...RULE);
-      doc.setLineWidth(0.2);
-      doc.line(MARGIN, y, RIGHT, y);
-    };
-
-    const known = ctx.opening.source !== "none";
-    const look = lineLookups(ctx);
-
-    // ── Cabeçalho ─────────────────────────────────────────────────────────
-    text(ctx.companyName, MARGIN, 15, { size: 8, color: MUTED });
-    text("Fluxo de caixa", MARGIN, 23, {
-      size: 16,
-      bold: true,
-      color: PRIMARY,
-    });
-    text(periodText(ctx.start, ctx.end), RIGHT, 15, {
-      size: 9,
-      bold: true,
-      align: "right",
-    });
-    text(
-      `Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
-      RIGHT,
-      20,
-      { size: 7.5, color: MUTED, align: "right" },
-    );
-    if (ctx.filters) {
-      text(ctx.filters, RIGHT, 25, { size: 7.5, color: MUTED, align: "right" });
-    }
-    rule(29);
-
-    // ── A conta que fecha: inicial + entradas − saídas = final ────────────
-    const sums: { label: string; value: number }[] = [
-      ...(known ? [{ label: "Saldo inicial", value: report.opening }] : []),
-      { label: "+ Entradas", value: report.inflow },
-      { label: "− Saídas", value: report.outflow },
-      {
-        label: known ? "= Saldo final" : "= Acumulado",
-        value: report.closing,
-      },
-    ];
-    const colW = USABLE_W / sums.length;
-    sums.forEach((s, i) => {
-      const x = MARGIN + i * colW;
-      text(s.label, x, 36, { size: 8, color: MUTED });
-      text(formatCurrency(s.value), x, 43, {
-        size: 13,
-        bold: true,
-        color: s.value < 0 ? DANGER : INK,
-      });
-    });
-
-    let y = 49;
-    for (const note of cashFlowNotes(report, ctx)) {
-      doc.setFont(font, "normal");
-      doc.setFontSize(8);
-      const wrapped = doc.splitTextToSize(note, USABLE_W) as string[];
-      wrapped.forEach((l) => {
-        text(l, MARGIN, y, { size: 8, color: MUTED });
-        y += 4;
-      });
-    }
-
-    // ── Tabela ────────────────────────────────────────────────────────────
-    const COLUMNS = [
-      { header: "Data", width: 14 },
-      { header: "Descrição", width: 86 },
-      { header: "Favorecido ou pagador", width: 66 },
-      { header: "CNPJ/CPF", width: 33 },
-      { header: "Situação", width: 38 },
-      { header: "Valor (R$)", width: 32 },
-    ];
-    const columnStyles = Object.fromEntries(
-      COLUMNS.map((c, i) => [
-        i,
-        {
-          cellWidth: c.width,
-          ...(i === COLUMNS.length - 1 ? { halign: "right" as const } : {}),
-        },
-      ]),
-    );
-    const rowOf = (line: FlowLine, dated: string) => {
-      const sign = line.tx.type === "receivable" ? "+" : "-";
-      return [
-        dated,
-        lineDescription(line),
-        look.partyOf(line.tx) || "-",
-        look.documentOf(line.tx) || "-",
-        lineSituation(line),
-        {
-          content: `${sign}${formatCurrency(line.amount)}`,
-          styles: {
-            fontStyle:
-              line.tx.type === "receivable"
-                ? ("bold" as const)
-                : ("normal" as const),
-          },
-        },
-      ];
-    };
-
-    const days = new Map<string, FlowLine[]>();
-    for (const line of look.sort(report.lines)) {
-      const key = format(line.date, "yyyy-MM-dd");
-      days.set(key, [...(days.get(key) ?? []), line]);
-    }
-
-    let running = currency(report.opening);
-    const body = [...days.values()].flatMap((lines) => {
-      const of = (type: Transaction["type"]) =>
-        lines
-          .filter((l) => l.tx.type === type)
-          .reduce((s, l) => s.add(l.amount), currency(0)).value;
-      const dayIn = of("receivable");
-      const dayOut = of("payable");
-      running = running.add(dayIn).subtract(dayOut);
-      const styles = {
-        fillColor: WASH,
-        fontStyle: "bold" as const,
-        cellPadding: { top: 2, bottom: 2, left: 1.5, right: 1.5 },
-      };
-      return [
-        [
-          {
-            content: format(lines[0].date, "EEEE, dd/MM/yyyy", {
-              locale: ptBR,
-            }).replace(/^./, (c) => c.toUpperCase()),
-            colSpan: 2,
-            styles,
-          },
-          {
-            content: [
-              dayIn > 0 ? `entradas ${formatCurrency(dayIn)}` : null,
-              dayOut > 0 ? `saídas ${formatCurrency(dayOut)}` : null,
-              `${known ? "saldo" : "acumulado"} ${formatCurrency(running.value)}`,
-            ]
-              .filter(Boolean)
-              .join("   ·   "),
-            colSpan: 4,
-            styles: {
-              ...styles,
-              halign: "right" as const,
-              ...(running.value < 0 ? { textColor: DANGER } : {}),
-            },
-          },
-        ],
-        ...lines.map((l) => rowOf(l, format(l.date, "dd/MM"))),
-      ];
-    });
-
-    const table = {
-      theme: "plain" as const,
-      styles: {
-        font,
-        fontSize: 8,
-        textColor: INK,
-        cellPadding: { top: 1.3, bottom: 1.3, left: 1.5, right: 1.5 },
-        lineColor: RULE,
-        lineWidth: { bottom: 0.1 },
-        overflow: "linebreak" as const,
-      },
-      headStyles: {
-        font,
-        fontStyle: "bold" as const,
-        fontSize: 7.5,
-        textColor: MUTED,
-        lineColor: INK,
-        lineWidth: { bottom: 0.3 },
-      },
-      columnStyles,
-      showHead: "everyPage" as const,
-      rowPageBreak: "avoid" as const,
-      didDrawPage: () => {
-        doc.setCharSpace(0);
-      },
-      // O cabeçalho do valor acompanha a coluna.
-      didParseCell: (data: {
-        section: string;
-        column: { index: number };
-        cell: { styles: { halign?: string } };
-      }) => {
-        if (
-          data.section === "head" &&
-          data.column.index === COLUMNS.length - 1
-        ) {
-          data.cell.styles.halign = "right";
-        }
-      },
-      margin: { top: 15, left: MARGIN, right: MARGIN, bottom: 18 },
-    };
-
-    if (body.length > 0) {
-      autoTable(doc, {
-        ...table,
-        startY: y + 1,
-        head: [COLUMNS.map((c) => c.header)],
-        body,
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      y = (doc as any).lastAutoTable.finalY + 8;
-    }
-
-    // ── Vencidos sem baixa, fora do saldo ─────────────────────────────────
-    if (report.pending.lines.length > 0) {
-      if (y > PAGE_H - 45) {
-        doc.addPage();
-        y = 18;
-      }
-      text("Vencidos sem baixa (fora do saldo)", MARGIN, y, {
-        size: 10,
-        bold: true,
-      });
-      autoTable(doc, {
-        ...table,
-        startY: y + 3,
-        head: [["Venc.", ...COLUMNS.slice(1).map((c) => c.header)]],
-        body: look
-          .sort(report.pending.lines)
-          .map((l) => rowOf(l, format(l.tx.dueDate, "dd/MM"))),
-      });
-    }
-
-    // ── Rodapé ────────────────────────────────────────────────────────────
-    const pages = doc.getNumberOfPages();
-    for (let p = 1; p <= pages; p++) {
-      doc.setPage(p);
-      rule(PAGE_H - 12);
-      text(`${title} · documento confidencial`, MARGIN, PAGE_H - 7, {
-        size: 7,
-        color: MUTED,
-      });
-      text(`Página ${p} de ${pages}`, RIGHT, PAGE_H - 7, {
-        size: 7,
-        color: MUTED,
-        align: "right",
-      });
-    }
-
-    doc.save(`fluxo_caixa_${periodSlug(ctx.start, ctx.end)}.pdf`);
+    const { buildCashFlowPdf } = await import("@/lib/services/cashFlowPdf");
+    const doc = await buildCashFlowPdf(report, ctx);
+    doc.save(`sintese_caixa_${periodSlug(ctx.start, ctx.end)}.pdf`);
   },
 
   exportCashFlowExcel: async (report: CashFlowReport, ctx: CashFlowContext) => {
@@ -1090,8 +981,8 @@ export const reportService = {
   },
 
   /**
-   * O que a contabilidade externa recebe: a planilha com as notas e os
-   * comprovantes em pastas, ligados por caminho relativo. Nenhum link do
+   * O que a contabilidade externa recebe: a síntese em PDF e a planilha com
+   * as notas e os comprovantes em pastas, ligados por caminho relativo. Nenhum link do
    * arquivo abre documento pela internet.
    */
   exportCashFlowPackage: async (
@@ -1190,9 +1081,15 @@ export const reportService = {
       }),
     );
 
-    const base = `fluxo_caixa_${periodSlug(ctx.start, ctx.end)}`;
-    const workbook = await buildCashFlowWorkbook(report, ctx, files);
+    const slugged = periodSlug(ctx.start, ctx.end);
+    const base = `fluxo_caixa_${slugged}`;
+    const [workbook, { buildCashFlowPdf }] = await Promise.all([
+      buildCashFlowWorkbook(report, ctx, files),
+      import("@/lib/services/cashFlowPdf"),
+    ]);
     zip.file(`${base}.xlsx`, await workbook.xlsx.writeBuffer());
+    const pdf = await buildCashFlowPdf(report, ctx);
+    zip.file(`sintese_caixa_${slugged}.pdf`, pdf.output("arraybuffer"));
     // Os documentos já são comprimidos: só empacotar.
     downloadBlob(await zip.generateAsync({ type: "blob" }), `${base}.zip`);
     return { failed };

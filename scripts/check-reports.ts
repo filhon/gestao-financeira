@@ -16,7 +16,17 @@ import {
   toCsv,
   variation,
 } from "../src/lib/reports";
+import {
+  buildSynthesis,
+  proveBalance,
+  synthesisTitle,
+} from "../src/lib/cashSynthesis";
 import type {
+  BankAccount,
+  BankTransaction,
+  ChartAccount,
+  CostCenter,
+  Entity,
   RecurringTransactionTemplate,
   Transaction,
 } from "../src/lib/types";
@@ -263,6 +273,179 @@ assert.equal(pays.filter((t) => belongsTo(t, acme, "main")).length, 3);
 assert.equal(
   toCsv([["a;b", 1234.5, new Date(2027, 0, 2)]]),
   '﻿"a;b";1234,50;02/01/2027',
+);
+
+// ─── Síntese: conferência com o banco ────────────────────────────────────────
+const bank = (p: Partial<BankAccount>) =>
+  ({
+    id: "cc",
+    name: "Conta",
+    active: true,
+    openingBalance: 10,
+    openingBalanceDate: new Date(2026, 9, 20),
+    ...p,
+  }) as BankAccount;
+const stmt = (p: Partial<BankTransaction>) =>
+  ({
+    bankAccountId: "cc",
+    description: "PIX",
+    status: "matched",
+    ...p,
+  }) as BankTransaction;
+const oct31 = new Date(2026, 9, 31); // sábado: o último dia útil é 30/10
+const closedOn = (d: number, balance: number) => ({
+  through: new Date(2026, 9, d),
+  balance,
+  closedBy: "",
+  closedAt: new Date(),
+});
+const closedOct = bank({ closings: [closedOn(30, 100)] });
+assert.equal(proveBalance(100, [closedOct], [], oct31).status, "match");
+const wrong = proveBalance(90, [closedOct], [], oct31);
+assert.equal(wrong.status, "mismatch");
+assert.equal(wrong.difference, -10);
+assert.equal(
+  proveBalance(100, [bank({ closings: [closedOn(29, 100)] })], [], oct31)
+    .status,
+  "uncovered",
+  "saldo de 29/10 não prova 30/10",
+);
+assert.equal(
+  proveBalance(100, [closedOct], [], new Date(2026, 8, 30)).status,
+  "uncovered",
+  "mês antes da abertura da conta",
+);
+assert.equal(
+  proveBalance(
+    97,
+    [
+      bank({
+        closings: [closedOn(28, 100)],
+        statementBalance: 500,
+        statementBalanceDate: new Date(2026, 10, 10),
+      }),
+    ],
+    [
+      stmt({ date: new Date(2026, 9, 29), amount: -3 }),
+      stmt({ date: new Date(2026, 9, 28), amount: -50 }),
+      stmt({ date: new Date(2026, 10, 3), amount: -50 }),
+      stmt({
+        date: new Date(2026, 9, 30),
+        amount: 9,
+        description: "SALDO DIA",
+      }),
+      stmt({
+        date: new Date(2026, 9, 30),
+        amount: 9,
+        status: "ignored",
+        ignoreReason: "duplicate",
+      }),
+    ],
+    oct31,
+  ).status,
+  "match",
+  "fechamento mais as linhas até o fim do período",
+);
+assert.equal(
+  proveBalance(
+    100,
+    [closedOct, bank({ id: "x", active: false, openingBalance: 999 })],
+    [],
+    oct31,
+  ).status,
+  "match",
+  "conta inativa fica fora",
+);
+assert.equal(proveBalance(0, [], [], oct31).status, "uncovered");
+
+// ─── Síntese: para onde foi e o que falta ────────────────────────────────────
+const ccs = [
+  { id: "root", name: "Global" },
+  { id: "ofertas", name: "OFERTAS", parentId: "root" },
+  { id: "saude", name: "Saúde", parentId: "ofertas" },
+  { id: "obras", name: "Obras", parentId: "ofertas" },
+  { id: "sede", name: "Sede", parentId: "root" },
+] as CostCenter[];
+const alloc = (parts: [string, number][]) =>
+  parts.map(([costCenterId, percentage]) => ({
+    costCenterId,
+    percentage,
+    amount: 0,
+  }));
+const day5 = new Date(2027, 0, 5);
+const paidTx = (p: Partial<Transaction>) =>
+  tx({ status: "paid", paymentDate: day5, ...p });
+const synthFlow = buildCashFlow(
+  [
+    paidTx({
+      type: "receivable",
+      amount: 500,
+      supplierOrClient: "Mantenedora",
+      accountId: "a1",
+    }),
+    paidTx({
+      amount: 100,
+      entityId: "pf",
+      costCenterAllocation: alloc([
+        ["saude", 33.33],
+        ["obras", 33.33],
+        ["sede", 33.34],
+      ]),
+    }),
+    paidTx({
+      amount: 50,
+      entityId: "pj",
+      comprovanteStoragePath: "comprovantes/c/x.pdf",
+      costCenterAllocation: alloc([["sede", 100]]),
+    }),
+  ],
+  {
+    start: new Date(2027, 0, 1),
+    end: new Date(2027, 0, 31),
+    today: new Date(2027, 1, 10),
+    opening: 10,
+    stages: allStages,
+    granularity: "day",
+  },
+);
+const synth = buildSynthesis(synthFlow, {
+  costCenters: ccs,
+  accounts: [{ id: "a1", code: "3.1", name: "Doações" }] as ChartAccount[],
+  entities: [
+    { id: "pf", name: "Ana", document: "123.456.789-09" },
+    { id: "pj", name: "Loja", document: "12.345.678/0001-95" },
+  ] as Entity[],
+  hasReceipt: (t) => !!t.comprovanteStoragePath,
+});
+assert.equal(
+  synth.areas.reduce((s, a) => s + a.value, 0).toFixed(2),
+  "150.00",
+  "áreas somam as saídas, sem perder centavo do rateio",
+);
+assert.deepEqual(
+  synth.areas.map((a) => [a.label, a.children?.length ?? 0]),
+  [
+    ["Sede", 0],
+    ["Ofertas", 2],
+  ],
+);
+assert.equal(synth.coverage.toFixed(4), (500 / 650).toFixed(4));
+assert.equal(synth.accounts.at(-1)!.missing, true);
+assert.deepEqual(
+  synth.people.map((p) => [p.name, p.value]),
+  [["Ana", 100]],
+);
+assert.equal(synth.undocumented.length, 1);
+assert.equal(synth.daily.at(-1)!.balance, synthFlow.closing);
+assert.match(
+  synthesisTitle(
+    synthFlow,
+    proveBalance(synthFlow.closing, [], [], oct31),
+    new Date(2027, 0, 1),
+    new Date(2027, 0, 31),
+    true,
+  ),
+  /^Janeiro de 2027 fechou com R\$\s360,00, ainda sem conferência/,
 );
 
 console.log("relatórios: ok");

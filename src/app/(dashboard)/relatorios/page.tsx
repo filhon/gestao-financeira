@@ -54,6 +54,9 @@ import {
   situationOf,
   STAGE_INFO,
 } from "@/lib/reports";
+import { proveBalance, type ProofState } from "@/lib/cashSynthesis";
+import { bankAccountService } from "@/lib/services/bankAccountService";
+import { reconciliationSessionService } from "@/lib/services/reconciliationSessionService";
 import { Transaction } from "@/lib/types";
 import {
   MAIN_BANK_ACCOUNT,
@@ -116,13 +119,17 @@ const EXPORTS: Record<
     {
       format: "package",
       label: "Pacote para a contabilidade",
-      hint: "ZIP com a planilha, as notas e os comprovantes",
+      hint: "ZIP com a síntese, a planilha, as notas e os comprovantes",
     },
-    { format: "pdf", label: "PDF", hint: "Extrato dia a dia com saldo" },
+    {
+      format: "pdf",
+      label: "PDF",
+      hint: "Síntese com conferência do banco e extrato anexo",
+    },
     {
       format: "excel",
       label: "Excel",
-      hint: "Extrato, tabela do fluxo e resumo",
+      hint: "Resumo, extrato, centros de custo e pendências",
     },
     { format: "csv", label: "CSV", hint: "Um lançamento por linha" },
   ],
@@ -676,6 +683,25 @@ function Reports() {
     .filter(Boolean)
     .join("  ·  ");
 
+  /** O saldo final contra o banco, lido só na hora de exportar. */
+  const bankProof = async (closing: number): Promise<ProofState> => {
+    if (!hasOpening || !openingKnown) return { status: "scope" };
+    if (!closedPeriod) return { status: "open" };
+    try {
+      const banks = await bankAccountService.getAll(companyId!);
+      const items = await Promise.all(
+        banks.map((b) =>
+          reconciliationSessionService.getAccountItems(companyId!, b.id),
+        ),
+      );
+      return proveBalance(closing, banks, items.flat(), range.end);
+    } catch (error) {
+      // Perfil sem acesso às contas: o arquivo sai e diz que não conferiu.
+      console.error("Conferência com o banco indisponível", error);
+      return { status: "unavailable" };
+    }
+  };
+
   const handleExport = async (fmt: ExportFormat) => {
     if (!selectedCompany || !companyId) return;
     setExporting(fmt);
@@ -728,7 +754,13 @@ function Reports() {
       } else if (isFlow && flow) {
         const fctx = {
           ...ctx,
+          companyCnpj: selectedCompany.cnpj,
           granularity: gran,
+          // O CSV é só a lista de lançamentos: não leva a conferência.
+          proof:
+            fmt === "csv"
+              ? ({ status: "unavailable" } as const)
+              : await bankProof(flow.closing),
           opening: !openingKnown
             ? ({ source: "none" } as const)
             : openingTyped !== null

@@ -8,12 +8,12 @@ import {
   compositionTitle,
   defaultCompositionMode,
   hasMovement,
-  tidyName,
   type AnalyticsReport,
   type CompositionMode,
   type CompositionNode,
   type Side,
 } from "@/lib/analytics";
+import { tidyName } from "@/lib/costCenterTree";
 import { variation } from "@/lib/reports";
 import { Button } from "@/components/ui/button";
 import {
