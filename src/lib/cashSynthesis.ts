@@ -419,8 +419,11 @@ export function periodName(start: Date, end: Date) {
 
 /** A conclusão da primeira página: o saldo e se ele confere com o banco. */
 export function synthesisTitle(
-  report: CashFlowReport,
-  proof: ProofState,
+  report: Pick<CashFlowReport, "closing" | "inflow" | "outflow"> & {
+    lines: Pick<FlowLine, "stage">[];
+  },
+  proof: Pick<ProofState, "status"> &
+    Partial<Pick<BankProof, "total" | "difference">>,
   start: Date,
   end: Date,
   /** Há saldo inicial; sem ele os valores são só o acumulado do recorte. */

@@ -4,7 +4,17 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { addDays, format, isValid, parse, startOfDay, subDays } from "date-fns";
+import {
+  addDays,
+  endOfMonth,
+  format,
+  isSameDay,
+  isValid,
+  parse,
+  startOfDay,
+  startOfMonth,
+  subDays,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import {
@@ -105,6 +115,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ClosingPanel } from "@/components/features/reports/ClosingPanel";
 import { CashMatrixView } from "@/components/features/reports/CashMatrix";
 import {
   CashFlowView,
@@ -221,7 +232,7 @@ function Reports() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
-  const { onlyOwnPayables, canViewReports } = usePermissions();
+  const { onlyOwnPayables, canViewReports, canCloseMonth } = usePermissions();
 
   useEffect(() => {
     if (!canViewReports) router.push("/dashboard");
@@ -634,6 +645,28 @@ function Reports() {
     entity,
     accountIndex,
   ]);
+
+  // ── Fechamento: um mês inteiro, sem recorte, com o saldo calculado ────────
+  const wholeMonth =
+    isSameDay(range.start, startOfMonth(range.start)) &&
+    isSameDay(range.end, endOfMonth(range.start));
+  const closable =
+    isFlow && hasOpening && closedPeriod && wholeMonth && !!openingQuery.data;
+  const calculatedOpening = openingQuery.data?.value;
+  const monthFlow = useMemo(
+    () =>
+      closable && current.data
+        ? buildCashFlow(current.data.transactions, {
+            start: range.start,
+            end: range.end,
+            today: new Date(todayStart),
+            opening: calculatedOpening,
+            stages: ["realized", ...DEFAULT_FORECAST],
+            granularity: "day",
+          })
+        : null,
+    [closable, current.data, range, todayStart, calculatedOpening],
+  );
 
   // ── Matriz: o mesmo fluxo, aberto por centro, conta, entidade ou banco ────
   const hasMatrix = isFlow && detail !== "none";
@@ -1388,71 +1421,94 @@ function Reports() {
           accountOf={accountOf}
         />
       ) : isFlow && flow ? (
-        <CashFlowView
-          report={flow}
-          previous={flowPrev}
-          showStages={mode !== "realized" && !closedPeriod}
-          hasOpening={openingKnown}
-          closedPeriod={closedPeriod}
-          granularity={gran}
-          toolbar={
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-              <Segmented
-                label="Detalhar por"
-                value={detail}
-                onChange={setDetail}
-                options={[
-                  { value: "none", label: "Só o período" },
-                  ...(
-                    Object.entries(MATRIX_ROWS) as [MatrixRows, string][]
-                  ).map(([value, label]) => ({ value, label })),
-                ]}
-              />
-              {hasMatrix && (
+        <div className="space-y-5">
+          {monthFlow && selectedCompany && companyId && (
+            <ClosingPanel
+              key={`${companyId}:${+range.start}`}
+              report={monthFlow}
+              canClose={canCloseMonth}
+              bankProof={bankProof}
+              context={{
+                companyId,
+                companyName: selectedCompany.name,
+                companyCnpj: selectedCompany.cnpj,
+                start: range.start,
+                end: range.end,
+                filters: "Realizado (período encerrado)",
+                accounts,
+                costCenters,
+                entities,
+                granularity: "day",
+                opening: { source: "calculated" },
+              }}
+            />
+          )}
+          <CashFlowView
+            report={flow}
+            previous={flowPrev}
+            showStages={mode !== "realized" && !closedPeriod}
+            hasOpening={openingKnown}
+            closedPeriod={closedPeriod}
+            granularity={gran}
+            toolbar={
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <Segmented
-                  label="Mostrar"
-                  value={againstPlan ? "plan" : "flow"}
-                  onChange={(v) => setAgainstPlan(v === "plan")}
+                  label="Detalhar por"
+                  value={detail}
+                  onChange={setDetail}
                   options={[
-                    { value: "flow", label: "Fluxo" },
-                    { value: "plan", label: "Previsto × realizado" },
+                    { value: "none", label: "Só o período" },
+                    ...(
+                      Object.entries(MATRIX_ROWS) as [MatrixRows, string][]
+                    ).map(([value, label]) => ({ value, label })),
                   ]}
                 />
-              )}
-            </div>
-          }
-          table={
-            !hasMatrix ? undefined : matrixError ? (
-              <div className="flex flex-col items-center gap-3 rounded-lg border py-12 text-center">
-                <AlertCircle className="h-6 w-6 text-muted-foreground" />
-                <p className="text-sm">
-                  Não foi possível carregar os dados da matriz.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    if (planQuery.error) void planQuery.refetch();
-                    if (banksQuery.error) void banksQuery.refetch();
-                  }}
-                >
-                  Tentar de novo
-                </Button>
+                {hasMatrix && (
+                  <Segmented
+                    label="Mostrar"
+                    value={againstPlan ? "plan" : "flow"}
+                    onChange={(v) => setAgainstPlan(v === "plan")}
+                    options={[
+                      { value: "flow", label: "Fluxo" },
+                      { value: "plan", label: "Previsto × realizado" },
+                    ]}
+                  />
+                )}
               </div>
-            ) : matrix ? (
-              <CashMatrixView
-                key={`${matrix.rows}:${matrix.hasPlan}`}
-                matrix={matrix}
-                today={new Date(todayStart)}
-                closedPeriod={closedPeriod}
-                onDrill={setDrill}
-              />
-            ) : (
-              <Skeleton className="h-72 w-full" />
-            )
-          }
-          onDrill={setDrill}
-        />
+            }
+            table={
+              !hasMatrix ? undefined : matrixError ? (
+                <div className="flex flex-col items-center gap-3 rounded-lg border py-12 text-center">
+                  <AlertCircle className="h-6 w-6 text-muted-foreground" />
+                  <p className="text-sm">
+                    Não foi possível carregar os dados da matriz.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (planQuery.error) void planQuery.refetch();
+                      if (banksQuery.error) void banksQuery.refetch();
+                    }}
+                  >
+                    Tentar de novo
+                  </Button>
+                </div>
+              ) : matrix ? (
+                <CashMatrixView
+                  key={`${matrix.rows}:${matrix.hasPlan}`}
+                  matrix={matrix}
+                  today={new Date(todayStart)}
+                  closedPeriod={closedPeriod}
+                  onDrill={setDrill}
+                />
+              ) : (
+                <Skeleton className="h-72 w-full" />
+              )
+            }
+            onDrill={setDrill}
+          />
+        </div>
       ) : dre ? (
         <div className="space-y-3">
           {current.data?.competenceMissing && (

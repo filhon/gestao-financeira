@@ -30,6 +30,18 @@ import {
   planLines,
   type MatrixRows,
 } from "../src/lib/cashMatrix";
+import {
+  canClosePeriod,
+  closingDiff,
+  closingLines,
+  closingSnapshot,
+  hasChanges,
+  linkState,
+  parseEmails,
+  requestSchema,
+  snapshotProblem,
+  type ClosingLine,
+} from "../src/lib/cashClosing";
 import type {
   BankAccount,
   BankTransaction,
@@ -584,5 +596,85 @@ assert.equal(versus.outflow.planTotal, 160, "31/01 ainda não venceu em 20/01");
 assert.equal(versus.closing, null);
 assert.equal(isUnfavorable("payable", 5), true);
 assert.equal(isUnfavorable("receivable", 5), false);
+
+// ─── Fechamento: a fotografia fecha sozinha e acusa o que mudou depois ───────
+const photo = closingLines(synthFlow, {
+  entities: [{ id: "pf", name: "Ana" }] as Entity[],
+  hasReceipt: (t) => !!t.comprovanteStoragePath,
+});
+const snap = closingSnapshot(synthFlow, synth, photo, 0);
+assert.equal(snapshotProblem(snap, "2027-01"), null);
+assert.match(snapshotProblem(snap, "2027-02")!, /outro mês/);
+assert.match(
+  snapshotProblem({ ...snap, closing: 1 }, "2027-01")!,
+  /saldo final/,
+);
+assert.match(snapshotProblem({ ...snap, outflow: 149 }, "2027-01")!, /saídas/);
+assert.match(
+  snapshotProblem({ ...snap, lines: [...photo, photo[0]] }, "2027-01")!,
+  /repetidos/,
+);
+// O que a tela manda passa pelo esquema da rota; campo estranho não entra.
+const request = {
+  action: "close",
+  companyId: "c",
+  period: "2027-01",
+  snapshot: snap,
+  uploadKey: "3f0e9b1c-5b0a-4a52-9d0f-0c9a7a1b2c3d",
+};
+assert.equal(requestSchema.safeParse(request).success, true);
+for (const bad of [
+  { ...request, period: "2027-13" },
+  { ...request, uploadKey: "../../outra-empresa" },
+  { ...request, snapshot: { ...snap, closing: "1" } },
+  { action: "revoke", companyId: "c", linkId: "x" },
+  { action: "send", companyId: "c", closingId: "i", emails: ["nao-email"] },
+  { action: "apagar", companyId: "c" },
+]) {
+  assert.equal(requestSchema.safeParse(bad).success, false);
+}
+assert.equal(canClosePeriod("2027-01", "2027-01-31"), false);
+assert.equal(canClosePeriod("2027-01", "2027-02-01"), true);
+
+const closedMonth = { lines: photo, opening: 10, closing: 360 };
+const same = closingDiff(closedMonth, closedMonth);
+assert.equal(hasChanges(same), false);
+const [l0, l1, l2] = photo;
+const extra: ClosingLine = { ...l1, id: "novo", amount: 5 };
+const moved = closingDiff(closedMonth, {
+  lines: [
+    l0,
+    { ...l1, amount: 120 },
+    { ...l2, receipt: false, note: true },
+    extra,
+  ],
+  opening: 12,
+  closing: 337,
+});
+assert.deepEqual(
+  moved.changes.map((c) => [c.kind, c.financial, c.fields]),
+  [
+    ["changed", true, ["valor"]],
+    ["added", true, []],
+    ["changed", false, ["nota fiscal", "comprovante"]],
+  ],
+);
+assert.equal(moved.financial, 2);
+assert.equal(moved.balance, -23);
+assert.equal(
+  closingDiff(closedMonth, { ...closedMonth, lines: [l0, l1] }).changes[0].kind,
+  "removed",
+);
+
+const at = new Date(2027, 1, 10);
+const later = new Date(2027, 2, 1);
+assert.equal(linkState({ expiresAt: later }, at), "active");
+assert.equal(linkState({ expiresAt: at }, at), "expired");
+assert.equal(linkState({ expiresAt: later, revokedAt: at }, at), "revoked");
+assert.equal(linkState({ expiresAt: later, sendError: "x" }, at), "failed");
+assert.deepEqual(parseEmails(" A@b.com, a@B.com;c@d.com.br  x@ "), {
+  emails: ["a@b.com", "c@d.com.br"],
+  invalid: ["x@"],
+});
 
 console.log("relatórios: ok");

@@ -54,6 +54,8 @@ export interface Permissions {
   canViewReports: boolean;
   /** Análise (BI da diretoria): a empresa inteira, só admin e gestor. */
   canViewAnalytics: boolean;
+  /** Fechar o mês, enviar à contabilidade e revogar links. */
+  canCloseMonth: boolean;
 
   // Admin & Settings
   canManageUsers: boolean;
@@ -246,6 +248,8 @@ export function usePermissions(): Permissions {
       ]),
       // Espelha ALLOWED em /api/internal/analytics.
       canViewAnalytics: isAdminOrManager,
+      // Espelha MANAGERS em /api/internal/cash-closings.
+      canCloseMonth: isAdminOrManager,
 
       // Admin & Settings
       canManageUsers: isAdminOrManager, // Manager manages company users

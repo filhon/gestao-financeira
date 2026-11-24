@@ -1173,6 +1173,120 @@ async function buildCashFlowWorkbook(
   return workbook;
 }
 
+/**
+ * O que a contabilidade externa recebe: a síntese em PDF e a planilha com
+ * as notas e os comprovantes em pastas, ligados por caminho relativo. Nenhum link do
+ * arquivo abre documento pela internet.
+ */
+export async function buildCashFlowPackage(
+  report: CashFlowReport,
+  ctx: CashFlowContext,
+  onProgress?: (done: number, total: number) => void,
+) {
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+  const look = lineLookups(ctx);
+  const slug = (s: string) =>
+    s
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase()
+      .slice(0, 40);
+
+  const files = new Map<string, PackagedFiles>();
+  const failed: string[] = [];
+  const jobs: (() => Promise<void>)[] = [];
+  /** O mesmo arquivo em vários lançamentos entra uma vez só. */
+  const fetched = new Map<string, Promise<string | null>>();
+
+  const enqueue = (
+    path: string | null,
+    name: string,
+    label: string,
+    done: (saved: string | null) => void,
+  ) =>
+    jobs.push(async () => {
+      const load = async () => {
+        if (!path) return null;
+        try {
+          const res = await fetch(comprovanteProxyUrl(path));
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const ext = path.match(/\.([a-zA-Z0-9]{2,5})$/)?.[1] ?? "pdf";
+          const saved = `${name}.${ext.toLowerCase()}`;
+          zip.file(saved, await res.arrayBuffer());
+          return saved;
+        } catch (error) {
+          console.warn("Documento fora do pacote", path, error);
+          return null;
+        }
+      };
+      const pending = (path && fetched.get(path)) || load();
+      if (path) fetched.set(path, pending);
+      const saved = await pending;
+      if (!saved) failed.push(label);
+      done(saved);
+    });
+
+  look.sort(report.lines).forEach((line, i) => {
+    const t = line.tx;
+    const n = String(i + 1).padStart(3, "0");
+    const who = slug(look.partyOf(t)) || "sem-nome";
+    const invoices = invoicesOf(t);
+    const entry: PackagedFiles = { invoices: invoices.map(() => null) };
+    files.set(t.id, entry);
+    invoices.forEach((a, k) =>
+      enqueue(
+        storagePathOf(a.url),
+        `notas/${n}${invoices.length > 1 ? `-${k + 1}` : ""}_${who}`,
+        `Nota da linha ${i + 1}: ${t.description}`,
+        (saved) => {
+          entry.invoices[k] = saved;
+        },
+      ),
+    );
+    const receipt =
+      t.comprovanteStoragePath ??
+      (t.comprovanteUrl ? storagePathOf(t.comprovanteUrl) : undefined);
+    if (receipt !== undefined) {
+      entry.receipt = null;
+      enqueue(
+        receipt,
+        `comprovantes/${n}_${who}`,
+        `Comprovante da linha ${i + 1}: ${t.description}`,
+        (saved) => {
+          entry.receipt = saved;
+        },
+      );
+    }
+  });
+
+  let done = 0;
+  let next = 0;
+  onProgress?.(0, jobs.length);
+  await Promise.all(
+    Array.from({ length: 6 }, async () => {
+      while (next < jobs.length) {
+        await jobs[next++]();
+        onProgress?.(++done, jobs.length);
+      }
+    }),
+  );
+
+  const slugged = periodSlug(ctx.start, ctx.end);
+  const base = `fluxo_caixa_${slugged}`;
+  const [workbook, { buildCashFlowPdf }] = await Promise.all([
+    buildCashFlowWorkbook(report, ctx, files),
+    import("@/lib/services/cashFlowPdf"),
+  ]);
+  zip.file(`${base}.xlsx`, await workbook.xlsx.writeBuffer());
+  const pdf = (await buildCashFlowPdf(report, ctx)).output("blob");
+  zip.file(`sintese_caixa_${slugged}.pdf`, pdf);
+  // Os documentos já são comprimidos: só empacotar.
+  return { zip: await zip.generateAsync({ type: "blob" }), pdf, failed };
+}
+
 export const reportService = {
   // ─────────────────────────────────────────────────────────────────────────
   // FLUXO DE CAIXA
@@ -1192,118 +1306,13 @@ export const reportService = {
     );
   },
 
-  /**
-   * O que a contabilidade externa recebe: a síntese em PDF e a planilha com
-   * as notas e os comprovantes em pastas, ligados por caminho relativo. Nenhum link do
-   * arquivo abre documento pela internet.
-   */
   exportCashFlowPackage: async (
     report: CashFlowReport,
     ctx: CashFlowContext,
     onProgress?: (done: number, total: number) => void,
   ) => {
-    const { default: JSZip } = await import("jszip");
-    const zip = new JSZip();
-    const look = lineLookups(ctx);
-    const slug = (s: string) =>
-      s
-        .normalize("NFD")
-        .replace(/[̀-ͯ]/g, "")
-        .replace(/[^a-zA-Z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .toLowerCase()
-        .slice(0, 40);
-
-    const files = new Map<string, PackagedFiles>();
-    const failed: string[] = [];
-    const jobs: (() => Promise<void>)[] = [];
-    /** O mesmo arquivo em vários lançamentos entra uma vez só. */
-    const fetched = new Map<string, Promise<string | null>>();
-
-    const enqueue = (
-      path: string | null,
-      name: string,
-      label: string,
-      done: (saved: string | null) => void,
-    ) =>
-      jobs.push(async () => {
-        const load = async () => {
-          if (!path) return null;
-          try {
-            const res = await fetch(comprovanteProxyUrl(path));
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const ext = path.match(/\.([a-zA-Z0-9]{2,5})$/)?.[1] ?? "pdf";
-            const saved = `${name}.${ext.toLowerCase()}`;
-            zip.file(saved, await res.arrayBuffer());
-            return saved;
-          } catch (error) {
-            console.warn("Documento fora do pacote", path, error);
-            return null;
-          }
-        };
-        const pending = (path && fetched.get(path)) || load();
-        if (path) fetched.set(path, pending);
-        const saved = await pending;
-        if (!saved) failed.push(label);
-        done(saved);
-      });
-
-    look.sort(report.lines).forEach((line, i) => {
-      const t = line.tx;
-      const n = String(i + 1).padStart(3, "0");
-      const who = slug(look.partyOf(t)) || "sem-nome";
-      const invoices = invoicesOf(t);
-      const entry: PackagedFiles = { invoices: invoices.map(() => null) };
-      files.set(t.id, entry);
-      invoices.forEach((a, k) =>
-        enqueue(
-          storagePathOf(a.url),
-          `notas/${n}${invoices.length > 1 ? `-${k + 1}` : ""}_${who}`,
-          `Nota da linha ${i + 1}: ${t.description}`,
-          (saved) => {
-            entry.invoices[k] = saved;
-          },
-        ),
-      );
-      const receipt =
-        t.comprovanteStoragePath ??
-        (t.comprovanteUrl ? storagePathOf(t.comprovanteUrl) : undefined);
-      if (receipt !== undefined) {
-        entry.receipt = null;
-        enqueue(
-          receipt,
-          `comprovantes/${n}_${who}`,
-          `Comprovante da linha ${i + 1}: ${t.description}`,
-          (saved) => {
-            entry.receipt = saved;
-          },
-        );
-      }
-    });
-
-    let done = 0;
-    let next = 0;
-    onProgress?.(0, jobs.length);
-    await Promise.all(
-      Array.from({ length: 6 }, async () => {
-        while (next < jobs.length) {
-          await jobs[next++]();
-          onProgress?.(++done, jobs.length);
-        }
-      }),
-    );
-
-    const slugged = periodSlug(ctx.start, ctx.end);
-    const base = `fluxo_caixa_${slugged}`;
-    const [workbook, { buildCashFlowPdf }] = await Promise.all([
-      buildCashFlowWorkbook(report, ctx, files),
-      import("@/lib/services/cashFlowPdf"),
-    ]);
-    zip.file(`${base}.xlsx`, await workbook.xlsx.writeBuffer());
-    const pdf = await buildCashFlowPdf(report, ctx);
-    zip.file(`sintese_caixa_${slugged}.pdf`, pdf.output("arraybuffer"));
-    // Os documentos já são comprimidos: só empacotar.
-    downloadBlob(await zip.generateAsync({ type: "blob" }), `${base}.zip`);
+    const { zip, failed } = await buildCashFlowPackage(report, ctx, onProgress);
+    downloadBlob(zip, `fluxo_caixa_${periodSlug(ctx.start, ctx.end)}.zip`);
     return { failed };
   },
 

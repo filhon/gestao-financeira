@@ -553,6 +553,26 @@ service cloud.firestore {
        }
     }
 
+    // Fechamento do mês: a fotografia que foi para a contabilidade. Só a rota
+    // /api/internal/cash-closings grava (Admin SDK); ninguém edita nem apaga.
+    match /cash_closings/{closingId} {
+       allow read: if isAuthenticated() && hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager', 'approver', 'releaser', 'auditor']);
+       allow write: if false;
+    }
+
+    // Links enviados e quem os abriu: só quem pode enviar e revogar.
+    match /cash_closing_links/{linkId} {
+       allow read: if isAuthenticated() && hasCompanyRole(resource.data.companyId, ['admin', 'financial_manager']);
+       allow write: if false;
+
+       match /accesses/{accessId} {
+          allow read: if isAuthenticated() && hasCompanyRole(
+            get(/databases/$(database)/documents/cash_closing_links/$(linkId)).data.companyId,
+            ['admin', 'financial_manager']);
+          allow write: if false;
+       }
+    }
+
     // Contas bancárias: eixo da conciliação. `closings` é o histórico de
     // períodos fechados; o último é a base do saldo conciliado.
     match /bank_accounts/{accountId} {

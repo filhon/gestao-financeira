@@ -221,6 +221,9 @@ export const ACTION_LABELS: Record<string, string> = {
   remove_match: "desfez a conciliação de",
   delete_comprovante: "excluiu",
   close_period: "fechou a conciliação de",
+  close_month: "fechou o mês",
+  send_closing: "enviou o fechamento de",
+  revoke_link: "cancelou o link de",
   reopen_period: "reabriu a conciliação de",
   export: "exportou",
   request_bank_change: "pediu troca de dados bancários de",
@@ -250,6 +253,9 @@ export const ACTION_NOUNS: Record<string, string> = {
   remove_match: "Conciliação desfeita",
   delete_comprovante: "Exclusão",
   close_period: "Fechamento",
+  close_month: "Fechamento do mês",
+  send_closing: "Envio de fechamento",
+  revoke_link: "Link cancelado",
   reopen_period: "Reabertura",
   export: "Exportação",
   request_bank_change: "Troca bancária pedida",
@@ -385,6 +391,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   bank_account: "Conta Bancária",
   reconciliation_rule: "Regra de Conciliação",
   comprovante: "Comprovante",
+  cash_closing: "Fechamento do mês",
   audit_log: "Log de Auditoria",
 };
 

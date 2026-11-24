@@ -1346,3 +1346,66 @@ export const ReimbursementApprovedEmail: React.FC<
     </div>
   </div>
 );
+
+interface CashClosingEmailProps {
+  companyName: string;
+  /** A conclusão da síntese: saldo e conferência com o banco. */
+  headline: string;
+  senderName: string;
+  message?: string;
+  version: number;
+  expires: string;
+  link: string;
+}
+
+export const CashClosingEmail: React.FC<Readonly<CashClosingEmailProps>> = ({
+  companyName,
+  headline,
+  senderName,
+  message,
+  version,
+  expires,
+  link,
+}) => (
+  <div
+    style={{
+      fontFamily: "sans-serif",
+      lineHeight: "1.5",
+      maxWidth: "600px",
+      color: "#12161f",
+    }}
+  >
+    <p style={{ color: "#60636c", fontSize: "13px", margin: 0 }}>
+      {companyName}
+    </p>
+    <h2 style={{ margin: "4px 0 16px", fontSize: "20px" }}>{headline}</h2>
+    {message ? (
+      <p style={{ whiteSpace: "pre-wrap" }}>{message}</p>
+    ) : (
+      <p>
+        O fechamento do mês está pronto, com a síntese em PDF, a planilha e os
+        documentos dos lançamentos.
+      </p>
+    )}
+    <p style={{ margin: "24px 0" }}>
+      <a
+        href={link}
+        style={{
+          background: "#202c85",
+          color: "#fdfdff",
+          padding: "12px 20px",
+          textDecoration: "none",
+          borderRadius: "6px",
+          fontWeight: "bold",
+        }}
+      >
+        Abrir o fechamento
+      </a>
+    </p>
+    <p style={{ color: "#60636c", fontSize: "13px" }}>
+      Versão {version}. O link é pessoal, vale até {expires} e registra cada
+      acesso: não o encaminhe. Enviado por {senderName}; dúvidas, responda a
+      este e-mail.
+    </p>
+  </div>
+);

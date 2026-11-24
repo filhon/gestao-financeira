@@ -657,6 +657,9 @@ export interface AuditLog {
     | "promise"
     | "close_period"
     | "reopen_period"
+    | "close_month"
+    | "send_closing"
+    | "revoke_link"
     | "export"
     | "request_bank_change"
     | "approve_bank_change"
@@ -676,6 +679,7 @@ export interface AuditLog {
     | "chart_account"
     | "bank_account"
     | "reconciliation_rule"
+    | "cash_closing"
     | "audit_log";
   entityId: string;
   /** Nome legível do registro no momento da ação (sobrevive à exclusão). */

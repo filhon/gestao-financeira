@@ -491,6 +491,59 @@ function renderDescription(description: string, due: Date): string {
     .replace(/\{ano\}/gi, String(due.getFullYear()));
 }
 
+/**
+ * Primeiro dia útil do mês, 08:00: avisa gestores e administradores que o mês
+ * anterior ainda não foi fechado. Só nas empresas que já fecham meses. Ninguém
+ * envia nada sozinho: o fechamento passa pela conferência com o banco.
+ * ponytail: dia útil = segunda a sexta; num feriado o aviso só chega cedo.
+ */
+export const remindMonthClosing = functions.pubsub
+  .schedule("0 8 1-3 * *")
+  .timeZone("America/Sao_Paulo")
+  .onRun(async () => {
+    const [y, m, d] = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+    })
+      .format(new Date())
+      .split("-")
+      .map(Number);
+    const weekday = (day: number) =>
+      new Date(Date.UTC(y, m - 1, day)).getUTCDay();
+    const isWeekday = (day: number) => ![0, 6].includes(weekday(day));
+    const first = [1, 2, 3].find(isWeekday);
+    if (d !== first) return null;
+
+    const previous = new Date(Date.UTC(y, m - 2, 1));
+    const period = previous.toISOString().slice(0, 7);
+    const name = previous.toLocaleDateString("pt-BR", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const snap = await db
+      .collection("cash_closings")
+      .select("companyId", "period")
+      .get();
+    const closed = new Set(
+      snap.docs
+        .filter((doc) => doc.get("period") === period)
+        .map((doc) => doc.get("companyId") as string),
+    );
+    const companies = new Set(
+      snap.docs.map((doc) => doc.get("companyId") as string),
+    );
+    for (const companyId of companies) {
+      if (closed.has(companyId)) continue;
+      await notifyBudgetExceeded(
+        companyId,
+        "Mês ainda não fechado",
+        `O fechamento de ${name} ainda não foi feito. Confira com o banco e envie à contabilidade.`,
+        "/relatorios?relatorio=cash_flow&periodo=last_month",
+      );
+    }
+    return null;
+  });
+
 export const processRecurringTemplates = functions
   .runWith({ timeoutSeconds: 300, memory: "512MB" })
   .pubsub.schedule("0 2 * * *")

@@ -173,6 +173,20 @@ service firebase.storage {
       allow delete: if isAuthenticated() && (isManager(companyId) || isGlobalAdmin());
     }
 
+    // 9. Fechamento do mês: pacote e síntese enviados à contabilidade.
+    // Path: closings/{companyId}/{uploadKey}/{pacote.zip|sintese.pdf}
+    match /closings/{companyId}/{uploadKey}/{fileName} {
+      // Leitura só por endereço assinado, gerado no servidor.
+      allow read: if false;
+
+      // Gestor guarda uma vez; ninguém troca nem apaga depois.
+      allow create: if isAuthenticated()
+        && hasCompanyRole(companyId, ['admin', 'financial_manager'])
+        && request.resource.size < 200 * 1024 * 1024 // Max 200MB
+        && request.resource.contentType in ['application/zip', 'application/pdf'];
+      allow update, delete: if false;
+    }
+
     // Default: Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;
