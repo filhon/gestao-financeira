@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CostCenterFormData,
@@ -30,6 +30,7 @@ import {
 import { CostCenter, UserProfile, UserRole } from "@/lib/types";
 import { useCompany } from "@/components/providers/CompanyProvider";
 import { userService } from "@/lib/services/userService";
+import { useChartOfAccounts } from "@/hooks/useChartOfAccounts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -115,8 +116,16 @@ export function CostCenterForm({
       allowedUserIds: [],
       approverEmail: "",
       releaserEmail: "",
+      restricted: false,
+      restrictedAccountIds: [],
+      restrictedText: "",
     },
   });
+  const restricted = useWatch({ control: form.control, name: "restricted" });
+  const { accounts } = useChartOfAccounts(selectedCompany?.id);
+  const revenueAccounts = accounts.filter(
+    (a) => a.type === "analytic" && a.nature === "revenue" && !a.archived,
+  );
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -421,6 +430,100 @@ export function CostCenterForm({
                 </FormItem>
               )}
             />
+          )}
+        </div>
+
+        <div className="space-y-4 border-t pt-4">
+          <FormField
+            control={form.control}
+            name="restricted"
+            render={({ field }) => (
+              <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                <FormControl>
+                  <Checkbox
+                    checked={field.value ?? false}
+                    onCheckedChange={(checked) =>
+                      field.onChange(checked === true)
+                    }
+                  />
+                </FormControl>
+                <div>
+                  <FormLabel>Recurso vinculado</FormLabel>
+                  <FormDescription>
+                    O doador definiu para que serve. O relatório DFC mostra
+                    quanto entrou, quanto foi aplicado aqui e quanto falta.
+                  </FormDescription>
+                </div>
+              </FormItem>
+            )}
+          />
+          {restricted && (
+            <div className="grid grid-cols-12 gap-4">
+              <div className="col-span-12 md:col-span-7">
+                <FormField
+                  control={form.control}
+                  name="restrictedAccountIds"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Contas de receita que financiam</FormLabel>
+                      <ScrollArea className="max-h-[200px] w-full rounded-md border px-4 py-2">
+                        {revenueAccounts.length === 0 && (
+                          <p className="py-2 text-sm text-muted-foreground">
+                            Nenhuma conta de receita no plano.
+                          </p>
+                        )}
+                        {revenueAccounts.map((a) => (
+                          <label
+                            key={a.id}
+                            className="flex items-start gap-3 py-1.5 text-sm"
+                          >
+                            <Checkbox
+                              checked={field.value?.includes(a.id) ?? false}
+                              onCheckedChange={(checked) =>
+                                field.onChange(
+                                  checked
+                                    ? [...(field.value ?? []), a.id]
+                                    : field.value?.filter((v) => v !== a.id),
+                                )
+                              }
+                            />
+                            <span>
+                              <span className="mr-2 font-financial text-xs text-muted-foreground">
+                                {a.code}
+                              </span>
+                              {a.name}
+                            </span>
+                          </label>
+                        ))}
+                      </ScrollArea>
+                      <FormDescription>
+                        Escolha só contas usadas por este recurso: toda receita
+                        delas conta para ele.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="col-span-12 md:col-span-5">
+                <FormField
+                  control={form.control}
+                  name="restrictedText"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Palavra na descrição da receita</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Ex: Capelowski" {...field} />
+                      </FormControl>
+                      <FormDescription>
+                        Para receitas antigas, sem conta contábil.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
           )}
         </div>
 

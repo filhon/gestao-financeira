@@ -121,7 +121,7 @@ async function load(companyId: string): Promise<CompanyData> {
 // ponytail: cache por instância do servidor, só para trocar período e regime
 // sem reler a empresa; `fresh=1` (botão Atualizar) passa por cima.
 const cache = new Map<string, { at: number; data: Promise<CompanyData> }>();
-function getData(companyId: string, fresh: boolean) {
+export function getCompanyData(companyId: string, fresh: boolean) {
   const hit = cache.get(companyId);
   if (!fresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
   const data = load(companyId);
@@ -188,7 +188,7 @@ export async function getAnalyticsReport(
   p: ReportParams,
   fresh = false,
 ) {
-  const data = await getData(companyId, fresh);
+  const data = await getCompanyData(companyId, fresh);
   const report = buildAnalytics(data, {
     ...p,
     today: wallClock(new Date()),

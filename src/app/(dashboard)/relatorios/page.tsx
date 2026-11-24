@@ -66,6 +66,7 @@ import {
   situationOf,
   STAGE_INFO,
 } from "@/lib/reports";
+import { buildCashStatement, buildRestrictedFunds } from "@/lib/cashStatement";
 import { proveBalance, type ProofState } from "@/lib/cashSynthesis";
 import {
   buildMatrix,
@@ -116,6 +117,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ClosingPanel } from "@/components/features/reports/ClosingPanel";
+import { AccuracyView } from "@/components/features/reports/AccuracyView";
+import { RestrictedFunds } from "@/components/features/reports/RestrictedFunds";
 import { CashMatrixView } from "@/components/features/reports/CashMatrix";
 import {
   CashFlowView,
@@ -127,7 +130,7 @@ import {
   Segmented,
 } from "@/components/features/reports/ReportTables";
 
-type ReportKind = "cash_flow" | "dre" | "payments";
+type ReportKind = "cash_flow" | "dre" | "dfc" | "payments" | "accuracy";
 type FlowMode = "realized" | "forecast" | "both";
 type ExportFormat = "pdf" | "pdf_receipts" | "package" | "excel" | "csv";
 
@@ -162,6 +165,20 @@ const EXPORTS: Record<
     },
     { format: "csv", label: "CSV", hint: "A tabela da DRE, meses em colunas" },
   ],
+  dfc: [
+    {
+      format: "pdf",
+      label: "PDF",
+      hint: "Demonstração e recursos com restrição",
+    },
+    {
+      format: "excel",
+      label: "Excel",
+      hint: "Mês a mês, com os lançamentos de cada linha",
+    },
+    { format: "csv", label: "CSV", hint: "A tabela, meses em colunas" },
+  ],
+  accuracy: [],
   payments: [
     {
       format: "pdf_receipts",
@@ -232,7 +249,12 @@ function Reports() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const { selectedCompany } = useCompany();
-  const { onlyOwnPayables, canViewReports, canCloseMonth } = usePermissions();
+  const {
+    onlyOwnPayables,
+    canViewReports,
+    canCloseMonth,
+    canManageCostCenters,
+  } = usePermissions();
 
   useEffect(() => {
     if (!canViewReports) router.push("/dashboard");
@@ -242,7 +264,7 @@ function Reports() {
   const [kind, setKind] = useState<ReportKind>(() =>
     oneOf(
       searchParams.get("relatorio"),
-      ["cash_flow", "dre", "payments"],
+      ["cash_flow", "dre", "dfc", "payments", "accuracy"],
       "cash_flow",
     ),
   );
@@ -403,6 +425,9 @@ function Reports() {
     [mode, forecast],
   );
   const isFlow = kind === "cash_flow";
+  /** Demonstração dos fluxos de caixa: a tabela da DRE, com outras linhas. */
+  const isDfc = kind === "dfc";
+  const isAccuracy = kind === "accuracy";
   const wantsRecurring = isFlow && stages.includes("recurring");
   // Saldo da empresa não vale para um recorte (centro de custo ou só os
   // próprios lançamentos): aí o fluxo mostra o acumulado do recorte.
@@ -411,11 +436,11 @@ function Reports() {
   // que já passou pelo banco.
   const todayStart = +startOfDay(new Date());
   const hasOpening =
-    isFlow &&
+    (isFlow || (isDfc && +range.start <= todayStart)) &&
     !ccIds &&
     !onlyOwnPayables &&
     !entity &&
-    (mode !== "forecast" || +range.start > todayStart);
+    (!isFlow || mode !== "forecast" || +range.start > todayStart);
   /** Período encerrado: só o realizado conta; vencido sem baixa vai à parte. */
   const closedPeriod = +range.end < todayStart;
   const wantsOverdue = isFlow && mode !== "realized" && !closedPeriod;
@@ -471,7 +496,7 @@ function Reports() {
   const current = useQuery({
     queryKey: ["report", ...scopeKey, +range.start, +range.end],
     queryFn: () => fetchPeriod(range.start, range.end),
-    enabled: !!companyId && canViewReports,
+    enabled: !!companyId && canViewReports && !isAccuracy,
     staleTime: 60_000,
   });
   const prior = useQuery({
@@ -755,27 +780,52 @@ function Reports() {
 
   const dre = useMemo(
     () =>
-      kind === "dre" && current.data
-        ? buildDre(scoped(current.data.transactions), accounts, {
+      isDfc && current.data
+        ? buildCashStatement(scoped(current.data.transactions), accounts, {
             start: range.start,
             end: range.end,
+            opening: openingKnown ? opening : null,
             costCenterIds: ccIds,
-            regime,
           })
-        : null,
+        : kind === "dre" && current.data
+          ? buildDre(scoped(current.data.transactions), accounts, {
+              start: range.start,
+              end: range.end,
+              costCenterIds: ccIds,
+              regime,
+            })
+          : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kind, current.data, accounts, range, ccIds, regime, entity, accountIndex],
+    [
+      kind,
+      current.data,
+      accounts,
+      range,
+      ccIds,
+      regime,
+      entity,
+      accountIndex,
+      openingKnown,
+      opening,
+    ],
   );
   const drePrev = useMemo(
     () =>
-      kind === "dre" && compRange && prior.data
-        ? buildDre(scoped(prior.data.transactions), accounts, {
+      isDfc && compRange && prior.data
+        ? buildCashStatement(scoped(prior.data.transactions), accounts, {
             start: compRange.start,
             end: compRange.end,
+            opening: null,
             costCenterIds: ccIds,
-            regime,
           })
-        : null,
+        : kind === "dre" && compRange && prior.data
+          ? buildDre(scoped(prior.data.transactions), accounts, {
+              start: compRange.start,
+              end: compRange.end,
+              costCenterIds: ccIds,
+              regime,
+            })
+          : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       kind,
@@ -787,6 +837,43 @@ function Reports() {
       entity,
       accountIndex,
     ],
+  );
+
+  // ── Recursos com restrição: desde o começo, para o saldo a aplicar ───────
+  const restricted = costCenters.filter((c) => c.restricted);
+  const restrictedIds = [
+    ...new Set(restricted.flatMap((c) => descendantIds(c.id, costCenters))),
+  ];
+  const fundsQuery = useQuery({
+    queryKey: ["report-funds", companyId, restrictedIds.join(","), +range.end],
+    queryFn: async () => {
+      const [ins, outs] = await Promise.all([
+        transactionService.getAll({
+          companyId: companyId!,
+          type: "receivable",
+          status: "paid",
+        }),
+        transactionService.getByPaymentDate({
+          companyId: companyId!,
+          startDate: new Date(2000, 0, 1),
+          endDate: range.end,
+          costCenterIds: restrictedIds,
+        }),
+      ]);
+      return dedupe([ins, outs]);
+    },
+    enabled: !!companyId && canViewReports && isDfc && restrictedIds.length > 0,
+    staleTime: 60_000,
+  });
+  const funds = useMemo(
+    () =>
+      isDfc && fundsQuery.data
+        ? buildRestrictedFunds(fundsQuery.data, costCenters, entities, {
+            start: range.start,
+            end: range.end,
+          })
+        : [],
+    [isDfc, fundsQuery.data, costCenters, entities, range],
   );
 
   const payments = useMemo(
@@ -827,9 +914,11 @@ function Reports() {
           forecast.length < FORECAST_STAGES.length
             ? ` (previsto: ${forecast.map((s) => STAGE_INFO[s].label.toLowerCase()).join(", ")})`
             : "")
-        : regime === "cash"
-          ? "Regime de caixa"
-          : "Regime de competência",
+        : isDfc
+          ? null
+          : regime === "cash"
+            ? "Regime de caixa"
+            : "Regime de competência",
     ccName ? `Centro de custo: ${ccName} e subordinados` : null,
     entity && !isPayments ? `Entidade: ${entity.name}` : null,
     accountName ? `Conta: ${accountName}` : null,
@@ -955,8 +1044,10 @@ function Reports() {
       } else if (dre) {
         const dreCtx = {
           ...ctx,
-          regime,
+          regime: isDfc ? ("cash" as const) : regime,
           competenceMissing: current.data?.competenceMissing,
+          statement: isDfc,
+          funds,
         };
         if (fmt === "pdf") await reportService.generateDREPDF(dre, dreCtx);
         if (fmt === "excel") await reportService.exportDREExcel(dre, dreCtx);
@@ -986,7 +1077,7 @@ function Reports() {
   // DRE em que o resultado das contas não representa o período: o arquivo só
   // sai depois de a pessoa confirmar que viu isso.
   const lowCoverage =
-    kind === "dre" && !!dre && dre.coverage < DRE_MIN_COVERAGE;
+    (kind === "dre" || isDfc) && !!dre && dre.coverage < DRE_MIN_COVERAGE;
   const requestExport = (fmt: ExportFormat) =>
     lowCoverage ? setConfirmExport(fmt) : handleExport(fmt);
 
@@ -1008,6 +1099,7 @@ function Reports() {
     current.isLoading ||
     (wantsRecurring && templatesQuery.isLoading) ||
     (wantsOverdue && overdueQuery.isLoading) ||
+    (isDfc && fundsQuery.isLoading) ||
     // Sem o saldo inicial a tabela e o arquivo sairiam com zero no lugar dele.
     (hasOpening && openingTyped === null && openingQuery.isLoading);
   const loadError = current.error ?? (wantsOverdue ? overdueQuery.error : null);
@@ -1028,365 +1120,382 @@ function Reports() {
               <TabsTrigger value="dre" className="px-3">
                 DRE gerencial
               </TabsTrigger>
+              <TabsTrigger value="dfc" className="px-3">
+                DFC
+              </TabsTrigger>
               <TabsTrigger value="payments" className="px-3">
                 Pagamentos
+              </TabsTrigger>
+              <TabsTrigger value="accuracy" className="px-3">
+                Acerto da previsão
               </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
         {/* Não modal: o item pode abrir a confirmação, e dois modais Radix
             seguidos deixam a página sem cliques. */}
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              loading={exporting !== null}
-              disabled={
-                exporting !== null ||
-                loading ||
-                isEmpty ||
-                !!loadError ||
-                (hasMatrix && !matrix && !matrixError)
-              }
-            >
-              {exporting === null && <Download className="h-4 w-4" />}
-              {receiptProgress ?? "Exportar"}
-              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            {EXPORTS[kind].map((e) => (
-              <DropdownMenuItem
-                key={e.format}
-                onSelect={() => requestExport(e.format)}
-              >
-                <div>
-                  <p>{e.label}</p>
-                  <p className="text-xs text-muted-foreground">{e.hint}</p>
-                </div>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
-
-      {/* ── Filtros ───────────────────────────────────────────────────── */}
-      <section
-        aria-label="Filtros do relatório"
-        className="flex flex-col gap-3 rounded-lg border bg-card p-3"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Popover
-            open={calendarOpen}
-            onOpenChange={(o) => {
-              setCalendarOpen(o);
-              if (o) setDraftRange(undefined);
-            }}
-          >
-            <PopoverTrigger asChild>
+        {!isAccuracy && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
-                size="sm"
-                className="font-financial font-normal"
+                loading={exporting !== null}
+                disabled={
+                  exporting !== null ||
+                  loading ||
+                  isEmpty ||
+                  !!loadError ||
+                  (hasMatrix && !matrix && !matrixError)
+                }
               >
-                <CalendarIcon className="h-4 w-4 opacity-60" />
-                {periodText(range.start, range.end)}
+                {exporting === null && <Download className="h-4 w-4" />}
+                {receiptProgress ?? "Exportar"}
+                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
               </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="range"
-                numberOfMonths={2}
-                defaultMonth={range.start}
-                selected={draftRange ?? { from: range.start, to: range.end }}
-                onSelect={setDraftRange}
-                locale={ptBR}
-              />
-              <div className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
-                <span className="font-financial">
-                  {draftRange?.from
-                    ? `${format(draftRange.from, "dd/MM/yyyy")} a ${
-                        draftRange.to
-                          ? format(draftRange.to, "dd/MM/yyyy")
-                          : "…"
-                      }`
-                    : "Escolha o primeiro e o último dia"}
-                </span>
-                <Button
-                  size="sm"
-                  disabled={!draftRange?.from}
-                  onClick={() => {
-                    const from = draftRange!.from!;
-                    const to = draftRange!.to ?? from;
-                    setRange({ start: from, end: to, key: null });
-                    setCalendarOpen(false);
-                  }}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {EXPORTS[kind].map((e) => (
+                <DropdownMenuItem
+                  key={e.format}
+                  onSelect={() => requestExport(e.format)}
                 >
-                  Aplicar
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <div className="max-w-full overflow-x-auto">
-            <Segmented
-              label="Atalhos de período"
-              hideLabel
-              value={range.key ?? ""}
-              onChange={pickPeriod}
-              options={periods.map((p) => ({ value: p.key, label: p.label }))}
-            />
-          </div>
-        </div>
+                  <div>
+                    <p>{e.label}</p>
+                    <p className="text-xs text-muted-foreground">{e.hint}</p>
+                  </div>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </header>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            Centro de custo
-            <Select
-              value={costCenterFilter}
-              onValueChange={setCostCenterFilter}
+      {isAccuracy && companyId && <AccuracyView companyId={companyId} />}
+
+      {/* ── Filtros ───────────────────────────────────────────────────── */}
+      {!isAccuracy && (
+        <section
+          aria-label="Filtros do relatório"
+          className="flex flex-col gap-3 rounded-lg border bg-card p-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Popover
+              open={calendarOpen}
+              onOpenChange={(o) => {
+                setCalendarOpen(o);
+                if (o) setDraftRange(undefined);
+              }}
             >
-              <SelectTrigger size="sm" className="min-w-44 text-foreground">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {ccTree.map(({ cc, depth }) => (
-                  <SelectItem key={cc.id} value={cc.id}>
-                    <span style={{ paddingLeft: `${depth * 0.75}rem` }}>
-                      {cc.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            Entidade
-            <Popover open={entityPickerOpen} onOpenChange={setEntityPickerOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
                   size="sm"
-                  role="combobox"
-                  className="min-w-44 max-w-64 justify-between font-normal text-foreground"
+                  className="font-financial font-normal"
                 >
-                  <span className="truncate">{entity?.name ?? "Todas"}</span>
-                  <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                  <CalendarIcon className="h-4 w-4 opacity-60" />
+                  {periodText(range.start, range.end)}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-72 p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Nome ou documento…" />
-                  <CommandList>
-                    <CommandEmpty>Nenhuma entidade encontrada.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem
-                        value="__todas__"
-                        onSelect={() => {
-                          setEntityFilter("");
-                          setEntityAccount("");
-                          setEntityPickerOpen(false);
-                        }}
-                      >
-                        Todas
-                      </CommandItem>
-                      {entities.map((e) => (
-                        <CommandItem
-                          key={e.id}
-                          value={`${e.name} ${e.tradeName ?? ""} ${e.document ?? ""}`}
-                          onSelect={() => {
-                            setEntityFilter(e.id);
-                            setEntityAccount("");
-                            setEntityPickerOpen(false);
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              "h-4 w-4",
-                              e.id === entityFilter
-                                ? "opacity-100"
-                                : "opacity-0",
-                            )}
-                          />
-                          <span className="truncate">{e.name}</span>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="range"
+                  numberOfMonths={2}
+                  defaultMonth={range.start}
+                  selected={draftRange ?? { from: range.start, to: range.end }}
+                  onSelect={setDraftRange}
+                  locale={ptBR}
+                />
+                <div className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+                  <span className="font-financial">
+                    {draftRange?.from
+                      ? `${format(draftRange.from, "dd/MM/yyyy")} a ${
+                          draftRange.to
+                            ? format(draftRange.to, "dd/MM/yyyy")
+                            : "…"
+                        }`
+                      : "Escolha o primeiro e o último dia"}
+                  </span>
+                  <Button
+                    size="sm"
+                    disabled={!draftRange?.from}
+                    onClick={() => {
+                      const from = draftRange!.from!;
+                      const to = draftRange!.to ?? from;
+                      setRange({ start: from, end: to, key: null });
+                      setCalendarOpen(false);
+                    }}
+                  >
+                    Aplicar
+                  </Button>
+                </div>
               </PopoverContent>
             </Popover>
-          </label>
+            <div className="max-w-full overflow-x-auto">
+              <Segmented
+                label="Atalhos de período"
+                hideLabel
+                value={range.key ?? ""}
+                onChange={pickPeriod}
+                options={periods.map((p) => ({ value: p.key, label: p.label }))}
+              />
+            </div>
+          </div>
 
-          {multiAccount && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              Conta
+              Centro de custo
               <Select
-                value={accountIndex >= 0 ? entityAccount : "all"}
-                onValueChange={(v) => setEntityAccount(v === "all" ? "" : v)}
+                value={costCenterFilter}
+                onValueChange={setCostCenterFilter}
               >
-                <SelectTrigger size="sm" className="min-w-40 text-foreground">
+                <SelectTrigger size="sm" className="min-w-44 text-foreground">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {entityAccounts.map((a, i) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {bankAccountLabel(a, i)}
+                  <SelectItem value="all">Todos</SelectItem>
+                  {ccTree.map(({ cc, depth }) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      <span style={{ paddingLeft: `${depth * 0.75}rem` }}>
+                        {cc.name}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </label>
-          )}
 
-          {isPayments ? (
-            <Segmented
-              label="Mostrar"
-              value={direction}
-              onChange={setDirection}
-              options={[
-                { value: "payable", label: "Pagos" },
-                { value: "receivable", label: "Recebidos" },
-              ]}
-            />
-          ) : isFlow ? (
-            <>
-              <Segmented
-                label="Situação"
-                value={mode}
-                onChange={setMode}
-                options={[
-                  { value: "realized", label: "Realizado" },
-                  { value: "forecast", label: "Previsto" },
-                  { value: "both", label: MODE_LABEL.both },
-                ]}
-              />
-              <Segmented
-                label="Agrupar por"
-                value={granularity === "auto" ? gran : granularity}
-                onChange={setGranularity}
-                options={(
-                  Object.entries(GRANULARITY_LABEL) as [Granularity, string][]
-                ).map(([value, label]) => ({ value, label }))}
-              />
-            </>
-          ) : (
-            <>
-              <Segmented
-                label="Regime"
-                value={regime}
-                onChange={setRegime}
-                options={[
-                  { value: "competence", label: "Competência" },
-                  { value: "cash", label: "Caixa" },
-                ]}
-              />
-              <Segmented
-                label="Colunas"
-                value={monthly ? "monthly" : "total"}
-                onChange={(v) => setMonthly(v === "monthly")}
-                options={[
-                  { value: "total", label: "Só o total" },
-                  { value: "monthly", label: "Mês a mês" },
-                ]}
-              />
-              <Segmented
-                label="Linhas zeradas"
-                value={hideZero ? "hide" : "show"}
-                onChange={(v) => setHideZero(v === "hide")}
-                options={[
-                  { value: "hide", label: "Ocultar" },
-                  { value: "show", label: "Mostrar" },
-                ]}
-              />
-            </>
-          )}
-
-          {!isPayments && (
-            <Segmented
-              label="Comparar com"
-              value={comparison}
-              onChange={setComparison}
-              options={[
-                { value: "none", label: "Sem comparação" },
-                { value: "previous", label: "Período anterior" },
-                { value: "year", label: "Mesmo período do ano anterior" },
-              ]}
-            />
-          )}
-        </div>
-
-        {isFlow && mode !== "realized" && !closedPeriod && (
-          <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
-            <span className="mr-1 text-xs text-muted-foreground">
-              Previsto inclui
-            </span>
-            {FORECAST_STAGES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                aria-pressed={forecast.includes(s)}
-                onClick={() => toggleStage(s)}
-                className={cn(
-                  "h-7 rounded-full border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  forecast.includes(s)
-                    ? "border-foreground/30 bg-foreground/6 text-foreground"
-                    : "border-dashed text-muted-foreground hover:text-foreground",
-                )}
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              Entidade
+              <Popover
+                open={entityPickerOpen}
+                onOpenChange={setEntityPickerOpen}
               >
-                {STAGE_INFO[s].label}
-                <span className="ml-1.5 text-muted-foreground">
-                  {STAGE_INFO[s].hint.toLowerCase()}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    role="combobox"
+                    className="min-w-44 max-w-64 justify-between font-normal text-foreground"
+                  >
+                    <span className="truncate">{entity?.name ?? "Todas"}</span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Nome ou documento…" />
+                    <CommandList>
+                      <CommandEmpty>Nenhuma entidade encontrada.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="__todas__"
+                          onSelect={() => {
+                            setEntityFilter("");
+                            setEntityAccount("");
+                            setEntityPickerOpen(false);
+                          }}
+                        >
+                          Todas
+                        </CommandItem>
+                        {entities.map((e) => (
+                          <CommandItem
+                            key={e.id}
+                            value={`${e.name} ${e.tradeName ?? ""} ${e.document ?? ""}`}
+                            onSelect={() => {
+                              setEntityFilter(e.id);
+                              setEntityAccount("");
+                              setEntityPickerOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "h-4 w-4",
+                                e.id === entityFilter
+                                  ? "opacity-100"
+                                  : "opacity-0",
+                              )}
+                            />
+                            <span className="truncate">{e.name}</span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </label>
 
-        {hasOpening && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-            <span>Saldo inicial em {format(range.start, "dd/MM/yyyy")}</span>
-            <div className="w-40">
-              <CurrencyInput
-                value={opening}
-                onChange={(value) =>
-                  setOpeningOverride({ start: +range.start, value })
-                }
-                className="h-8 font-financial text-sm text-foreground"
-                aria-label="Saldo inicial"
+            {multiAccount && (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                Conta
+                <Select
+                  value={accountIndex >= 0 ? entityAccount : "all"}
+                  onValueChange={(v) => setEntityAccount(v === "all" ? "" : v)}
+                >
+                  <SelectTrigger size="sm" className="min-w-40 text-foreground">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    {entityAccounts.map((a, i) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {bankAccountLabel(a, i)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
+
+            {isPayments ? (
+              <Segmented
+                label="Mostrar"
+                value={direction}
+                onChange={setDirection}
+                options={[
+                  { value: "payable", label: "Pagos" },
+                  { value: "receivable", label: "Recebidos" },
+                ]}
               />
-            </div>
-            {openingTyped !== null ? (
-              <button
-                type="button"
-                onClick={() => setOpeningOverride(null)}
-                className="inline-flex items-center gap-1 hover:text-foreground"
-              >
-                <RotateCcw className="h-3 w-3" />
-                Usar o calculado
-              </button>
-            ) : openingQuery.isLoading ? (
-              <span>calculando…</span>
-            ) : openingQuery.data ? (
-              <span>
-                Calculado do saldo de hoje (
-                {formatCurrency(openingQuery.data.todayBalance)}) até o início
-                do período. Pode ajustar.
-              </span>
+            ) : isFlow ? (
+              <>
+                <Segmented
+                  label="Situação"
+                  value={mode}
+                  onChange={setMode}
+                  options={[
+                    { value: "realized", label: "Realizado" },
+                    { value: "forecast", label: "Previsto" },
+                    { value: "both", label: MODE_LABEL.both },
+                  ]}
+                />
+                <Segmented
+                  label="Agrupar por"
+                  value={granularity === "auto" ? gran : granularity}
+                  onChange={setGranularity}
+                  options={(
+                    Object.entries(GRANULARITY_LABEL) as [Granularity, string][]
+                  ).map(([value, label]) => ({ value, label }))}
+                />
+              </>
             ) : (
-              <span>
-                Sem saldo de referência: o relatório mostra só o acumulado. Para
-                ver o saldo, digite o valor das contas.
-              </span>
+              <>
+                {!isDfc && (
+                  <Segmented
+                    label="Regime"
+                    value={regime}
+                    onChange={setRegime}
+                    options={[
+                      { value: "competence", label: "Competência" },
+                      { value: "cash", label: "Caixa" },
+                    ]}
+                  />
+                )}
+                <Segmented
+                  label="Colunas"
+                  value={monthly ? "monthly" : "total"}
+                  onChange={(v) => setMonthly(v === "monthly")}
+                  options={[
+                    { value: "total", label: "Só o total" },
+                    { value: "monthly", label: "Mês a mês" },
+                  ]}
+                />
+                <Segmented
+                  label="Linhas zeradas"
+                  value={hideZero ? "hide" : "show"}
+                  onChange={(v) => setHideZero(v === "hide")}
+                  options={[
+                    { value: "hide", label: "Ocultar" },
+                    { value: "show", label: "Mostrar" },
+                  ]}
+                />
+              </>
+            )}
+
+            {!isPayments && (
+              <Segmented
+                label="Comparar com"
+                value={comparison}
+                onChange={setComparison}
+                options={[
+                  { value: "none", label: "Sem comparação" },
+                  { value: "previous", label: "Período anterior" },
+                  { value: "year", label: "Mesmo período do ano anterior" },
+                ]}
+              />
             )}
           </div>
-        )}
-      </section>
+
+          {isFlow && mode !== "realized" && !closedPeriod && (
+            <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
+              <span className="mr-1 text-xs text-muted-foreground">
+                Previsto inclui
+              </span>
+              {FORECAST_STAGES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  aria-pressed={forecast.includes(s)}
+                  onClick={() => toggleStage(s)}
+                  className={cn(
+                    "h-7 rounded-full border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    forecast.includes(s)
+                      ? "border-foreground/30 bg-foreground/6 text-foreground"
+                      : "border-dashed text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {STAGE_INFO[s].label}
+                  <span className="ml-1.5 text-muted-foreground">
+                    {STAGE_INFO[s].hint.toLowerCase()}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {hasOpening && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
+              <span>Saldo inicial em {format(range.start, "dd/MM/yyyy")}</span>
+              <div className="w-40">
+                <CurrencyInput
+                  value={opening}
+                  onChange={(value) =>
+                    setOpeningOverride({ start: +range.start, value })
+                  }
+                  className="h-8 font-financial text-sm text-foreground"
+                  aria-label="Saldo inicial"
+                />
+              </div>
+              {openingTyped !== null ? (
+                <button
+                  type="button"
+                  onClick={() => setOpeningOverride(null)}
+                  className="inline-flex items-center gap-1 hover:text-foreground"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Usar o calculado
+                </button>
+              ) : openingQuery.isLoading ? (
+                <span>calculando…</span>
+              ) : openingQuery.data ? (
+                <span>
+                  Calculado do saldo de hoje (
+                  {formatCurrency(openingQuery.data.todayBalance)}) até o início
+                  do período. Pode ajustar.
+                </span>
+              ) : (
+                <span>
+                  Sem saldo de referência: o relatório mostra só o acumulado.
+                  Para ver o saldo, digite o valor das contas.
+                </span>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Relatório ─────────────────────────────────────────────────── */}
-      {loadError ? (
+      {isAccuracy ? null : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border py-16 text-center">
           <AlertCircle className="h-6 w-6 text-muted-foreground" />
           <p className="text-sm">Não foi possível carregar os lançamentos.</p>
@@ -1450,6 +1559,7 @@ function Reports() {
             hasOpening={openingKnown}
             closedPeriod={closedPeriod}
             granularity={gran}
+            onAccuracy={() => setKind("accuracy")}
             toolbar={
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <Segmented
@@ -1534,20 +1644,29 @@ function Reports() {
                 Só {formatPercent(dre.coverage)} do movimento do período tem
                 conta contábil.
               </p>
-              <p className="mt-1 text-amber-900 dark:text-amber-200">
-                O resultado das contas classificadas é{" "}
-                <span className="font-financial font-medium">
-                  {formatCurrency(resultOf("Resultado Líquido do Período"))}
-                </span>
-                ; com os {unclassifiedLines.length} lançamentos sem conta, o
-                período fecha em{" "}
-                <span className="font-financial font-medium">
-                  {formatCurrency(
-                    resultOf("Resultado com Lançamentos sem Conta"),
-                  )}
-                </span>
-                . Classifique-os para a DRE valer como demonstrativo.
-              </p>
+              {isDfc ? (
+                <p className="mt-1 text-amber-900 dark:text-amber-200">
+                  A variação e os saldos estão completos, mas{" "}
+                  {unclassifiedLines.length} lançamentos não se dividem entre
+                  operacional, investimento e financiamento. Classifique-os para
+                  a demonstração valer.
+                </p>
+              ) : (
+                <p className="mt-1 text-amber-900 dark:text-amber-200">
+                  O resultado das contas classificadas é{" "}
+                  <span className="font-financial font-medium">
+                    {formatCurrency(resultOf("Resultado Líquido do Período"))}
+                  </span>
+                  ; com os {unclassifiedLines.length} lançamentos sem conta, o
+                  período fecha em{" "}
+                  <span className="font-financial font-medium">
+                    {formatCurrency(
+                      resultOf("Resultado com Lançamentos sem Conta"),
+                    )}
+                  </span>
+                  . Classifique-os para a DRE valer como demonstrativo.
+                </p>
+              )}
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium">
                 <button
                   type="button"
@@ -1580,15 +1699,23 @@ function Reports() {
             onDrill={setDrill}
           />
           <ul className="space-y-1 text-xs text-muted-foreground">
-            <li>
-              {regime === "cash"
-                ? "Regime de caixa: só o que foi pago ou recebido, no mês da baixa."
-                : "Regime de competência: o mês de competência do lançamento; sem competência, a data de pagamento ou de vencimento."}{" "}
-              Rejeitadas não entram.{" "}
-              {dre.base > 0
-                ? "AV % sobre a receita líquida."
-                : "AV % indisponível: não há receita líquida classificada no período."}
-            </li>
+            {isDfc ? (
+              <li>
+                Método direto: só o que foi pago ou recebido, na data da baixa.
+                Doações nas atividades operacionais (ITG 2002, item 25). Caixa e
+                equivalentes incluem contas correntes e aplicações.
+              </li>
+            ) : (
+              <li>
+                {regime === "cash"
+                  ? "Regime de caixa: só o que foi pago ou recebido, no mês da baixa."
+                  : "Regime de competência: o mês de competência do lançamento; sem competência, a data de pagamento ou de vencimento."}{" "}
+                Rejeitadas não entram.{" "}
+                {dre.base > 0
+                  ? "AV % sobre a receita líquida."
+                  : "AV % indisponível: não há receita líquida classificada no período."}
+              </li>
+            )}
             {accounts.length === 0 && (
               <li>
                 Sem plano de contas, tudo aparece como &ldquo;sem conta
@@ -1604,13 +1731,36 @@ function Reports() {
           </ul>
         </div>
       ) : null}
+      {isDfc &&
+        dre &&
+        !loading &&
+        !loadError &&
+        (fundsQuery.error ? (
+          <p className="text-sm text-muted-foreground">
+            Não foi possível ler os recursos com restrição.{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={() => fundsQuery.refetch()}
+            >
+              Tentar de novo
+            </button>
+          </p>
+        ) : (
+          <RestrictedFunds
+            funds={funds}
+            start={range.start}
+            canManage={canManageCostCenters}
+            onDrill={setDrill}
+          />
+        ))}
 
       <DrillSheet drill={drill} onClose={() => setDrill(null)} />
       <ConfirmDialog
         open={confirmExport !== null}
         onOpenChange={(o) => !o && setConfirmExport(null)}
-        title="Exportar uma DRE com pouca classificação?"
-        description={`Só ${dre ? formatPercent(dre.coverage) : ""} do movimento do período tem conta contábil, então o resultado das contas classificadas não representa o período. O arquivo sai com esse aviso no topo.`}
+        title={`Exportar uma ${isDfc ? "DFC" : "DRE"} com pouca classificação?`}
+        description={`Só ${dre ? formatPercent(dre.coverage) : ""} do movimento do período tem conta contábil, então ${isDfc ? "a divisão entre as atividades" : "o resultado das contas classificadas"} não representa o período. O arquivo sai com esse aviso no topo.`}
         confirmText="Exportar com o aviso"
         onConfirm={() => {
           const fmt = confirmExport;

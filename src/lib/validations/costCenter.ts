@@ -10,6 +10,16 @@ export const costCenterSchema = z.object({
   // `setCostCenterEnvelope`. O formulário trata só de identidade.
   archived: z.boolean().optional(),
 
+  // Recurso com restrição do doador (DFC e recursos restritos)
+  restricted: z.boolean().optional(),
+  restrictedAccountIds: z.array(z.string()).optional(),
+  restrictedText: z
+    .string()
+    .trim()
+    .max(60, "Até 60 caracteres")
+    .refine((v) => v === "" || v.length >= 3, "Pelo menos 3 letras")
+    .optional(),
+
   // Permissions
   allowedUserIds: z.array(z.string()).optional(),
   approverEmail: z

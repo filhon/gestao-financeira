@@ -25,6 +25,9 @@ export function toFormData(cc: CostCenter): CostCenterFormData {
     allowedUserIds: cc.allowedUserIds,
     approverEmail: cc.approverEmail,
     releaserEmail: cc.releaserEmail,
+    restricted: cc.restricted ?? false,
+    restrictedAccountIds: cc.restrictedAccountIds ?? [],
+    restrictedText: cc.restrictedText ?? "",
     archived: !!cc.archived,
   };
 }

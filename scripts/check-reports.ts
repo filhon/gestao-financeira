@@ -42,6 +42,16 @@ import {
   snapshotProblem,
   type ClosingLine,
 } from "../src/lib/cashClosing";
+import {
+  accuracyTitle,
+  buildAccuracy,
+  historyOf,
+  type HistoryChange,
+} from "../src/lib/forecastAccuracy";
+import {
+  buildCashStatement,
+  buildRestrictedFunds,
+} from "../src/lib/cashStatement";
 import type {
   BankAccount,
   BankTransaction,
@@ -676,5 +686,254 @@ assert.deepEqual(parseEmails(" A@b.com, a@B.com;c@d.com.br  x@ "), {
   emails: ["a@b.com", "c@d.com.br"],
   invalid: ["x@"],
 });
+
+// ─── Acerto da previsão ──────────────────────────────────────────────────────
+// Segunda 01/02/2027; hoje é 08/02: uma janela de 1 semana vencida.
+const jan1 = new Date(2027, 0, 1);
+const feb = (d: number) => new Date(2027, 1, d);
+const seen = (p: Partial<Transaction>) => tx({ createdAt: jan1, ...p });
+const onDay = (d: Date, p: Partial<Transaction>) =>
+  seen({ status: "paid", dueDate: d, paymentDate: d, ...p });
+const history: HistoryChange[] = [
+  // Em 03/02 o valor virou 120; na segunda a previsão era 100.
+  { id: "valor", at: feb(3), field: "amount", old: 100 },
+  // Vencia em 04/02 e foi empurrado para março depois da previsão.
+  { id: "empurrado", at: feb(3), field: "dueDate", old: feb(4) },
+];
+const jan20 = new Date(2027, 0, 20);
+const measured = buildAccuracy(
+  [
+    onDay(feb(2), { id: "ok", amount: 50 }),
+    onDay(feb(3), { id: "valor", amount: 120 }),
+    seen({ id: "empurrado", amount: 30, dueDate: new Date(2027, 2, 4) }),
+    // Vencido a pagar ainda em aberto: a regra do relatório o põe na semana.
+    seen({ id: "vencido", amount: 7, dueDate: jan20 }),
+    seen({ id: "areceber", type: "receivable", amount: 900, dueDate: jan20 }),
+    // Lançado na quarta, pago na quinta: ninguém previu.
+    onDay(feb(4), { id: "novo", amount: 40, createdAt: feb(3) }),
+    // Vencia na outra semana e foi pago antes.
+    onDay(feb(5), { id: "antes", amount: 11, dueDate: feb(10) }),
+    // Recorrência lançada depois, mas o modelo já rodava em janeiro.
+    onDay(new Date(2027, 0, 5), {
+      id: "r1",
+      amount: 5,
+      recurringTemplateId: "m",
+    }),
+    onDay(feb(5), {
+      id: "r2",
+      amount: 5,
+      recurringTemplateId: "m",
+      createdAt: feb(2),
+    }),
+    seen({ id: "rej", amount: 999, status: "rejected", dueDate: feb(3) }),
+    onDay(feb(2), {
+      id: "implanta",
+      type: "receivable",
+      description: "Saldo inicial",
+      amount: 5000,
+    }),
+  ],
+  history,
+  feb(8),
+  () => "",
+);
+const oneWeek = measured.horizons[0];
+const point = oneWeek.points.at(-1)!;
+assert.equal(point.origin, "2027-02-01");
+assert.equal(point.end, "2027-02-07");
+assert.equal(point.forecast.payable, 50 + 100 + 30 + 7 + 5);
+assert.equal(point.actual.payable, 50 + 120 + 40 + 11 + 5);
+assert.equal(point.forecast.receivable, 0, "a receber vencido não conta");
+assert.equal(point.actual.receivable, 0, "saldo inicial não é movimento");
+assert.deepEqual(
+  Object.fromEntries(oneWeek.last!.items.map((i) => [i.id, i.cause])),
+  {
+    novo: "late_entry",
+    empurrado: "postponed",
+    valor: "value",
+    antes: "shifted",
+    vencido: "postponed",
+  },
+);
+// As causas explicam a diferença inteira.
+assert.equal(
+  currency(oneWeek.last!.items.reduce((s, i) => s + i.actual - i.forecast, 0))
+    .value,
+  currency(point.actual.payable).subtract(point.forecast.payable).value,
+);
+assert.match(accuracyTitle(oneWeek, String), /^Em 1 semana, a previsão acerta/);
+assert.deepEqual(buildAccuracy([], [], feb(8), () => "").horizons, []);
+assert.deepEqual(
+  historyOf(
+    [
+      {
+        entityId: "a",
+        createdAt: feb(1),
+        details: {
+          changes: [
+            { field: "amount", oldValue: 3 },
+            { field: "dueDate", oldValue: "x" },
+            { field: "notes", oldValue: 1 },
+          ],
+        },
+      },
+      {
+        createdAt: feb(1),
+        details: { changes: [{ field: "amount", oldValue: 3 }] },
+      },
+      { entityId: "b", createdAt: feb(1), details: {} },
+    ],
+    () => null,
+  ).map((h) => [h.id, h.old]),
+  [["a", 3]],
+);
+
+// ─── DFC: fecha com o saldo, com ou sem conta contábil ───────────────────────
+const plan = [
+  { id: "r", code: "3", name: "RECEITAS", type: "synthetic" },
+  {
+    id: "r1",
+    code: "3.1",
+    name: "SEM RESTRIÇÃO",
+    type: "synthetic",
+    dreGroup: "gross_revenue",
+  },
+  {
+    id: "r2",
+    code: "3.2",
+    name: "COM RESTRIÇÃO",
+    type: "synthetic",
+    dreGroup: "gross_revenue",
+  },
+  {
+    id: "r11",
+    code: "3.1.01.001",
+    name: "Doações",
+    type: "analytic",
+    dreGroup: "gross_revenue",
+  },
+  { id: "r21", code: "3.2.01.001", name: "Vinculadas", type: "analytic" },
+  {
+    id: "i1",
+    code: "1.2.01.001",
+    name: "Móveis",
+    type: "analytic",
+    dreGroup: "investments",
+  },
+  {
+    id: "f1",
+    code: "2.1.02.001",
+    name: "Mútuos",
+    type: "analytic",
+    dreGroup: "financing",
+  },
+  {
+    id: "d1",
+    code: "4.2.01.001",
+    name: "Salários",
+    type: "analytic",
+    dreGroup: "operating_expenses",
+  },
+] as ChartAccount[];
+const paidOn = (d: Date, p: Partial<Transaction>) =>
+  tx({ status: "paid", paymentDate: d, ...p });
+const dfc = buildCashStatement(
+  [
+    paidOn(day5, { type: "receivable", amount: 500, accountId: "r11" }),
+    paidOn(day5, { type: "receivable", amount: 80, accountId: "r21" }),
+    paidOn(day5, { amount: 120, accountId: "d1" }),
+    // Devolução numa conta de despesa reduz o pagamento.
+    paidOn(day5, { type: "receivable", amount: 20, accountId: "d1" }),
+    paidOn(feb(3), { amount: 200, accountId: "i1" }),
+    paidOn(feb(3), { type: "receivable", amount: 1000, accountId: "f1" }),
+    paidOn(feb(3), { amount: 33 }),
+    paidOn(day5, {
+      type: "receivable",
+      description: "Saldo inicial",
+      amount: 70,
+    }),
+    tx({ amount: 999, accountId: "d1" }),
+    paidOn(new Date(2027, 2, 1), { amount: 999, accountId: "d1" }),
+  ],
+  plan,
+  { start: jan1, end: new Date(2027, 1, 28), opening: 10 },
+);
+const dfcRow = (label: string) => dfc.rows.find((r) => r.label === label)!;
+assert.equal(dfcRow("Recebimentos").total, 580);
+assert.equal(dfcRow("Pagamentos").total, -100);
+assert.deepEqual(dfcRow("Caixa das atividades operacionais").values, [480, 0]);
+assert.equal(dfcRow("Caixa das atividades de investimento").total, -200);
+assert.equal(dfcRow("Caixa das atividades de financiamento").total, 1000);
+assert.equal(dfcRow("Pagamentos sem conta").total, -33);
+assert.equal(dfcRow("Variação líquida de caixa").total, 1247);
+assert.deepEqual(dfcRow("No início do período").values, [10, 560]);
+assert.deepEqual(dfcRow("No fim do período").values, [560, 1327]);
+assert.equal(dfcRow("Com restrição").total, 80, "grupo herdado do pai");
+assert.equal(dfc.unclassifiedCount, 1);
+assert.equal(
+  buildCashStatement([], plan, {
+    start: jan1,
+    end: jan1,
+    opening: null,
+  }).rows.some((r) => r.label === "No fim do período"),
+  false,
+);
+
+// ─── Recursos com restrição ──────────────────────────────────────────────────
+const [fund] = buildRestrictedFunds(
+  [
+    paidOn(new Date(2026, 11, 5), {
+      type: "receivable",
+      amount: 100,
+      description: "Oferta da OBRA",
+    }),
+    paidOn(new Date(2026, 11, 6), {
+      amount: 130,
+      costCenterAllocation: alloc([["obras", 100]]),
+    }),
+    paidOn(day5, {
+      type: "receivable",
+      amount: 60,
+      accountId: "r21",
+      supplierOrClient: "Ana",
+    }),
+    paidOn(day5, {
+      type: "receivable",
+      amount: 999,
+      description: "Doação geral",
+    }),
+    paidOn(day5, {
+      amount: 40,
+      costCenterAllocation: alloc([
+        ["obras", 50],
+        ["sede", 50],
+      ]),
+    }),
+    paidOn(feb(5), {
+      amount: 500,
+      costCenterAllocation: alloc([["obras", 100]]),
+    }),
+  ],
+  ccs.map((c) =>
+    c.id === "obras"
+      ? {
+          ...c,
+          restricted: true,
+          restrictedAccountIds: ["r21"],
+          restrictedText: "obra",
+        }
+      : c,
+  ),
+  [],
+  { start: jan1, end: new Date(2027, 0, 31) },
+);
+assert.deepEqual(
+  [fund.before, fund.received, fund.applied, fund.balance],
+  [-30, 60, 20, 10],
+);
+assert.deepEqual(
+  fund.donors.map((d) => [d.name, d.value]),
+  [["Ana", 60]],
+);
 
 console.log("relatórios: ok");

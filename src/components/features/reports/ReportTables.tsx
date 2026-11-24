@@ -294,6 +294,7 @@ export function CashFlowView({
   toolbar,
   table,
   onDrill,
+  onAccuracy,
 }: {
   report: CashFlowReport;
   previous: CashFlowReport | null;
@@ -306,6 +307,8 @@ export function CashFlowView({
   toolbar?: ReactNode;
   /** A matriz no lugar da tabela por período. */
   table?: ReactNode;
+  /** Abre o índice de acerto da previsão. */
+  onAccuracy?: () => void;
   onDrill: (d: Drill) => void;
 }) {
   const drill = (
@@ -581,7 +584,16 @@ export function CashFlowView({
           <h2 className="text-sm font-semibold">Por situação</h2>
           <p className="text-xs text-muted-foreground">
             Do mais firme ao menos firme. Quanto mais do previsto estiver nas
-            últimas linhas, menos confiável é o saldo final.
+            últimas linhas, menos confiável é o saldo final.{" "}
+            {onAccuracy && (
+              <button
+                type="button"
+                onClick={onAccuracy}
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                Ver quanto a previsão costuma acertar
+              </button>
+            )}
           </p>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">

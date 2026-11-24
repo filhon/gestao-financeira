@@ -111,6 +111,12 @@ export interface CostCenter {
   budgetYear?: number;
   /** Fora dos formulários de despesa nova; histórico e envelope seguem valendo. */
   archived?: boolean;
+  /** Recurso com restrição do doador: o centro só gasta o que veio para ele. */
+  restricted?: boolean;
+  /** Contas das receitas que financiam o centro. */
+  restrictedAccountIds?: string[];
+  /** Palavra na descrição da receita, para as que não têm conta. */
+  restrictedText?: string;
 
   // Permissions
   allowedUserIds?: string[]; // Users allowed to create expenses

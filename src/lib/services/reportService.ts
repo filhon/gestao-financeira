@@ -41,6 +41,7 @@ import {
   situationOf,
   toCsv,
 } from "@/lib/reports";
+import type { RestrictedFund } from "@/lib/cashStatement";
 import {
   MATRIX_ROWS,
   shownNodes,
@@ -238,6 +239,10 @@ const formatAv = (v: number, base: number) =>
 /** Opções da DRE que mudam o que o arquivo precisa avisar. */
 export type DreExportContext = ReportContext & {
   regime: DreRegime;
+  /** Demonstração dos fluxos de caixa: mesma tabela, outros títulos e notas. */
+  statement?: boolean;
+  /** Recursos com restrição, impressos depois da demonstração. */
+  funds?: RestrictedFund[];
   /** A consulta por competência falhou: o arquivo sai sem parte dos lançamentos. */
   competenceMissing?: boolean;
 };
@@ -246,29 +251,49 @@ export type DreExportContext = ReportContext & {
  * Notas impressas no arquivo. Os avisos de completude vêm primeiro: quem
  * recebe o PDF não viu a tela e não pode descobrir sozinho que falta algo.
  */
-const dreNotes = (dre: DreReport<Transaction>, ctx: DreExportContext) => [
+const dreTitle = (ctx: DreExportContext) =>
+  ctx.statement
+    ? "Demonstração dos Fluxos de Caixa (método direto)"
+    : "Demonstração do Resultado — DRE Gerencial";
+const dreFile = (ctx: DreExportContext, ext: string) =>
+  `${ctx.statement ? "dfc" : "dre"}_${periodSlug(ctx.start, ctx.end)}.${ext}`;
+
+const statementNotes = (dre: DreReport<Transaction>) => [
   ...(dre.coverage < DRE_MIN_COVERAGE
     ? [
-        `ATENÇÃO: só ${formatPercentText(dre.coverage)} do movimento do período tem conta contábil. O resultado das contas classificadas não representa o período; o resultado com os lançamentos sem conta está na última linha.`,
+        `ATENÇÃO: só ${formatPercentText(dre.coverage)} do movimento do período tem conta contábil. O restante aparece em "Movimento sem conta contábil" e não está dividido entre as atividades; a variação e os saldos estão completos.`,
       ]
     : []),
-  ...(ctx.competenceMissing
-    ? [
-        "ATENÇÃO: lançamentos com competência no período e vencimento ou pagamento fora dele não foram incluídos (consulta por competência indisponível).",
-      ]
-    : []),
-  ctx.regime === "cash"
-    ? "Regime de caixa: só o que foi pago ou recebido, no mês da baixa. Rejeitadas não entram."
-    : "Regime de competência: o mês de competência do lançamento; sem competência, a data efetiva (pagamento se pago, senão vencimento). Rejeitadas não entram.",
-  dre.base > 0
-    ? "AV % (análise vertical): participação de cada linha sobre a receita líquida do período. Valores entre parênteses são saídas."
-    : "AV % indisponível: não há receita líquida classificada no período. Valores entre parênteses são saídas.",
-  ...(dre.unclassifiedCount > 0
-    ? [
-        `${dre.unclassifiedCount} lançamento(s) sem conta contábil aparecem em linha própria e não entram nos grupos da DRE.`,
-      ]
-    : []),
+  "Método direto, pelo regime de caixa: só o que foi pago ou recebido, na data da baixa. Doações nas atividades operacionais (ITG 2002, item 25). Valores entre parênteses são saídas.",
+  "Caixa e equivalentes incluem as contas correntes e as aplicações; transferências entre contas próprias não são movimento.",
 ];
+
+const dreNotes = (dre: DreReport<Transaction>, ctx: DreExportContext) =>
+  ctx.statement
+    ? statementNotes(dre)
+    : [
+        ...(dre.coverage < DRE_MIN_COVERAGE
+          ? [
+              `ATENÇÃO: só ${formatPercentText(dre.coverage)} do movimento do período tem conta contábil. O resultado das contas classificadas não representa o período; o resultado com os lançamentos sem conta está na última linha.`,
+            ]
+          : []),
+        ...(ctx.competenceMissing
+          ? [
+              "ATENÇÃO: lançamentos com competência no período e vencimento ou pagamento fora dele não foram incluídos (consulta por competência indisponível).",
+            ]
+          : []),
+        ctx.regime === "cash"
+          ? "Regime de caixa: só o que foi pago ou recebido, no mês da baixa. Rejeitadas não entram."
+          : "Regime de competência: o mês de competência do lançamento; sem competência, a data efetiva (pagamento se pago, senão vencimento). Rejeitadas não entram.",
+        dre.base > 0
+          ? "AV % (análise vertical): participação de cada linha sobre a receita líquida do período. Valores entre parênteses são saídas."
+          : "AV % indisponível: não há receita líquida classificada no período. Valores entre parênteses são saídas.",
+        ...(dre.unclassifiedCount > 0
+          ? [
+              `${dre.unclassifiedCount} lançamento(s) sem conta contábil aparecem em linha própria e não entram nos grupos da DRE.`,
+            ]
+          : []),
+      ];
 
 const formatPercentText = (v: number) =>
   `${(v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
@@ -277,7 +302,7 @@ const formatPercentText = (v: number) =>
 const dreSources = (dre: DreReport<Transaction>) => {
   const seen = new Set<string>();
   return dre.rows
-    .filter((r) => r.kind === "group" || r.kind === "info")
+    .filter((r) => r.sources)
     .flatMap((r) => r.sources ?? [])
     .filter((t) => !seen.has(t.id) && !!seen.add(t.id))
     .sort((a, b) => effectiveDate(a).getTime() - effectiveDate(b).getTime());
@@ -285,7 +310,7 @@ const dreSources = (dre: DreReport<Transaction>) => {
 
 const dreRowLabel = (r: DreRow<unknown>) => {
   if (r.kind === "account") {
-    return `${"    ".repeat(Math.max(r.level - 1, 0))}${r.code}  ${r.label}`;
+    return `${"    ".repeat(Math.max(r.level - 1, 0))}${r.code ? `${r.code}  ` : ""}${r.label}`;
   }
   if (r.kind === "info") return `    ${r.label}`;
   if (r.kind === "subtotal" || r.kind === "result") return `(=) ${r.label}`;
@@ -1335,7 +1360,7 @@ export const reportService = {
 
     doc.setFontSize(15);
     doc.setTextColor(15, 23, 42);
-    doc.text("Demonstração do Resultado — DRE Gerencial", 14, 18);
+    doc.text(dreTitle(ctx), 14, 18);
     doc.setFontSize(10);
     doc.setTextColor(71, 85, 105);
     doc.text(ctx.companyName, 14, 25);
@@ -1361,11 +1386,17 @@ export const reportService = {
 
     autoTable(doc, {
       startY: tableY,
-      head: [["Conta", "Valor (R$)", "AV %"]],
+      head: [
+        ctx.statement
+          ? ["Conta", "Valor (R$)"]
+          : ["Conta", "Valor (R$)", "AV %"],
+      ],
       body: dre.rows.map((r) => [
         dreRowLabel(r),
         r.kind === "heading" ? "" : formatDreValue(r.total),
-        r.kind === "heading" ? "" : formatAv(r.total, dre.base),
+        ...(ctx.statement
+          ? []
+          : [r.kind === "heading" ? "" : formatAv(r.total, dre.base)]),
       ]),
       showHead: "everyPage",
       theme: "plain",
@@ -1414,6 +1445,54 @@ export const reportService = {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let y = (doc as any).lastAutoTable.finalY + 6;
+    if (ctx.funds?.length) {
+      autoTable(doc, {
+        startY: y + 2,
+        head: [
+          [
+            "Recursos com restrição do doador",
+            "A aplicar no início",
+            "Recebido",
+            "Aplicado",
+            "A aplicar",
+          ],
+        ],
+        body: ctx.funds.flatMap((f) => [
+          [
+            f.name,
+            formatDreValue(f.before),
+            formatDreValue(f.received),
+            formatDreValue(f.applied),
+            formatDreValue(f.balance),
+          ],
+          ...f.donors.map((d) => [
+            `    ${d.name}`,
+            "",
+            formatDreValue(d.value),
+            "",
+            "",
+          ]),
+        ]),
+        theme: "plain",
+        styles: {
+          font: reportFont,
+          fontSize: 8.5,
+          cellPadding: { top: 1.6, bottom: 1.6, left: 2, right: 2 },
+          textColor: [30, 41, 59],
+        },
+        headStyles: {
+          font: reportFont,
+          fontStyle: "bold",
+          fillColor: [15, 23, 42],
+          textColor: [255, 255, 255],
+        },
+        columnStyles: Object.fromEntries(
+          [1, 2, 3, 4].map((c) => [c, { halign: "right", cellWidth: 28 }]),
+        ),
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
     for (const note of dreNotes(dre, ctx)) {
@@ -1422,7 +1501,7 @@ export const reportService = {
       y += lines.length * 3.6;
     }
 
-    doc.save(`dre_${periodSlug(ctx.start, ctx.end)}.pdf`);
+    doc.save(dreFile(ctx, "pdf"));
   },
 
   /**
@@ -1441,7 +1520,7 @@ export const reportService = {
     workbook.created = new Date();
 
     const MONEY = '#,##0.00;[Red](#,##0.00);"-"';
-    const sheet = workbook.addWorksheet("DRE", {
+    const sheet = workbook.addWorksheet(ctx.statement ? "DFC" : "DRE", {
       views: [{ state: "frozen", ySplit: 4, xSplit: 2 }],
       properties: { outlineLevelRow: 3 },
     });
@@ -1455,7 +1534,9 @@ export const reportService = {
     const lastCol = 2 + dre.columns.length + 2;
 
     sheet.mergeCells(1, 1, 1, lastCol);
-    sheet.getCell(1, 1).value = `${ctx.companyName} — DRE Gerencial`;
+    sheet.getCell(1, 1).value = `${ctx.companyName} — ${
+      ctx.statement ? dreTitle(ctx) : "DRE Gerencial"
+    }`;
     sheet.getCell(1, 1).font = { bold: true, size: 13 };
     sheet.mergeCells(2, 1, 2, lastCol);
     sheet.getCell(2, 1).value =
@@ -1580,11 +1661,40 @@ export const reportService = {
     }
     detail.autoFilter = { from: "A1", to: "J1" };
 
+    if (ctx.funds?.length) {
+      const funds = workbook.addWorksheet("Recursos restritos", {
+        views: [{ state: "frozen", ySplit: 1 }],
+      });
+      funds.columns = [
+        { header: "Recurso", width: 34 },
+        { header: "Doador", width: 44 },
+        { header: "A aplicar no início", width: 20 },
+        { header: "Recebido", width: 18 },
+        { header: "Aplicado", width: 18 },
+        { header: "A aplicar", width: 18 },
+      ];
+      funds.getRow(1).font = { bold: true };
+      for (const f of ctx.funds) {
+        const row = funds.addRow([
+          f.name,
+          "",
+          f.before,
+          f.received,
+          f.applied,
+          null,
+        ]);
+        row.getCell(6).value = {
+          formula: `C${row.number}+D${row.number}-E${row.number}`,
+          result: f.balance,
+        };
+        row.font = { bold: true };
+        for (const d of f.donors) funds.addRow([f.name, d.name, null, d.value]);
+      }
+      for (let c = 3; c <= 6; c++) funds.getColumn(c).numFmt = MONEY;
+    }
+
     const buffer = await workbook.xlsx.writeBuffer();
-    downloadBlob(
-      new Blob([buffer], { type: XLSX_TYPE }),
-      `dre_${periodSlug(ctx.start, ctx.end)}.xlsx`,
-    );
+    downloadBlob(new Blob([buffer], { type: XLSX_TYPE }), dreFile(ctx, "xlsx"));
   },
 
   /** DRE em CSV: a mesma tabela da tela, com os meses em colunas. */
@@ -1603,7 +1713,7 @@ export const reportService = {
     ];
     downloadBlob(
       new Blob([toCsv(rows)], { type: "text/csv;charset=utf-8;" }),
-      `dre_${periodSlug(ctx.start, ctx.end)}.csv`,
+      dreFile(ctx, "csv"),
     );
   },
 
