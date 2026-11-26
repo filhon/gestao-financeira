@@ -757,7 +757,7 @@ export function TransactionDetailsDialog({
               )}
               {promise && !showPromiseForm && (
                 <div className="flex items-start gap-2">
-                  <Handshake className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 dark:text-sky-400" />
+                  <Handshake className="mt-0.5 h-4 w-4 shrink-0 text-info-700 dark:text-info-400" />
                   <p className="flex-1">
                     Prometeu pagar em{" "}
                     <span className="font-medium">
@@ -877,7 +877,7 @@ export function TransactionDetailsDialog({
         {transaction.paymentDate && (
           <Field label={isPayable ? "Pago em" : "Recebido em"}>
             <span className="inline-flex items-center gap-1.5 font-financial">
-              <CheckCircle2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-info-600 dark:text-info-400" />
               {format(transaction.paymentDate, "dd/MM/yyyy")}
             </span>
           </Field>

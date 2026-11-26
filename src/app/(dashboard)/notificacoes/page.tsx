@@ -36,7 +36,7 @@ import { useRouter } from "next/navigation";
 // ─── Notification type metadata ──────────────────────────────────────────────
 
 const TYPE_CONFIG = {
-  info: { icon: Info, iconClass: "text-blue-500", dotClass: "bg-blue-500" },
+  info: { icon: Info, iconClass: "text-info-500", dotClass: "bg-info-500" },
   warning: {
     icon: AlertTriangle,
     iconClass: "text-amber-500",

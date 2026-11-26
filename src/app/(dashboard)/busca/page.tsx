@@ -137,14 +137,14 @@ const STATUS_STYLE: Record<StatusKey, string> = {
   late: "border-destructive/40 bg-destructive/10 text-destructive",
   draft: "border-border bg-muted text-muted-foreground",
   pending_approval:
-    "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300",
+    "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300",
   approved:
-    "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-300",
+    "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
   pending_authorization:
-    "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300",
+    "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-800 dark:bg-brand-950 dark:text-brand-300",
   authorized:
-    "border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300",
-  paid: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+    "border-brand-700 bg-brand-700 text-white dark:border-brand-600 dark:bg-brand-600 dark:text-white",
+  paid: "border-info-300 bg-info-50 text-info-800 dark:border-info-800 dark:bg-info-950 dark:text-info-300",
   rejected: "border-dashed border-border text-muted-foreground",
 };
 

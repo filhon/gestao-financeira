@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       "utf8",
     );
     const origin = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
-    const md = raw.replace("https://{seu-dominio}", origin.replace(/\/$/, ""));
+    const md = raw.replaceAll("https://{seu-dominio}", origin.replace(/\/$/, ""));
 
     return new NextResponse(md, {
       headers: {

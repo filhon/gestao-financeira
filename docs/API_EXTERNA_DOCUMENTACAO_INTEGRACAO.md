@@ -613,7 +613,7 @@ class FinanceAPIClient {
 const client = new FinanceAPIClient(
   "gf_live_abcdef1234567890",
   "sk_xxxxxxxxxxxxxxxxxxxxxxxx",
-  "https://app.exemplo.com",
+  "https://{seu-dominio}",
 );
 
 // Saldo atual
@@ -705,7 +705,7 @@ class FinanceAPIClient:
 client = FinanceAPIClient(
     api_key="gf_live_abcdef1234567890",
     secret_key="sk_xxxxxxxxxxxxxxxxxxxxxxxx",
-    base_url="https://app.exemplo.com",
+    base_url="https://{seu-dominio}",
 )
 
 # Saldo

@@ -169,7 +169,7 @@ export default function PendingApprovalPage() {
             </div>
           )}
 
-          <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md text-sm text-blue-700 dark:text-blue-300 text-center">
+          <div className="bg-brand-50 dark:bg-brand-900/20 p-3 rounded-md text-sm text-brand-700 dark:text-brand-300 text-center">
             Esta página será atualizada automaticamente quando sua conta for
             aprovada.
           </div>

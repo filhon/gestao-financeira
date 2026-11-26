@@ -303,7 +303,7 @@ export default function ApprovalPage() {
   const isNew = isNewTransaction();
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-50 p-4 py-8">
+    <div className="min-h-screen bg-linear-to-br from-brand-50 to-info-50 p-4 py-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <Card className="shadow-lg border-t-4 border-t-blue-500">
           <CardHeader>
@@ -363,7 +363,7 @@ export default function ApprovalPage() {
                     variant="ghost"
                     size="sm"
                     onClick={handleStartEdit}
-                    className="h-8 text-blue-600 hover:text-blue-700"
+                    className="h-8 text-brand-600 hover:text-brand-700"
                   >
                     <Edit2 className="h-3.5 w-3.5 mr-1" />
                     Ajustar
@@ -394,7 +394,7 @@ export default function ApprovalPage() {
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <p className="text-3xl font-bold font-financial text-blue-600">
+                  <p className="text-3xl font-bold font-financial text-brand-600">
                     {formatCurrency(adjustedAmount)}
                   </p>
                   {hasAmountChange() && (

@@ -20,7 +20,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const DOT_CLASS: Record<Notification["type"], string> = {
-  info: "bg-blue-500",
+  info: "bg-info-500",
   warning: "bg-amber-500",
   success: "bg-emerald-500",
   error: "bg-destructive",

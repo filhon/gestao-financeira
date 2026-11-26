@@ -62,12 +62,12 @@ const roleBadgeConfig: Record<UserRole, { label: string; className: string }> =
     admin: {
       label: "Administrador",
       className:
-        "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-400 dark:border-violet-800",
+        "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-950/50 dark:text-brand-400 dark:border-brand-800",
     },
     financial_manager: {
       label: "Gerente Financeiro",
       className:
-        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+        "bg-info-50 text-info-700 border-info-200 dark:bg-info-950/50 dark:text-info-400 dark:border-info-800",
     },
     approver: {
       label: "Aprovador",

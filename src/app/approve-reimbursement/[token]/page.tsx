@@ -272,7 +272,7 @@ export default function ApproveReimbursementPage() {
                                   href={a.url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-blue-700 underline underline-offset-2"
+                                  className="text-brand-700 underline underline-offset-2"
                                 >
                                   {item.attachments.length > 1
                                     ? `Nota ${j + 1}`

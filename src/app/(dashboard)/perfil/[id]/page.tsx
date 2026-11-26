@@ -71,7 +71,7 @@ const ROLE_CONFIG: Record<
     description:
       "Acesso total a todas as funcionalidades e configurações, incluindo gerenciamento de usuários e empresas.",
     badgeClass:
-      "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-400 dark:border-violet-800",
+      "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-950/50 dark:text-brand-400 dark:border-brand-800",
     icon: <ShieldCheck className="h-4 w-4" />,
   },
   financial_manager: {
@@ -79,7 +79,7 @@ const ROLE_CONFIG: Record<
     description:
       "Gerencia transações, contas e relatórios financeiros da empresa. Pode criar e aprovar transações de qualquer centro de custo.",
     badgeClass:
-      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+      "bg-info-50 text-info-700 border-info-200 dark:bg-info-950/50 dark:text-info-400 dark:border-info-800",
     icon: <Banknote className="h-4 w-4" />,
   },
   approver: {
@@ -142,7 +142,7 @@ const STATUS_CONFIG: Record<
   pending_authorization: {
     label: "Aguard. Autorização",
     badgeClass:
-      "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800",
+      "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-950/50 dark:text-brand-400 dark:border-brand-800",
     icon: <Clock className="h-3 w-3" />,
   },
 };
@@ -284,7 +284,7 @@ function CostCenterCard({
             </div>
           )}
           {isAdmin && (
-            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+            <div className="flex items-center gap-1.5 text-brand-600 dark:text-brand-400">
               <ShieldCheck className="h-3 w-3" />
               <span>Acesso Administrativo</span>
             </div>

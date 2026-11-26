@@ -151,8 +151,8 @@ export default function BatchAuthorizationPage() {
     <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
       <Card className="w-full max-w-lg">
         <CardHeader className="text-center">
-          <div className="mx-auto bg-sky-100 p-3 rounded-full w-fit mb-4">
-            <Building2 className="h-8 w-8 text-sky-600" />
+          <div className="mx-auto bg-info-100 p-3 rounded-full w-fit mb-4">
+            <Building2 className="h-8 w-8 text-info-600" />
           </div>
           <CardTitle>Autorização Bancária</CardTitle>
           <CardDescription>
@@ -172,7 +172,7 @@ export default function BatchAuthorizationPage() {
             </div>
             <div className="flex justify-between border-t pt-2">
               <span className="text-muted-foreground">Valor Total:</span>
-              <span className="font-bold font-financial text-lg text-sky-700">
+              <span className="font-bold font-financial text-lg text-info-700">
                 {formatCurrency(batch?.totalAmount || 0)}
               </span>
             </div>
@@ -194,7 +194,6 @@ export default function BatchAuthorizationPage() {
           <Button
             onClick={handleAuthorize}
             disabled={isSubmitting}
-            className="bg-sky-600 hover:bg-sky-700"
           >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Confirmar Autorização
