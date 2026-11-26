@@ -26,20 +26,20 @@ const STATUS: Record<string, { label: string; className: string }> = {
   pending_authorization: {
     label: "Aguardando autorização",
     className:
-      "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
+      "bg-brand-100 text-brand-800 dark:bg-brand-950/60 dark:text-brand-300",
   },
   authorized: {
     label: "Autorizado",
     className:
-      "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300",
+      "bg-brand-700 text-white dark:bg-brand-600 dark:text-white",
   },
   paid: {
     label: "Pago",
-    className: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+    className: "bg-info-100 text-info-800 dark:bg-info-950/60 dark:text-info-300",
   },
   received: {
     label: "Recebido",
-    className: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+    className: "bg-info-100 text-info-800 dark:bg-info-950/60 dark:text-info-300",
   },
   rejected: {
     label: "Rejeitado",

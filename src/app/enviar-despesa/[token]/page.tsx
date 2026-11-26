@@ -81,7 +81,7 @@ async function shrink(file: File): Promise<Blob> {
 
 const STAGE_STYLE: Record<string, string> = {
   Recebida: "bg-muted text-muted-foreground",
-  Lançada: "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200",
+  Lançada: "bg-info-100 text-info-900 dark:bg-info-950 dark:text-info-200",
   "Em relatório":
     "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
   Paga: "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-200",

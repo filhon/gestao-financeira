@@ -9,15 +9,15 @@ import { cn } from "@/lib/utils";
 function EntidadesCard() {
   return (
     <Link href="/cadastros/entidades" className="group block h-full">
-      <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-indigo-200 dark:hover:border-indigo-900 overflow-hidden">
+      <div className="relative h-full rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/5 hover:border-brand-200 dark:hover:border-brand-900 overflow-hidden">
         {/* accent strip */}
-        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-indigo-500 to-violet-400" />
+        <div className="absolute top-0 left-0 h-1 w-full rounded-t-xl bg-linear-to-r from-brand-500 to-info-400" />
 
         <div className="flex items-start justify-between mb-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-950">
-            <Users className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 dark:bg-brand-950">
+            <Users className="h-5 w-5 text-brand-600 dark:text-brand-400" />
           </div>
-          <ArrowUpRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-indigo-500" />
+          <ArrowUpRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-brand-500" />
         </div>
 
         <p className="text-sm font-medium text-muted-foreground mb-1">
@@ -31,11 +31,11 @@ function EntidadesCard() {
         </p>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 dark:bg-indigo-950 px-2.5 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 dark:bg-brand-950 px-2.5 py-1 text-xs font-medium text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
             <Users className="h-3 w-3" />
             Fornecedores
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 dark:bg-violet-950 px-2.5 py-1 text-xs font-medium text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
+          <span className="inline-flex items-center gap-1 rounded-full bg-info-50 dark:bg-info-950 px-2.5 py-1 text-xs font-medium text-info-700 dark:text-info-300 border border-info-200 dark:border-info-800">
             <Building2 className="h-3 w-3" />
             Clientes
           </span>

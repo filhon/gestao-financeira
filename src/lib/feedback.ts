@@ -42,7 +42,7 @@ export const feedbackStatusLabel = (
 
 export const FEEDBACK_STATUS_CLASS: Record<FeedbackStatus, string> = {
   pending: "bg-muted text-foreground",
-  in_review: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  in_review: "bg-info-100 text-info-800 dark:bg-info-900 dark:text-info-200",
   waiting_user:
     "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
   resolved: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",

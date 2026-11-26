@@ -373,7 +373,7 @@ function FillMark({ source }: { source?: FillSource }) {
   if (!source) return null;
   const { label, Icon } = SOURCE[source];
   return (
-    <span title={label} className="inline-flex text-sky-600 dark:text-sky-400">
+    <span title={label} className="inline-flex text-info-600 dark:text-info-400">
       <Icon className="h-3.5 w-3.5" aria-hidden />
       <span className="sr-only">{label}</span>
     </span>

@@ -206,7 +206,7 @@ export function CashFlowChart({ year }: { year?: number }) {
             Fluxo de caixa projetado
           </CardTitle>
           {isSimulating && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-950/50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-400">
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-950/50 px-2 py-0.5 text-[10px] font-semibold text-brand-700 dark:text-brand-400">
               <FlaskConical className="h-3 w-3" />
               Simulação
             </span>
@@ -391,7 +391,7 @@ export function CashFlowChart({ year }: { year?: number }) {
           </div>
         )}
         {isSimulating && !isLoading && (
-          <div className="mb-2 ml-4 flex items-center gap-2 rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-700 dark:bg-violet-950/30 dark:text-violet-400">
+          <div className="mb-2 ml-4 flex items-center gap-2 rounded-md bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:bg-brand-950/30 dark:text-brand-400">
             <FlaskConical className="h-3.5 w-3.5 shrink-0" />
             <span>
               Linha tracejada: projeção com {simulatedTransactions.length}{" "}

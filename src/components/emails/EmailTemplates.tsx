@@ -118,7 +118,7 @@ export const StatusUpdateEmail: React.FC<Readonly<StatusUpdateEmailProps>> = ({
     {
       approved: "#10b981", // emerald-500
       rejected: "#ef4444", // red-500
-      paid: "#3b82f6", // blue-500
+      paid: "#006e94", // info-700 (azul claro da marca, contraste AA)
     }[status] || "#6b7280";
 
   return (
@@ -620,7 +620,7 @@ export const BatchAuthorizationEmail: React.FC<
                   fontWeight: "bold",
                   textAlign: "right",
                   borderTop: "1px solid #e2e8f0",
-                  color: "#0284c7",
+                  color: "#202c85",
                   fontSize: "18px",
                 }}
               >
@@ -640,7 +640,7 @@ export const BatchAuthorizationEmail: React.FC<
         <a
           href={link}
           style={{
-            background: "#0284c7",
+            background: "#202c85",
             color: "#fff",
             padding: "12px 32px",
             textDecoration: "none",
@@ -842,7 +842,7 @@ export const FeedbackNotificationEmail: React.FC<
 }) => {
   const typeColors = {
     bug: "#dc2626",
-    improvement: "#0284c7",
+    improvement: "#006e94",
     question: "#ca8a04",
     praise: "#059669",
   };

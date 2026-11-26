@@ -171,17 +171,17 @@ const STATUS: Record<
   pending_authorization: {
     label: "Ag. Autorização",
     className:
-      "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
+      "bg-brand-100 text-brand-800 dark:bg-brand-950/60 dark:text-brand-300",
   },
   authorized: {
     label: "Autorizado",
     className:
-      "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300",
+      "bg-brand-700 text-white dark:bg-brand-600 dark:text-white",
   },
   paid: {
     label: "Pago",
     receivable: "Recebido",
-    className: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+    className: "bg-info-100 text-info-800 dark:bg-info-950/60 dark:text-info-300",
   },
   rejected: {
     label: "Rejeitado",
@@ -2265,7 +2265,7 @@ function Flag({
         tone === "muted" && "text-muted-foreground",
         tone === "warn" && "text-amber-700 dark:text-amber-400",
         tone === "danger" && "text-red-600 dark:text-red-400",
-        tone === "info" && "text-sky-700 dark:text-sky-400",
+        tone === "info" && "text-info-700 dark:text-info-400",
       )}
     >
       {Icon && <Icon className="h-3 w-3" />}

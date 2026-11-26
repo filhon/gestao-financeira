@@ -49,6 +49,42 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/*
+ * Escalas da marca. brand = azul Hebron #202C85 (800); info = azul claro (500).
+ * As paletas blue/indigo/violet/sky do Tailwind ficam desligadas: classe fixa
+ * dessas cores não gera CSS. Use brand-*, info-* ou os tokens semânticos.
+ */
+@theme {
+  --color-blue-*: initial;
+  --color-indigo-*: initial;
+  --color-violet-*: initial;
+  --color-sky-*: initial;
+
+  --color-brand-50: oklch(0.97 0.014 270.5);
+  --color-brand-100: oklch(0.93 0.032 270.5);
+  --color-brand-200: oklch(0.87 0.06 270.5);
+  --color-brand-300: oklch(0.78 0.1 270.5);
+  --color-brand-400: oklch(0.66 0.15 270.5);
+  --color-brand-500: oklch(0.56 0.19 270.5);
+  --color-brand-600: oklch(0.47 0.19 270.5);
+  --color-brand-700: oklch(0.4 0.17 270.5);
+  --color-brand-800: oklch(0.347 0.148 270.5);
+  --color-brand-900: oklch(0.29 0.12 270.5);
+  --color-brand-950: oklch(0.22 0.09 270.5);
+
+  --color-info-50: oklch(0.97 0.015 227.3);
+  --color-info-100: oklch(0.94 0.035 227.3);
+  --color-info-200: oklch(0.89 0.06 227.3);
+  --color-info-300: oklch(0.82 0.1 227.3);
+  --color-info-400: oklch(0.76 0.125 227.3);
+  --color-info-500: oklch(0.719 0.138 227.3);
+  --color-info-600: oklch(0.6 0.13 227.3);
+  --color-info-700: oklch(0.5 0.11 227.3);
+  --color-info-800: oklch(0.42 0.09 227.3);
+  --color-info-900: oklch(0.36 0.07 227.3);
+  --color-info-950: oklch(0.28 0.05 227.3);
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
